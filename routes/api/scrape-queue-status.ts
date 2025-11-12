@@ -60,6 +60,9 @@ export const handler = async (
     // Get queue statistics
     const counts = await queueService.getJobCounts();
 
+    // Get worker status
+    const workerStatus = queueService.getWorkerStatus();
+
     // Get sample jobs from each category
     const waiting = await queueService.getWaitingJobs(0, 5);
     const active = await queueService.getActiveJobs(0, 5);
@@ -70,6 +73,11 @@ export const handler = async (
       queue: {
         name: "bricklink-scraper",
         counts,
+      },
+      workerStatus: {
+        isAlive: workerStatus.isAlive,
+        isPaused: workerStatus.isPaused,
+        isRunning: workerStatus.isRunning,
       },
       jobs: {
         waiting: waiting.map((j) => ({
@@ -84,6 +92,7 @@ export const handler = async (
           data: j.data,
           progress: j.progress,
           processedOn: j.processedOn,
+          attemptsMade: j.attemptsMade,
         })),
         completed: completed.map((j) => ({
           id: j.id,
@@ -98,6 +107,7 @@ export const handler = async (
           data: j.data,
           failedReason: j.failedReason,
           attemptsMade: j.attemptsMade,
+          finishedOn: j.finishedOn,
         })),
       },
     });

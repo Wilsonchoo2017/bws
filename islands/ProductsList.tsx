@@ -3,7 +3,7 @@ import { useEffect, useState } from "preact/hooks";
 import { formatDate, formatNumber, formatPrice } from "../utils/formatters.ts";
 import { PAGINATION } from "../constants/app-config.ts";
 import type { ProductSource } from "../db/schema.ts";
-import QueueStatsBanner from "./components/QueueStatsBanner.tsx";
+import QueueHealthBanner from "./components/QueueHealthBanner.tsx";
 
 interface Product {
   id: number;
@@ -90,6 +90,11 @@ interface QueueStats {
     active: JobInfo[];
     completed: JobInfo[];
     failed: JobInfo[];
+  };
+  workerStatus?: {
+    isAlive: boolean;
+    isPaused: boolean;
+    isRunning: boolean;
   };
 }
 
@@ -369,14 +374,9 @@ export default function ProductsList() {
   return (
     <div class="card bg-base-100 shadow-xl">
       <div class="card-body">
-        {/* Queue Statistics Banner */}
-        <QueueStatsBanner
-          stats={queueStats
-            ? {
-              counts: queueStats.queue.counts,
-              lastCompleted: queueStats.jobs.completed[0],
-            }
-            : null}
+        {/* Queue Health Banner */}
+        <QueueHealthBanner
+          stats={queueStats}
           isLoading={isLoadingQueue}
           onRefresh={fetchQueueStats}
         />
@@ -573,7 +573,7 @@ export default function ProductsList() {
                     </td>
                     <td class="max-w-xs">
                       <a
-                        href={`/product/${item.productId}`}
+                        href={`/products/${item.productId}`}
                         class="font-medium line-clamp-2 link link-hover text-primary"
                       >
                         {item.name || "Unnamed product"}

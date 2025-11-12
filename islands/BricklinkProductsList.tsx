@@ -6,7 +6,7 @@
 import { useEffect, useState } from "preact/hooks";
 import { useSignal } from "@preact/signals";
 import SyncStatusBadge from "./components/SyncStatusBadge.tsx";
-import QueueStatsBanner from "./components/QueueStatsBanner.tsx";
+import QueueHealthBanner from "./components/QueueHealthBanner.tsx";
 import {
   buildBricklinkUrl,
   determineSyncStatus,
@@ -71,6 +71,11 @@ interface QueueStats {
     active: QueueJob[];
     completed: QueueJob[];
     failed: QueueJob[];
+  };
+  workerStatus?: {
+    isAlive: boolean;
+    isPaused: boolean;
+    isRunning: boolean;
   };
 }
 
@@ -329,14 +334,9 @@ export default function BricklinkProductsList() {
         </div>
       )}
 
-      {/* Queue Statistics Banner */}
-      <QueueStatsBanner
-        stats={queueStats
-          ? {
-            counts: queueStats.queue.counts,
-            lastCompleted: queueStats.jobs.completed[0],
-          }
-          : null}
+      {/* Queue Health Banner */}
+      <QueueHealthBanner
+        stats={queueStats}
         isLoading={isLoadingQueue}
         onRefresh={fetchQueueStats}
       />

@@ -9,7 +9,7 @@
 export const REDIS_CONFIG = {
   HOST: Deno.env.get("REDIS_HOST") || "localhost",
   PORT: parseInt(Deno.env.get("REDIS_PORT") || "6379"),
-  PASSWORD: Deno.env.get("REDIS_PASSWORD"),
+  PASSWORD: Deno.env.get("REDIS_PASSWORD") || undefined,
   DB: parseInt(Deno.env.get("REDIS_DB") || "0"),
   MAX_RETRIES_PER_REQUEST: 3,
 } as const;

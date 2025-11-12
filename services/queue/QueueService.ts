@@ -526,6 +526,29 @@ export class QueueService {
   isReady(): boolean {
     return this.isInitialized;
   }
+
+  /**
+   * Get worker status information
+   */
+  getWorkerStatus(): {
+    isAlive: boolean;
+    isPaused: boolean;
+    isRunning: boolean;
+  } {
+    if (!this.worker) {
+      return {
+        isAlive: false,
+        isPaused: false,
+        isRunning: false,
+      };
+    }
+
+    return {
+      isAlive: true,
+      isPaused: this.worker.isPaused(),
+      isRunning: this.worker.isRunning(),
+    };
+  }
 }
 
 /**
