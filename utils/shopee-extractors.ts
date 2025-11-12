@@ -36,7 +36,7 @@ export interface ParsedShopeeProduct {
  * @param htmlContent - Raw HTML string
  * @returns Parsed Document object
  */
-export function parseHtmlDocument(htmlContent: string): Document {
+export function parseHtmlDocument(htmlContent: string) {
   const parser = new DOMParser();
   const doc = parser.parseFromString(htmlContent, "text/html");
   if (!doc) {
