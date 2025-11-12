@@ -69,7 +69,10 @@ export const handler: Handlers = {
       // Filter by watch status
       if (query.watchStatus && query.watchStatus.trim()) {
         conditions.push(
-          eq(shopeeItems.watchStatus, query.watchStatus as "active" | "paused" | "stopped" | "archived"),
+          eq(
+            shopeeItems.watchStatus,
+            query.watchStatus as "active" | "paused" | "stopped" | "archived",
+          ),
         );
       }
 

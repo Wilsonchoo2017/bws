@@ -36,7 +36,10 @@ export const handler = {
       let items;
       if (watchStatus) {
         items = await db.query.bricklinkItems.findMany({
-          where: eq(bricklinkItems.watchStatus, watchStatus as "active" | "paused" | "stopped" | "archived"),
+          where: eq(
+            bricklinkItems.watchStatus,
+            watchStatus as "active" | "paused" | "stopped" | "archived",
+          ),
         });
       } else {
         items = await db.select().from(bricklinkItems);
