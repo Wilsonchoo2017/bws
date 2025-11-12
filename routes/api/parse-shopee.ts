@@ -124,7 +124,7 @@ export const handler = async (
           name: product.product_name,
           currency: "MYR",
           price: product.price,
-          sold: product.units_sold,
+          unitsSold: product.units_sold,
           legoSetNumber: product.lego_set_number,
           shopId: product.shop_id,
           shopName: product.shop_name,
@@ -140,7 +140,7 @@ export const handler = async (
           set: {
             name: sql`EXCLUDED.name`,
             price: sql`EXCLUDED.price`,
-            sold: sql`EXCLUDED.sold`,
+            unitsSold: sql`EXCLUDED.units_sold`,
             legoSetNumber: sql`EXCLUDED.lego_set_number`,
             shopId: sql`EXCLUDED.shop_id`,
             shopName: sql`EXCLUDED.shop_name`,
@@ -155,7 +155,7 @@ export const handler = async (
         const shouldRecordHistory = !existingProduct || // New product, always record
           (previousHistory && (
             previousHistory.price !== product.price || // Price changed
-            previousHistory.soldAtTime !== product.units_sold // Sold units changed
+            previousHistory.unitsSoldSnapshot !== product.units_sold // Sold units changed
           )) ||
           !previousHistory; // No previous history exists
 
@@ -163,7 +163,7 @@ export const handler = async (
           await db.insert(shopeePriceHistory).values({
             productId: product.product_id,
             price: product.price,
-            soldAtTime: product.units_sold,
+            unitsSoldSnapshot: product.units_sold,
           });
         }
 
@@ -171,11 +171,11 @@ export const handler = async (
         const productWithMeta = {
           ...insertedProduct,
           wasUpdated: !!existingProduct,
-          previousSold: previousHistory?.soldAtTime || null,
+          previousSold: previousHistory?.unitsSoldSnapshot || null,
           previousPrice: previousHistory?.price || null,
           soldDelta: existingProduct && product.units_sold !== null &&
-              previousHistory?.soldAtTime
-            ? product.units_sold - (previousHistory.soldAtTime || 0)
+              previousHistory?.unitsSoldSnapshot
+            ? product.units_sold - (previousHistory.unitsSoldSnapshot || 0)
             : null,
           priceDelta:
             existingProduct && product.price !== null && previousHistory?.price

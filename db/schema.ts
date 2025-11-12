@@ -76,22 +76,22 @@ export const shopeeItems = pgTable(
     priceBeforeDiscount: bigint("price_before_discount", { mode: "number" }),
 
     // Stats
-    sold: bigint("sold", { mode: "number" }),
-    historical_sold: bigint("historical_sold", { mode: "number" }),
+    unitsSold: bigint("units_sold", { mode: "number" }),
+    lifetimeSold: bigint("lifetime_sold", { mode: "number" }),
     liked_count: bigint("liked_count", { mode: "number" }),
-    cmt_count: bigint("cmt_count", { mode: "number" }),
+    commentCount: bigint("comment_count", { mode: "number" }),
     view_count: bigint("view_count", { mode: "number" }),
 
     // Ratings
-    itemRatingStarRating: bigint("item_rating_star_rating", {
+    avgStarRating: bigint("avg_star_rating", {
       mode: "number",
     }),
-    itemRatingRatingCount: jsonb("item_rating_rating_count"),
+    ratingCount: jsonb("rating_count"),
 
     // Product details
     stockInfoSummary: text("stock_info_summary"),
-    stockInfoStockType: bigint("stock_info_stock_type", { mode: "number" }),
-    stockInfoCurrentStock: bigint("stock_info_current_stock", {
+    stockType: bigint("stock_type", { mode: "number" }),
+    currentStock: bigint("current_stock", {
       mode: "number",
     }),
 
@@ -127,7 +127,7 @@ export const shopeeItems = pgTable(
     // Indexes for read performance
     productIdIdx: index("idx_shopee_product_id").on(table.productId),
     priceIdx: index("idx_shopee_price").on(table.price),
-    soldIdx: index("idx_shopee_sold").on(table.sold),
+    soldIdx: index("idx_shopee_sold").on(table.unitsSold),
     shopIdIdx: index("idx_shopee_shop_id").on(table.shopId),
     createdAtIdx: index("idx_shopee_created_at").on(table.createdAt),
     legoSetNumberIdx: index("idx_shopee_lego_set").on(table.legoSetNumber),
@@ -148,7 +148,7 @@ export const shopeePriceHistory = pgTable(
     productId: varchar("product_id", { length: 100 }).notNull(),
     price: bigint("price", { mode: "number" }),
     priceBeforeDiscount: bigint("price_before_discount", { mode: "number" }),
-    soldAtTime: bigint("sold_at_time", { mode: "number" }),
+    unitsSoldSnapshot: bigint("units_sold_snapshot", { mode: "number" }),
     recordedAt: timestamp("recorded_at").defaultNow().notNull(),
   },
   (table) => ({

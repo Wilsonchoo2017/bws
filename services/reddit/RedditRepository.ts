@@ -1,0 +1,194 @@
+/**
+ * RedditRepository - Database access layer for Reddit search results
+ *
+ * Responsibilities (Single Responsibility Principle):
+ * - CRUD operations for reddit_search_results table
+ * - Query building and execution
+ * - Transaction management
+ *
+ * This service follows SOLID principles:
+ * - SRP: Only handles database operations
+ * - OCP: Can be extended without modifying core logic
+ * - DIP: Depends on database abstraction (Drizzle ORM)
+ * - ISP: Focused interface for Reddit data
+ */
+
+import { db } from "../../db/client.ts";
+import {
+  type NewRedditSearchResult,
+  type RedditSearchResult,
+  redditSearchResults,
+} from "../../db/schema.ts";
+import { desc, eq } from "drizzle-orm";
+
+export interface RedditPost {
+  id: string;
+  title: string;
+  author: string;
+  score: number;
+  num_comments: number;
+  url: string;
+  permalink: string;
+  created_utc: number;
+  selftext?: string;
+}
+
+/**
+ * RedditRepository - Handles all database operations for Reddit search results
+ */
+export class RedditRepository {
+  /**
+   * Find search results by LEGO set number
+   */
+  async findBySetNumber(
+    setNumber: string,
+    options: { limit?: number; offset?: number } = {},
+  ): Promise<RedditSearchResult[]> {
+    const limit = options.limit || 50;
+    const offset = options.offset || 0;
+
+    return await db.select()
+      .from(redditSearchResults)
+      .where(eq(redditSearchResults.legoSetNumber, setNumber))
+      .orderBy(desc(redditSearchResults.searchedAt))
+      .limit(limit)
+      .offset(offset);
+  }
+
+  /**
+   * Find the most recent search result for a set number
+   */
+  async findLatestBySetNumber(
+    setNumber: string,
+  ): Promise<RedditSearchResult | undefined> {
+    return await db.query.redditSearchResults.findFirst({
+      where: eq(redditSearchResults.legoSetNumber, setNumber),
+      orderBy: desc(redditSearchResults.searchedAt),
+    });
+  }
+
+  /**
+   * Find search result by ID
+   */
+  async findById(id: number): Promise<RedditSearchResult | undefined> {
+    return await db.query.redditSearchResults.findFirst({
+      where: eq(redditSearchResults.id, id),
+    });
+  }
+
+  /**
+   * Create a new search result
+   */
+  async create(data: NewRedditSearchResult): Promise<RedditSearchResult> {
+    const [result] = await db.insert(redditSearchResults)
+      .values(data)
+      .returning();
+
+    return result;
+  }
+
+  /**
+   * Delete a search result by ID
+   */
+  async delete(id: number): Promise<boolean> {
+    await db.delete(redditSearchResults)
+      .where(eq(redditSearchResults.id, id));
+
+    return true;
+  }
+
+  /**
+   * Delete all search results for a set number
+   */
+  async deleteBySetNumber(setNumber: string): Promise<boolean> {
+    await db.delete(redditSearchResults)
+      .where(eq(redditSearchResults.legoSetNumber, setNumber));
+
+    return true;
+  }
+
+  /**
+   * Get all unique LEGO set numbers that have been searched
+   */
+  async getAllSearchedSetNumbers(): Promise<string[]> {
+    const results = await db.selectDistinct({
+      setNumber: redditSearchResults.legoSetNumber,
+    })
+      .from(redditSearchResults);
+
+    return results.map((r) => r.setNumber);
+  }
+
+  /**
+   * Count total searches
+   */
+  async count(): Promise<number> {
+    const result = await db.select()
+      .from(redditSearchResults);
+
+    return result.length;
+  }
+
+  /**
+   * Count searches by set number
+   */
+  async countBySetNumber(setNumber: string): Promise<number> {
+    const result = await db.select()
+      .from(redditSearchResults)
+      .where(eq(redditSearchResults.legoSetNumber, setNumber));
+
+    return result.length;
+  }
+
+  /**
+   * Get all search results with pagination
+   */
+  async findAll(
+    options: {
+      limit?: number;
+      offset?: number;
+    } = {},
+  ): Promise<RedditSearchResult[]> {
+    const limit = options.limit || 50;
+    const offset = options.offset || 0;
+
+    return await db.select()
+      .from(redditSearchResults)
+      .orderBy(desc(redditSearchResults.searchedAt))
+      .limit(limit)
+      .offset(offset);
+  }
+
+  /**
+   * Find all searches by subreddit
+   */
+  async findBySubreddit(
+    subreddit: string,
+    options: { limit?: number; offset?: number } = {},
+  ): Promise<RedditSearchResult[]> {
+    const limit = options.limit || 50;
+    const offset = options.offset || 0;
+
+    return await db.select()
+      .from(redditSearchResults)
+      .where(eq(redditSearchResults.subreddit, subreddit))
+      .orderBy(desc(redditSearchResults.searchedAt))
+      .limit(limit)
+      .offset(offset);
+  }
+}
+
+/**
+ * Singleton instance for reuse across the application
+ */
+let repositoryInstance: RedditRepository | null = null;
+
+/**
+ * Get the singleton RedditRepository instance
+ */
+export function getRedditRepository(): RedditRepository {
+  if (!repositoryInstance) {
+    repositoryInstance = new RedditRepository();
+  }
+  return repositoryInstance;
+}

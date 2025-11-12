@@ -15,10 +15,13 @@ import * as $api_shopee_items from "./routes/api/shopee-items.ts";
 import * as $greet_name_ from "./routes/greet/[name].tsx";
 import * as $index from "./routes/index.tsx";
 import * as $products from "./routes/products.tsx";
+import * as $BricklinkProductsList from "./islands/BricklinkProductsList.tsx";
 import * as $Counter from "./islands/Counter.tsx";
 import * as $ProductsList from "./islands/ProductsList.tsx";
 import * as $ShopeeParser from "./islands/ShopeeParser.tsx";
 import * as $Sidebar from "./islands/Sidebar.tsx";
+import * as $components_QueueStatsBanner from "./islands/components/QueueStatsBanner.tsx";
+import * as $components_SyncStatusBadge from "./islands/components/SyncStatusBadge.tsx";
 import type { Manifest } from "$fresh/server.ts";
 
 const manifest = {
@@ -38,10 +41,13 @@ const manifest = {
     "./routes/products.tsx": $products,
   },
   islands: {
+    "./islands/BricklinkProductsList.tsx": $BricklinkProductsList,
     "./islands/Counter.tsx": $Counter,
     "./islands/ProductsList.tsx": $ProductsList,
     "./islands/ShopeeParser.tsx": $ShopeeParser,
     "./islands/Sidebar.tsx": $Sidebar,
+    "./islands/components/QueueStatsBanner.tsx": $components_QueueStatsBanner,
+    "./islands/components/SyncStatusBadge.tsx": $components_SyncStatusBadge,
   },
   baseUrl: import.meta.url,
 } satisfies Manifest;

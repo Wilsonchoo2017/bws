@@ -13,16 +13,16 @@ interface ShopeeItem {
   priceMin: number | null;
   priceMax: number | null;
   priceBeforeDiscount: number | null;
-  sold: number | null;
-  historical_sold: number | null;
+  unitsSold: number | null;
+  lifetimeSold: number | null;
   liked_count: number | null;
-  cmt_count: number | null;
+  commentCount: number | null;
   view_count: number | null;
-  itemRatingStarRating: number | null;
-  itemRatingRatingCount: number[] | null;
+  avgStarRating: number | null;
+  ratingCount: number[] | null;
   stockInfoSummary: string | null;
-  stockInfoStockType: number | null;
-  stockInfoCurrentStock: number | null;
+  stockType: number | null;
+  currentStock: number | null;
   isAdult: boolean | null;
   isMart: boolean | null;
   isPreferred: boolean | null;
@@ -131,11 +131,11 @@ export default function ProductsList() {
   ]);
 
   // Get badge color based on sold volume
-  const getSoldBadgeColor = (sold: number | null): string => {
-    if (sold === null || sold === 0) return "badge-ghost";
-    if (sold < 100) return "badge-info";
-    if (sold < 500) return "badge-success";
-    if (sold < 1000) return "badge-warning";
+  const getSoldBadgeColor = (unitsSold: number | null): string => {
+    if (unitsSold === null || unitsSold === 0) return "badge-ghost";
+    if (unitsSold < 100) return "badge-info";
+    if (unitsSold < 500) return "badge-success";
+    if (unitsSold < 1000) return "badge-warning";
     return "badge-error"; // High volume (1000+)
   };
 
@@ -369,8 +369,10 @@ export default function ProductsList() {
                       )}
                     </td>
                     <td>
-                      <span class={`badge ${getSoldBadgeColor(item.sold)}`}>
-                        {formatNumber(item.sold)}
+                      <span
+                        class={`badge ${getSoldBadgeColor(item.unitsSold)}`}
+                      >
+                        {formatNumber(item.unitsSold)}
                       </span>
                     </td>
                     <td>

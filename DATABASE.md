@@ -78,14 +78,36 @@ Stores scraped Shopee product data.
 
 **Table**: `shopee_items`
 
-| Column     | Type         | Description                      |
-| ---------- | ------------ | -------------------------------- |
-| id         | serial       | Primary key                      |
-| product_id | varchar(100) | Shopee product ID (unique)       |
-| name       | text         | Product name                     |
-| price      | bigint       | Current price                    |
-| sold       | bigint       | Units sold                       |
-| ...        | ...          | Many more fields (see schema.ts) |
+| Column          | Type         | Description                      |
+| --------------- | ------------ | -------------------------------- |
+| id              | serial       | Primary key                      |
+| product_id      | varchar(100) | Shopee product ID (unique)       |
+| name            | text         | Product name                     |
+| price           | bigint       | Current price in cents           |
+| units_sold      | bigint       | Total units sold                 |
+| lifetime_sold   | bigint       | Lifetime units sold (historical) |
+| comment_count   | bigint       | Number of comments/reviews       |
+| avg_star_rating | bigint       | Average star rating              |
+| rating_count    | jsonb        | Rating distribution              |
+| current_stock   | bigint       | Current available stock          |
+| stock_type      | bigint       | Stock type indicator             |
+| lego_set_number | varchar(10)  | LEGO set number if applicable    |
+| ...             | ...          | Many more fields (see schema.ts) |
+
+### Shopee Price History
+
+Tracks price and sales changes over time for Shopee products.
+
+**Table**: `shopee_price_history`
+
+| Column                | Type         | Description                     |
+| --------------------- | ------------ | ------------------------------- |
+| id                    | serial       | Primary key                     |
+| product_id            | varchar(100) | Reference to shopee_items       |
+| price                 | bigint       | Price at recording time         |
+| price_before_discount | bigint       | Original price before discount  |
+| units_sold_snapshot   | bigint       | Units sold at time of recording |
+| recorded_at           | timestamp    | When this snapshot was recorded |
 
 ## API Endpoints
 

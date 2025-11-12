@@ -89,7 +89,7 @@ export const handler: Handlers = {
           orderByClause = sortOrderFn(shopeeItems.price);
           break;
         case "sold":
-          orderByClause = sortOrderFn(shopeeItems.sold);
+          orderByClause = sortOrderFn(shopeeItems.unitsSold);
           break;
         case "createdAt":
           orderByClause = sortOrderFn(shopeeItems.createdAt);
