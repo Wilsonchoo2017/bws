@@ -207,7 +207,8 @@ export default function ProductsList() {
     }
 
     if (!/^\d{5}$/.test(setNumber)) {
-      addError.value = "Please enter a valid 5-digit LEGO set number (e.g., 75192)";
+      addError.value =
+        "Please enter a valid 5-digit LEGO set number (e.g., 75192)";
       return;
     }
 
@@ -232,15 +233,18 @@ export default function ProductsList() {
         throw new Error(data.error || `HTTP error! status: ${response.status}`);
       }
 
-      addSuccess.value = data.message || "Product added successfully!";
+      // Show success message with job info
+      addSuccess.value = data.message ||
+        "Scraping job enqueued! Data will appear once scraping completes.";
       addLegoSetNumber.value = "";
 
-      // Refresh the product list after a short delay
+      // Close modal and refresh after showing success
       setTimeout(() => {
         showAddModal.value = false;
         addSuccess.value = null;
-        fetchProducts();
-      }, 2000);
+        // Refresh queue stats to show the new job
+        fetchQueueStats();
+      }, 3000);
     } catch (err) {
       addError.value = err instanceof Error
         ? err.message
@@ -730,13 +734,14 @@ export default function ProductsList() {
                   class="input input-bordered w-full"
                   value={addLegoSetNumber.value}
                   onInput={(e) =>
-                    addLegoSetNumber.value = (e.target as HTMLInputElement).value}
+                    addLegoSetNumber.value =
+                      (e.target as HTMLInputElement).value}
                   disabled={isAdding.value}
                   maxLength={5}
                 />
                 <label class="label">
                   <span class="label-text-alt text-base-content/60">
-                    Product details will be fetched from Rebrickable
+                    Data will be scraped from Bricklink (takes 10-30 seconds)
                   </span>
                 </label>
               </div>
