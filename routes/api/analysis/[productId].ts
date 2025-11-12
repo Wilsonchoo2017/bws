@@ -25,7 +25,15 @@ export const handler: Handlers = {
         },
       });
     } catch (error) {
-      console.error("Analysis error:", error);
+      // Log detailed error information to server console
+      console.error("=== Analysis Error ===");
+      console.error("Product ID:", productId);
+      console.error("Strategy:", strategy);
+      console.error("Error:", error);
+      if (error instanceof Error) {
+        console.error("Stack:", error.stack);
+      }
+      console.error("===================");
 
       const errorMessage = error instanceof Error
         ? error.message
@@ -34,6 +42,8 @@ export const handler: Handlers = {
       return new Response(
         JSON.stringify({
           error: errorMessage,
+          productId,
+          details: error instanceof Error ? error.stack : undefined,
         }),
         {
           status: error instanceof Error && errorMessage.includes("not found")

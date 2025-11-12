@@ -130,11 +130,11 @@ export class AnalysisService {
 
     // Build pricing data
     const pricing: PricingData = {
-      currentRetailPrice: product.price || undefined,
-      originalRetailPrice: product.priceBeforeDiscount || undefined,
+      currentRetailPrice: this.safeNumber(product.price),
+      originalRetailPrice: this.safeNumber(product.priceBeforeDiscount),
       discountPercentage: this.calculateDiscountPercentage(
-        product.price,
-        product.priceBeforeDiscount,
+        this.safeNumber(product.price),
+        this.safeNumber(product.priceBeforeDiscount),
       ),
       bricklink: bricklinkData
         ? this.normalizeBricklinkPricing(bricklinkData)
@@ -143,11 +143,11 @@ export class AnalysisService {
 
     // Build demand data
     const demand: DemandData = {
-      unitsSold: product.unitsSold || undefined,
-      lifetimeSold: product.lifetimeSold || undefined,
-      viewCount: product.view_count || undefined,
-      likedCount: product.liked_count || undefined,
-      commentCount: product.commentCount || undefined,
+      unitsSold: this.safeNumber(product.unitsSold),
+      lifetimeSold: this.safeNumber(product.lifetimeSold),
+      viewCount: this.safeNumber(product.view_count),
+      likedCount: this.safeNumber(product.liked_count),
+      commentCount: this.safeNumber(product.commentCount),
       bricklinkTimesSold: bricklinkData
         ? this.extractBricklinkTimesSold(bricklinkData)
         : undefined,
@@ -159,7 +159,7 @@ export class AnalysisService {
 
     // Build availability data
     const availability: AvailabilityData = {
-      currentStock: product.currentStock || undefined,
+      currentStock: this.safeNumber(product.currentStock),
       stockType: product.stockType?.toString(),
       retiringSoon: retirementData?.retiringSoon || false,
       expectedRetirementDate: retirementData?.expectedRetirementDate
@@ -175,8 +175,8 @@ export class AnalysisService {
 
     // Build quality data
     const quality: QualityData = {
-      avgStarRating: product.avgStarRating
-        ? product.avgStarRating / 10
+      avgStarRating: this.safeNumber(product.avgStarRating)
+        ? this.safeNumber(product.avgStarRating)! / 10
         : undefined, // Shopee stores as bigint * 10
       ratingCount: this.extractRatingCount(product.ratingCount),
       ratingDistribution: this.extractRatingDistribution(product.ratingCount),
@@ -351,11 +351,27 @@ export class AnalysisService {
     };
   }
 
+  private safeNumber(
+    value: number | bigint | null | undefined,
+  ): number | undefined {
+    if (value === null || value === undefined) return undefined;
+    if (typeof value === "bigint") return Number(value);
+    if (typeof value === "number") return value;
+    return undefined;
+  }
+
   private extractRatingCount(ratingCount: unknown): number | undefined {
     if (!ratingCount || typeof ratingCount !== "object") return undefined;
-    const counts = ratingCount as Record<string, number>;
-    const total = Object.values(counts).reduce((sum, count) => sum + count, 0);
-    return total > 0 ? total : undefined;
+    try {
+      const counts = ratingCount as Record<string, number>;
+      const total = Object.values(counts).reduce((sum, count) => {
+        const num = typeof count === "number" ? count : 0;
+        return sum + num;
+      }, 0);
+      return total > 0 ? total : undefined;
+    } catch {
+      return undefined;
+    }
   }
 
   private extractRatingDistribution(
