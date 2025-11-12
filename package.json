@@ -1,12 +1,12 @@
 {
-  "name": "@bws/api",
+  "name": "bws",
   "version": "1.0.0",
-  "description": "Backend API service",
+  "description": "Bricklink Warehouse System - Fresh.js with PostgreSQL",
   "scripts": {
-    "dev": "deno task dev",
-    "start": "deno task start",
-    "build": "deno task build"
+    "db:up": "docker-compose up -d postgres",
+    "db:down": "docker-compose down",
+    "db:logs": "docker-compose logs -f postgres"
   },
-  "keywords": ["api", "backend"],
+  "keywords": ["fresh", "deno", "api", "scraper"],
   "license": "ISC"
 }

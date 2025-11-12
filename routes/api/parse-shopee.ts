@@ -251,6 +251,22 @@ export const handler = async (
 
     for (const product of products) {
       try {
+        // Check if product already exists to get previous data
+        const existingProduct = await db.query.shopeeItems.findFirst({
+          where: eq(shopeeItems.productId, product.product_id),
+        });
+
+        // Get the most recent price history entry (before this update)
+        let previousHistory = null;
+        if (existingProduct) {
+          const histories = await db.query.shopeePriceHistory.findMany({
+            where: eq(shopeePriceHistory.productId, product.product_id),
+            orderBy: (history, { desc }) => [desc(history.recordedAt)],
+            limit: 1,
+          });
+          previousHistory = histories[0] || null;
+        }
+
         // Upsert product into shopeeItems table
         const [insertedProduct] = await db.insert(shopeeItems).values({
           productId: product.product_id,
@@ -292,7 +308,21 @@ export const handler = async (
           });
         }
 
-        insertedProducts.push(insertedProduct);
+        // Add metadata about whether this was an update
+        const productWithMeta = {
+          ...insertedProduct,
+          wasUpdated: !!existingProduct,
+          previousSold: previousHistory?.soldAtTime || null,
+          previousPrice: previousHistory?.price || null,
+          soldDelta: existingProduct && product.units_sold !== null && previousHistory?.soldAtTime
+            ? product.units_sold - (previousHistory.soldAtTime || 0)
+            : null,
+          priceDelta: existingProduct && product.price !== null && previousHistory?.price
+            ? product.price - (previousHistory.price || 0)
+            : null,
+        };
+
+        insertedProducts.push(productWithMeta);
         productsStored++;
       } catch (productError) {
         console.error(

@@ -1,29 +1,39 @@
 {
+  "lock": false,
   "tasks": {
-    "check": "deno fmt --check && deno lint && deno check",
-    "dev": "deno run -A --watch=static/,routes/ main.ts",
-    "build": "deno run -A main.ts build",
+    "check": "deno fmt --check && deno lint && deno check **/*.ts && deno check **/*.tsx",
+    "cli": "echo \"import '\\$fresh/src/dev/cli.ts'\" | deno run --unstable -A -",
+    "manifest": "deno task cli manifest $(pwd)",
+    "start": "deno run -A --watch=static/,routes/ dev.ts",
+    "build": "deno run -A dev.ts build",
     "preview": "deno run -A main.ts",
-    "update": "deno run -A -r jsr:@fresh/update .",
+    "update": "deno run -A -r https://fresh.deno.dev/update .",
     "db:generate": "deno run -A npm:drizzle-kit generate",
     "db:migrate": "deno run -A db/migrate.ts",
     "db:studio": "deno run -A npm:drizzle-kit studio"
   },
   "lint": {
     "rules": {
-      "tags": ["fresh", "recommended"]
+      "tags": [
+        "fresh",
+        "recommended"
+      ]
     }
   },
-  "exclude": ["**/_fresh/*"],
+  "exclude": [
+    "**/_fresh/*"
+  ],
   "imports": {
-    "$fresh/": "https://deno.land/x/fresh@2.1.4/",
-    "preact": "npm:preact@^10.27.2",
-    "preact/": "npm:preact@^10.27.2/",
-    "@preact/signals": "npm:@preact/signals@^2.3.2",
-    "@preact/signals-core": "npm:@preact/signals-core@^1.9.0",
+    "$fresh/": "https://deno.land/x/fresh@1.7.3/",
+    "preact": "https://esm.sh/preact@10.22.0",
+    "preact/": "https://esm.sh/preact@10.22.0/",
+    "@preact/signals": "https://esm.sh/*@preact/signals@1.2.2",
+    "@preact/signals-core": "https://esm.sh/*@preact/signals-core@1.5.1",
     "$std/": "https://deno.land/std@0.216.0/",
-    "tailwindcss": "npm:tailwindcss@^4.1.7",
-    "daisyui": "npm:daisyui@latest",
+    "tailwindcss": "npm:tailwindcss@3.4.1",
+    "tailwindcss/": "npm:/tailwindcss@3.4.1/",
+    "tailwindcss/plugin": "npm:/tailwindcss@3.4.1/plugin.js",
+    "daisyui": "npm:daisyui@4.12.14",
     "drizzle-orm": "npm:drizzle-orm@^0.36.4",
     "drizzle-orm/": "npm:/drizzle-orm@^0.36.4/",
     "drizzle-kit": "npm:drizzle-kit@^0.30.0",
