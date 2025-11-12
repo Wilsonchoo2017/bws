@@ -110,17 +110,16 @@ export default function ShopeeParser() {
     }
   };
 
-  const getSoldColorClass = (sold: number | null) => {
-    if (sold === null || sold === 0) return "";
+  const getSoldColorStyle = (sold: number | null) => {
+    if (sold === null || sold === 0) return {};
 
-    // Color thresholds based on sold units
-    // Using !important via Tailwind's ! prefix to override DaisyUI styles
-    if (sold >= 10000) return "!text-purple-600 font-bold"; // 10k+ - Purple (Viral)
-    if (sold >= 5000) return "!text-red-600 font-bold";    // 5k-10k - Red (Hot)
-    if (sold >= 1000) return "!text-orange-600 font-semibold"; // 1k-5k - Orange (Popular)
-    if (sold >= 500) return "!text-yellow-600 font-medium";    // 500-1k - Yellow (Selling)
-    if (sold >= 100) return "!text-green-600";             // 100-500 - Green (Moderate)
-    return "";                                             // <100 - Default
+    // Color thresholds based on sold units - using inline styles for guaranteed override
+    if (sold >= 10000) return { color: "#9333ea", fontWeight: "700" }; // Purple (Viral)
+    if (sold >= 5000) return { color: "#dc2626", fontWeight: "700" };  // Red (Hot)
+    if (sold >= 1000) return { color: "#ea580c", fontWeight: "600" };  // Orange (Popular)
+    if (sold >= 500) return { color: "#ca8a04", fontWeight: "500" };   // Yellow (Selling)
+    if (sold >= 100) return { color: "#16a34a", fontWeight: "400" };   // Green (Moderate)
+    return {};
   };
 
   return (
@@ -292,20 +291,18 @@ export default function ShopeeParser() {
           {/* Products Table */}
           {result.value.products && result.value.products.length > 0 && (
             <div class="card bg-base-100 shadow-xl">
-              <div class="card-body">
-                <h3 class="card-title">Stored Products ({result.value.products.length})</h3>
-
+              <div class="card-body p-0">
                 <div class="overflow-x-auto">
-                  <table class="table table-zebra">
+                  <table class="table">
                     <thead>
-                      <tr>
-                        <th>Status</th>
-                        <th>Image</th>
-                        <th>Product Name</th>
-                        <th>LEGO Set</th>
-                        <th>Price</th>
-                        <th>Sold</th>
-                        <th>Shop</th>
+                      <tr class="border-b border-base-300">
+                        <th class="bg-base-200">Status</th>
+                        <th class="bg-base-200">Image</th>
+                        <th class="bg-base-200">Product</th>
+                        <th class="bg-base-200">Set #</th>
+                        <th class="bg-base-200">Price</th>
+                        <th class="bg-base-200">Sold</th>
+                        <th class="bg-base-200">Shop</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -314,67 +311,75 @@ export default function ShopeeParser() {
                         const priceDelta = formatDelta(product.priceDelta || null, "price");
 
                         return (
-                          <tr key={product.id}>
-                            <td>
+                          <tr key={product.id} class="hover:bg-base-200/50 transition-colors">
+                            <td class="py-3">
                               {product.wasUpdated ? (
-                                <span class="badge badge-info badge-sm">Updated</span>
+                                <span class="badge badge-info badge-sm gap-1">
+                                  <svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3" viewBox="0 0 20 20" fill="currentColor">
+                                    <path d="M4 4a2 2 0 00-2 2v1h16V6a2 2 0 00-2-2H4z" />
+                                    <path fill-rule="evenodd" d="M18 9H2v5a2 2 0 002 2h12a2 2 0 002-2V9zM4 13a1 1 0 011-1h1a1 1 0 110 2H5a1 1 0 01-1-1zm5-1a1 1 0 100 2h1a1 1 0 100-2H9z" clip-rule="evenodd" />
+                                  </svg>
+                                  Updated
+                                </span>
                               ) : (
-                                <span class="badge badge-success badge-sm">New</span>
+                                <span class="badge badge-success badge-sm gap-1">
+                                  <svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3" viewBox="0 0 20 20" fill="currentColor">
+                                    <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-11a1 1 0 10-2 0v2H7a1 1 0 100 2h2v2a1 1 0 102 0v-2h2a1 1 0 100-2h-2V7z" clip-rule="evenodd" />
+                                  </svg>
+                                  New
+                                </span>
                               )}
                             </td>
-                            <td>
+                            <td class="py-3">
                               {product.image ? (
                                 <div class="avatar">
-                                  <div class="w-12 h-12 rounded">
-                                    <img src={product.image} alt={product.name || "Product"} />
+                                  <div class="w-16 h-16 rounded-lg">
+                                    <img src={product.image} alt={product.name || "Product"} class="object-cover" />
                                   </div>
                                 </div>
                               ) : (
-                                <div class="w-12 h-12 bg-base-300 rounded flex items-center justify-center">
-                                  <span class="text-xs opacity-50">No img</span>
+                                <div class="w-16 h-16 bg-base-300 rounded-lg flex items-center justify-center">
+                                  <svg xmlns="http://www.w3.org/2000/svg" class="h-8 w-8 opacity-30" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                                  </svg>
                                 </div>
                               )}
                             </td>
-                            <td>
-                              <div class="font-medium max-w-xs truncate" title={product.name || undefined}>
-                                {product.name || "N/A"}
+                            <td class="py-3">
+                              <div class="max-w-xs">
+                                <div class="font-medium text-sm leading-tight line-clamp-2" title={product.name || undefined}>
+                                  {product.name || "N/A"}
+                                </div>
                               </div>
-                              <div class="text-xs opacity-50">ID: {product.productId}</div>
                             </td>
-                            <td>
+                            <td class="py-3">
                               {product.legoSetNumber ? (
-                                <span class="badge badge-primary">{product.legoSetNumber}</span>
+                                <span class="badge badge-primary badge-sm">{product.legoSetNumber}</span>
                               ) : (
-                                <span class="text-xs opacity-50">—</span>
+                                <span class="text-xs opacity-40">—</span>
                               )}
                             </td>
-                            <td>
-                              <div class="font-semibold">{formatPrice(product.price)}</div>
+                            <td class="py-3">
+                              <div class="font-semibold text-base">{formatPrice(product.price)}</div>
                               {priceDelta && (
-                                <div
-                                  class={`text-xs ${
-                                    priceDelta.isPositive ? "text-error" : "text-success"
-                                  }`}
-                                >
+                                <div class={`text-xs font-medium mt-0.5 ${priceDelta.isPositive ? "text-error" : "text-success"}`}>
                                   {priceDelta.text}
                                 </div>
                               )}
                             </td>
-                            <td>
-                              <div class={getSoldColorClass(product.sold)}>
+                            <td class="py-3">
+                              <div class="text-base" style={getSoldColorStyle(product.sold)}>
                                 {formatSold(product.sold)}
                               </div>
                               {soldDelta && (
-                                <div
-                                  class={`text-xs ${
-                                    soldDelta.isPositive ? "text-success" : "text-error"
-                                  }`}
-                                >
+                                <div class={`text-xs font-medium mt-0.5 ${soldDelta.isPositive ? "text-success" : "text-error"}`}>
                                   {soldDelta.text}
                                 </div>
                               )}
                             </td>
-                            <td class="text-sm opacity-70">{product.shopName || "—"}</td>
+                            <td class="py-3">
+                              <span class="text-sm font-medium opacity-70">{product.shopName || "—"}</span>
+                            </td>
                           </tr>
                         );
                       })}
