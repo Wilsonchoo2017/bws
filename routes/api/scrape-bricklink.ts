@@ -2,7 +2,7 @@ import { FreshContext } from "$fresh/server.ts";
 import { DOMParser } from "https://deno.land/x/deno_dom@v0.1.45/deno-dom-wasm.ts";
 import { db } from "../../db/client.ts";
 import { bricklinkItems, bricklinkPriceHistory } from "../../db/schema.ts";
-import { eq, desc } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 
 interface PriceData {
   currency: string;
@@ -190,10 +190,18 @@ async function scrapeBricklinkItem(url: string): Promise<BricklinkData> {
   };
 
   if (priceBoxes.length >= 4) {
-    pricingData.six_month_new = extractPriceBox(priceBoxes[0] as unknown as Element);
-    pricingData.six_month_used = extractPriceBox(priceBoxes[1] as unknown as Element);
-    pricingData.current_new = extractPriceBox(priceBoxes[2] as unknown as Element);
-    pricingData.current_used = extractPriceBox(priceBoxes[3] as unknown as Element);
+    pricingData.six_month_new = extractPriceBox(
+      priceBoxes[0] as unknown as Element,
+    );
+    pricingData.six_month_used = extractPriceBox(
+      priceBoxes[1] as unknown as Element,
+    );
+    pricingData.current_new = extractPriceBox(
+      priceBoxes[2] as unknown as Element,
+    );
+    pricingData.current_used = extractPriceBox(
+      priceBoxes[3] as unknown as Element,
+    );
   }
 
   return {

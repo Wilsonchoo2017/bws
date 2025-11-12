@@ -1,4 +1,6 @@
 import { useSignal } from "@preact/signals";
+import { formatDelta, formatPrice, formatSold } from "../utils/formatters.ts";
+import { getSoldStyle } from "../constants/app-config.ts";
 
 interface ShopeeProduct {
   id: number;
@@ -84,44 +86,6 @@ export default function ShopeeParser() {
     error.value = null;
   };
 
-  const formatPrice = (priceInCents: number | null) => {
-    if (priceInCents === null) return "N/A";
-    return `RM ${(priceInCents / 100).toFixed(2)}`;
-  };
-
-  const formatSold = (sold: number | null) => {
-    if (sold === null) return "N/A";
-    if (sold >= 1000) return `${(sold / 1000).toFixed(1)}k`;
-    return sold.toString();
-  };
-
-  const formatDelta = (delta: number | null, type: "sold" | "price") => {
-    if (delta === null || delta === 0) return null;
-
-    const isPositive = delta > 0;
-    const prefix = isPositive ? "+" : "";
-
-    if (type === "sold") {
-      const formatted = delta >= 1000 ? `${(delta / 1000).toFixed(1)}k` : delta.toString();
-      return { text: `${prefix}${formatted}`, isPositive };
-    } else {
-      const formatted = (delta / 100).toFixed(2);
-      return { text: `${prefix}RM ${formatted}`, isPositive };
-    }
-  };
-
-  const getSoldColorStyle = (sold: number | null) => {
-    if (sold === null || sold === 0) return {};
-
-    // Color thresholds based on sold units - using inline styles for guaranteed override
-    if (sold >= 10000) return { color: "#9333ea", fontWeight: "700" }; // Purple (Viral)
-    if (sold >= 5000) return { color: "#dc2626", fontWeight: "700" };  // Red (Hot)
-    if (sold >= 1000) return { color: "#ea580c", fontWeight: "600" };  // Orange (Popular)
-    if (sold >= 500) return { color: "#ca8a04", fontWeight: "500" };   // Yellow (Selling)
-    if (sold >= 100) return { color: "#16a34a", fontWeight: "400" };   // Green (Moderate)
-    return {};
-  };
-
   return (
     <div class="w-full max-w-6xl mx-auto space-y-6">
       {/* Form Card */}
@@ -129,7 +93,8 @@ export default function ShopeeParser() {
         <div class="card-body">
           <h2 class="card-title text-2xl">Shopee HTML Parser</h2>
           <p class="text-sm opacity-70">
-            Paste the HTML content from a Shopee product listing page to extract and store product data
+            Paste the HTML content from a Shopee product listing page to extract
+            and store product data
           </p>
 
           <form onSubmit={handleSubmit} class="space-y-4 mt-4">
@@ -151,7 +116,9 @@ export default function ShopeeParser() {
             <div class="form-control">
               <label class="label">
                 <span class="label-text font-medium">Source URL *</span>
-                <span class="label-text-alt opacity-70">Required to extract shop name</span>
+                <span class="label-text-alt opacity-70">
+                  Required to extract shop name
+                </span>
               </label>
               <input
                 type="url"
@@ -179,14 +146,16 @@ export default function ShopeeParser() {
                 class="btn btn-primary"
                 disabled={isLoading.value}
               >
-                {isLoading.value ? (
-                  <>
-                    <span class="loading loading-spinner loading-sm"></span>
-                    Parsing...
-                  </>
-                ) : (
-                  "Parse & Store"
-                )}
+                {isLoading.value
+                  ? (
+                    <>
+                      <span class="loading loading-spinner loading-sm"></span>
+                      Parsing...
+                    </>
+                  )
+                  : (
+                    "Parse & Store"
+                  )}
               </button>
             </div>
           </form>
@@ -216,77 +185,85 @@ export default function ShopeeParser() {
       {/* Success/Partial Result Alert */}
       {result.value && (
         <>
-          {result.value.status === "success" ? (
-            <div class="alert alert-success">
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                class="stroke-current shrink-0 h-6 w-6"
-                fill="none"
-                viewBox="0 0 24 24"
-              >
-                <path
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  stroke-width="2"
-                  d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"
-                />
-              </svg>
-              <div>
-                <div class="font-bold">Successfully parsed and stored!</div>
-                <div class="text-sm">
-                  Session ID: {result.value.session_id} |
-                  Products: {result.value.products_stored}/{result.value.products_found} stored
+          {result.value.status === "success"
+            ? (
+              <div class="alert alert-success">
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  class="stroke-current shrink-0 h-6 w-6"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="2"
+                    d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"
+                  />
+                </svg>
+                <div>
+                  <div class="font-bold">Successfully parsed and stored!</div>
+                  <div class="text-sm">
+                    Session ID: {result.value.session_id} | Products:{" "}
+                    {result.value.products_stored}/{result.value.products_found}
+                    {" "}
+                    stored
+                  </div>
                 </div>
               </div>
-            </div>
-          ) : result.value.status === "partial" ? (
-            <div class="alert alert-warning">
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                class="stroke-current shrink-0 h-6 w-6"
-                fill="none"
-                viewBox="0 0 24 24"
-              >
-                <path
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  stroke-width="2"
-                  d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
-                />
-              </svg>
-              <div>
-                <div class="font-bold">Partially successful</div>
-                <div class="text-sm">
-                  Session ID: {result.value.session_id} |
-                  Products: {result.value.products_stored}/{result.value.products_found} stored
-                  (some products failed to save)
+            )
+            : result.value.status === "partial"
+            ? (
+              <div class="alert alert-warning">
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  class="stroke-current shrink-0 h-6 w-6"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="2"
+                    d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
+                  />
+                </svg>
+                <div>
+                  <div class="font-bold">Partially successful</div>
+                  <div class="text-sm">
+                    Session ID: {result.value.session_id} | Products:{" "}
+                    {result.value.products_stored}/{result.value.products_found}
+                    {" "}
+                    stored (some products failed to save)
+                  </div>
                 </div>
               </div>
-            </div>
-          ) : (
-            <div class="alert alert-info">
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                fill="none"
-                viewBox="0 0 24 24"
-                class="stroke-current shrink-0 w-6 h-6"
-              >
-                <path
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  stroke-width="2"
-                  d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
-                />
-              </svg>
-              <div>
-                <div class="font-bold">No products found</div>
-                <div class="text-sm">
-                  Session ID: {result.value.session_id} |
-                  The HTML content didn't contain any recognizable product listings
+            )
+            : (
+              <div class="alert alert-info">
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  class="stroke-current shrink-0 w-6 h-6"
+                >
+                  <path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="2"
+                    d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+                  />
+                </svg>
+                <div>
+                  <div class="font-bold">No products found</div>
+                  <div class="text-sm">
+                    Session ID: {result.value.session_id}{" "}
+                    | The HTML content didn't contain any recognizable product
+                    listings
+                  </div>
                 </div>
               </div>
-            </div>
-          )}
+            )}
 
           {/* Products Table */}
           {result.value.products && result.value.products.length > 0 && (
@@ -307,78 +284,148 @@ export default function ShopeeParser() {
                     </thead>
                     <tbody>
                       {result.value.products.map((product) => {
-                        const soldDelta = formatDelta(product.soldDelta || null, "sold");
-                        const priceDelta = formatDelta(product.priceDelta || null, "price");
+                        const soldDelta = formatDelta(
+                          product.soldDelta || null,
+                          "sold",
+                        );
+                        const priceDelta = formatDelta(
+                          product.priceDelta || null,
+                          "price",
+                        );
 
                         return (
-                          <tr key={product.id} class="hover:bg-base-200/50 transition-colors">
+                          <tr
+                            key={product.id}
+                            class="hover:bg-base-200/50 transition-colors"
+                          >
                             <td class="py-3">
-                              {product.wasUpdated ? (
-                                <span class="badge badge-info badge-sm gap-1">
-                                  <svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3" viewBox="0 0 20 20" fill="currentColor">
-                                    <path d="M4 4a2 2 0 00-2 2v1h16V6a2 2 0 00-2-2H4z" />
-                                    <path fill-rule="evenodd" d="M18 9H2v5a2 2 0 002 2h12a2 2 0 002-2V9zM4 13a1 1 0 011-1h1a1 1 0 110 2H5a1 1 0 01-1-1zm5-1a1 1 0 100 2h1a1 1 0 100-2H9z" clip-rule="evenodd" />
-                                  </svg>
-                                  Updated
-                                </span>
-                              ) : (
-                                <span class="badge badge-success badge-sm gap-1">
-                                  <svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3" viewBox="0 0 20 20" fill="currentColor">
-                                    <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-11a1 1 0 10-2 0v2H7a1 1 0 100 2h2v2a1 1 0 102 0v-2h2a1 1 0 100-2h-2V7z" clip-rule="evenodd" />
-                                  </svg>
-                                  New
-                                </span>
-                              )}
+                              {product.wasUpdated
+                                ? (
+                                  <span class="badge badge-info badge-sm gap-1">
+                                    <svg
+                                      xmlns="http://www.w3.org/2000/svg"
+                                      class="h-3 w-3"
+                                      viewBox="0 0 20 20"
+                                      fill="currentColor"
+                                    >
+                                      <path d="M4 4a2 2 0 00-2 2v1h16V6a2 2 0 00-2-2H4z" />
+                                      <path
+                                        fill-rule="evenodd"
+                                        d="M18 9H2v5a2 2 0 002 2h12a2 2 0 002-2V9zM4 13a1 1 0 011-1h1a1 1 0 110 2H5a1 1 0 01-1-1zm5-1a1 1 0 100 2h1a1 1 0 100-2H9z"
+                                        clip-rule="evenodd"
+                                      />
+                                    </svg>
+                                    Updated
+                                  </span>
+                                )
+                                : (
+                                  <span class="badge badge-success badge-sm gap-1">
+                                    <svg
+                                      xmlns="http://www.w3.org/2000/svg"
+                                      class="h-3 w-3"
+                                      viewBox="0 0 20 20"
+                                      fill="currentColor"
+                                    >
+                                      <path
+                                        fill-rule="evenodd"
+                                        d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-11a1 1 0 10-2 0v2H7a1 1 0 100 2h2v2a1 1 0 102 0v-2h2a1 1 0 100-2h-2V7z"
+                                        clip-rule="evenodd"
+                                      />
+                                    </svg>
+                                    New
+                                  </span>
+                                )}
                             </td>
                             <td class="py-3">
-                              {product.image ? (
-                                <div class="avatar">
-                                  <div class="w-16 h-16 rounded-lg">
-                                    <img src={product.image} alt={product.name || "Product"} class="object-cover" />
+                              {product.image
+                                ? (
+                                  <div class="avatar">
+                                    <div class="w-16 h-16 rounded-lg">
+                                      <img
+                                        src={product.image}
+                                        alt={product.name || "Product"}
+                                        class="object-cover"
+                                      />
+                                    </div>
                                   </div>
-                                </div>
-                              ) : (
-                                <div class="w-16 h-16 bg-base-300 rounded-lg flex items-center justify-center">
-                                  <svg xmlns="http://www.w3.org/2000/svg" class="h-8 w-8 opacity-30" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
-                                  </svg>
-                                </div>
-                              )}
+                                )
+                                : (
+                                  <div class="w-16 h-16 bg-base-300 rounded-lg flex items-center justify-center">
+                                    <svg
+                                      xmlns="http://www.w3.org/2000/svg"
+                                      class="h-8 w-8 opacity-30"
+                                      fill="none"
+                                      viewBox="0 0 24 24"
+                                      stroke="currentColor"
+                                    >
+                                      <path
+                                        stroke-linecap="round"
+                                        stroke-linejoin="round"
+                                        stroke-width="2"
+                                        d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z"
+                                      />
+                                    </svg>
+                                  </div>
+                                )}
                             </td>
                             <td class="py-3">
                               <div class="max-w-xs">
-                                <div class="font-medium text-sm leading-tight line-clamp-2" title={product.name || undefined}>
+                                <div
+                                  class="font-medium text-sm leading-tight line-clamp-2"
+                                  title={product.name || undefined}
+                                >
                                   {product.name || "N/A"}
                                 </div>
                               </div>
                             </td>
                             <td class="py-3">
-                              {product.legoSetNumber ? (
-                                <span class="badge badge-primary badge-sm">{product.legoSetNumber}</span>
-                              ) : (
-                                <span class="text-xs opacity-40">—</span>
-                              )}
+                              {product.legoSetNumber
+                                ? (
+                                  <span class="badge badge-primary badge-sm">
+                                    {product.legoSetNumber}
+                                  </span>
+                                )
+                                : <span class="text-xs opacity-40">—</span>}
                             </td>
                             <td class="py-3">
-                              <div class="font-semibold text-base">{formatPrice(product.price)}</div>
+                              <div class="font-semibold text-base">
+                                {formatPrice(product.price)}
+                              </div>
                               {priceDelta && (
-                                <div class={`text-xs font-medium mt-0.5 ${priceDelta.isPositive ? "text-error" : "text-success"}`}>
+                                <div
+                                  class={`text-xs font-medium mt-0.5 ${
+                                    priceDelta.isPositive
+                                      ? "text-error"
+                                      : "text-success"
+                                  }`}
+                                >
                                   {priceDelta.text}
                                 </div>
                               )}
                             </td>
                             <td class="py-3">
-                              <div class="text-base" style={getSoldColorStyle(product.sold)}>
+                              <div
+                                class="text-base"
+                                style={getSoldStyle(product.sold)}
+                              >
                                 {formatSold(product.sold)}
                               </div>
                               {soldDelta && (
-                                <div class={`text-xs font-medium mt-0.5 ${soldDelta.isPositive ? "text-success" : "text-error"}`}>
+                                <div
+                                  class={`text-xs font-medium mt-0.5 ${
+                                    soldDelta.isPositive
+                                      ? "text-success"
+                                      : "text-error"
+                                  }`}
+                                >
                                   {soldDelta.text}
                                 </div>
                               )}
                             </td>
                             <td class="py-3">
-                              <span class="text-sm font-medium opacity-70">{product.shopName || "—"}</span>
+                              <span class="text-sm font-medium opacity-70">
+                                {product.shopName || "—"}
+                              </span>
                             </td>
                           </tr>
                         );

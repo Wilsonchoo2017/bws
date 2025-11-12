@@ -11,7 +11,9 @@ export default function Home() {
         <div class="container mx-auto">
           {/* Header */}
           <div class="mb-8">
-            <h1 class="text-4xl lg:text-5xl font-bold mb-2">Shopee Product Parser</h1>
+            <h1 class="text-4xl lg:text-5xl font-bold mb-2">
+              Shopee Product Parser
+            </h1>
             <p class="text-lg opacity-70">
               Extract and store Shopee product data from HTML
             </p>

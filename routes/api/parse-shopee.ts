@@ -1,5 +1,4 @@
 import { FreshContext } from "$fresh/server.ts";
-import { DOMParser } from "https://deno.land/x/deno_dom@v0.1.45/deno-dom-wasm.ts";
 import { eq, sql } from "drizzle-orm";
 import { db } from "../../db/client.ts";
 import {
@@ -7,190 +6,12 @@ import {
   shopeePriceHistory,
   shopeeScrapeSessions,
 } from "../../db/schema.ts";
-import {
-  extractLegoSetNumber,
-  extractShopeeProductId,
-  extractShopUsername,
-  generateProductIdFromName,
-  normalizeSoldUnits,
-  parsePriceToCents,
-} from "../../db/utils.ts";
+import { extractShopUsername } from "../../db/utils.ts";
+import { parseShopeeHtml } from "../../utils/shopee-extractors.ts";
 
-interface ShopeeProduct {
-  product_id: string;
-  product_name: string;
-  price: number | null; // Price in cents
-  price_string: string; // Original price string for reference
-  units_sold: number | null; // Normalized sold units
-  units_sold_string: string; // Original sold string for reference
-  lego_set_number: string | null;
-  shop_name?: string;
-  shop_id?: number;
-  image?: string;
-  product_url?: string;
-}
-
-function parseShopeeHtml(
-  htmlContent: string,
-  shopUsernameFromUrl: string,
-): ShopeeProduct[] {
-  const parser = new DOMParser();
-  const doc = parser.parseFromString(htmlContent, "text/html");
-
-  if (!doc) {
-    throw new Error("Failed to parse HTML");
-  }
-
-  const products: ShopeeProduct[] = [];
-
-  // Find all product items
-  const items = doc.querySelectorAll(".shop-search-result-view__item");
-
-  for (let idx = 0; idx < items.length; idx++) {
-    const item = items[idx];
-    try {
-      const allText = item.textContent || "";
-
-      // Extract product name
-      let productName: string | null = null;
-
-      // Search for text containing LEGO pattern
-      const legoMatch = allText.match(/LEGO.*\d{5}/i);
-      if (legoMatch) {
-        productName = legoMatch[0].trim();
-      }
-
-      // Fallback: look for line-clamp-2 class
-      if (!productName) {
-        const nameDiv = item.querySelector('[class*="line-clamp-2"]');
-        if (nameDiv) {
-          productName = nameDiv.textContent?.trim() || null;
-        }
-      }
-
-      if (!productName) continue; // Skip items without names
-
-      // Extract product URL and ID
-      let productUrl: string | null = null;
-      let productId: string | null = null;
-
-      const linkElement = item.querySelector("a[href]");
-      if (linkElement) {
-        const href = linkElement.getAttribute("href");
-        if (href) {
-          // Handle relative URLs
-          productUrl = href.startsWith("http")
-            ? href
-            : `https://shopee.com.my${href}`;
-          productId = extractShopeeProductId(productUrl);
-        }
-      }
-
-      // Fallback: generate ID from product name if URL-based ID not found
-      if (!productId) {
-        productId = generateProductIdFromName(productName);
-      }
-
-      // IMPORTANT: Prefix product ID with shop username to ensure products from different shops are unique
-      // This allows tracking the same product across multiple shops
-      productId = `${shopUsernameFromUrl}:${productId}`;
-
-      // Extract price
-      let priceStr: string | null = null;
-      const priceSpan = item.querySelector(
-        '[class*="text-base"][class*="font-medium"]',
-      );
-      if (priceSpan) {
-        priceStr = priceSpan.textContent?.trim() || null;
-      }
-
-      // Fallback: regex search for RM price
-      if (!priceStr) {
-        const priceMatch = allText.match(/RM\s*([0-9,.]+)/);
-        if (priceMatch) {
-          priceStr = `RM ${priceMatch[1]}`;
-        }
-      }
-
-      const price = priceStr ? parsePriceToCents(priceStr) : null;
-
-      // Extract sold units
-      let soldStr: string | null = null;
-      const soldDiv = item.querySelector(
-        '[class*="text-shopee-black87"][class*="text-xs"]',
-      );
-      if (soldDiv) {
-        const soldMatch = soldDiv.textContent?.match(/([0-9kK.+,]+)\s*sold/);
-        if (soldMatch) {
-          soldStr = soldMatch[1].trim();
-        }
-      }
-
-      // Fallback: regex search in all text
-      if (!soldStr) {
-        const soldMatch = allText.match(/([0-9kK.+,]+)\s*sold/);
-        if (soldMatch) {
-          soldStr = soldMatch[1].trim();
-        }
-      }
-
-      const unitsSold = soldStr ? normalizeSoldUnits(soldStr) : null;
-
-      // Extract LEGO set number
-      const legoSetNumber = extractLegoSetNumber(productName);
-
-      // Extract image
-      let image: string | null = null;
-      const imgElement = item.querySelector("img");
-      if (imgElement) {
-        image = imgElement.getAttribute("src") ||
-          imgElement.getAttribute("data-src") || null;
-      }
-
-      // Extract shop information (if available in the HTML)
-      let shopName: string | null = null;
-      let shopId: number | null = null;
-
-      // Try to find shop name in various places
-      const shopNameElement = item.querySelector('[class*="shop-name"]') ||
-        item.querySelector('[class*="shopName"]');
-      if (shopNameElement) {
-        shopName = shopNameElement.textContent?.trim() || null;
-      }
-
-      // Fallback: use shop username from URL if no shop name in HTML
-      if (!shopName) {
-        shopName = shopUsernameFromUrl;
-      }
-
-      // Try to extract shop ID from URL if available
-      if (productUrl && productId) {
-        const shopIdMatch = productId.match(/^(\d+)-/);
-        if (shopIdMatch) {
-          shopId = parseInt(shopIdMatch[1], 10);
-        }
-      }
-
-      products.push({
-        product_id: productId,
-        product_name: productName,
-        price,
-        price_string: priceStr || "N/A",
-        units_sold: unitsSold,
-        units_sold_string: soldStr || "N/A",
-        lego_set_number: legoSetNumber,
-        shop_name: shopName || undefined,
-        shop_id: shopId || undefined,
-        image: image || undefined,
-        product_url: productUrl || undefined,
-      });
-    } catch (error) {
-      console.error(`Error parsing item ${idx + 1}:`, error);
-    }
-  }
-
-  return products;
-}
+// Re-export type from shopee-extractors for backwards compatibility
+import type { ParsedShopeeProduct } from "../../utils/shopee-extractors.ts";
+type ShopeeProduct = ParsedShopeeProduct;
 
 export const handler = async (
   req: Request,
@@ -352,12 +173,14 @@ export const handler = async (
           wasUpdated: !!existingProduct,
           previousSold: previousHistory?.soldAtTime || null,
           previousPrice: previousHistory?.price || null,
-          soldDelta: existingProduct && product.units_sold !== null && previousHistory?.soldAtTime
+          soldDelta: existingProduct && product.units_sold !== null &&
+              previousHistory?.soldAtTime
             ? product.units_sold - (previousHistory.soldAtTime || 0)
             : null,
-          priceDelta: existingProduct && product.price !== null && previousHistory?.price
-            ? product.price - (previousHistory.price || 0)
-            : null,
+          priceDelta:
+            existingProduct && product.price !== null && previousHistory?.price
+              ? product.price - (previousHistory.price || 0)
+              : null,
         };
 
         insertedProducts.push(productWithMeta);

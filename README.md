@@ -1,6 +1,7 @@
 # BWS - Bricklink Warehouse System
 
-A Fresh.js web application for scraping and managing LEGO product data from Bricklink and Shopee, with PostgreSQL integration.
+A Fresh.js web application for scraping and managing LEGO product data from
+Bricklink and Shopee, with PostgreSQL integration.
 
 ## Features
 
@@ -26,6 +27,7 @@ npm run db:up
 ```
 
 This starts PostgreSQL on `localhost:5432` with:
+
 - Database: `bws`
 - User: `postgres`
 - Password: `postgres`
@@ -96,17 +98,20 @@ See [DATABASE.md](./DATABASE.md) for detailed API documentation.
 ## Available Tasks
 
 ### Development
+
 - `deno task start` - Start dev server with hot reload
 - `deno task check` - Run linting and type checking
 - `deno task build` - Build for production
 - `deno task preview` - Preview production build
 
 ### Database
+
 - `deno task db:generate` - Generate migrations from schema
 - `deno task db:migrate` - Run pending migrations
 - `deno task db:studio` - Open Drizzle Studio (visual DB browser)
 
 ### Docker
+
 - `npm run db:up` - Start PostgreSQL container
 - `npm run db:down` - Stop and remove containers
 - `npm run db:logs` - View PostgreSQL logs
@@ -114,10 +119,13 @@ See [DATABASE.md](./DATABASE.md) for detailed API documentation.
 ## Database Schema
 
 ### Bricklink Items
+
 Stores scraped product data from Bricklink with pricing history in JSONB format.
 
 ### Shopee Items
+
 Stores scraped product data from Shopee with:
+
 - Product details (name, brand, price)
 - Sales metrics (sold, views, likes)
 - Rating information
@@ -126,6 +134,7 @@ Stores scraped product data from Shopee with:
 - Full-text search support
 
 ### Price History
+
 Tracks Shopee price changes over time.
 
 See [DATABASE.md](./DATABASE.md) for complete schema documentation.
@@ -133,6 +142,7 @@ See [DATABASE.md](./DATABASE.md) for complete schema documentation.
 ## Development
 
 The project uses Fresh 1.7.3 with:
+
 - Preact for UI components
 - Drizzle ORM for type-safe database queries
 - PostgreSQL for data storage

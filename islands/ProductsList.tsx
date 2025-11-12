@@ -1,5 +1,7 @@
-import { useSignal, useComputed } from "@preact/signals";
+import { useComputed, useSignal } from "@preact/signals";
 import { useEffect } from "preact/hooks";
+import { formatDate, formatNumber, formatPrice } from "../utils/formatters.ts";
+import { PAGINATION } from "../constants/app-config.ts";
 
 interface ShopeeItem {
   id: number;
@@ -85,7 +87,7 @@ export default function ProductsList() {
     try {
       const params = new URLSearchParams({
         page: currentPage.value.toString(),
-        limit: "50",
+        limit: PAGINATION.DEFAULT_LIMIT.toString(),
         sortBy: sortBy.value,
         sortOrder: sortOrder.value,
       });
@@ -108,7 +110,9 @@ export default function ProductsList() {
       items.value = data.items;
       pagination.value = data.pagination;
     } catch (err) {
-      error.value = err instanceof Error ? err.message : "Failed to fetch products";
+      error.value = err instanceof Error
+        ? err.message
+        : "Failed to fetch products";
       console.error("Error fetching products:", err);
     } finally {
       isLoading.value = false;
@@ -118,32 +122,21 @@ export default function ProductsList() {
   // Fetch on mount and when dependencies change
   useEffect(() => {
     fetchProducts();
-  }, [debouncedSearch.value, legoSetFilter.value, sortBy.value, sortOrder.value, currentPage.value]);
+  }, [
+    debouncedSearch.value,
+    legoSetFilter.value,
+    sortBy.value,
+    sortOrder.value,
+    currentPage.value,
+  ]);
 
-  // Format price from cents to RM
-  const formatPrice = (cents: number | null): string => {
-    if (cents === null || cents === undefined) return "N/A";
-    return `RM ${(cents / 100).toFixed(2)}`;
-  };
-
-  // Format large numbers (e.g., 1500 → 1.5k)
-  const formatNumber = (num: number | null): string => {
-    if (num === null || num === undefined) return "0";
-    if (num >= 1000) {
-      return `${(num / 1000).toFixed(1)}k`;
-    }
-    return num.toString();
-  };
-
-  // Format date
-  const formatDate = (date: Date | null): string => {
-    if (!date) return "N/A";
-    const d = new Date(date);
-    return d.toLocaleDateString("en-MY", {
-      year: "numeric",
-      month: "short",
-      day: "numeric"
-    });
+  // Get badge color based on sold volume
+  const getSoldBadgeColor = (sold: number | null): string => {
+    if (sold === null || sold === 0) return "badge-ghost";
+    if (sold < 100) return "badge-info";
+    if (sold < 500) return "badge-success";
+    if (sold < 1000) return "badge-warning";
+    return "badge-error"; // High volume (1000+)
   };
 
   // Handle sort column click
@@ -199,8 +192,8 @@ export default function ProductsList() {
       // Always show first page
       pages.push(1);
 
-      let start = Math.max(2, page - 2);
-      let end = Math.min(totalPages - 1, page + 2);
+      const start = Math.max(2, page - 2);
+      const end = Math.min(totalPages - 1, page + 2);
 
       if (start > 2) {
         pages.push(-1); // Ellipsis
@@ -235,7 +228,8 @@ export default function ProductsList() {
               placeholder="Search products..."
               class="input input-bordered w-full"
               value={searchQuery.value}
-              onInput={(e) => searchQuery.value = (e.target as HTMLInputElement).value}
+              onInput={(e) =>
+                searchQuery.value = (e.target as HTMLInputElement).value}
             />
           </div>
           <div class="form-control flex-1">
@@ -247,7 +241,8 @@ export default function ProductsList() {
               placeholder="e.g., 75192"
               class="input input-bordered w-full"
               value={legoSetFilter.value}
-              onInput={(e) => legoSetFilter.value = (e.target as HTMLInputElement).value}
+              onInput={(e) =>
+                legoSetFilter.value = (e.target as HTMLInputElement).value}
             />
           </div>
         </div>
@@ -255,8 +250,18 @@ export default function ProductsList() {
         {/* Error state */}
         {error.value && (
           <div class="alert alert-error mb-4">
-            <svg xmlns="http://www.w3.org/2000/svg" class="stroke-current shrink-0 h-6 w-6" fill="none" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z" />
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              class="stroke-current shrink-0 h-6 w-6"
+              fill="none"
+              viewBox="0 0 24 24"
+            >
+              <path
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                stroke-width="2"
+                d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z"
+              />
             </svg>
             <span>{error.value}</span>
           </div>
@@ -272,7 +277,12 @@ export default function ProductsList() {
         {/* Results info */}
         {!isLoading.value && pagination.value && (
           <div class="text-sm text-base-content/70 mb-4">
-            Showing {items.value.length > 0 ? ((pagination.value.page - 1) * pagination.value.limit + 1) : 0} to {Math.min(pagination.value.page * pagination.value.limit, pagination.value.totalCount)} of {pagination.value.totalCount} products
+            Showing {items.value.length > 0
+              ? ((pagination.value.page - 1) * pagination.value.limit + 1)
+              : 0} to {Math.min(
+                pagination.value.page * pagination.value.limit,
+                pagination.value.totalCount,
+              )} of {pagination.value.totalCount} products
           </div>
         )}
 
@@ -310,50 +320,65 @@ export default function ProductsList() {
                 {items.value.map((item) => (
                   <tr key={item.id}>
                     <td>
-                      {item.image ? (
-                        <div class="avatar">
-                          <div class="w-16 rounded">
-                            <img
-                              src={item.image}
-                              alt={item.name || "Product"}
-                              loading="lazy"
-                            />
+                      {item.image
+                        ? (
+                          <div class="avatar">
+                            <div class="w-16 rounded">
+                              <img
+                                src={item.image}
+                                alt={item.name || "Product"}
+                                loading="lazy"
+                              />
+                            </div>
                           </div>
-                        </div>
-                      ) : (
-                        <div class="w-16 h-16 bg-base-300 rounded flex items-center justify-center">
-                          <span class="text-xs text-base-content/50">No image</span>
-                        </div>
-                      )}
+                        )
+                        : (
+                          <div class="w-16 h-16 bg-base-300 rounded flex items-center justify-center">
+                            <span class="text-xs text-base-content/50">
+                              No image
+                            </span>
+                          </div>
+                        )}
                     </td>
                     <td class="max-w-xs">
-                      <div class="font-medium line-clamp-2">{item.name || "Unnamed product"}</div>
+                      <div class="font-medium line-clamp-2">
+                        {item.name || "Unnamed product"}
+                      </div>
                       {item.brand && (
-                        <div class="text-xs text-base-content/60 mt-1">{item.brand}</div>
+                        <div class="text-xs text-base-content/60 mt-1">
+                          {item.brand}
+                        </div>
                       )}
                     </td>
                     <td>
-                      {item.legoSetNumber ? (
-                        <span class="badge badge-primary">{item.legoSetNumber}</span>
-                      ) : (
-                        <span class="text-base-content/50">—</span>
-                      )}
+                      {item.legoSetNumber
+                        ? (
+                          <span class="badge badge-primary">
+                            {item.legoSetNumber}
+                          </span>
+                        )
+                        : <span class="text-base-content/50">—</span>}
                     </td>
                     <td>
                       <div class="font-semibold">{formatPrice(item.price)}</div>
-                      {item.priceBeforeDiscount && item.priceBeforeDiscount > (item.price || 0) && (
+                      {item.priceBeforeDiscount &&
+                        item.priceBeforeDiscount > (item.price || 0) && (
                         <div class="text-xs text-base-content/50 line-through">
                           {formatPrice(item.priceBeforeDiscount)}
                         </div>
                       )}
                     </td>
                     <td>
-                      <span class="badge badge-info">{formatNumber(item.sold)}</span>
+                      <span class={`badge ${getSoldBadgeColor(item.sold)}`}>
+                        {formatNumber(item.sold)}
+                      </span>
                     </td>
                     <td>
                       <div class="text-sm">{item.shopName || "Unknown"}</div>
                       {item.shopLocation && (
-                        <div class="text-xs text-base-content/50">{item.shopLocation}</div>
+                        <div class="text-xs text-base-content/50">
+                          {item.shopLocation}
+                        </div>
                       )}
                     </td>
                     <td class="text-sm text-base-content/70">
@@ -369,8 +394,19 @@ export default function ProductsList() {
         {/* Empty state */}
         {!isLoading.value && items.value.length === 0 && (
           <div class="text-center py-12">
-            <svg xmlns="http://www.w3.org/2000/svg" class="h-16 w-16 mx-auto text-base-content/30" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4" />
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              class="h-16 w-16 mx-auto text-base-content/30"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+            >
+              <path
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                stroke-width="2"
+                d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4"
+              />
             </svg>
             <p class="text-lg text-base-content/70 mt-4">No products found</p>
             <p class="text-sm text-base-content/50 mt-2">
@@ -382,7 +418,8 @@ export default function ProductsList() {
         )}
 
         {/* Pagination */}
-        {!isLoading.value && pagination.value && pagination.value.totalPages > 1 && (
+        {!isLoading.value && pagination.value &&
+          pagination.value.totalPages > 1 && (
           <div class="flex justify-center items-center gap-2 mt-6">
             <button
               class="btn btn-sm"
@@ -395,12 +432,21 @@ export default function ProductsList() {
             <div class="join">
               {pageNumbers.value.map((pageNum, idx) => {
                 if (pageNum === -1) {
-                  return <button key={`ellipsis-${idx}`} class="join-item btn btn-sm btn-disabled">...</button>;
+                  return (
+                    <button
+                      key={`ellipsis-${idx}`}
+                      class="join-item btn btn-sm btn-disabled"
+                    >
+                      ...
+                    </button>
+                  );
                 }
                 return (
                   <button
                     key={pageNum}
-                    class={`join-item btn btn-sm ${currentPage.value === pageNum ? 'btn-active' : ''}`}
+                    class={`join-item btn btn-sm ${
+                      currentPage.value === pageNum ? "btn-active" : ""
+                    }`}
                     onClick={() => handlePageClick(pageNum)}
                   >
                     {pageNum}

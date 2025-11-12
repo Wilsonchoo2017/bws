@@ -194,7 +194,8 @@ export type BricklinkItem = typeof bricklinkItems.$inferSelect;
 export type NewBricklinkItem = typeof bricklinkItems.$inferInsert;
 
 export type BricklinkPriceHistory = typeof bricklinkPriceHistory.$inferSelect;
-export type NewBricklinkPriceHistory = typeof bricklinkPriceHistory.$inferInsert;
+export type NewBricklinkPriceHistory =
+  typeof bricklinkPriceHistory.$inferInsert;
 
 export type ShopeeItem = typeof shopeeItems.$inferSelect;
 export type NewShopeeItem = typeof shopeeItems.$inferInsert;

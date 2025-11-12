@@ -130,7 +130,7 @@ export function extractShopUsername(url: string): string | null {
         return username;
       }
     }
-  } catch (error) {
+  } catch (_error) {
     // Invalid URL, return null
     return null;
   }

@@ -1,7 +1,13 @@
 import { Handlers } from "$fresh/server.ts";
 import { db } from "../../db/client.ts";
 import { shopeeItems } from "../../db/schema.ts";
-import { desc, asc, sql, like, eq, and } from "drizzle-orm";
+import { and, asc, desc, eq, sql } from "drizzle-orm";
+import {
+  createErrorResponse,
+  createJsonResponse,
+  createPaginatedResponse,
+} from "../../utils/api-helpers.ts";
+import { PAGINATION } from "../../constants/app-config.ts";
 
 interface ShopeeItemsQuery {
   search?: string;
@@ -20,11 +26,17 @@ export const handler: Handlers = {
       const query: ShopeeItemsQuery = {
         search: url.searchParams.get("search") || undefined,
         legoSetNumber: url.searchParams.get("legoSetNumber") || undefined,
-        watchStatus: url.searchParams.get("watchStatus") || url.searchParams.get("watch_status") || undefined,
-        sortBy: (url.searchParams.get("sortBy") as ShopeeItemsQuery["sortBy"]) || "updatedAt",
-        sortOrder: (url.searchParams.get("sortOrder") as "asc" | "desc") || "desc",
+        watchStatus: url.searchParams.get("watchStatus") ||
+          url.searchParams.get("watch_status") || undefined,
+        sortBy:
+          (url.searchParams.get("sortBy") as ShopeeItemsQuery["sortBy"]) ||
+          "updatedAt",
+        sortOrder: (url.searchParams.get("sortOrder") as "asc" | "desc") ||
+          "desc",
         page: parseInt(url.searchParams.get("page") || "1"),
-        limit: parseInt(url.searchParams.get("limit") || "50"),
+        limit: parseInt(
+          url.searchParams.get("limit") || PAGINATION.DEFAULT_LIMIT.toString(),
+        ),
       };
 
       // Build where conditions
@@ -32,34 +44,38 @@ export const handler: Handlers = {
 
       // Search by product name (full-text search with improved handling)
       if (query.search && query.search.trim()) {
-        const searchTerm = query.search.trim().replace(/\s+/g, ' '); // Normalize multiple spaces
+        const searchTerm = query.search.trim().replace(/\s+/g, " "); // Normalize multiple spaces
 
         // Use websearch_to_tsquery for better phrase and partial matching
         // COALESCE handles NULL names
         conditions.push(
-          sql`to_tsvector('english', COALESCE(${shopeeItems.name}, '')) @@ websearch_to_tsquery('english', ${searchTerm})`
+          sql`to_tsvector('english', COALESCE(${shopeeItems.name}, '')) @@ websearch_to_tsquery('english', ${searchTerm})`,
         );
       }
 
       // Filter by LEGO set number (starts with match, case-insensitive)
       if (query.legoSetNumber && query.legoSetNumber.trim()) {
-        const setNumberTerm = query.legoSetNumber.trim().replace(/\s+/g, ''); // Remove all spaces
+        const setNumberTerm = query.legoSetNumber.trim().replace(/\s+/g, ""); // Remove all spaces
 
         // Use ILIKE for case-insensitive "starts with" matching
         // COALESCE handles NULL set numbers
         conditions.push(
-          sql`COALESCE(${shopeeItems.legoSetNumber}, '') ILIKE ${setNumberTerm + '%'}`
+          sql`COALESCE(${shopeeItems.legoSetNumber}, '') ILIKE ${
+            setNumberTerm + "%"
+          }`,
         );
       }
 
       // Filter by watch status
       if (query.watchStatus && query.watchStatus.trim()) {
         conditions.push(
-          eq(shopeeItems.watchStatus, query.watchStatus as any)
+          eq(shopeeItems.watchStatus, query.watchStatus as "active" | "paused" | "stopped" | "archived"),
         );
       }
 
-      const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
+      const whereClause = conditions.length > 0
+        ? and(...conditions)
+        : undefined;
 
       // Determine sort column and order
       let orderByClause;
@@ -99,44 +115,17 @@ export const handler: Handlers = {
         .limit(query.limit!)
         .offset(offset);
 
-      // Calculate pagination metadata
-      const totalPages = Math.ceil(totalCount / query.limit!);
-      const hasNextPage = query.page! < totalPages;
-      const hasPrevPage = query.page! > 1;
+      // Return paginated response
+      const response = createPaginatedResponse(
+        items,
+        query.page!,
+        query.limit!,
+        totalCount,
+      );
 
-      return new Response(
-        JSON.stringify({
-          items,
-          pagination: {
-            page: query.page,
-            limit: query.limit,
-            totalCount,
-            totalPages,
-            hasNextPage,
-            hasPrevPage,
-          },
-        }),
-        {
-          status: 200,
-          headers: {
-            "Content-Type": "application/json",
-          },
-        }
-      );
+      return createJsonResponse(response);
     } catch (error) {
-      console.error("Error fetching Shopee items:", error);
-      return new Response(
-        JSON.stringify({
-          error: "Failed to fetch products",
-          message: error instanceof Error ? error.message : String(error),
-        }),
-        {
-          status: 500,
-          headers: {
-            "Content-Type": "application/json",
-          },
-        }
-      );
+      return createErrorResponse(error, "Failed to fetch Shopee items");
     }
   },
 };

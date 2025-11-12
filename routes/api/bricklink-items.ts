@@ -2,6 +2,12 @@ import { FreshContext } from "$fresh/server.ts";
 import { eq } from "drizzle-orm";
 import { db } from "../../db/client.ts";
 import { bricklinkItems } from "../../db/schema.ts";
+import {
+  createErrorResponse,
+  createJsonResponse,
+  createNotFoundResponse,
+  createValidationErrorResponse,
+} from "../../utils/api-helpers.ts";
 
 export const handler = {
   // GET /api/bricklink-items - List all items
@@ -20,44 +26,25 @@ export const handler = {
         });
 
         if (!item) {
-          return new Response(
-            JSON.stringify({ error: "Item not found" }),
-            {
-              status: 404,
-              headers: { "Content-Type": "application/json" },
-            },
-          );
+          return createNotFoundResponse("Item");
         }
 
-        return new Response(JSON.stringify(item), {
-          headers: { "Content-Type": "application/json" },
-        });
+        return createJsonResponse(item);
       }
 
       // Get all items (optionally filtered by watch status)
       let items;
       if (watchStatus) {
         items = await db.query.bricklinkItems.findMany({
-          where: eq(bricklinkItems.watchStatus, watchStatus as any),
+          where: eq(bricklinkItems.watchStatus, watchStatus as "active" | "paused" | "stopped" | "archived"),
         });
       } else {
         items = await db.select().from(bricklinkItems);
       }
 
-      return new Response(JSON.stringify(items), {
-        headers: { "Content-Type": "application/json" },
-      });
+      return createJsonResponse(items);
     } catch (error) {
-      console.error("Error fetching items:", error);
-      return new Response(
-        JSON.stringify({
-          error: error instanceof Error ? error.message : "Unknown error",
-        }),
-        {
-          status: 500,
-          headers: { "Content-Type": "application/json" },
-        },
-      );
+      return createErrorResponse(error, "Error fetching Bricklink items");
     }
   },
 
@@ -78,21 +65,9 @@ export const handler = {
         currentUsed: body.current_used || null,
       }).returning();
 
-      return new Response(JSON.stringify(newItem), {
-        status: 201,
-        headers: { "Content-Type": "application/json" },
-      });
+      return createJsonResponse(newItem, 201);
     } catch (error) {
-      console.error("Error creating item:", error);
-      return new Response(
-        JSON.stringify({
-          error: error instanceof Error ? error.message : "Unknown error",
-        }),
-        {
-          status: 500,
-          headers: { "Content-Type": "application/json" },
-        },
-      );
+      return createErrorResponse(error, "Error creating Bricklink item");
     }
   },
 
@@ -115,17 +90,27 @@ export const handler = {
       const body = await req.json();
 
       // Build update object dynamically to only update provided fields
-      const updateData: any = {
+      const updateData: Record<string, unknown> = {
         updatedAt: new Date(),
       };
 
       if (body.title !== undefined) updateData.title = body.title;
       if (body.weight !== undefined) updateData.weight = body.weight;
-      if (body.six_month_new !== undefined) updateData.sixMonthNew = body.six_month_new || null;
-      if (body.six_month_used !== undefined) updateData.sixMonthUsed = body.six_month_used || null;
-      if (body.current_new !== undefined) updateData.currentNew = body.current_new || null;
-      if (body.current_used !== undefined) updateData.currentUsed = body.current_used || null;
-      if (body.watch_status !== undefined) updateData.watchStatus = body.watch_status;
+      if (body.six_month_new !== undefined) {
+        updateData.sixMonthNew = body.six_month_new || null;
+      }
+      if (body.six_month_used !== undefined) {
+        updateData.sixMonthUsed = body.six_month_used || null;
+      }
+      if (body.current_new !== undefined) {
+        updateData.currentNew = body.current_new || null;
+      }
+      if (body.current_used !== undefined) {
+        updateData.currentUsed = body.current_used || null;
+      }
+      if (body.watch_status !== undefined) {
+        updateData.watchStatus = body.watch_status;
+      }
 
       // Update item
       const [updatedItem] = await db.update(bricklinkItems)
@@ -134,29 +119,12 @@ export const handler = {
         .returning();
 
       if (!updatedItem) {
-        return new Response(
-          JSON.stringify({ error: "Item not found" }),
-          {
-            status: 404,
-            headers: { "Content-Type": "application/json" },
-          },
-        );
+        return createNotFoundResponse("Item");
       }
 
-      return new Response(JSON.stringify(updatedItem), {
-        headers: { "Content-Type": "application/json" },
-      });
+      return createJsonResponse(updatedItem);
     } catch (error) {
-      console.error("Error updating item:", error);
-      return new Response(
-        JSON.stringify({
-          error: error instanceof Error ? error.message : "Unknown error",
-        }),
-        {
-          status: 500,
-          headers: { "Content-Type": "application/json" },
-        },
-      );
+      return createErrorResponse(error, "Error updating Bricklink item");
     }
   },
 
@@ -167,31 +135,14 @@ export const handler = {
       const itemId = url.searchParams.get("item_id");
 
       if (!itemId) {
-        return new Response(
-          JSON.stringify({ error: "Missing item_id parameter" }),
-          {
-            status: 400,
-            headers: { "Content-Type": "application/json" },
-          },
-        );
+        return createValidationErrorResponse("Missing item_id parameter");
       }
 
       await db.delete(bricklinkItems).where(eq(bricklinkItems.itemId, itemId));
 
-      return new Response(JSON.stringify({ success: true }), {
-        headers: { "Content-Type": "application/json" },
-      });
+      return createJsonResponse({ success: true });
     } catch (error) {
-      console.error("Error deleting item:", error);
-      return new Response(
-        JSON.stringify({
-          error: error instanceof Error ? error.message : "Unknown error",
-        }),
-        {
-          status: 500,
-          headers: { "Content-Type": "application/json" },
-        },
-      );
+      return createErrorResponse(error, "Error deleting Bricklink item");
     }
   },
 };
