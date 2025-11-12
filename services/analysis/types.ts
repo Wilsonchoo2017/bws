@@ -15,16 +15,17 @@ export interface AnalysisScore {
 }
 
 export interface DimensionalScores {
-  pricing: AnalysisScore;
-  demand: AnalysisScore;
-  availability: AnalysisScore;
-  quality: AnalysisScore;
+  pricing: AnalysisScore | null; // null = insufficient data to analyze
+  demand: AnalysisScore | null;
+  availability: AnalysisScore | null;
+  quality: AnalysisScore | null;
 }
 
 export interface ProductRecommendation {
   overall: AnalysisScore;
   dimensions: DimensionalScores;
-  action: "strong_buy" | "buy" | "hold" | "pass";
+  availableDimensions: number; // How many dimensions had sufficient data (0-4)
+  action: "strong_buy" | "buy" | "hold" | "pass" | "insufficient_data";
   strategy: string;
   urgency: "urgent" | "moderate" | "low" | "no_rush";
   estimatedROI?: number; // Percentage
@@ -140,9 +141,10 @@ export interface ProductAnalysisInput {
 /**
  * Base interface for all analyzers
  * Each analyzer focuses on one dimension (Single Responsibility Principle)
+ * Returns null if insufficient data to analyze (smart skipping)
  */
 export interface IAnalyzer<T> {
-  analyze(data: T): Promise<AnalysisScore>;
+  analyze(data: T): Promise<AnalysisScore | null>;
   getName(): string;
   getDescription(): string;
 }

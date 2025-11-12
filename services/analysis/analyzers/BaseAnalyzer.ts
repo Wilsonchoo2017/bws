@@ -14,7 +14,7 @@ export abstract class BaseAnalyzer<T> implements IAnalyzer<T> {
     this.description = description;
   }
 
-  abstract analyze(data: T): Promise<AnalysisScore>;
+  abstract analyze(data: T): Promise<AnalysisScore | null>;
 
   getName(): string {
     return this.name;
