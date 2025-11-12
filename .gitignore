@@ -63,6 +63,3 @@ ENV/
 deno.lock
 _fresh/
 
-# Monorepo
-packages/*/node_modules
-packages/*/venv

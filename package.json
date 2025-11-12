@@ -1,26 +1,12 @@
 {
-  "name": "bws",
+  "name": "@bws/api",
   "version": "1.0.0",
-  "private": true,
-  "workspaces": [
-    "packages/*"
-  ],
+  "description": "Backend API service",
   "scripts": {
-    "scraper": "cd packages/scraper && python scrape-bricklink.py",
-    "api:dev": "cd packages/api/api && deno task start",
-    "backend:install": "cd packages/backend && pip install -e '.[dev]'",
-    "backend:dev": "cd packages/backend && uvicorn app.main:app --reload --host 0.0.0.0 --port 8000",
-    "backend:migrate": "cd packages/backend && alembic upgrade head",
-    "backend:migration": "cd packages/backend && alembic revision --autogenerate",
-    "backend:lint": "cd packages/backend && ruff check .",
-    "backend:format": "cd packages/backend && ruff format . && ruff check --fix .",
-    "backend:type-check": "cd packages/backend && mypy app/",
-    "db:up": "docker-compose up -d postgres",
-    "db:down": "docker-compose down",
-    "db:logs": "docker-compose logs -f postgres"
+    "dev": "deno task dev",
+    "start": "deno task start",
+    "build": "deno task build"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
-  "description": "Monorepo for BWS backend services"
+  "keywords": ["api", "backend"],
+  "license": "ISC"
 }
