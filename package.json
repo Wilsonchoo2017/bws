@@ -1,17 +1,26 @@
 {
   "name": "bws",
   "version": "1.0.0",
-  "main": "index.js",
+  "private": true,
+  "workspaces": [
+    "packages/*"
+  ],
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "scraper": "cd packages/scraper && python scrape-bricklink.py",
+    "api:dev": "cd packages/api/api && deno task start",
+    "backend:install": "cd packages/backend && pip install -e '.[dev]'",
+    "backend:dev": "cd packages/backend && uvicorn app.main:app --reload --host 0.0.0.0 --port 8000",
+    "backend:migrate": "cd packages/backend && alembic upgrade head",
+    "backend:migration": "cd packages/backend && alembic revision --autogenerate",
+    "backend:lint": "cd packages/backend && ruff check .",
+    "backend:format": "cd packages/backend && ruff format . && ruff check --fix .",
+    "backend:type-check": "cd packages/backend && mypy app/",
+    "db:up": "docker-compose up -d postgres",
+    "db:down": "docker-compose down",
+    "db:logs": "docker-compose logs -f postgres"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
-  "description": "",
-  "dependencies": {
-    "playwright": "^1.56.1",
-    "playwright-extra": "^4.3.6",
-    "puppeteer-extra-plugin-stealth": "^2.11.2"
-  }
+  "description": "Monorepo for BWS backend services"
 }

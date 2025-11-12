@@ -56,3 +56,13 @@ __pycache__/
 venv/
 env/
 ENV/
+*.egg-info/
+.pytest_cache/
+
+# Deno
+deno.lock
+_fresh/
+
+# Monorepo
+packages/*/node_modules
+packages/*/venv

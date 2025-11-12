@@ -1,0 +1,12 @@
+{
+  "name": "@bws/api",
+  "version": "1.0.0",
+  "description": "Backend API service",
+  "scripts": {
+    "dev": "cd fresh-shadcn-ui && deno task dev",
+    "start": "cd fresh-shadcn-ui && deno task start",
+    "build": "cd fresh-shadcn-ui && deno task build"
+  },
+  "keywords": ["api", "backend"],
+  "license": "ISC"
+}
