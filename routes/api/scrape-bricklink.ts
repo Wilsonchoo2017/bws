@@ -190,10 +190,10 @@ async function scrapeBricklinkItem(url: string): Promise<BricklinkData> {
   };
 
   if (priceBoxes.length >= 4) {
-    pricingData.six_month_new = extractPriceBox(priceBoxes[0]);
-    pricingData.six_month_used = extractPriceBox(priceBoxes[1]);
-    pricingData.current_new = extractPriceBox(priceBoxes[2]);
-    pricingData.current_used = extractPriceBox(priceBoxes[3]);
+    pricingData.six_month_new = extractPriceBox(priceBoxes[0] as unknown as Element);
+    pricingData.six_month_used = extractPriceBox(priceBoxes[1] as unknown as Element);
+    pricingData.current_new = extractPriceBox(priceBoxes[2] as unknown as Element);
+    pricingData.current_used = extractPriceBox(priceBoxes[3] as unknown as Element);
   }
 
   return {
