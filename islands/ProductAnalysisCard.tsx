@@ -94,19 +94,34 @@ export default function ProductAnalysisCard(
 
   if (loading.value) {
     return (
-      <div class="bg-white rounded-lg shadow-md p-6 animate-pulse">
-        <div class="h-8 bg-gray-200 rounded w-1/3 mb-4"></div>
-        <div class="h-4 bg-gray-200 rounded w-full mb-2"></div>
-        <div class="h-4 bg-gray-200 rounded w-2/3"></div>
+      <div class="card bg-base-100 shadow-xl p-6 animate-pulse">
+        <div class="h-8 bg-base-300 rounded w-1/3 mb-4"></div>
+        <div class="h-4 bg-base-300 rounded w-full mb-2"></div>
+        <div class="h-4 bg-base-300 rounded w-2/3"></div>
       </div>
     );
   }
 
   if (error.value) {
     return (
-      <div class="bg-red-50 border border-red-200 rounded-lg p-6">
-        <h3 class="text-red-800 font-semibold mb-2">Analysis Error</h3>
-        <p class="text-red-600">{error.value}</p>
+      <div class="alert alert-error">
+        <svg
+          xmlns="http://www.w3.org/2000/svg"
+          class="stroke-current shrink-0 h-6 w-6"
+          fill="none"
+          viewBox="0 0 24 24"
+        >
+          <path
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            stroke-width="2"
+            d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z"
+          />
+        </svg>
+        <div>
+          <h3 class="font-bold">Analysis Error</h3>
+          <div class="text-sm">{error.value}</div>
+        </div>
       </div>
     );
   }
@@ -116,243 +131,294 @@ export default function ProductAnalysisCard(
   const rec = recommendation.value;
 
   return (
-    <div class="bg-white rounded-lg shadow-md p-6 space-y-6">
-      {/* Header with Strategy Selector */}
-      <div class="flex items-start justify-between">
-        <div>
-          <h3 class="text-xl font-bold text-gray-900 mb-2">
-            Investment Analysis
-          </h3>
-          <p class="text-sm text-gray-600">
-            Strategy: {rec.strategy}
-          </p>
+    <div class="card bg-base-100 shadow-xl">
+      <div class="card-body space-y-6">
+        {/* Header with Strategy Selector */}
+        <div class="flex items-start justify-between">
+          <div>
+            <h3 class="text-xl font-bold mb-2">
+              Investment Analysis
+            </h3>
+            <p class="text-sm text-base-content/70">
+              Strategy: {rec.strategy}
+            </p>
+          </div>
+          <div class="flex flex-col items-end gap-2">
+            <select
+              class="select select-bordered select-sm"
+              value={selectedStrategy.value}
+              onChange={(e) =>
+                selectedStrategy.value = (e.target as HTMLSelectElement).value}
+            >
+              {strategies.value.map((strategy) => (
+                <option key={strategy.name} value={strategy.name}>
+                  {strategy.name}
+                </option>
+              ))}
+            </select>
+          </div>
         </div>
-        <div class="flex flex-col items-end gap-2">
-          <select
-            class="px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-            value={selectedStrategy.value}
-            onChange={(e) =>
-              selectedStrategy.value = (e.target as HTMLSelectElement).value}
-          >
-            {strategies.value.map((strategy) => (
-              <option key={strategy.name} value={strategy.name}>
-                {strategy.name}
-              </option>
-            ))}
-          </select>
-        </div>
-      </div>
 
-      {/* Overall Score and Recommendation */}
-      <div class="flex items-center gap-6 p-4 bg-gray-50 rounded-lg">
-        <div class="flex-1">
-          <ScoreMeter
-            score={rec.overall.value}
-            label="Overall Score"
-            size="lg"
-          />
-          <p class="text-sm text-gray-600 mt-2">
-            Confidence: {Math.round(rec.overall.confidence * 100)}%
-          </p>
-        </div>
-        <div class="flex-shrink-0">
-          <RecommendationBadge
-            action={rec.action}
-            urgency={rec.urgency}
-            size="lg"
-          />
-        </div>
-      </div>
-
-      {/* Investment Metrics */}
-      {(rec.estimatedROI !== undefined || rec.timeHorizon) && (
-        <div class="grid grid-cols-2 gap-4 p-4 bg-blue-50 rounded-lg">
-          {rec.estimatedROI !== undefined && (
-            <div>
-              <p class="text-xs text-blue-700 font-medium mb-1">
-                Estimated ROI
-              </p>
-              <p class="text-2xl font-bold text-blue-900">
-                {rec.estimatedROI > 0 ? "+" : ""}
-                {rec.estimatedROI.toFixed(0)}%
-              </p>
-            </div>
-          )}
-          {rec.timeHorizon && (
-            <div>
-              <p class="text-xs text-blue-700 font-medium mb-1">
-                Time Horizon
-              </p>
-              <p class="text-sm font-semibold text-blue-900">
-                {rec.timeHorizon}
-              </p>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Dimensional Scores */}
-      <div class="space-y-4">
-        <div class="flex items-center justify-between">
-          <h4 class="font-semibold text-gray-900">Dimensional Analysis</h4>
-          <p class="text-xs text-gray-500">
-            {rec.availableDimensions} of 4 dimensions analyzed
-          </p>
-        </div>
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {rec.dimensions.pricing
-            ? (
-              <div>
+        {/* Overall Score and Recommendation */}
+        {rec.availableDimensions === 4
+          ? (
+            <div class="flex items-center gap-6 p-4 bg-base-200 rounded-lg">
+              <div class="flex-1">
                 <ScoreMeter
-                  score={rec.dimensions.pricing.value}
-                  label="💰 Pricing"
-                  size="md"
+                  score={rec.overall.value}
+                  label="Overall Score"
+                  size="lg"
                 />
-                <p class="text-xs text-gray-600 mt-1">
-                  {rec.dimensions.pricing.reasoning}
+                <p class="text-sm text-base-content/70 mt-2">
+                  Confidence: {Math.round(rec.overall.confidence * 100)}%
                 </p>
               </div>
-            )
-            : (
-              <div class="opacity-50">
-                <div class="p-4 bg-gray-100 rounded-lg">
-                  <p class="text-sm font-medium text-gray-500">💰 Pricing</p>
-                  <p class="text-xs text-gray-400 mt-1">
-                    Insufficient data
+              <div class="flex-shrink-0">
+                <RecommendationBadge
+                  action={rec.action}
+                  urgency={rec.urgency}
+                  size="lg"
+                />
+              </div>
+            </div>
+          )
+          : (
+            <div class="p-6 bg-warning/10 border-2 border-warning rounded-lg">
+              <div class="flex items-start gap-4">
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  class="h-6 w-6 text-warning flex-shrink-0"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                >
+                  <path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="2"
+                    d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+                  />
+                </svg>
+                <div>
+                  <h4 class="font-semibold text-warning mb-2">
+                    Not Enough Data Yet
+                  </h4>
+                  <p class="text-sm text-base-content/80">
+                    We need {4 - rec.availableDimensions} more dimension{4 -
+                          rec.availableDimensions !== 1
+                      ? "s"
+                      : ""}{" "}
+                    to provide a reliable score. Check back after we gather more
+                    information about this product.
+                  </p>
+                  <p class="text-xs text-base-content/60 mt-2">
+                    Currently analyzed: {rec.availableDimensions}{" "}
+                    of 4 dimensions
                   </p>
                 </div>
               </div>
-            )}
-          {rec.dimensions.demand
-            ? (
+            </div>
+          )}
+
+        {/* Investment Metrics */}
+        {rec.availableDimensions === 4 &&
+          (rec.estimatedROI !== undefined || rec.timeHorizon) && (
+          <div class="grid grid-cols-2 gap-4 p-4 bg-primary/10 rounded-lg">
+            {rec.estimatedROI !== undefined && (
               <div>
-                <ScoreMeter
-                  score={rec.dimensions.demand.value}
-                  label="📈 Demand"
-                  size="md"
-                />
-                <p class="text-xs text-gray-600 mt-1">
-                  {rec.dimensions.demand.reasoning}
+                <p class="text-xs text-primary font-medium mb-1">
+                  Estimated ROI
+                </p>
+                <p class="text-2xl font-bold text-primary">
+                  {rec.estimatedROI > 0 ? "+" : ""}
+                  {rec.estimatedROI.toFixed(0)}%
                 </p>
               </div>
-            )
-            : (
-              <div class="opacity-50">
-                <div class="p-4 bg-gray-100 rounded-lg">
-                  <p class="text-sm font-medium text-gray-500">📈 Demand</p>
-                  <p class="text-xs text-gray-400 mt-1">
-                    Insufficient data
-                  </p>
-                </div>
-              </div>
             )}
-          {rec.dimensions.availability
-            ? (
+            {rec.timeHorizon && (
               <div>
-                <ScoreMeter
-                  score={rec.dimensions.availability.value}
-                  label="📦 Availability"
-                  size="md"
-                />
-                <p class="text-xs text-gray-600 mt-1">
-                  {rec.dimensions.availability.reasoning}
+                <p class="text-xs text-primary font-medium mb-1">
+                  Time Horizon
+                </p>
+                <p class="text-sm font-semibold">
+                  {rec.timeHorizon}
                 </p>
               </div>
-            )
-            : (
-              <div class="opacity-50">
-                <div class="p-4 bg-gray-100 rounded-lg">
-                  <p class="text-sm font-medium text-gray-500">
-                    📦 Availability
-                  </p>
-                  <p class="text-xs text-gray-400 mt-1">
-                    Insufficient data
+            )}
+          </div>
+        )}
+
+        {/* Dimensional Scores */}
+        <div class="space-y-4">
+          <div class="flex items-center justify-between">
+            <h4 class="font-semibold">Dimensional Analysis</h4>
+            <p class="text-xs text-base-content/50">
+              {rec.availableDimensions} of 4 dimensions analyzed
+            </p>
+          </div>
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {rec.dimensions.pricing
+              ? (
+                <div>
+                  <ScoreMeter
+                    score={rec.dimensions.pricing.value}
+                    label="💰 Pricing"
+                    size="md"
+                  />
+                  <p class="text-xs text-base-content/70 mt-1">
+                    {rec.dimensions.pricing.reasoning}
                   </p>
                 </div>
-              </div>
-            )}
-          {rec.dimensions.quality
-            ? (
-              <div>
-                <ScoreMeter
-                  score={rec.dimensions.quality.value}
-                  label="⭐ Quality"
-                  size="md"
-                />
-                <p class="text-xs text-gray-600 mt-1">
-                  {rec.dimensions.quality.reasoning}
-                </p>
-              </div>
-            )
-            : (
-              <div class="opacity-50">
-                <div class="p-4 bg-gray-100 rounded-lg">
-                  <p class="text-sm font-medium text-gray-500">⭐ Quality</p>
-                  <p class="text-xs text-gray-400 mt-1">
-                    Insufficient data
+              )
+              : (
+                <div class="opacity-50">
+                  <div class="p-4 bg-base-200 rounded-lg">
+                    <p class="text-sm font-medium text-base-content/50">
+                      💰 Pricing
+                    </p>
+                    <p class="text-xs text-base-content/40 mt-1">
+                      Insufficient data
+                    </p>
+                  </div>
+                </div>
+              )}
+            {rec.dimensions.demand
+              ? (
+                <div>
+                  <ScoreMeter
+                    score={rec.dimensions.demand.value}
+                    label="📈 Demand"
+                    size="md"
+                  />
+                  <p class="text-xs text-base-content/70 mt-1">
+                    {rec.dimensions.demand.reasoning}
                   </p>
                 </div>
-              </div>
-            )}
+              )
+              : (
+                <div class="opacity-50">
+                  <div class="p-4 bg-base-200 rounded-lg">
+                    <p class="text-sm font-medium text-base-content/50">
+                      📈 Demand
+                    </p>
+                    <p class="text-xs text-base-content/40 mt-1">
+                      Insufficient data
+                    </p>
+                  </div>
+                </div>
+              )}
+            {rec.dimensions.availability
+              ? (
+                <div>
+                  <ScoreMeter
+                    score={rec.dimensions.availability.value}
+                    label="📦 Availability"
+                    size="md"
+                  />
+                  <p class="text-xs text-base-content/70 mt-1">
+                    {rec.dimensions.availability.reasoning}
+                  </p>
+                </div>
+              )
+              : (
+                <div class="opacity-50">
+                  <div class="p-4 bg-base-200 rounded-lg">
+                    <p class="text-sm font-medium text-base-content/50">
+                      📦 Availability
+                    </p>
+                    <p class="text-xs text-base-content/40 mt-1">
+                      Insufficient data
+                    </p>
+                  </div>
+                </div>
+              )}
+            {rec.dimensions.quality
+              ? (
+                <div>
+                  <ScoreMeter
+                    score={rec.dimensions.quality.value}
+                    label="⭐ Quality"
+                    size="md"
+                  />
+                  <p class="text-xs text-base-content/70 mt-1">
+                    {rec.dimensions.quality.reasoning}
+                  </p>
+                </div>
+              )
+              : (
+                <div class="opacity-50">
+                  <div class="p-4 bg-base-200 rounded-lg">
+                    <p class="text-sm font-medium text-base-content/50">
+                      ⭐ Quality
+                    </p>
+                    <p class="text-xs text-base-content/40 mt-1">
+                      Insufficient data
+                    </p>
+                  </div>
+                </div>
+              )}
+          </div>
         </div>
-      </div>
 
-      {/* Opportunities and Risks Toggle */}
-      <button
-        class="w-full py-2 px-4 bg-gray-100 hover:bg-gray-200 rounded-lg text-sm font-medium text-gray-700 transition-colors"
-        onClick={() => showDetails.value = !showDetails.value}
-      >
-        {showDetails.value ? "▲ Hide Details" : "▼ Show Opportunities & Risks"}
-      </button>
+        {/* Opportunities and Risks Toggle */}
+        <button
+          class="btn btn-outline btn-block btn-sm"
+          onClick={() => showDetails.value = !showDetails.value}
+        >
+          {showDetails.value
+            ? "▲ Hide Details"
+            : "▼ Show Opportunities & Risks"}
+        </button>
 
-      {/* Details Section */}
-      {showDetails.value && (
-        <div class="space-y-4 pt-4 border-t border-gray-200">
-          {/* Opportunities */}
-          {rec.opportunities.length > 0 && (
-            <div>
-              <h5 class="font-semibold text-green-800 mb-2">
-                ✅ Opportunities
-              </h5>
-              <ul class="space-y-1">
-                {rec.opportunities.map((opp, idx) => (
-                  <li key={idx} class="text-sm text-gray-700 flex items-start">
-                    <span class="text-green-600 mr-2">•</span>
-                    <span>{opp}</span>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
+        {/* Details Section */}
+        {showDetails.value && (
+          <div class="space-y-4 pt-4 border-t border-base-300">
+            {/* Opportunities */}
+            {rec.opportunities.length > 0 && (
+              <div>
+                <h5 class="font-semibold text-success mb-2">
+                  ✅ Opportunities
+                </h5>
+                <ul class="space-y-1">
+                  {rec.opportunities.map((opp, idx) => (
+                    <li key={idx} class="text-sm flex items-start">
+                      <span class="text-success mr-2">•</span>
+                      <span>{opp}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
 
-          {/* Risks */}
-          {rec.risks.length > 0 && (
-            <div>
-              <h5 class="font-semibold text-red-800 mb-2">⚠️ Risks</h5>
-              <ul class="space-y-1">
-                {rec.risks.map((risk, idx) => (
-                  <li key={idx} class="text-sm text-gray-700 flex items-start">
-                    <span class="text-red-600 mr-2">•</span>
-                    <span>{risk}</span>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
+            {/* Risks */}
+            {rec.risks.length > 0 && (
+              <div>
+                <h5 class="font-semibold text-error mb-2">⚠️ Risks</h5>
+                <ul class="space-y-1">
+                  {rec.risks.map((risk, idx) => (
+                    <li key={idx} class="text-sm flex items-start">
+                      <span class="text-error mr-2">•</span>
+                      <span>{risk}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
 
-          {/* Analysis Timestamp */}
-          <p class="text-xs text-gray-500 mt-4">
-            Analyzed: {new Date(rec.analyzedAt).toLocaleString()}
+            {/* Analysis Timestamp */}
+            <p class="text-xs text-base-content/50 mt-4">
+              Analyzed: {new Date(rec.analyzedAt).toLocaleString()}
+            </p>
+          </div>
+        )}
+
+        {/* Overall Reasoning */}
+        <div class="p-4 bg-base-200 rounded-lg">
+          <p class="text-sm">
+            <span class="font-semibold">Summary:</span>
+            {rec.overall.reasoning}
           </p>
         </div>
-      )}
-
-      {/* Overall Reasoning */}
-      <div class="p-4 bg-gray-50 rounded-lg">
-        <p class="text-sm text-gray-700">
-          <span class="font-semibold">Summary:</span>
-          {rec.overall.reasoning}
-        </p>
       </div>
     </div>
   );

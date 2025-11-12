@@ -16,7 +16,7 @@ export class BricklinkRepository implements IBricklinkRepository {
    */
   async findByLegoSetNumber(setNumber: string): Promise<BricklinkItem | null> {
     const itemId = `S-${setNumber}`;
-    return this.findByItemId(itemId);
+    return await this.findByItemId(itemId);
   }
 
   /**

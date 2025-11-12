@@ -14,6 +14,7 @@ export class AvailabilityAnalyzer extends BaseAnalyzer<AvailabilityData> {
     );
   }
 
+  // deno-lint-ignore require-await
   async analyze(data: AvailabilityData): Promise<AnalysisScore | null> {
     // Prerequisite check: Need at least retirement info OR stock data
     const hasRetirementData = data.retiringSoon !== undefined ||

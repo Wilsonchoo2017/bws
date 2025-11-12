@@ -20,11 +20,13 @@ import * as $api_scrape_queue_status from "./routes/api/scrape-queue-status.ts";
 import * as $api_scrape_scheduler from "./routes/api/scrape-scheduler.ts";
 import * as $api_shopee_items from "./routes/api/shopee-items.ts";
 import * as $bricklink_items from "./routes/bricklink-items.tsx";
+import * as $cart from "./routes/cart.tsx";
 import * as $greet_name_ from "./routes/greet/[name].tsx";
 import * as $index from "./routes/index.tsx";
 import * as $product_id_ from "./routes/product/[id].tsx";
 import * as $products from "./routes/products.tsx";
 import * as $BricklinkProductsList from "./islands/BricklinkProductsList.tsx";
+import * as $CartManager from "./islands/CartManager.tsx";
 import * as $Counter from "./islands/Counter.tsx";
 import * as $ProductAnalysisCard from "./islands/ProductAnalysisCard.tsx";
 import * as $ProductsList from "./islands/ProductsList.tsx";
@@ -55,6 +57,7 @@ const manifest = {
     "./routes/api/scrape-scheduler.ts": $api_scrape_scheduler,
     "./routes/api/shopee-items.ts": $api_shopee_items,
     "./routes/bricklink-items.tsx": $bricklink_items,
+    "./routes/cart.tsx": $cart,
     "./routes/greet/[name].tsx": $greet_name_,
     "./routes/index.tsx": $index,
     "./routes/product/[id].tsx": $product_id_,
@@ -62,6 +65,7 @@ const manifest = {
   },
   islands: {
     "./islands/BricklinkProductsList.tsx": $BricklinkProductsList,
+    "./islands/CartManager.tsx": $CartManager,
     "./islands/Counter.tsx": $Counter,
     "./islands/ProductAnalysisCard.tsx": $ProductAnalysisCard,
     "./islands/ProductsList.tsx": $ProductsList,

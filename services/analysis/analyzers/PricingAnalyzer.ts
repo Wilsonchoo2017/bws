@@ -14,6 +14,7 @@ export class PricingAnalyzer extends BaseAnalyzer<PricingData> {
     );
   }
 
+  // deno-lint-ignore require-await
   async analyze(data: PricingData): Promise<AnalysisScore | null> {
     // Prerequisite check: Need at least retail price OR bricklink data
     const hasRetailData = data.currentRetailPrice !== undefined ||

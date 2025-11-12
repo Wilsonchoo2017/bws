@@ -14,6 +14,7 @@ export class QualityAnalyzer extends BaseAnalyzer<QualityData> {
     );
   }
 
+  // deno-lint-ignore require-await
   async analyze(data: QualityData): Promise<AnalysisScore | null> {
     // Prerequisite check: Need at least ratings OR trust signals
     const hasRatings = data.avgStarRating !== undefined &&

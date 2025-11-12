@@ -14,6 +14,7 @@ export class DemandAnalyzer extends BaseAnalyzer<DemandData> {
     );
   }
 
+  // deno-lint-ignore require-await
   async analyze(data: DemandData): Promise<AnalysisScore | null> {
     // Prerequisite check: Need at least one demand signal
     const hasSalesData = data.unitsSold !== undefined ||
