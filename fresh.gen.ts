@@ -7,7 +7,10 @@ import * as $_app from "./routes/_app.tsx";
 import * as $api_bricklink_items from "./routes/api/bricklink-items.ts";
 import * as $api_joke from "./routes/api/joke.ts";
 import * as $api_parse_shopee from "./routes/api/parse-shopee.ts";
+import * as $api_reddit_search from "./routes/api/reddit-search.ts";
 import * as $api_scrape_bricklink from "./routes/api/scrape-bricklink.ts";
+import * as $api_scrape_queue_status from "./routes/api/scrape-queue-status.ts";
+import * as $api_scrape_scheduler from "./routes/api/scrape-scheduler.ts";
 import * as $api_shopee_items from "./routes/api/shopee-items.ts";
 import * as $greet_name_ from "./routes/greet/[name].tsx";
 import * as $index from "./routes/index.tsx";
@@ -25,7 +28,10 @@ const manifest = {
     "./routes/api/bricklink-items.ts": $api_bricklink_items,
     "./routes/api/joke.ts": $api_joke,
     "./routes/api/parse-shopee.ts": $api_parse_shopee,
+    "./routes/api/reddit-search.ts": $api_reddit_search,
     "./routes/api/scrape-bricklink.ts": $api_scrape_bricklink,
+    "./routes/api/scrape-queue-status.ts": $api_scrape_queue_status,
+    "./routes/api/scrape-scheduler.ts": $api_scrape_scheduler,
     "./routes/api/shopee-items.ts": $api_shopee_items,
     "./routes/greet/[name].tsx": $greet_name_,
     "./routes/index.tsx": $index,

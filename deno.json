@@ -38,7 +38,11 @@
     "drizzle-orm/": "npm:/drizzle-orm@^0.36.4/",
     "drizzle-kit": "npm:drizzle-kit@^0.30.0",
     "postgres": "npm:postgres@3.4.4",
-    "zod": "https://deno.land/x/zod@v3.23.8/mod.ts"
+    "zod": "https://deno.land/x/zod@v3.23.8/mod.ts",
+    "bullmq": "npm:bullmq@^5.28.2",
+    "ioredis": "npm:ioredis@^5.4.1",
+    "puppeteer": "npm:puppeteer@^23.11.1",
+    "puppeteer-core": "npm:puppeteer-core@^23.11.1"
   },
   "compilerOptions": {
     "jsx": "react-jsx",

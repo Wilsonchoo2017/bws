@@ -15,6 +15,20 @@
       "when": 1762944938150,
       "tag": "0001_bizarre_jack_murdock",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1762950286651,
+      "tag": "0002_nervous_secret_warriors",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1762950783760,
+      "tag": "0003_silent_psylocke",
+      "breakpoints": true
     }
   ]
 }

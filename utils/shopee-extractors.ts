@@ -299,7 +299,13 @@ export function parseShopeeHtml(
   const products: ParsedShopeeProduct[] = [];
 
   items.forEach((item, index) => {
-    const product = parseProductItem(item, index, shopUsername);
+    // Filter out non-Element nodes
+    if (item.nodeType !== 1) return; // 1 = Element node
+    const product = parseProductItem(
+      item as unknown as Element,
+      index,
+      shopUsername,
+    );
     if (product) {
       products.push(product);
     }

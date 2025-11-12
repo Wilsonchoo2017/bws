@@ -40,6 +40,11 @@ export const bricklinkItems = pgTable(
     // Watch status for price tracking
     watchStatus: watchStatusEnum("watch_status").default("active").notNull(),
 
+    // Scraping schedule configuration
+    scrapeIntervalDays: integer("scrape_interval_days").default(30).notNull(),
+    lastScrapedAt: timestamp("last_scraped_at"),
+    nextScrapeAt: timestamp("next_scrape_at"),
+
     // Metadata
     createdAt: timestamp("created_at").defaultNow().notNull(),
     updatedAt: timestamp("updated_at").defaultNow().notNull(),
@@ -47,6 +52,10 @@ export const bricklinkItems = pgTable(
   (table) => ({
     // Index for filtering by watch status
     watchStatusIdx: index("idx_bricklink_watch_status").on(table.watchStatus),
+    // Index for efficient scraping queue queries
+    nextScrapeAtIdx: index("idx_bricklink_next_scrape_at").on(
+      table.nextScrapeAt,
+    ),
   }),
 );
 
@@ -189,6 +198,27 @@ export const shopeeScrapeSessions = pgTable(
   }),
 );
 
+// Reddit search results for LEGO sets
+export const redditSearchResults = pgTable(
+  "reddit_search_results",
+  {
+    id: serial("id").primaryKey(),
+    legoSetNumber: varchar("lego_set_number", { length: 20 }).notNull(),
+    subreddit: varchar("subreddit", { length: 50 }).notNull().default("lego"),
+    totalPosts: integer("total_posts").notNull().default(0),
+    posts: jsonb("posts"), // Array of post objects with title, url, score, num_comments, etc.
+    searchedAt: timestamp("searched_at").defaultNow().notNull(),
+  },
+  (table) => ({
+    // Index for looking up by LEGO set number
+    legoSetNumberIdx: index("idx_reddit_lego_set_number").on(
+      table.legoSetNumber,
+    ),
+    // Index for time-based queries
+    searchedAtIdx: index("idx_reddit_searched_at").on(table.searchedAt),
+  }),
+);
+
 // Type exports for TypeScript
 export type BricklinkItem = typeof bricklinkItems.$inferSelect;
 export type NewBricklinkItem = typeof bricklinkItems.$inferInsert;
@@ -205,5 +235,8 @@ export type NewShopeePriceHistory = typeof shopeePriceHistory.$inferInsert;
 
 export type ShopeeScrapeSessions = typeof shopeeScrapeSessions.$inferSelect;
 export type NewShopeeScrapeSessions = typeof shopeeScrapeSessions.$inferInsert;
+
+export type RedditSearchResult = typeof redditSearchResults.$inferSelect;
+export type NewRedditSearchResult = typeof redditSearchResults.$inferInsert;
 
 export type WatchStatus = "active" | "paused" | "stopped" | "archived";

@@ -114,6 +114,18 @@ export const handler = {
       if (body.watch_status !== undefined) {
         updateData.watchStatus = body.watch_status;
       }
+      if (body.scrape_interval_days !== undefined) {
+        updateData.scrapeIntervalDays = body.scrape_interval_days;
+
+        // If interval changed, recalculate next_scrape_at
+        if (body.scrape_interval_days > 0) {
+          const now = new Date();
+          const nextScrape = new Date(
+            now.getTime() + body.scrape_interval_days * 24 * 60 * 60 * 1000,
+          );
+          updateData.nextScrapeAt = nextScrape;
+        }
+      }
 
       // Update item
       const [updatedItem] = await db.update(bricklinkItems)
