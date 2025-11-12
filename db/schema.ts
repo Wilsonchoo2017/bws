@@ -25,6 +25,7 @@ export const watchStatusEnum = pgEnum("watch_status", [
 export const productSourceEnum = pgEnum("product_source", [
   "shopee",
   "toysrus",
+  "self",
 ]);
 
 // Bricklink scraped items
@@ -276,6 +277,55 @@ export const brickrankerRetirementItems = pgTable(
   }),
 );
 
+// Product analysis cache table
+export const productAnalysis = pgTable(
+  "product_analysis",
+  {
+    id: serial("id").primaryKey(),
+    productId: varchar("product_id", { length: 100 }).notNull(),
+    strategy: varchar("strategy", { length: 50 }).notNull(),
+
+    // Overall score and recommendation
+    overallScore: integer("overall_score").notNull(), // 0-100
+    confidence: integer("confidence").notNull(), // 0-100 (confidence * 100)
+    action: varchar("action", { length: 20 }).notNull(), // strong_buy, buy, hold, pass
+    urgency: varchar("urgency", { length: 20 }).notNull(), // urgent, moderate, low, no_rush
+
+    // Dimensional scores (JSONB for flexibility)
+    dimensionalScores: jsonb("dimensional_scores").notNull(),
+
+    // Investment metrics
+    estimatedROI: integer("estimated_roi"), // Percentage
+    timeHorizon: varchar("time_horizon", { length: 100 }),
+
+    // Risks and opportunities
+    risks: jsonb("risks"), // Array of strings
+    opportunities: jsonb("opportunities"), // Array of strings
+
+    // Full recommendation data (for detailed view)
+    fullRecommendation: jsonb("full_recommendation").notNull(),
+
+    // Metadata
+    analyzedAt: timestamp("analyzed_at").defaultNow().notNull(),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+  },
+  (table) => ({
+    // Composite unique index for product + strategy
+    productStrategyIdx: index("idx_analysis_product_strategy").on(
+      table.productId,
+      table.strategy,
+    ),
+    // Index for filtering by action
+    actionIdx: index("idx_analysis_action").on(table.action),
+    // Index for filtering by urgency
+    urgencyIdx: index("idx_analysis_urgency").on(table.urgency),
+    // Index for sorting by score
+    scoreIdx: index("idx_analysis_score").on(table.overallScore),
+    // Index for time-based cache invalidation
+    analyzedAtIdx: index("idx_analysis_analyzed_at").on(table.analyzedAt),
+  }),
+);
+
 // Type exports for TypeScript
 export type BricklinkItem = typeof bricklinkItems.$inferSelect;
 export type NewBricklinkItem = typeof bricklinkItems.$inferInsert;
@@ -301,5 +351,8 @@ export type BrickrankerRetirementItem =
 export type NewBrickrankerRetirementItem =
   typeof brickrankerRetirementItems.$inferInsert;
 
+export type ProductAnalysis = typeof productAnalysis.$inferSelect;
+export type NewProductAnalysis = typeof productAnalysis.$inferInsert;
+
 export type WatchStatus = "active" | "paused" | "stopped" | "archived";
-export type ProductSource = "shopee" | "toysrus";
+export type ProductSource = "shopee" | "toysrus" | "self";
