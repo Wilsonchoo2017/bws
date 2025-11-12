@@ -4,21 +4,29 @@
 
 import * as $_404 from "./routes/_404.tsx";
 import * as $_app from "./routes/_app.tsx";
+import * as $analysis_demo from "./routes/analysis-demo.tsx";
+import * as $api_analysis_productId_ from "./routes/api/analysis/[productId].ts";
+import * as $api_analysis_batch from "./routes/api/analysis/batch.ts";
+import * as $api_analysis_strategies from "./routes/api/analysis/strategies.ts";
 import * as $api_bricklink_items from "./routes/api/bricklink-items.ts";
 import * as $api_joke from "./routes/api/joke.ts";
 import * as $api_parse_shopee from "./routes/api/parse-shopee.ts";
 import * as $api_parse_toysrus from "./routes/api/parse-toysrus.ts";
+import * as $api_products_manual from "./routes/api/products/manual.ts";
 import * as $api_reddit_results from "./routes/api/reddit-results.ts";
 import * as $api_reddit_search from "./routes/api/reddit-search.ts";
 import * as $api_scrape_bricklink from "./routes/api/scrape-bricklink.ts";
 import * as $api_scrape_queue_status from "./routes/api/scrape-queue-status.ts";
 import * as $api_scrape_scheduler from "./routes/api/scrape-scheduler.ts";
 import * as $api_shopee_items from "./routes/api/shopee-items.ts";
+import * as $bricklink_items from "./routes/bricklink-items.tsx";
 import * as $greet_name_ from "./routes/greet/[name].tsx";
 import * as $index from "./routes/index.tsx";
+import * as $product_id_ from "./routes/product/[id].tsx";
 import * as $products from "./routes/products.tsx";
 import * as $BricklinkProductsList from "./islands/BricklinkProductsList.tsx";
 import * as $Counter from "./islands/Counter.tsx";
+import * as $ProductAnalysisCard from "./islands/ProductAnalysisCard.tsx";
 import * as $ProductsList from "./islands/ProductsList.tsx";
 import * as $ShopeeParser from "./islands/ShopeeParser.tsx";
 import * as $Sidebar from "./islands/Sidebar.tsx";
@@ -31,23 +39,31 @@ const manifest = {
   routes: {
     "./routes/_404.tsx": $_404,
     "./routes/_app.tsx": $_app,
+    "./routes/analysis-demo.tsx": $analysis_demo,
+    "./routes/api/analysis/[productId].ts": $api_analysis_productId_,
+    "./routes/api/analysis/batch.ts": $api_analysis_batch,
+    "./routes/api/analysis/strategies.ts": $api_analysis_strategies,
     "./routes/api/bricklink-items.ts": $api_bricklink_items,
     "./routes/api/joke.ts": $api_joke,
     "./routes/api/parse-shopee.ts": $api_parse_shopee,
     "./routes/api/parse-toysrus.ts": $api_parse_toysrus,
+    "./routes/api/products/manual.ts": $api_products_manual,
     "./routes/api/reddit-results.ts": $api_reddit_results,
     "./routes/api/reddit-search.ts": $api_reddit_search,
     "./routes/api/scrape-bricklink.ts": $api_scrape_bricklink,
     "./routes/api/scrape-queue-status.ts": $api_scrape_queue_status,
     "./routes/api/scrape-scheduler.ts": $api_scrape_scheduler,
     "./routes/api/shopee-items.ts": $api_shopee_items,
+    "./routes/bricklink-items.tsx": $bricklink_items,
     "./routes/greet/[name].tsx": $greet_name_,
     "./routes/index.tsx": $index,
+    "./routes/product/[id].tsx": $product_id_,
     "./routes/products.tsx": $products,
   },
   islands: {
     "./islands/BricklinkProductsList.tsx": $BricklinkProductsList,
     "./islands/Counter.tsx": $Counter,
+    "./islands/ProductAnalysisCard.tsx": $ProductAnalysisCard,
     "./islands/ProductsList.tsx": $ProductsList,
     "./islands/ShopeeParser.tsx": $ShopeeParser,
     "./islands/Sidebar.tsx": $Sidebar,

@@ -62,6 +62,7 @@ export abstract class BaseAnalyzer<T> implements IAnalyzer<T> {
     const available = dataPoints.filter((d) => d !== undefined && d !== null)
       .length;
     const total = dataPoints.length;
+    if (total === 0) return 0; // Avoid division by zero
     return available / total;
   }
 

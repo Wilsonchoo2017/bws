@@ -207,16 +207,24 @@ export class AnalysisService {
   ): Promise<BricklinkItem | null> {
     if (!legoSetNumber) return null;
 
-    // Bricklink uses "S" prefix for sets
-    const itemId = `S-${legoSetNumber}`;
+    try {
+      // Bricklink uses "S" prefix for sets
+      const itemId = `S-${legoSetNumber}`;
 
-    const result = await db
-      .select()
-      .from(bricklinkItems)
-      .where(eq(bricklinkItems.itemId, itemId))
-      .limit(1);
+      const result = await db
+        .select()
+        .from(bricklinkItems)
+        .where(eq(bricklinkItems.itemId, itemId))
+        .limit(1);
 
-    return result.length > 0 ? result[0] : null;
+      return result.length > 0 ? result[0] : null;
+    } catch (error) {
+      console.warn(
+        `Failed to fetch Bricklink data for ${legoSetNumber}:`,
+        error instanceof Error ? error.message : error,
+      );
+      return null;
+    }
   }
 
   /**
@@ -227,13 +235,21 @@ export class AnalysisService {
   ): Promise<RedditSearchResult | null> {
     if (!legoSetNumber) return null;
 
-    const result = await db
-      .select()
-      .from(redditSearchResults)
-      .where(eq(redditSearchResults.legoSetNumber, legoSetNumber))
-      .limit(1);
+    try {
+      const result = await db
+        .select()
+        .from(redditSearchResults)
+        .where(eq(redditSearchResults.legoSetNumber, legoSetNumber))
+        .limit(1);
 
-    return result.length > 0 ? result[0] : null;
+      return result.length > 0 ? result[0] : null;
+    } catch (error) {
+      console.warn(
+        `Failed to fetch Reddit data for ${legoSetNumber}:`,
+        error instanceof Error ? error.message : error,
+      );
+      return null;
+    }
   }
 
   /**
@@ -244,13 +260,21 @@ export class AnalysisService {
   ): Promise<BrickrankerRetirementItem | null> {
     if (!legoSetNumber) return null;
 
-    const result = await db
-      .select()
-      .from(brickrankerRetirementItems)
-      .where(eq(brickrankerRetirementItems.setNumber, legoSetNumber))
-      .limit(1);
+    try {
+      const result = await db
+        .select()
+        .from(brickrankerRetirementItems)
+        .where(eq(brickrankerRetirementItems.setNumber, legoSetNumber))
+        .limit(1);
 
-    return result.length > 0 ? result[0] : null;
+      return result.length > 0 ? result[0] : null;
+    } catch (error) {
+      console.warn(
+        `Failed to fetch retirement data for ${legoSetNumber}:`,
+        error instanceof Error ? error.message : error,
+      );
+      return null;
+    }
   }
 
   // Helper methods for data normalization

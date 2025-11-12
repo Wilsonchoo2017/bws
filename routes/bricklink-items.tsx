@@ -1,23 +1,24 @@
 import { Head } from "$fresh/runtime.ts";
-import ProductsList from "../islands/ProductsList.tsx";
+import BricklinkProductsList from "../islands/BricklinkProductsList.tsx";
 
-export default function ProductsPage() {
+export default function BricklinkItemsPage() {
   return (
     <>
       <Head>
-        <title>Products - LEGO Price Tracker</title>
+        <title>Bricklink Items - LEGO Price Tracker</title>
       </Head>
       <div class="min-h-screen bg-base-200 p-4 lg:p-8">
         <div class="max-w-7xl mx-auto">
           <div class="mb-6">
             <h1 class="text-3xl lg:text-4xl font-bold text-base-content">
-              Products
+              Bricklink Items
             </h1>
             <p class="text-base-content/70 mt-2">
-              Monitor all tracked LEGO products from Shopee and Toys"R"Us
+              Monitor LEGO item prices from Bricklink marketplace with real-time
+              sync status
             </p>
           </div>
-          <ProductsList />
+          <BricklinkProductsList />
         </div>
       </div>
     </>

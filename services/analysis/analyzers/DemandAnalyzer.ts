@@ -251,6 +251,7 @@ export class DemandAnalyzer extends BaseAnalyzer<DemandData> {
     }
 
     // Return average of available scores
+    if (scores.length === 0) return 20; // Default neutral-low score
     return scores.reduce((sum, s) => sum + s, 0) / scores.length;
   }
 
