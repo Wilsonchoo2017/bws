@@ -4,7 +4,8 @@
       "WebFetch(domain:github.com)",
       "WebFetch(domain:raw.githubusercontent.com)",
       "WebSearch",
-      "WebFetch(domain:fresh.deno.dev)"
+      "WebFetch(domain:fresh.deno.dev)",
+      "Bash(deno task:*)"
     ],
     "deny": [],
     "ask": []

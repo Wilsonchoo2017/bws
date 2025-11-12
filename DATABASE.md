@@ -14,11 +14,13 @@ PostgreSQL integration for Fresh.js API using Drizzle ORM.
 ### 1. Start PostgreSQL
 
 From the root directory:
+
 ```bash
 npm run db:up
 ```
 
 This starts PostgreSQL on `localhost:5432` with:
+
 - Database: `bws`
 - User: `postgres`
 - Password: `postgres`
@@ -51,53 +53,58 @@ deno task start
 ## Database Schema
 
 ### Bricklink Items
+
 Stores scraped Bricklink product data with pricing history.
 
 **Table**: `bricklink_items`
 
-| Column | Type | Description |
-|--------|------|-------------|
-| id | serial | Primary key |
-| item_id | varchar(50) | Bricklink item ID (unique) |
-| item_type | varchar(10) | Type (P, S, M, G, C, I, O, B) |
-| title | text | Item title |
-| weight | varchar(50) | Item weight |
-| six_month_new | jsonb | 6-month new pricing data |
-| six_month_used | jsonb | 6-month used pricing data |
-| current_new | jsonb | Current new pricing data |
-| current_used | jsonb | Current used pricing data |
-| created_at | timestamp | Creation timestamp |
-| updated_at | timestamp | Last update timestamp |
+| Column         | Type        | Description                   |
+| -------------- | ----------- | ----------------------------- |
+| id             | serial      | Primary key                   |
+| item_id        | varchar(50) | Bricklink item ID (unique)    |
+| item_type      | varchar(10) | Type (P, S, M, G, C, I, O, B) |
+| title          | text        | Item title                    |
+| weight         | varchar(50) | Item weight                   |
+| six_month_new  | jsonb       | 6-month new pricing data      |
+| six_month_used | jsonb       | 6-month used pricing data     |
+| current_new    | jsonb       | Current new pricing data      |
+| current_used   | jsonb       | Current used pricing data     |
+| created_at     | timestamp   | Creation timestamp            |
+| updated_at     | timestamp   | Last update timestamp         |
 
 ### Shopee Items
+
 Stores scraped Shopee product data.
 
 **Table**: `shopee_items`
 
-| Column | Type | Description |
-|--------|------|-------------|
-| id | serial | Primary key |
-| product_id | varchar(100) | Shopee product ID (unique) |
-| name | text | Product name |
-| price | bigint | Current price |
-| sold | bigint | Units sold |
-| ... | ... | Many more fields (see schema.ts) |
+| Column     | Type         | Description                      |
+| ---------- | ------------ | -------------------------------- |
+| id         | serial       | Primary key                      |
+| product_id | varchar(100) | Shopee product ID (unique)       |
+| name       | text         | Product name                     |
+| price      | bigint       | Current price                    |
+| sold       | bigint       | Units sold                       |
+| ...        | ...          | Many more fields (see schema.ts) |
 
 ## API Endpoints
 
 ### Bricklink Items
 
 #### List all items
+
 ```bash
 GET /api/bricklink-items
 ```
 
 #### Get specific item
+
 ```bash
 GET /api/bricklink-items?item_id=75192
 ```
 
 #### Create item
+
 ```bash
 POST /api/bricklink-items
 Content-Type: application/json
@@ -118,6 +125,7 @@ Content-Type: application/json
 ```
 
 #### Update item
+
 ```bash
 PUT /api/bricklink-items?item_id=75192
 Content-Type: application/json
@@ -129,6 +137,7 @@ Content-Type: application/json
 ```
 
 #### Delete item
+
 ```bash
 DELETE /api/bricklink-items?item_id=75192
 ```
@@ -148,18 +157,23 @@ GET /api/scrape-bricklink?url=https://www.bricklink.com/v2/catalog/catalogitem.p
 ## Database Tasks
 
 ### Generate Migration
+
 After modifying `db/schema.ts`:
+
 ```bash
 deno task db:generate
 ```
 
 ### Run Migrations
+
 ```bash
 deno task db:migrate
 ```
 
 ### Open Drizzle Studio
+
 Visual database browser:
+
 ```bash
 deno task db:studio
 ```
@@ -201,6 +215,7 @@ await db.insert(bricklinkItems).values({
 ## Connection Management
 
 The database connection pool is automatically managed:
+
 - Max 10 connections
 - 20s idle timeout
 - Graceful shutdown on SIGINT/SIGTERM
@@ -208,11 +223,13 @@ The database connection pool is automatically managed:
 ## Troubleshooting
 
 ### Can't connect to database
+
 1. Ensure PostgreSQL is running: `npm run db:up`
 2. Check connection string in `.env`
 3. Verify database exists: `psql -h localhost -U postgres -d bws`
 
 ### Migration errors
+
 1. Check schema syntax in `db/schema.ts`
 2. Review generated migration in `drizzle/` directory
 3. Drop and recreate database if needed (dev only):
@@ -223,4 +240,5 @@ The database connection pool is automatically managed:
    ```
 
 ### Type errors
+
 Run `deno check **/*.ts` to verify TypeScript compilation.

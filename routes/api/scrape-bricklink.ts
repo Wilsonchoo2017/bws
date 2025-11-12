@@ -259,13 +259,17 @@ export const handler = async (
         console.error("Database error:", dbError);
         // Return scraped data even if DB save fails
         return new Response(
-          JSON.stringify({
-            ...result,
-            saved: false,
-            db_error: dbError instanceof Error
-              ? dbError.message
-              : "Unknown database error",
-          }, null, 2),
+          JSON.stringify(
+            {
+              ...result,
+              saved: false,
+              db_error: dbError instanceof Error
+                ? dbError.message
+                : "Unknown database error",
+            },
+            null,
+            2,
+          ),
           {
             headers: { "Content-Type": "application/json" },
           },
