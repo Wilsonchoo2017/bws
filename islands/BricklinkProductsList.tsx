@@ -198,6 +198,49 @@ export default function BricklinkProductsList() {
     }
   };
 
+  // Reddit search action
+  const handleSearchReddit = async (item: BricklinkItem) => {
+    const itemKey = `reddit-${item.itemId}`;
+    setSyncingItems((prev) => new Set(prev).add(itemKey));
+
+    try {
+      const response = await fetch(
+        `/api/reddit-search?set=${encodeURIComponent(item.itemId)}&save=true`,
+        { method: "POST" },
+      );
+
+      if (!response.ok) {
+        throw new Error(
+          `Failed to enqueue Reddit search: ${response.statusText}`,
+        );
+      }
+
+      const result = await response.json();
+      setToastMessage(
+        `✓ Reddit search enqueued for ${item.itemId} (Job ID: ${result.job.id})`,
+      );
+
+      // Refresh queue stats immediately
+      await fetchQueueStats();
+
+      // Clear toast after 5 seconds
+      setTimeout(() => setToastMessage(null), 5000);
+    } catch (err) {
+      setToastMessage(
+        `✗ Failed to search Reddit for ${item.itemId}: ${
+          err instanceof Error ? err.message : "Unknown error"
+        }`,
+      );
+      setTimeout(() => setToastMessage(null), 5000);
+    } finally {
+      setSyncingItems((prev) => {
+        const next = new Set(prev);
+        next.delete(itemKey);
+        return next;
+      });
+    }
+  };
+
   // Filter and sort items
   const filteredItems = items
     .filter((item) => {
@@ -447,6 +490,7 @@ export default function BricklinkProductsList() {
                 <th>Avg Price</th>
                 <th>Watch Status</th>
                 <th>Actions</th>
+                <th>Reddit</th>
               </tr>
             </thead>
             <tbody>
@@ -463,6 +507,9 @@ export default function BricklinkProductsList() {
                 const isInQueue = syncStatus === "scraping" ||
                   syncStatus === "queued";
                 const countdown = getNextScrapeCountdown(item.nextScrapeAt);
+                const isRedditSearching = syncingItems.has(
+                  `reddit-${item.itemId}`,
+                );
 
                 return (
                   <tr key={item.id}>
@@ -538,6 +585,19 @@ export default function BricklinkProductsList() {
                           <span class="loading loading-spinner loading-xs" />
                         )}
                         {!isSyncing && "Sync Now"}
+                      </button>
+                    </td>
+                    <td>
+                      <button
+                        class="btn btn-sm btn-secondary"
+                        onClick={() => handleSearchReddit(item)}
+                        disabled={isRedditSearching}
+                        title="Search Reddit for this set"
+                      >
+                        {isRedditSearching && (
+                          <span class="loading loading-spinner loading-xs" />
+                        )}
+                        {!isRedditSearching && "🔍 Reddit"}
                       </button>
                     </td>
                   </tr>

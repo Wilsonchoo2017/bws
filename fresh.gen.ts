@@ -7,6 +7,8 @@ import * as $_app from "./routes/_app.tsx";
 import * as $api_bricklink_items from "./routes/api/bricklink-items.ts";
 import * as $api_joke from "./routes/api/joke.ts";
 import * as $api_parse_shopee from "./routes/api/parse-shopee.ts";
+import * as $api_parse_toysrus from "./routes/api/parse-toysrus.ts";
+import * as $api_reddit_results from "./routes/api/reddit-results.ts";
 import * as $api_reddit_search from "./routes/api/reddit-search.ts";
 import * as $api_scrape_bricklink from "./routes/api/scrape-bricklink.ts";
 import * as $api_scrape_queue_status from "./routes/api/scrape-queue-status.ts";
@@ -20,6 +22,7 @@ import * as $Counter from "./islands/Counter.tsx";
 import * as $ProductsList from "./islands/ProductsList.tsx";
 import * as $ShopeeParser from "./islands/ShopeeParser.tsx";
 import * as $Sidebar from "./islands/Sidebar.tsx";
+import * as $UnifiedParser from "./islands/UnifiedParser.tsx";
 import * as $components_QueueStatsBanner from "./islands/components/QueueStatsBanner.tsx";
 import * as $components_SyncStatusBadge from "./islands/components/SyncStatusBadge.tsx";
 import type { Manifest } from "$fresh/server.ts";
@@ -31,6 +34,8 @@ const manifest = {
     "./routes/api/bricklink-items.ts": $api_bricklink_items,
     "./routes/api/joke.ts": $api_joke,
     "./routes/api/parse-shopee.ts": $api_parse_shopee,
+    "./routes/api/parse-toysrus.ts": $api_parse_toysrus,
+    "./routes/api/reddit-results.ts": $api_reddit_results,
     "./routes/api/reddit-search.ts": $api_reddit_search,
     "./routes/api/scrape-bricklink.ts": $api_scrape_bricklink,
     "./routes/api/scrape-queue-status.ts": $api_scrape_queue_status,
@@ -46,6 +51,7 @@ const manifest = {
     "./islands/ProductsList.tsx": $ProductsList,
     "./islands/ShopeeParser.tsx": $ShopeeParser,
     "./islands/Sidebar.tsx": $Sidebar,
+    "./islands/UnifiedParser.tsx": $UnifiedParser,
     "./islands/components/QueueStatsBanner.tsx": $components_QueueStatsBanner,
     "./islands/components/SyncStatusBadge.tsx": $components_SyncStatusBadge,
   },

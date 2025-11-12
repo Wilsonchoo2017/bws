@@ -2,12 +2,7 @@ import { FreshContext } from "$fresh/server.ts";
 import { eq, sql } from "drizzle-orm";
 import { db } from "../../db/client.ts";
 import { priceHistory, products, scrapeSessions } from "../../db/schema.ts";
-import { extractShopUsername } from "../../db/utils.ts";
-import { parseShopeeHtml } from "../../utils/shopee-extractors.ts";
-
-// Re-export type from shopee-extractors for backwards compatibility
-import type { ParsedShopeeProduct } from "../../utils/shopee-extractors.ts";
-type ShopeeProduct = ParsedShopeeProduct;
+import { parseToysRUsHtml } from "../../utils/toysrus-extractors.ts";
 
 export const handler = async (
   req: Request,
@@ -62,29 +57,12 @@ export const handler = async (
       );
     }
 
-    // Extract shop username from source URL if provided
-    const shopUsername = sourceUrl ? extractShopUsername(sourceUrl) : null;
-
-    // Validate that shop username is available
-    if (!shopUsername) {
-      return new Response(
-        JSON.stringify({
-          error:
-            "Shop name cannot be determined. Please provide a valid Shopee shop URL in the 'source_url' field (e.g., https://shopee.com.my/legoshopmy?shopCollection=...)",
-        }),
-        {
-          status: 400,
-          headers: { "Content-Type": "application/json" },
-        },
-      );
-    }
-
     // Parse HTML to extract products
-    const parsedProducts = parseShopeeHtml(htmlContent, shopUsername);
+    const parsedProducts = parseToysRUsHtml(htmlContent);
 
     // Create scrape session
     const [session] = await db.insert(scrapeSessions).values({
-      source: "shopee",
+      source: "toysrus",
       sourceUrl: sourceUrl || null,
       productsFound: parsedProducts.length,
       productsStored: 0,
@@ -101,14 +79,14 @@ export const handler = async (
       try {
         // Check if product already exists to get previous data
         const existingProduct = await db.query.products.findFirst({
-          where: eq(products.productId, product.product_id),
+          where: eq(products.productId, product.productId),
         });
 
         // Get the most recent price history entry (before this update)
         let previousHistory = null;
         if (existingProduct) {
           const histories = await db.query.priceHistory.findMany({
-            where: eq(priceHistory.productId, product.product_id),
+            where: eq(priceHistory.productId, product.productId),
             orderBy: (history, { desc }) => [desc(history.recordedAt)],
             limit: 1,
           });
@@ -117,51 +95,56 @@ export const handler = async (
 
         // Upsert product into products table
         const [insertedProduct] = await db.insert(products).values({
-          source: "shopee",
-          productId: product.product_id,
-          name: product.product_name,
+          source: "toysrus",
+          productId: product.productId,
+          name: product.name,
+          brand: product.brand,
           currency: "MYR",
           price: product.price,
-          unitsSold: product.units_sold,
-          legoSetNumber: product.lego_set_number,
-          shopId: product.shop_id,
-          shopName: product.shop_name,
+          priceBeforeDiscount: product.priceBeforeDiscount,
           image: product.image,
+          legoSetNumber: product.legoSetNumber,
+          sku: product.sku,
+          categoryNumber: product.categoryNumber,
+          categoryName: product.categoryName,
+          ageRange: product.ageRange,
           rawData: {
-            product_url: product.product_url,
-            price_string: product.price_string,
-            units_sold_string: product.units_sold_string,
+            product_url: product.productUrl,
+            ...product.rawData,
           },
           updatedAt: new Date(),
         }).onConflictDoUpdate({
           target: products.productId,
           set: {
             name: sql`EXCLUDED.name`,
+            brand: sql`EXCLUDED.brand`,
             price: sql`EXCLUDED.price`,
-            unitsSold: sql`EXCLUDED.units_sold`,
-            legoSetNumber: sql`EXCLUDED.lego_set_number`,
-            shopId: sql`EXCLUDED.shop_id`,
-            shopName: sql`EXCLUDED.shop_name`,
+            priceBeforeDiscount: sql`EXCLUDED.price_before_discount`,
             image: sql`EXCLUDED.image`,
+            legoSetNumber: sql`EXCLUDED.lego_set_number`,
+            sku: sql`EXCLUDED.sku`,
+            categoryNumber: sql`EXCLUDED.category_number`,
+            categoryName: sql`EXCLUDED.category_name`,
+            ageRange: sql`EXCLUDED.age_range`,
             rawData: sql`EXCLUDED.raw_data`,
             updatedAt: new Date(),
           },
         }).returning();
 
         // Record price history - only if values have changed or it's a new product
-        // This prevents duplicate entries and optimizes storage
         const shouldRecordHistory = !existingProduct || // New product, always record
           (previousHistory && (
             previousHistory.price !== product.price || // Price changed
-            previousHistory.unitsSoldSnapshot !== product.units_sold // Sold units changed
+            previousHistory.priceBeforeDiscount !== product.priceBeforeDiscount // Discount changed
           )) ||
           !previousHistory; // No previous history exists
 
         if (shouldRecordHistory && product.price !== null) {
           await db.insert(priceHistory).values({
-            productId: product.product_id,
+            productId: product.productId,
             price: product.price,
-            unitsSoldSnapshot: product.units_sold,
+            priceBeforeDiscount: product.priceBeforeDiscount,
+            unitsSoldSnapshot: null, // Toys"R"Us doesn't have units sold
           });
         }
 
@@ -169,12 +152,9 @@ export const handler = async (
         const productWithMeta = {
           ...insertedProduct,
           wasUpdated: !!existingProduct,
-          previousSold: previousHistory?.unitsSoldSnapshot || null,
           previousPrice: previousHistory?.price || null,
-          soldDelta: existingProduct && product.units_sold !== null &&
-              previousHistory?.unitsSoldSnapshot
-            ? product.units_sold - (previousHistory.unitsSoldSnapshot || 0)
-            : null,
+          previousPriceBeforeDiscount: previousHistory?.priceBeforeDiscount ||
+            null,
           priceDelta:
             existingProduct && product.price !== null && previousHistory?.price
               ? product.price - (previousHistory.price || 0)
@@ -185,7 +165,7 @@ export const handler = async (
         productsStored++;
       } catch (productError) {
         console.error(
-          `Failed to insert product ${product.product_id}:`,
+          `Failed to insert product ${product.productId}:`,
           productError,
         );
         // Continue with other products

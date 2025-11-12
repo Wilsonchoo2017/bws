@@ -4,7 +4,8 @@
       "Bash(deno task:*)",
       "Bash(git add:*)",
       "Bash(git commit -m \"$(cat <<''EOF''\nRefactor codebase with utility functions and improved code organization\n\n- Extract formatting utilities (formatPrice, formatNumber, formatDate) into shared utils/formatters.ts\n- Add app-wide constants in constants/app-config.ts for pagination and styling\n- Improve code quality in ProductsList and ShopeeParser with better separation of concerns\n- Enhance ProductsList with dynamic sold badge colors based on volume\n- Format documentation files (.claude/CLAUDE.md, README.md) with consistent line wrapping\n- Clean up TypeScript types and unused variables (db/schema.ts, db/utils.ts)\n- Add newlines to JSON files for better git diffs (drizzle meta files)\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nCo-Authored-By: Claude <noreply@anthropic.com>\nEOF\n)\")",
-      "Bash(deno fmt:*)"
+      "Bash(deno fmt:*)",
+      "Bash(deno lint:*)"
     ],
     "deny": [],
     "ask": []

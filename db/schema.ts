@@ -21,6 +21,12 @@ export const watchStatusEnum = pgEnum("watch_status", [
   "archived",
 ]);
 
+// Enum for product source/platform
+export const productSourceEnum = pgEnum("product_source", [
+  "shopee",
+  "toysrus",
+]);
+
 // Bricklink scraped items
 export const bricklinkItems = pgTable(
   "bricklink_items",
@@ -59,65 +65,64 @@ export const bricklinkItems = pgTable(
   }),
 );
 
-// Shopee scraped items
-export const shopeeItems = pgTable(
-  "shopee_items",
+// Unified products table (supports multiple platforms)
+export const products = pgTable(
+  "products",
   {
     id: serial("id").primaryKey(),
+
+    // Source platform
+    source: productSourceEnum("source").notNull(),
+
+    // Core product fields (all platforms)
     productId: varchar("product_id", { length: 100 }).notNull().unique(),
     name: text("name"),
     brand: varchar("brand", { length: 255 }),
 
-    // Pricing
+    // Pricing (all platforms)
     currency: varchar("currency", { length: 10 }),
     price: bigint("price", { mode: "number" }),
     priceMin: bigint("price_min", { mode: "number" }),
     priceMax: bigint("price_max", { mode: "number" }),
     priceBeforeDiscount: bigint("price_before_discount", { mode: "number" }),
 
-    // Stats
+    // Media (all platforms)
+    image: text("image"),
+    images: jsonb("images"),
+
+    // LEGO specific (all platforms)
+    legoSetNumber: varchar("lego_set_number", { length: 10 }),
+
+    // Watch status for price tracking (all platforms)
+    watchStatus: watchStatusEnum("watch_status").default("active").notNull(),
+
+    // Shopee-specific fields (nullable)
     unitsSold: bigint("units_sold", { mode: "number" }),
     lifetimeSold: bigint("lifetime_sold", { mode: "number" }),
     liked_count: bigint("liked_count", { mode: "number" }),
     commentCount: bigint("comment_count", { mode: "number" }),
     view_count: bigint("view_count", { mode: "number" }),
-
-    // Ratings
-    avgStarRating: bigint("avg_star_rating", {
-      mode: "number",
-    }),
+    avgStarRating: bigint("avg_star_rating", { mode: "number" }),
     ratingCount: jsonb("rating_count"),
-
-    // Product details
     stockInfoSummary: text("stock_info_summary"),
     stockType: bigint("stock_type", { mode: "number" }),
-    currentStock: bigint("current_stock", {
-      mode: "number",
-    }),
-
-    // Flags
+    currentStock: bigint("current_stock", { mode: "number" }),
     isAdult: boolean("is_adult"),
     isMart: boolean("is_mart"),
     isPreferred: boolean("is_preferred"),
     isServiceByShopee: boolean("is_service_by_shopee"),
-
-    // Media
-    image: text("image"),
-    images: jsonb("images"),
-
-    // Additional metadata
     shopId: bigint("shop_id", { mode: "number" }),
     shopName: varchar("shop_name", { length: 255 }),
     shopLocation: varchar("shop_location", { length: 255 }),
 
-    // LEGO specific
-    legoSetNumber: varchar("lego_set_number", { length: 10 }),
+    // Toys"R"Us-specific fields (nullable)
+    sku: varchar("sku", { length: 50 }),
+    categoryNumber: varchar("category_number", { length: 50 }),
+    categoryName: varchar("category_name", { length: 255 }),
+    ageRange: varchar("age_range", { length: 100 }),
 
-    // Full data dump for reference
+    // Full data dump for reference (all platforms)
     rawData: jsonb("raw_data"),
-
-    // Watch status for price tracking
-    watchStatus: watchStatusEnum("watch_status").default("active").notNull(),
 
     // Metadata
     createdAt: timestamp("created_at").defaultNow().notNull(),
@@ -125,24 +130,30 @@ export const shopeeItems = pgTable(
   },
   (table) => ({
     // Indexes for read performance
-    productIdIdx: index("idx_shopee_product_id").on(table.productId),
-    priceIdx: index("idx_shopee_price").on(table.price),
-    soldIdx: index("idx_shopee_sold").on(table.unitsSold),
-    shopIdIdx: index("idx_shopee_shop_id").on(table.shopId),
-    createdAtIdx: index("idx_shopee_created_at").on(table.createdAt),
-    legoSetNumberIdx: index("idx_shopee_lego_set").on(table.legoSetNumber),
-    watchStatusIdx: index("idx_shopee_watch_status").on(table.watchStatus),
+    sourceIdx: index("idx_products_source").on(table.source),
+    productIdIdx: index("idx_products_product_id").on(table.productId),
+    priceIdx: index("idx_products_price").on(table.price),
+    soldIdx: index("idx_products_sold").on(table.unitsSold),
+    shopIdIdx: index("idx_products_shop_id").on(table.shopId),
+    createdAtIdx: index("idx_products_created_at").on(table.createdAt),
+    legoSetNumberIdx: index("idx_products_lego_set").on(table.legoSetNumber),
+    watchStatusIdx: index("idx_products_watch_status").on(table.watchStatus),
     // Full-text search index on name
-    nameSearchIdx: index("idx_shopee_name_search").using(
+    nameSearchIdx: index("idx_products_name_search").using(
       "gin",
       sql`to_tsvector('english', ${table.name})`,
+    ),
+    // Composite index for source + common queries
+    sourceLegoSetIdx: index("idx_products_source_lego").on(
+      table.source,
+      table.legoSetNumber,
     ),
   }),
 );
 
-// Shopee price history for tracking price changes over time
-export const shopeePriceHistory = pgTable(
-  "shopee_price_history",
+// Unified price history for tracking price changes over time (all platforms)
+export const priceHistory = pgTable(
+  "price_history",
   {
     id: serial("id").primaryKey(),
     productId: varchar("product_id", { length: 100 }).notNull(),
@@ -181,11 +192,12 @@ export const bricklinkPriceHistory = pgTable(
   }),
 );
 
-// Shopee scrape sessions for tracking scraping metadata
-export const shopeeScrapeSessions = pgTable(
-  "shopee_scrape_sessions",
+// Unified scrape sessions for tracking scraping metadata (all platforms)
+export const scrapeSessions = pgTable(
+  "scrape_sessions",
   {
     id: serial("id").primaryKey(),
+    source: productSourceEnum("source").notNull(),
     sourceUrl: text("source_url"),
     productsFound: integer("products_found").notNull().default(0),
     productsStored: integer("products_stored").notNull().default(0),
@@ -195,6 +207,7 @@ export const shopeeScrapeSessions = pgTable(
   },
   (table) => ({
     scrapedAtIdx: index("idx_scrape_sessions_scraped_at").on(table.scrapedAt),
+    sourceIdx: index("idx_scrape_sessions_source").on(table.source),
   }),
 );
 
@@ -219,6 +232,50 @@ export const redditSearchResults = pgTable(
   }),
 );
 
+// BrickRanker retirement tracking
+export const brickrankerRetirementItems = pgTable(
+  "brickranker_retirement_items",
+  {
+    id: serial("id").primaryKey(),
+    setNumber: varchar("set_number", { length: 20 }).notNull().unique(),
+    setName: text("set_name").notNull(),
+    yearReleased: integer("year_released"),
+    retiringSoon: boolean("retiring_soon").default(false).notNull(),
+    expectedRetirementDate: varchar("expected_retirement_date", { length: 50 }),
+    theme: varchar("theme", { length: 100 }),
+
+    // Optional link to products table for sets we already track
+    productId: integer("product_id"),
+
+    // Track if set is still listed on the retirement tracker page
+    isActive: boolean("is_active").default(true).notNull(),
+
+    // Scraping schedule configuration
+    scrapeIntervalDays: integer("scrape_interval_days").default(30).notNull(),
+    lastScrapedAt: timestamp("last_scraped_at"),
+    nextScrapeAt: timestamp("next_scrape_at"),
+
+    // Metadata
+    scrapedAt: timestamp("scraped_at").defaultNow().notNull(),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+  },
+  (table) => ({
+    // Index for fast lookups by set number
+    setNumberIdx: index("idx_brickranker_set_number").on(table.setNumber),
+    // Index for matching with products table
+    productIdIdx: index("idx_brickranker_product_id").on(table.productId),
+    // Index for theme filtering
+    themeIdx: index("idx_brickranker_theme").on(table.theme),
+    // Index for active items
+    isActiveIdx: index("idx_brickranker_is_active").on(table.isActive),
+    // Index for efficient scraping queue queries
+    nextScrapeAtIdx: index("idx_brickranker_next_scrape_at").on(
+      table.nextScrapeAt,
+    ),
+  }),
+);
+
 // Type exports for TypeScript
 export type BricklinkItem = typeof bricklinkItems.$inferSelect;
 export type NewBricklinkItem = typeof bricklinkItems.$inferInsert;
@@ -227,16 +284,22 @@ export type BricklinkPriceHistory = typeof bricklinkPriceHistory.$inferSelect;
 export type NewBricklinkPriceHistory =
   typeof bricklinkPriceHistory.$inferInsert;
 
-export type ShopeeItem = typeof shopeeItems.$inferSelect;
-export type NewShopeeItem = typeof shopeeItems.$inferInsert;
+export type Product = typeof products.$inferSelect;
+export type NewProduct = typeof products.$inferInsert;
 
-export type ShopeePriceHistory = typeof shopeePriceHistory.$inferSelect;
-export type NewShopeePriceHistory = typeof shopeePriceHistory.$inferInsert;
+export type PriceHistory = typeof priceHistory.$inferSelect;
+export type NewPriceHistory = typeof priceHistory.$inferInsert;
 
-export type ShopeeScrapeSessions = typeof shopeeScrapeSessions.$inferSelect;
-export type NewShopeeScrapeSessions = typeof shopeeScrapeSessions.$inferInsert;
+export type ScrapeSession = typeof scrapeSessions.$inferSelect;
+export type NewScrapeSession = typeof scrapeSessions.$inferInsert;
 
 export type RedditSearchResult = typeof redditSearchResults.$inferSelect;
 export type NewRedditSearchResult = typeof redditSearchResults.$inferInsert;
 
+export type BrickrankerRetirementItem =
+  typeof brickrankerRetirementItems.$inferSelect;
+export type NewBrickrankerRetirementItem =
+  typeof brickrankerRetirementItems.$inferInsert;
+
 export type WatchStatus = "active" | "paused" | "stopped" | "archived";
+export type ProductSource = "shopee" | "toysrus";

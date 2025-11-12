@@ -198,6 +198,29 @@ export const QUEUE_CONFIG = {
 } as const;
 
 /**
+ * Reddit API configuration
+ */
+export const REDDIT_CONFIG = {
+  /** Rate limiting for Reddit API (unauthenticated) */
+  /** Reddit allows ~60 requests per minute for unauthenticated requests */
+  /** We'll be conservative: 1 request per 5 seconds = 12 per minute */
+  MIN_DELAY_MS: 5000, // 5 seconds
+  MAX_DELAY_MS: 10000, // 10 seconds
+  /** Maximum posts to fetch per search */
+  MAX_POSTS_PER_SEARCH: 100,
+  /** Default subreddit for LEGO searches */
+  DEFAULT_SUBREDDIT: "lego",
+  /** Alternative subreddits to search */
+  ALTERNATIVE_SUBREDDITS: [
+    "legostarwars",
+    "legotechnic",
+    "afol",
+    "legomarket",
+    "legodeals",
+  ],
+} as const;
+
+/**
  * Scraping intervals configuration
  */
 export const SCRAPE_INTERVALS = {
@@ -207,6 +230,21 @@ export const SCRAPE_INTERVALS = {
   MIN_INTERVAL_DAYS: 1,
   /** Maximum allowed interval in days */
   MAX_INTERVAL_DAYS: 365,
+} as const;
+
+/**
+ * BrickRanker retirement tracker configuration
+ */
+export const BRICKRANKER_CONFIG = {
+  /** Base URL for retirement tracker page */
+  BASE_URL: "https://brickranker.com/retirement-tracker",
+  /** Rate limiting - Less aggressive than Bricklink (monthly scraping) */
+  RATE_LIMIT_MIN_DELAY_MS: 60000, // 1 minute
+  RATE_LIMIT_MAX_DELAY_MS: 180000, // 3 minutes
+  /** Scraping schedule - Monthly updates */
+  SCHEDULE_INTERVAL_DAYS: 30,
+  /** Maximum requests per hour (less aggressive) */
+  MAX_REQUESTS_PER_HOUR: 30,
 } as const;
 
 /**

@@ -25,6 +25,16 @@ import {
   type ScrapeOptions,
   type ScrapeResult,
 } from "../bricklink/BricklinkScraperService.ts";
+import { getRedditRepository } from "../reddit/RedditRepository.ts";
+import {
+  createRedditSearchService,
+  type SearchResult,
+} from "../reddit/RedditSearchService.ts";
+import { getBrickRankerRepository } from "../brickranker/BrickRankerRepository.ts";
+import {
+  createBrickRankerScraperService,
+  type ScrapeResult as BrickRankerScrapeResult,
+} from "../brickranker/BrickRankerScraperService.ts";
 
 /**
  * Job data types
@@ -43,6 +53,16 @@ export interface BulkScrapeJobData {
 // Scheduled scrapes don't need additional data, so we use an empty object type
 export type ScheduledScrapeJobData = Record<string, never>;
 
+export interface RedditSearchJobData {
+  setNumber: string;
+  subreddit?: string;
+  saveToDb?: boolean;
+}
+
+export interface BrickRankerScrapeJobData {
+  saveToDb?: boolean;
+}
+
 /**
  * Job type names
  */
@@ -50,6 +70,8 @@ export const JOB_TYPES = {
   SCRAPE_SINGLE: "scrape-single-item",
   SCRAPE_BULK: "scrape-bulk-items",
   SCRAPE_SCHEDULED: "scrape-scheduled-items",
+  SEARCH_REDDIT: "search-reddit",
+  SCRAPE_BRICKRANKER_RETIREMENT: "scrape-brickranker-retirement",
 } as const;
 
 /**
@@ -123,7 +145,14 @@ export class QueueService {
   /**
    * Process a job based on its type
    */
-  private async processJob(job: Job): Promise<ScrapeResult | ScrapeResult[]> {
+  private async processJob(
+    job: Job,
+  ): Promise<
+    | ScrapeResult
+    | ScrapeResult[]
+    | SearchResult
+    | BrickRankerScrapeResult
+  > {
     console.log(`🔄 Processing job ${job.id} of type: ${job.name}`);
 
     try {
@@ -138,6 +167,16 @@ export class QueueService {
 
         case JOB_TYPES.SCRAPE_SCHEDULED:
           return await this.processScheduledScrapeJob();
+
+        case JOB_TYPES.SEARCH_REDDIT:
+          return await this.processRedditSearchJob(
+            job.data as RedditSearchJobData,
+          );
+
+        case JOB_TYPES.SCRAPE_BRICKRANKER_RETIREMENT:
+          return await this.processBrickRankerScrapeJob(
+            job.data as BrickRankerScrapeJobData,
+          );
 
         default:
           throw new Error(`Unknown job type: ${job.name}`);
@@ -243,6 +282,45 @@ export class QueueService {
   }
 
   /**
+   * Process Reddit search job
+   */
+  private async processRedditSearchJob(
+    data: RedditSearchJobData,
+  ): Promise<SearchResult> {
+    const rateLimiter = getRateLimiter();
+    const repository = getRedditRepository();
+
+    const searchService = createRedditSearchService(rateLimiter, repository);
+
+    return await searchService.search({
+      setNumber: data.setNumber,
+      subreddit: data.subreddit,
+      saveToDb: data.saveToDb ?? true,
+    });
+  }
+
+  /**
+   * Process BrickRanker retirement tracker scrape job
+   */
+  private async processBrickRankerScrapeJob(
+    _data: BrickRankerScrapeJobData,
+  ): Promise<BrickRankerScrapeResult> {
+    const httpClient = getHttpClient();
+    const rateLimiter = getRateLimiter();
+    const repository = getBrickRankerRepository();
+
+    const scraper = createBrickRankerScraperService(
+      httpClient,
+      rateLimiter,
+      repository,
+    );
+
+    return await scraper.scrapeAndSave({
+      skipRateLimit: false,
+    });
+  }
+
+  /**
    * Add a scrape job to the queue
    */
   async addScrapeJob(data: ScrapeJobData): Promise<Job> {
@@ -282,6 +360,43 @@ export class QueueService {
 
     const job = await this.queue.add(JOB_TYPES.SCRAPE_SCHEDULED, {});
     console.log(`➕ Added scheduled scrape job: ${job.id}`);
+
+    return job;
+  }
+
+  /**
+   * Add a Reddit search job to the queue
+   */
+  async addRedditSearchJob(data: RedditSearchJobData): Promise<Job> {
+    if (!this.queue) {
+      throw new Error("Queue not initialized. Call initialize() first.");
+    }
+
+    const job = await this.queue.add(JOB_TYPES.SEARCH_REDDIT, data);
+    console.log(
+      `➕ Added Reddit search job: ${job.id} for set ${data.setNumber}`,
+    );
+
+    return job;
+  }
+
+  /**
+   * Add a BrickRanker retirement tracker scrape job to the queue
+   */
+  async addBrickRankerScrapeJob(
+    data: BrickRankerScrapeJobData = { saveToDb: true },
+  ): Promise<Job> {
+    if (!this.queue) {
+      throw new Error("Queue not initialized. Call initialize() first.");
+    }
+
+    const job = await this.queue.add(
+      JOB_TYPES.SCRAPE_BRICKRANKER_RETIREMENT,
+      data,
+    );
+    console.log(
+      `➕ Added BrickRanker retirement tracker scrape job: ${job.id}`,
+    );
 
     return job;
   }

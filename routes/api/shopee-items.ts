@@ -1,6 +1,6 @@
 import { Handlers } from "$fresh/server.ts";
 import { db } from "../../db/client.ts";
-import { shopeeItems } from "../../db/schema.ts";
+import { products } from "../../db/schema.ts";
 import { and, asc, desc, eq, sql } from "drizzle-orm";
 import {
   createErrorResponse,
@@ -8,11 +8,13 @@ import {
   createPaginatedResponse,
 } from "../../utils/api-helpers.ts";
 import { PAGINATION } from "../../constants/app-config.ts";
+import type { ProductSource } from "../../db/schema.ts";
 
-interface ShopeeItemsQuery {
+interface ProductsQuery {
   search?: string;
   legoSetNumber?: string;
   watchStatus?: string;
+  source?: ProductSource | "all"; // Filter by platform or show all
   sortBy?: "price" | "sold" | "createdAt" | "updatedAt";
   sortOrder?: "asc" | "desc";
   page?: number;
@@ -23,13 +25,14 @@ export const handler: Handlers = {
   async GET(req) {
     try {
       const url = new URL(req.url);
-      const query: ShopeeItemsQuery = {
+      const query: ProductsQuery = {
         search: url.searchParams.get("search") || undefined,
         legoSetNumber: url.searchParams.get("legoSetNumber") || undefined,
         watchStatus: url.searchParams.get("watchStatus") ||
           url.searchParams.get("watch_status") || undefined,
-        sortBy:
-          (url.searchParams.get("sortBy") as ShopeeItemsQuery["sortBy"]) ||
+        source: (url.searchParams.get("source") as ProductSource | "all") ||
+          "all",
+        sortBy: (url.searchParams.get("sortBy") as ProductsQuery["sortBy"]) ||
           "updatedAt",
         sortOrder: (url.searchParams.get("sortOrder") as "asc" | "desc") ||
           "desc",
@@ -42,6 +45,11 @@ export const handler: Handlers = {
       // Build where conditions
       const conditions = [];
 
+      // Filter by source/platform
+      if (query.source && query.source !== "all") {
+        conditions.push(eq(products.source, query.source));
+      }
+
       // Search by product name (full-text search with improved handling)
       if (query.search && query.search.trim()) {
         const searchTerm = query.search.trim().replace(/\s+/g, " "); // Normalize multiple spaces
@@ -49,7 +57,7 @@ export const handler: Handlers = {
         // Use websearch_to_tsquery for better phrase and partial matching
         // COALESCE handles NULL names
         conditions.push(
-          sql`to_tsvector('english', COALESCE(${shopeeItems.name}, '')) @@ websearch_to_tsquery('english', ${searchTerm})`,
+          sql`to_tsvector('english', COALESCE(${products.name}, '')) @@ websearch_to_tsquery('english', ${searchTerm})`,
         );
       }
 
@@ -60,7 +68,7 @@ export const handler: Handlers = {
         // Use ILIKE for case-insensitive "starts with" matching
         // COALESCE handles NULL set numbers
         conditions.push(
-          sql`COALESCE(${shopeeItems.legoSetNumber}, '') ILIKE ${
+          sql`COALESCE(${products.legoSetNumber}, '') ILIKE ${
             setNumberTerm + "%"
           }`,
         );
@@ -70,7 +78,7 @@ export const handler: Handlers = {
       if (query.watchStatus && query.watchStatus.trim()) {
         conditions.push(
           eq(
-            shopeeItems.watchStatus,
+            products.watchStatus,
             query.watchStatus as "active" | "paused" | "stopped" | "archived",
           ),
         );
@@ -86,24 +94,24 @@ export const handler: Handlers = {
 
       switch (query.sortBy) {
         case "price":
-          orderByClause = sortOrderFn(shopeeItems.price);
+          orderByClause = sortOrderFn(products.price);
           break;
         case "sold":
-          orderByClause = sortOrderFn(shopeeItems.unitsSold);
+          orderByClause = sortOrderFn(products.unitsSold);
           break;
         case "createdAt":
-          orderByClause = sortOrderFn(shopeeItems.createdAt);
+          orderByClause = sortOrderFn(products.createdAt);
           break;
         case "updatedAt":
         default:
-          orderByClause = sortOrderFn(shopeeItems.updatedAt);
+          orderByClause = sortOrderFn(products.updatedAt);
           break;
       }
 
       // Get total count for pagination
       const [countResult] = await db
         .select({ count: sql<number>`count(*)::int` })
-        .from(shopeeItems)
+        .from(products)
         .where(whereClause);
 
       const totalCount = countResult?.count || 0;
@@ -112,7 +120,7 @@ export const handler: Handlers = {
       const offset = (query.page! - 1) * query.limit!;
       const items = await db
         .select()
-        .from(shopeeItems)
+        .from(products)
         .where(whereClause)
         .orderBy(orderByClause)
         .limit(query.limit!)
@@ -128,7 +136,7 @@ export const handler: Handlers = {
 
       return createJsonResponse(response);
     } catch (error) {
-      return createErrorResponse(error, "Failed to fetch Shopee items");
+      return createErrorResponse(error, "Failed to fetch products");
     }
   },
 };

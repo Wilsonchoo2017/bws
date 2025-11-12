@@ -2,9 +2,11 @@ import { useComputed, useSignal } from "@preact/signals";
 import { useEffect } from "preact/hooks";
 import { formatDate, formatNumber, formatPrice } from "../utils/formatters.ts";
 import { PAGINATION } from "../constants/app-config.ts";
+import type { ProductSource } from "../db/schema.ts";
 
-interface ShopeeItem {
+interface Product {
   id: number;
+  source: ProductSource;
   productId: string | null;
   name: string | null;
   brand: string | null;
@@ -13,6 +15,11 @@ interface ShopeeItem {
   priceMin: number | null;
   priceMax: number | null;
   priceBeforeDiscount: number | null;
+  image: string | null;
+  images: string[] | null;
+  legoSetNumber: string | null;
+
+  // Shopee-specific fields
   unitsSold: number | null;
   lifetimeSold: number | null;
   liked_count: number | null;
@@ -27,12 +34,16 @@ interface ShopeeItem {
   isMart: boolean | null;
   isPreferred: boolean | null;
   isServiceByShopee: boolean | null;
-  image: string | null;
-  images: string[] | null;
   shopId: number | null;
   shopName: string | null;
   shopLocation: string | null;
-  legoSetNumber: string | null;
+
+  // Toys"R"Us-specific fields
+  sku: string | null;
+  categoryNumber: string | null;
+  categoryName: string | null;
+  ageRange: string | null;
+
   rawData: unknown | null;
   createdAt: Date | null;
   updatedAt: Date | null;
@@ -48,7 +59,7 @@ interface Pagination {
 }
 
 interface ApiResponse {
-  items: ShopeeItem[];
+  items: Product[];
   pagination: Pagination;
 }
 
@@ -56,7 +67,7 @@ type SortBy = "price" | "sold" | "createdAt" | "updatedAt";
 type SortOrder = "asc" | "desc";
 
 export default function ProductsList() {
-  const items = useSignal<ShopeeItem[]>([]);
+  const items = useSignal<Product[]>([]);
   const pagination = useSignal<Pagination | null>(null);
   const isLoading = useSignal(false);
   const error = useSignal<string | null>(null);
@@ -64,6 +75,7 @@ export default function ProductsList() {
   // Filter and sort state
   const searchQuery = useSignal("");
   const legoSetFilter = useSignal("");
+  const sourceFilter = useSignal<ProductSource | "all">("all");
   const sortBy = useSignal<SortBy>("updatedAt");
   const sortOrder = useSignal<SortOrder>("desc");
   const currentPage = useSignal(1);
@@ -100,6 +112,10 @@ export default function ProductsList() {
         params.set("legoSetNumber", legoSetFilter.value.trim());
       }
 
+      if (sourceFilter.value) {
+        params.set("source", sourceFilter.value);
+      }
+
       const response = await fetch(`/api/shopee-items?${params}`);
 
       if (!response.ok) {
@@ -125,6 +141,7 @@ export default function ProductsList() {
   }, [
     debouncedSearch.value,
     legoSetFilter.value,
+    sourceFilter.value,
     sortBy.value,
     sortOrder.value,
     currentPage.value,
@@ -245,6 +262,25 @@ export default function ProductsList() {
                 legoSetFilter.value = (e.target as HTMLInputElement).value}
             />
           </div>
+          <div class="form-control flex-1">
+            <label class="label">
+              <span class="label-text">Platform</span>
+            </label>
+            <select
+              class="select select-bordered w-full"
+              value={sourceFilter.value}
+              onChange={(e) => {
+                sourceFilter.value = (e.target as HTMLSelectElement).value as
+                  | ProductSource
+                  | "all";
+                currentPage.value = 1;
+              }}
+            >
+              <option value="all">All Platforms</option>
+              <option value="shopee">Shopee</option>
+              <option value="toysrus">Toys"R"Us</option>
+            </select>
+          </div>
         </div>
 
         {/* Error state */}
@@ -292,6 +328,7 @@ export default function ProductsList() {
             <table class="table table-zebra w-full">
               <thead>
                 <tr>
+                  <th class="w-20">Platform</th>
                   <th class="w-20">Image</th>
                   <th>Name</th>
                   <th class="w-24">LEGO Set</th>
@@ -301,13 +338,17 @@ export default function ProductsList() {
                   >
                     Price <SortIcon column="price" />
                   </th>
-                  <th
-                    class="cursor-pointer hover:bg-base-200 w-24"
-                    onClick={() => handleSort("sold")}
-                  >
-                    Sold <SortIcon column="sold" />
+                  {sourceFilter.value !== "toysrus" && (
+                    <th
+                      class="cursor-pointer hover:bg-base-200 w-24"
+                      onClick={() => handleSort("sold")}
+                    >
+                      Sold <SortIcon column="sold" />
+                    </th>
+                  )}
+                  <th>
+                    {sourceFilter.value === "toysrus" ? "SKU" : "Shop"}
                   </th>
-                  <th>Shop</th>
                   <th
                     class="cursor-pointer hover:bg-base-200 w-32"
                     onClick={() => handleSort("updatedAt")}
@@ -319,6 +360,17 @@ export default function ProductsList() {
               <tbody>
                 {items.value.map((item) => (
                   <tr key={item.id}>
+                    <td>
+                      <span
+                        class={`badge badge-sm ${
+                          item.source === "shopee"
+                            ? "badge-primary"
+                            : "badge-secondary"
+                        }`}
+                      >
+                        {item.source === "shopee" ? "Shopee" : 'Toys"R"Us'}
+                      </span>
+                    </td>
                     <td>
                       {item.image
                         ? (
@@ -368,20 +420,34 @@ export default function ProductsList() {
                         </div>
                       )}
                     </td>
+                    {sourceFilter.value !== "toysrus" && (
+                      <td>
+                        <span
+                          class={`badge ${getSoldBadgeColor(item.unitsSold)}`}
+                        >
+                          {formatNumber(item.unitsSold)}
+                        </span>
+                      </td>
+                    )}
                     <td>
-                      <span
-                        class={`badge ${getSoldBadgeColor(item.unitsSold)}`}
-                      >
-                        {formatNumber(item.unitsSold)}
-                      </span>
-                    </td>
-                    <td>
-                      <div class="text-sm">{item.shopName || "Unknown"}</div>
-                      {item.shopLocation && (
-                        <div class="text-xs text-base-content/50">
-                          {item.shopLocation}
-                        </div>
-                      )}
+                      {item.source === "shopee"
+                        ? (
+                          <>
+                            <div class="text-sm">
+                              {item.shopName || "Unknown"}
+                            </div>
+                            {item.shopLocation && (
+                              <div class="text-xs text-base-content/50">
+                                {item.shopLocation}
+                              </div>
+                            )}
+                          </>
+                        )
+                        : (
+                          <div class="text-sm font-mono">
+                            {item.sku || "—"}
+                          </div>
+                        )}
                     </td>
                     <td class="text-sm text-base-content/70">
                       {formatDate(item.updatedAt)}
@@ -412,9 +478,10 @@ export default function ProductsList() {
             </svg>
             <p class="text-lg text-base-content/70 mt-4">No products found</p>
             <p class="text-sm text-base-content/50 mt-2">
-              {debouncedSearch.value || legoSetFilter.value
+              {debouncedSearch.value || legoSetFilter.value ||
+                  sourceFilter.value !== "all"
                 ? "Try adjusting your search or filters"
-                : "Start by adding some products using the Shopee Parser"}
+                : "Start by adding some products using the parser"}
             </p>
           </div>
         )}
