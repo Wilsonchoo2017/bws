@@ -1,5 +1,8 @@
 import { FreshContext } from "$fresh/server.ts";
 import { DOMParser } from "https://deno.land/x/deno_dom@v0.1.45/deno-dom-wasm.ts";
+import { db } from "../../db/client.ts";
+import { bricklinkItems } from "../../db/schema.ts";
+import { eq } from "drizzle-orm";
 
 interface PriceData {
   currency: string;
@@ -197,6 +200,7 @@ export const handler = async (
   try {
     const url = new URL(req.url);
     const bricklinkUrl = url.searchParams.get("url");
+    const saveToDb = url.searchParams.get("save") === "true";
 
     if (!bricklinkUrl) {
       return new Response(
@@ -209,6 +213,65 @@ export const handler = async (
     }
 
     const result = await scrapeBricklinkItem(bricklinkUrl);
+
+    // Optionally save to database
+    if (saveToDb) {
+      try {
+        // Check if item already exists
+        const existingItem = await db.query.bricklinkItems.findFirst({
+          where: eq(bricklinkItems.itemId, result.item_id),
+        });
+
+        if (existingItem) {
+          // Update existing item
+          await db.update(bricklinkItems)
+            .set({
+              title: result.title,
+              weight: result.weight,
+              sixMonthNew: result.six_month_new,
+              sixMonthUsed: result.six_month_used,
+              currentNew: result.current_new,
+              currentUsed: result.current_used,
+              updatedAt: new Date(),
+            })
+            .where(eq(bricklinkItems.itemId, result.item_id));
+        } else {
+          // Insert new item
+          await db.insert(bricklinkItems).values({
+            itemId: result.item_id,
+            itemType: result.item_type,
+            title: result.title,
+            weight: result.weight,
+            sixMonthNew: result.six_month_new,
+            sixMonthUsed: result.six_month_used,
+            currentNew: result.current_new,
+            currentUsed: result.current_used,
+          });
+        }
+
+        return new Response(
+          JSON.stringify({ ...result, saved: true }, null, 2),
+          {
+            headers: { "Content-Type": "application/json" },
+          },
+        );
+      } catch (dbError) {
+        console.error("Database error:", dbError);
+        // Return scraped data even if DB save fails
+        return new Response(
+          JSON.stringify({
+            ...result,
+            saved: false,
+            db_error: dbError instanceof Error
+              ? dbError.message
+              : "Unknown database error",
+          }, null, 2),
+          {
+            headers: { "Content-Type": "application/json" },
+          },
+        );
+      }
+    }
 
     return new Response(JSON.stringify(result, null, 2), {
       headers: { "Content-Type": "application/json" },

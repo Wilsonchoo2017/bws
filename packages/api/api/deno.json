@@ -7,7 +7,10 @@
     "start": "deno run -A --watch=static/,routes/ dev.ts",
     "build": "deno run -A dev.ts build",
     "preview": "deno run -A main.ts",
-    "update": "deno run -A -r https://fresh.deno.dev/update ."
+    "update": "deno run -A -r https://fresh.deno.dev/update .",
+    "db:generate": "deno run -A npm:drizzle-kit generate",
+    "db:migrate": "deno run -A db/migrate.ts",
+    "db:studio": "deno run -A npm:drizzle-kit studio"
   },
   "lint": {
     "rules": {
@@ -30,7 +33,12 @@
     "tailwindcss": "npm:tailwindcss@^3.4.17",
     "tailwindcss/": "npm:/tailwindcss@^3.4.17/",
     "tailwindcss/plugin": "npm:/tailwindcss@^3.4.17/plugin.js",
-    "daisyui": "npm:daisyui@^4.12.14"
+    "daisyui": "npm:daisyui@^4.12.14",
+    "drizzle-orm": "npm:drizzle-orm@^0.36.4",
+    "drizzle-orm/": "npm:/drizzle-orm@^0.36.4/",
+    "drizzle-kit": "npm:drizzle-kit@^0.30.0",
+    "postgres": "npm:postgres@3.4.4",
+    "zod": "https://deno.land/x/zod@v3.23.8/mod.ts"
   },
   "compilerOptions": {
     "jsx": "react-jsx",
