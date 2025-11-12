@@ -12,7 +12,7 @@
  * abstractions (interfaces) rather than concrete implementations.
  */
 
-import puppeteer, { Browser, Page } from "puppeteer";
+import puppeteer, { Browser, Page } from "../../lib/puppeteer.ts";
 import {
   BROWSER_CONFIG,
   getRandomAcceptLanguage,
