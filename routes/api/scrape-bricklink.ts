@@ -1,8 +1,8 @@
 import { FreshContext } from "$fresh/server.ts";
 import { DOMParser } from "https://deno.land/x/deno_dom@v0.1.45/deno-dom-wasm.ts";
 import { db } from "../../db/client.ts";
-import { bricklinkItems } from "../../db/schema.ts";
-import { eq } from "drizzle-orm";
+import { bricklinkItems, bricklinkPriceHistory } from "../../db/schema.ts";
+import { eq, desc } from "drizzle-orm";
 
 interface PriceData {
   currency: string;
@@ -92,6 +92,18 @@ function extractPriceBox(boxElement: Element): PricingBox | null {
   }
 
   return Object.keys(data).length > 0 ? data : null;
+}
+
+function hasDataChanged(
+  oldData: PricingBox | null,
+  newData: PricingBox | null,
+): boolean {
+  // If one is null and the other isn't, it's a change
+  if ((oldData === null) !== (newData === null)) return true;
+  if (oldData === null && newData === null) return false;
+
+  // Deep comparison of pricing data
+  return JSON.stringify(oldData) !== JSON.stringify(newData);
 }
 
 async function scrapeBricklinkItem(url: string): Promise<BricklinkData> {
@@ -235,13 +247,52 @@ export const handler = async (
               updatedAt: new Date(),
             })
             .where(eq(bricklinkItems.itemId, result.item_id));
+
+          // Record price history if watch status is active and data has changed
+          if (existingItem.watchStatus === "active") {
+            const hasChanged = hasDataChanged(
+              existingItem.sixMonthNew as PricingBox | null,
+              result.six_month_new,
+            ) ||
+              hasDataChanged(
+                existingItem.sixMonthUsed as PricingBox | null,
+                result.six_month_used,
+              ) ||
+              hasDataChanged(
+                existingItem.currentNew as PricingBox | null,
+                result.current_new,
+              ) ||
+              hasDataChanged(
+                existingItem.currentUsed as PricingBox | null,
+                result.current_used,
+              );
+
+            if (hasChanged) {
+              await db.insert(bricklinkPriceHistory).values({
+                itemId: result.item_id,
+                sixMonthNew: result.six_month_new,
+                sixMonthUsed: result.six_month_used,
+                currentNew: result.current_new,
+                currentUsed: result.current_used,
+              });
+            }
+          }
         } else {
-          // Insert new item
+          // Insert new item (defaults to 'active' watch status)
           await db.insert(bricklinkItems).values({
             itemId: result.item_id,
             itemType: result.item_type,
             title: result.title,
             weight: result.weight,
+            sixMonthNew: result.six_month_new,
+            sixMonthUsed: result.six_month_used,
+            currentNew: result.current_new,
+            currentUsed: result.current_used,
+          });
+
+          // Record initial price history for new items
+          await db.insert(bricklinkPriceHistory).values({
+            itemId: result.item_id,
             sixMonthNew: result.six_month_new,
             sixMonthUsed: result.six_month_used,
             currentNew: result.current_new,

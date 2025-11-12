@@ -110,6 +110,19 @@ export default function ShopeeParser() {
     }
   };
 
+  const getSoldColorClass = (sold: number | null) => {
+    if (sold === null || sold === 0) return "";
+
+    // Color thresholds based on sold units
+    // Using !important via Tailwind's ! prefix to override DaisyUI styles
+    if (sold >= 10000) return "!text-purple-600 font-bold"; // 10k+ - Purple (Viral)
+    if (sold >= 5000) return "!text-red-600 font-bold";    // 5k-10k - Red (Hot)
+    if (sold >= 1000) return "!text-orange-600 font-semibold"; // 1k-5k - Orange (Popular)
+    if (sold >= 500) return "!text-yellow-600 font-medium";    // 500-1k - Yellow (Selling)
+    if (sold >= 100) return "!text-green-600";             // 100-500 - Green (Moderate)
+    return "";                                             // <100 - Default
+  };
+
   return (
     <div class="w-full max-w-6xl mx-auto space-y-6">
       {/* Form Card */}
@@ -138,15 +151,17 @@ export default function ShopeeParser() {
             {/* Source URL Input */}
             <div class="form-control">
               <label class="label">
-                <span class="label-text font-medium">Source URL (optional)</span>
+                <span class="label-text font-medium">Source URL *</span>
+                <span class="label-text-alt opacity-70">Required to extract shop name</span>
               </label>
               <input
                 type="url"
                 class="input input-bordered"
-                placeholder="https://shopee.com.my/..."
+                placeholder="https://shopee.com.my/legoshopmy?shopCollection=..."
                 value={sourceUrl.value}
                 onInput={(e) => sourceUrl.value = e.currentTarget.value}
                 disabled={isLoading.value}
+                required
               />
             </div>
 
@@ -346,7 +361,9 @@ export default function ShopeeParser() {
                               )}
                             </td>
                             <td>
-                              <div>{formatSold(product.sold)}</div>
+                              <div class={getSoldColorClass(product.sold)}>
+                                {formatSold(product.sold)}
+                              </div>
                               {soldDelta && (
                                 <div
                                   class={`text-xs ${

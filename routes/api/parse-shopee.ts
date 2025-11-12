@@ -10,6 +10,7 @@ import {
 import {
   extractLegoSetNumber,
   extractShopeeProductId,
+  extractShopUsername,
   generateProductIdFromName,
   normalizeSoldUnits,
   parsePriceToCents,
@@ -29,7 +30,10 @@ interface ShopeeProduct {
   product_url?: string;
 }
 
-function parseShopeeHtml(htmlContent: string): ShopeeProduct[] {
+function parseShopeeHtml(
+  htmlContent: string,
+  shopUsernameFromUrl: string,
+): ShopeeProduct[] {
   const parser = new DOMParser();
   const doc = parser.parseFromString(htmlContent, "text/html");
 
@@ -86,6 +90,10 @@ function parseShopeeHtml(htmlContent: string): ShopeeProduct[] {
       if (!productId) {
         productId = generateProductIdFromName(productName);
       }
+
+      // IMPORTANT: Prefix product ID with shop username to ensure products from different shops are unique
+      // This allows tracking the same product across multiple shops
+      productId = `${shopUsernameFromUrl}:${productId}`;
 
       // Extract price
       let priceStr: string | null = null;
@@ -148,6 +156,11 @@ function parseShopeeHtml(htmlContent: string): ShopeeProduct[] {
         item.querySelector('[class*="shopName"]');
       if (shopNameElement) {
         shopName = shopNameElement.textContent?.trim() || null;
+      }
+
+      // Fallback: use shop username from URL if no shop name in HTML
+      if (!shopName) {
+        shopName = shopUsernameFromUrl;
       }
 
       // Try to extract shop ID from URL if available
@@ -232,8 +245,25 @@ export const handler = async (
       );
     }
 
+    // Extract shop username from source URL if provided
+    const shopUsername = sourceUrl ? extractShopUsername(sourceUrl) : null;
+
+    // Validate that shop username is available
+    if (!shopUsername) {
+      return new Response(
+        JSON.stringify({
+          error:
+            "Shop name cannot be determined. Please provide a valid Shopee shop URL in the 'source_url' field (e.g., https://shopee.com.my/legoshopmy?shopCollection=...)",
+        }),
+        {
+          status: 400,
+          headers: { "Content-Type": "application/json" },
+        },
+      );
+    }
+
     // Parse HTML to extract products
-    const products = parseShopeeHtml(htmlContent);
+    const products = parseShopeeHtml(htmlContent, shopUsername);
 
     // Create scrape session
     const [session] = await db.insert(shopeeScrapeSessions).values({
@@ -299,8 +329,16 @@ export const handler = async (
           },
         }).returning();
 
-        // Record price history
-        if (product.price !== null) {
+        // Record price history - only if values have changed or it's a new product
+        // This prevents duplicate entries and optimizes storage
+        const shouldRecordHistory = !existingProduct || // New product, always record
+          (previousHistory && (
+            previousHistory.price !== product.price || // Price changed
+            previousHistory.soldAtTime !== product.units_sold // Sold units changed
+          )) ||
+          !previousHistory; // No previous history exists
+
+        if (shouldRecordHistory && product.price !== null) {
           await db.insert(shopeePriceHistory).values({
             productId: product.product_id,
             price: product.price,

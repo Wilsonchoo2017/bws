@@ -102,3 +102,38 @@ export function generateProductIdFromName(productName: string): string {
   }
   return `gen-${Math.abs(hash)}`;
 }
+
+/**
+ * Extracts shop username from a Shopee shop URL
+ * @param url - Shopee shop URL
+ * @returns Shop username string, or null if not found
+ * @example
+ * extractShopUsername("https://shopee.com.my/legoshopmy?shopCollection=262908470")
+ * // Returns "legoshopmy"
+ */
+export function extractShopUsername(url: string): string | null {
+  if (!url) return null;
+
+  try {
+    const urlObj = new URL(url);
+    const pathname = urlObj.pathname;
+
+    // Extract username from path: /username or /username/...
+    // Skip common non-shop paths
+    const skipPaths = ["/product", "/search", "/cart", "/checkout", "/account"];
+
+    const pathMatch = pathname.match(/^\/([^/?#]+)/);
+    if (pathMatch && pathMatch[1]) {
+      const username = pathMatch[1];
+      // Check if it's not a common non-shop path
+      if (!skipPaths.includes(`/${username}`)) {
+        return username;
+      }
+    }
+  } catch (error) {
+    // Invalid URL, return null
+    return null;
+  }
+
+  return null;
+}

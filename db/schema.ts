@@ -4,6 +4,7 @@ import {
   index,
   integer,
   jsonb,
+  pgEnum,
   pgTable,
   serial,
   text,
@@ -12,24 +13,42 @@ import {
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 
+// Enum for watch status
+export const watchStatusEnum = pgEnum("watch_status", [
+  "active",
+  "paused",
+  "stopped",
+  "archived",
+]);
+
 // Bricklink scraped items
-export const bricklinkItems = pgTable("bricklink_items", {
-  id: serial("id").primaryKey(),
-  itemId: varchar("item_id", { length: 50 }).notNull().unique(),
-  itemType: varchar("item_type", { length: 10 }).notNull(),
-  title: text("title"),
-  weight: varchar("weight", { length: 50 }),
+export const bricklinkItems = pgTable(
+  "bricklink_items",
+  {
+    id: serial("id").primaryKey(),
+    itemId: varchar("item_id", { length: 50 }).notNull().unique(),
+    itemType: varchar("item_type", { length: 10 }).notNull(),
+    title: text("title"),
+    weight: varchar("weight", { length: 50 }),
 
-  // Store pricing data as JSONB for flexibility
-  sixMonthNew: jsonb("six_month_new"),
-  sixMonthUsed: jsonb("six_month_used"),
-  currentNew: jsonb("current_new"),
-  currentUsed: jsonb("current_used"),
+    // Store pricing data as JSONB for flexibility
+    sixMonthNew: jsonb("six_month_new"),
+    sixMonthUsed: jsonb("six_month_used"),
+    currentNew: jsonb("current_new"),
+    currentUsed: jsonb("current_used"),
 
-  // Metadata
-  createdAt: timestamp("created_at").defaultNow().notNull(),
-  updatedAt: timestamp("updated_at").defaultNow().notNull(),
-});
+    // Watch status for price tracking
+    watchStatus: watchStatusEnum("watch_status").default("active").notNull(),
+
+    // Metadata
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+  },
+  (table) => ({
+    // Index for filtering by watch status
+    watchStatusIdx: index("idx_bricklink_watch_status").on(table.watchStatus),
+  }),
+);
 
 // Shopee scraped items
 export const shopeeItems = pgTable(
@@ -88,6 +107,9 @@ export const shopeeItems = pgTable(
     // Full data dump for reference
     rawData: jsonb("raw_data"),
 
+    // Watch status for price tracking
+    watchStatus: watchStatusEnum("watch_status").default("active").notNull(),
+
     // Metadata
     createdAt: timestamp("created_at").defaultNow().notNull(),
     updatedAt: timestamp("updated_at").defaultNow().notNull(),
@@ -100,6 +122,7 @@ export const shopeeItems = pgTable(
     shopIdIdx: index("idx_shopee_shop_id").on(table.shopId),
     createdAtIdx: index("idx_shopee_created_at").on(table.createdAt),
     legoSetNumberIdx: index("idx_shopee_lego_set").on(table.legoSetNumber),
+    watchStatusIdx: index("idx_shopee_watch_status").on(table.watchStatus),
     // Full-text search index on name
     nameSearchIdx: index("idx_shopee_name_search").using(
       "gin",
@@ -128,6 +151,27 @@ export const shopeePriceHistory = pgTable(
   }),
 );
 
+// Bricklink price history for tracking price changes over time
+export const bricklinkPriceHistory = pgTable(
+  "bricklink_price_history",
+  {
+    id: serial("id").primaryKey(),
+    itemId: varchar("item_id", { length: 50 }).notNull(),
+    sixMonthNew: jsonb("six_month_new"),
+    sixMonthUsed: jsonb("six_month_used"),
+    currentNew: jsonb("current_new"),
+    currentUsed: jsonb("current_used"),
+    recordedAt: timestamp("recorded_at").defaultNow().notNull(),
+  },
+  (table) => ({
+    // Composite index for efficient time-series queries
+    itemTimeIdx: index("idx_bricklink_price_history_item_time").on(
+      table.itemId,
+      table.recordedAt,
+    ),
+  }),
+);
+
 // Shopee scrape sessions for tracking scraping metadata
 export const shopeeScrapeSessions = pgTable(
   "shopee_scrape_sessions",
@@ -149,6 +193,9 @@ export const shopeeScrapeSessions = pgTable(
 export type BricklinkItem = typeof bricklinkItems.$inferSelect;
 export type NewBricklinkItem = typeof bricklinkItems.$inferInsert;
 
+export type BricklinkPriceHistory = typeof bricklinkPriceHistory.$inferSelect;
+export type NewBricklinkPriceHistory = typeof bricklinkPriceHistory.$inferInsert;
+
 export type ShopeeItem = typeof shopeeItems.$inferSelect;
 export type NewShopeeItem = typeof shopeeItems.$inferInsert;
 
@@ -157,3 +204,5 @@ export type NewShopeePriceHistory = typeof shopeePriceHistory.$inferInsert;
 
 export type ShopeeScrapeSessions = typeof shopeeScrapeSessions.$inferSelect;
 export type NewShopeeScrapeSessions = typeof shopeeScrapeSessions.$inferInsert;
+
+export type WatchStatus = "active" | "paused" | "stopped" | "archived";

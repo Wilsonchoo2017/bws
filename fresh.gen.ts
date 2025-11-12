@@ -8,10 +8,14 @@ import * as $api_bricklink_items from "./routes/api/bricklink-items.ts";
 import * as $api_joke from "./routes/api/joke.ts";
 import * as $api_parse_shopee from "./routes/api/parse-shopee.ts";
 import * as $api_scrape_bricklink from "./routes/api/scrape-bricklink.ts";
+import * as $api_shopee_items from "./routes/api/shopee-items.ts";
 import * as $greet_name_ from "./routes/greet/[name].tsx";
 import * as $index from "./routes/index.tsx";
+import * as $products from "./routes/products.tsx";
 import * as $Counter from "./islands/Counter.tsx";
+import * as $ProductsList from "./islands/ProductsList.tsx";
 import * as $ShopeeParser from "./islands/ShopeeParser.tsx";
+import * as $Sidebar from "./islands/Sidebar.tsx";
 import type { Manifest } from "$fresh/server.ts";
 
 const manifest = {
@@ -22,12 +26,16 @@ const manifest = {
     "./routes/api/joke.ts": $api_joke,
     "./routes/api/parse-shopee.ts": $api_parse_shopee,
     "./routes/api/scrape-bricklink.ts": $api_scrape_bricklink,
+    "./routes/api/shopee-items.ts": $api_shopee_items,
     "./routes/greet/[name].tsx": $greet_name_,
     "./routes/index.tsx": $index,
+    "./routes/products.tsx": $products,
   },
   islands: {
     "./islands/Counter.tsx": $Counter,
+    "./islands/ProductsList.tsx": $ProductsList,
     "./islands/ShopeeParser.tsx": $ShopeeParser,
+    "./islands/Sidebar.tsx": $Sidebar,
   },
   baseUrl: import.meta.url,
 } satisfies Manifest;
