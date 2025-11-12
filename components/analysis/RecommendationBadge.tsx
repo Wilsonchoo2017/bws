@@ -3,7 +3,7 @@
  */
 
 interface RecommendationBadgeProps {
-  action: "strong_buy" | "buy" | "hold" | "pass";
+  action: "strong_buy" | "buy" | "hold" | "pass" | "insufficient_data";
   urgency?: "urgent" | "moderate" | "low" | "no_rush";
   size?: "sm" | "md" | "lg";
 }
@@ -22,6 +22,8 @@ export default function RecommendationBadge(
         return "bg-yellow-500 text-white border-yellow-600";
       case "pass":
         return "bg-red-500 text-white border-red-600";
+      case "insufficient_data":
+        return "bg-gray-400 text-white border-gray-500";
       default:
         return "bg-gray-500 text-white border-gray-600";
     }
@@ -37,6 +39,8 @@ export default function RecommendationBadge(
         return "HOLD";
       case "pass":
         return "PASS";
+      case "insufficient_data":
+        return "INSUFFICIENT DATA";
       default:
         return "UNKNOWN";
     }

@@ -7,7 +7,7 @@ import { Handlers, PageProps } from "$fresh/server.ts";
 import { Head } from "$fresh/runtime.ts";
 import { eq } from "drizzle-orm";
 import { db } from "../../db/client.ts";
-import { products, type Product } from "../../db/schema.ts";
+import { type Product, products } from "../../db/schema.ts";
 import ProductAnalysisCard from "../../islands/ProductAnalysisCard.tsx";
 
 interface ProductDetailData {
@@ -128,7 +128,8 @@ export default function ProductDetailPage(
                     </div>
                     {product.brand && (
                       <p class="text-base-content/70">
-                        Brand: <span class="font-semibold">{product.brand}</span>
+                        Brand:{" "}
+                        <span class="font-semibold">{product.brand}</span>
                       </p>
                     )}
                   </div>
@@ -250,13 +251,13 @@ export default function ProductDetailPage(
                     <div class="flex flex-wrap gap-4">
                       {product.ageRange && (
                         <div>
-                          <span class="text-base-content/70">Age: </span>
+                          <span class="text-base-content/70">Age:</span>
                           <span class="font-semibold">{product.ageRange}</span>
                         </div>
                       )}
                       {product.categoryName && (
                         <div>
-                          <span class="text-base-content/70">Category: </span>
+                          <span class="text-base-content/70">Category:</span>
                           <span class="font-semibold">
                             {product.categoryName}
                           </span>
@@ -287,8 +288,7 @@ export default function ProductDetailPage(
 
                   {/* Last Updated */}
                   <div class="text-xs text-base-content/50">
-                    Last updated:{" "}
-                    {new Date(product.updatedAt).toLocaleString()}
+                    Last updated: {new Date(product.updatedAt).toLocaleString()}
                   </div>
                 </div>
               </div>
@@ -323,7 +323,8 @@ export default function ProductDetailPage(
                 </path>
               </svg>
               <span>
-                Investment analysis is only available for products with a valid LEGO set number.
+                Investment analysis is only available for products with a valid
+                LEGO set number.
               </span>
             </div>
           )}

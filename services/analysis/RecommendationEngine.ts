@@ -4,7 +4,6 @@
  */
 
 import type {
-  AnalysisScore,
   AvailabilityData,
   DemandData,
   DimensionalScores,

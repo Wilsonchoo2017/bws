@@ -14,7 +14,20 @@ export class QualityAnalyzer extends BaseAnalyzer<QualityData> {
     );
   }
 
-  async analyze(data: QualityData): Promise<AnalysisScore> {
+  async analyze(data: QualityData): Promise<AnalysisScore | null> {
+    // Prerequisite check: Need at least ratings OR trust signals
+    const hasRatings = data.avgStarRating !== undefined &&
+      data.ratingCount !== undefined;
+    const hasTrustSignals = data.isPreferredSeller !== undefined ||
+      data.isServiceByShopee !== undefined || data.isMart !== undefined;
+    const hasBrandData = data.brand !== undefined;
+    const hasMetadata = data.legoSetNumber !== undefined ||
+      data.theme !== undefined;
+
+    if (!hasRatings && !hasTrustSignals && !hasBrandData && !hasMetadata) {
+      return null; // Skip analysis - insufficient quality data
+    }
+
     const scores: Array<{ score: number; weight: number }> = [];
     const reasons: string[] = [];
     const dataPoints: Record<string, unknown> = {};

@@ -16,16 +16,17 @@ interface AnalysisScore {
 }
 
 interface DimensionalScores {
-  pricing: AnalysisScore;
-  demand: AnalysisScore;
-  availability: AnalysisScore;
-  quality: AnalysisScore;
+  pricing: AnalysisScore | null;
+  demand: AnalysisScore | null;
+  availability: AnalysisScore | null;
+  quality: AnalysisScore | null;
 }
 
 interface ProductRecommendation {
   overall: AnalysisScore;
   dimensions: DimensionalScores;
-  action: "strong_buy" | "buy" | "hold" | "pass";
+  availableDimensions: number;
+  action: "strong_buy" | "buy" | "hold" | "pass" | "insufficient_data";
   strategy: string;
   urgency: "urgent" | "moderate" | "low" | "no_rush";
   estimatedROI?: number;
@@ -192,48 +193,107 @@ export default function ProductAnalysisCard(
 
       {/* Dimensional Scores */}
       <div class="space-y-4">
-        <h4 class="font-semibold text-gray-900">Dimensional Analysis</h4>
+        <div class="flex items-center justify-between">
+          <h4 class="font-semibold text-gray-900">Dimensional Analysis</h4>
+          <p class="text-xs text-gray-500">
+            {rec.availableDimensions} of 4 dimensions analyzed
+          </p>
+        </div>
         <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div>
-            <ScoreMeter
-              score={rec.dimensions.pricing.value}
-              label="💰 Pricing"
-              size="md"
-            />
-            <p class="text-xs text-gray-600 mt-1">
-              {rec.dimensions.pricing.reasoning}
-            </p>
-          </div>
-          <div>
-            <ScoreMeter
-              score={rec.dimensions.demand.value}
-              label="📈 Demand"
-              size="md"
-            />
-            <p class="text-xs text-gray-600 mt-1">
-              {rec.dimensions.demand.reasoning}
-            </p>
-          </div>
-          <div>
-            <ScoreMeter
-              score={rec.dimensions.availability.value}
-              label="📦 Availability"
-              size="md"
-            />
-            <p class="text-xs text-gray-600 mt-1">
-              {rec.dimensions.availability.reasoning}
-            </p>
-          </div>
-          <div>
-            <ScoreMeter
-              score={rec.dimensions.quality.value}
-              label="⭐ Quality"
-              size="md"
-            />
-            <p class="text-xs text-gray-600 mt-1">
-              {rec.dimensions.quality.reasoning}
-            </p>
-          </div>
+          {rec.dimensions.pricing
+            ? (
+              <div>
+                <ScoreMeter
+                  score={rec.dimensions.pricing.value}
+                  label="💰 Pricing"
+                  size="md"
+                />
+                <p class="text-xs text-gray-600 mt-1">
+                  {rec.dimensions.pricing.reasoning}
+                </p>
+              </div>
+            )
+            : (
+              <div class="opacity-50">
+                <div class="p-4 bg-gray-100 rounded-lg">
+                  <p class="text-sm font-medium text-gray-500">💰 Pricing</p>
+                  <p class="text-xs text-gray-400 mt-1">
+                    Insufficient data
+                  </p>
+                </div>
+              </div>
+            )}
+          {rec.dimensions.demand
+            ? (
+              <div>
+                <ScoreMeter
+                  score={rec.dimensions.demand.value}
+                  label="📈 Demand"
+                  size="md"
+                />
+                <p class="text-xs text-gray-600 mt-1">
+                  {rec.dimensions.demand.reasoning}
+                </p>
+              </div>
+            )
+            : (
+              <div class="opacity-50">
+                <div class="p-4 bg-gray-100 rounded-lg">
+                  <p class="text-sm font-medium text-gray-500">📈 Demand</p>
+                  <p class="text-xs text-gray-400 mt-1">
+                    Insufficient data
+                  </p>
+                </div>
+              </div>
+            )}
+          {rec.dimensions.availability
+            ? (
+              <div>
+                <ScoreMeter
+                  score={rec.dimensions.availability.value}
+                  label="📦 Availability"
+                  size="md"
+                />
+                <p class="text-xs text-gray-600 mt-1">
+                  {rec.dimensions.availability.reasoning}
+                </p>
+              </div>
+            )
+            : (
+              <div class="opacity-50">
+                <div class="p-4 bg-gray-100 rounded-lg">
+                  <p class="text-sm font-medium text-gray-500">
+                    📦 Availability
+                  </p>
+                  <p class="text-xs text-gray-400 mt-1">
+                    Insufficient data
+                  </p>
+                </div>
+              </div>
+            )}
+          {rec.dimensions.quality
+            ? (
+              <div>
+                <ScoreMeter
+                  score={rec.dimensions.quality.value}
+                  label="⭐ Quality"
+                  size="md"
+                />
+                <p class="text-xs text-gray-600 mt-1">
+                  {rec.dimensions.quality.reasoning}
+                </p>
+              </div>
+            )
+            : (
+              <div class="opacity-50">
+                <div class="p-4 bg-gray-100 rounded-lg">
+                  <p class="text-sm font-medium text-gray-500">⭐ Quality</p>
+                  <p class="text-xs text-gray-400 mt-1">
+                    Insufficient data
+                  </p>
+                </div>
+              </div>
+            )}
         </div>
       </div>
 

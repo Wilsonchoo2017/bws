@@ -14,7 +14,17 @@ export class AvailabilityAnalyzer extends BaseAnalyzer<AvailabilityData> {
     );
   }
 
-  async analyze(data: AvailabilityData): Promise<AnalysisScore> {
+  async analyze(data: AvailabilityData): Promise<AnalysisScore | null> {
+    // Prerequisite check: Need at least retirement info OR stock data
+    const hasRetirementData = data.retiringSoon !== undefined ||
+      data.expectedRetirementDate !== undefined;
+    const hasStockData = data.currentStock !== undefined;
+    const hasActiveStatus = data.isActive !== undefined;
+
+    if (!hasRetirementData && !hasStockData && !hasActiveStatus) {
+      return null; // Skip analysis - insufficient availability data
+    }
+
     const scores: Array<{ score: number; weight: number }> = [];
     const reasons: string[] = [];
     const dataPoints: Record<string, unknown> = {};

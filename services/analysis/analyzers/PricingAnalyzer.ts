@@ -14,7 +14,16 @@ export class PricingAnalyzer extends BaseAnalyzer<PricingData> {
     );
   }
 
-  async analyze(data: PricingData): Promise<AnalysisScore> {
+  async analyze(data: PricingData): Promise<AnalysisScore | null> {
+    // Prerequisite check: Need at least retail price OR bricklink data
+    const hasRetailData = data.currentRetailPrice !== undefined ||
+      data.discountPercentage !== undefined;
+    const hasBricklinkData = data.bricklink?.current.newAvg !== undefined;
+
+    if (!hasRetailData && !hasBricklinkData) {
+      return null; // Skip analysis - insufficient pricing data
+    }
+
     const scores: Array<{ score: number; weight: number }> = [];
     const reasons: string[] = [];
     const dataPoints: Record<string, unknown> = {};

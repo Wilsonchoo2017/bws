@@ -14,7 +14,23 @@ export class DemandAnalyzer extends BaseAnalyzer<DemandData> {
     );
   }
 
-  async analyze(data: DemandData): Promise<AnalysisScore> {
+  async analyze(data: DemandData): Promise<AnalysisScore | null> {
+    // Prerequisite check: Need at least one demand signal
+    const hasSalesData = data.unitsSold !== undefined ||
+      data.lifetimeSold !== undefined;
+    const hasBricklinkData = data.bricklinkTimesSold !== undefined ||
+      data.bricklinkTotalQty !== undefined;
+    const hasRedditData = data.redditPosts !== undefined;
+    const hasEngagementData = data.viewCount !== undefined ||
+      data.likedCount !== undefined || data.commentCount !== undefined;
+
+    if (
+      !hasSalesData && !hasBricklinkData && !hasRedditData &&
+      !hasEngagementData
+    ) {
+      return null; // Skip analysis - insufficient demand data
+    }
+
     const scores: Array<{ score: number; weight: number }> = [];
     const reasons: string[] = [];
     const dataPoints: Record<string, unknown> = {};
@@ -185,10 +201,9 @@ export class DemandAnalyzer extends BaseAnalyzer<DemandData> {
    */
   private analyzeBricklinkActivity(
     timesSold?: number,
-    totalQty?: number,
+    _totalQty?: number,
   ): number {
     const transactions = timesSold ?? 0;
-    const quantity = totalQty ?? 0;
 
     // Scoring based on transaction count
     // 0 = 0 (no activity)

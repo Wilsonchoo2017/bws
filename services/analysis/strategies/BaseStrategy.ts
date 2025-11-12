@@ -39,17 +39,26 @@ export abstract class BaseStrategy implements IStrategy {
 
   /**
    * Calculate weighted overall score from dimensional scores
+   * Only includes dimensions with non-null scores
    */
   protected calculateOverallScore(scores: DimensionalScores): number {
     const weightedScores = [
-      { score: scores.pricing.value, weight: this.weights.pricing },
-      { score: scores.demand.value, weight: this.weights.demand },
-      {
-        score: scores.availability.value,
-        weight: this.weights.availability,
-      },
-      { score: scores.quality.value, weight: this.weights.quality },
-    ];
+      scores.pricing
+        ? { score: scores.pricing.value, weight: this.weights.pricing }
+        : null,
+      scores.demand
+        ? { score: scores.demand.value, weight: this.weights.demand }
+        : null,
+      scores.availability
+        ? {
+          score: scores.availability.value,
+          weight: this.weights.availability,
+        }
+        : null,
+      scores.quality
+        ? { score: scores.quality.value, weight: this.weights.quality }
+        : null,
+    ].filter((s) => s !== null) as Array<{ score: number; weight: number }>;
 
     const totalWeight = weightedScores.reduce(
       (sum, s) => sum + s.weight,
@@ -66,23 +75,30 @@ export abstract class BaseStrategy implements IStrategy {
 
   /**
    * Calculate overall confidence from dimensional confidences
+   * Only includes dimensions with non-null scores
    */
   protected calculateOverallConfidence(scores: DimensionalScores): number {
     const confidences = [
-      scores.pricing.confidence,
-      scores.demand.confidence,
-      scores.availability.confidence,
-      scores.quality.confidence,
-    ];
+      scores.pricing?.confidence,
+      scores.demand?.confidence,
+      scores.availability?.confidence,
+      scores.quality?.confidence,
+    ].filter((c) => c !== undefined) as number[];
+
+    if (confidences.length === 0) return 0;
     return confidences.reduce((sum, c) => sum + c, 0) / confidences.length;
   }
 
   /**
-   * Determine action based on overall score
+   * Determine action based on overall score and available dimensions
    */
   protected determineAction(
     score: number,
-  ): "strong_buy" | "buy" | "hold" | "pass" {
+    availableDimensions: number,
+  ): "strong_buy" | "buy" | "hold" | "pass" | "insufficient_data" {
+    // Need at least 2 dimensions for a recommendation
+    if (availableDimensions < 2) return "insufficient_data";
+
     if (score >= 80) return "strong_buy";
     if (score >= 65) return "buy";
     if (score >= 45) return "hold";
@@ -93,8 +109,9 @@ export abstract class BaseStrategy implements IStrategy {
    * Determine urgency based on availability score
    */
   protected determineUrgency(
-    availabilityScore: number,
+    availabilityScore: number | null,
   ): "urgent" | "moderate" | "low" | "no_rush" {
+    if (availabilityScore === null) return "no_rush"; // No availability data
     if (availabilityScore >= 85) return "urgent"; // Retiring soon or very low stock
     if (availabilityScore >= 65) return "moderate"; // Some urgency
     if (availabilityScore >= 40) return "low"; // Some time left
@@ -103,33 +120,48 @@ export abstract class BaseStrategy implements IStrategy {
 
   /**
    * Generate reasoning from dimensional scores
+   * Only includes dimensions with non-null scores
    */
   protected generateReasoning(scores: DimensionalScores): string {
     const reasons: string[] = [];
 
-    // Add top contributing factors
+    // Add top contributing factors (filter out nulls)
     const dimensions = [
-      {
-        name: "Pricing",
-        score: scores.pricing.value,
-        weight: this.weights.pricing,
-      },
-      {
-        name: "Demand",
-        score: scores.demand.value,
-        weight: this.weights.demand,
-      },
-      {
-        name: "Availability",
-        score: scores.availability.value,
-        weight: this.weights.availability,
-      },
-      {
-        name: "Quality",
-        score: scores.quality.value,
-        weight: this.weights.quality,
-      },
-    ];
+      scores.pricing
+        ? {
+          name: "Pricing",
+          score: scores.pricing.value,
+          weight: this.weights.pricing,
+        }
+        : null,
+      scores.demand
+        ? {
+          name: "Demand",
+          score: scores.demand.value,
+          weight: this.weights.demand,
+        }
+        : null,
+      scores.availability
+        ? {
+          name: "Availability",
+          score: scores.availability.value,
+          weight: this.weights.availability,
+        }
+        : null,
+      scores.quality
+        ? {
+          name: "Quality",
+          score: scores.quality.value,
+          weight: this.weights.quality,
+        }
+        : null,
+    ].filter((d) => d !== null) as Array<
+      { name: string; score: number; weight: number }
+    >;
+
+    if (dimensions.length === 0) {
+      return "Insufficient data for analysis.";
+    }
 
     // Sort by weighted contribution
     dimensions.sort((a, b) => b.score * b.weight - a.score * a.weight);
@@ -156,28 +188,32 @@ export abstract class BaseStrategy implements IStrategy {
 
   /**
    * Identify risks based on dimensional scores
+   * Only includes dimensions with non-null scores
    */
   protected identifyRisks(scores: DimensionalScores): string[] {
     const risks: string[] = [];
 
-    if (scores.pricing.value < 40) {
+    if (scores.pricing && scores.pricing.value < 40) {
       risks.push("Poor pricing or negative margins");
     }
-    if (scores.demand.value < 30) {
+    if (scores.demand && scores.demand.value < 30) {
       risks.push("Low market demand or limited resale activity");
     }
-    if (scores.availability.value < 30 && scores.availability.value > 0) {
+    if (
+      scores.availability && scores.availability.value < 30 &&
+      scores.availability.value > 0
+    ) {
       risks.push("Abundant stock may indicate slow-moving item");
     }
-    if (scores.quality.value < 40) {
+    if (scores.quality && scores.quality.value < 40) {
       risks.push("Quality concerns or untrusted seller");
     }
 
     // Confidence warnings
-    if (scores.pricing.confidence < 0.5) {
+    if (scores.pricing && scores.pricing.confidence < 0.5) {
       risks.push("Limited pricing data for accurate analysis");
     }
-    if (scores.demand.confidence < 0.5) {
+    if (scores.demand && scores.demand.confidence < 0.5) {
       risks.push("Insufficient demand data");
     }
 
@@ -186,28 +222,35 @@ export abstract class BaseStrategy implements IStrategy {
 
   /**
    * Identify opportunities based on dimensional scores
+   * Only includes dimensions with non-null scores
    */
   protected identifyOpportunities(scores: DimensionalScores): string[] {
     const opportunities: string[] = [];
 
-    if (scores.pricing.value >= 75) {
+    if (scores.pricing && scores.pricing.value >= 75) {
       opportunities.push("Excellent profit margin potential");
     }
-    if (scores.demand.value >= 75) {
+    if (scores.demand && scores.demand.value >= 75) {
       opportunities.push("Strong market demand and community interest");
     }
-    if (scores.availability.value >= 75) {
+    if (scores.availability && scores.availability.value >= 75) {
       opportunities.push("Limited availability creates scarcity value");
     }
-    if (scores.quality.value >= 80) {
+    if (scores.quality && scores.quality.value >= 80) {
       opportunities.push("High-quality product with good ratings");
     }
 
     // Combo opportunities
-    if (scores.pricing.value >= 70 && scores.availability.value >= 70) {
+    if (
+      scores.pricing && scores.availability &&
+      scores.pricing.value >= 70 && scores.availability.value >= 70
+    ) {
       opportunities.push("Good margin with upcoming scarcity");
     }
-    if (scores.demand.value >= 70 && scores.availability.value >= 70) {
+    if (
+      scores.demand && scores.availability &&
+      scores.demand.value >= 70 && scores.availability.value >= 70
+    ) {
       opportunities.push("High demand with limited supply");
     }
 
@@ -215,13 +258,28 @@ export abstract class BaseStrategy implements IStrategy {
   }
 
   /**
+   * Count available dimensions (non-null scores)
+   */
+  protected countAvailableDimensions(scores: DimensionalScores): number {
+    let count = 0;
+    if (scores.pricing !== null) count++;
+    if (scores.demand !== null) count++;
+    if (scores.availability !== null) count++;
+    if (scores.quality !== null) count++;
+    return count;
+  }
+
+  /**
    * Main interpretation method (to be optionally overridden by subclasses)
    */
   interpret(scores: DimensionalScores): ProductRecommendation {
+    const availableDimensions = this.countAvailableDimensions(scores);
     const overallScore = this.calculateOverallScore(scores);
     const confidence = this.calculateOverallConfidence(scores);
-    const action = this.determineAction(overallScore);
-    const urgency = this.determineUrgency(scores.availability.value);
+    const action = this.determineAction(overallScore, availableDimensions);
+    const urgency = this.determineUrgency(
+      scores.availability ? scores.availability.value : null,
+    );
 
     return {
       overall: {
@@ -234,6 +292,7 @@ export abstract class BaseStrategy implements IStrategy {
         },
       },
       dimensions: scores,
+      availableDimensions,
       action,
       strategy: this.name,
       urgency,
