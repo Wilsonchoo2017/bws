@@ -1,8 +1,9 @@
 import { useComputed, useSignal } from "@preact/signals";
-import { useEffect } from "preact/hooks";
+import { useEffect, useState } from "preact/hooks";
 import { formatDate, formatNumber, formatPrice } from "../utils/formatters.ts";
 import { PAGINATION } from "../constants/app-config.ts";
 import type { ProductSource } from "../db/schema.ts";
+import QueueStatsBanner from "./components/QueueStatsBanner.tsx";
 
 interface Product {
   id: number;
@@ -63,6 +64,35 @@ interface ApiResponse {
   pagination: Pagination;
 }
 
+interface JobInfo {
+  id: string;
+  data?: {
+    url?: string;
+    itemId?: string;
+    itemType?: string;
+  };
+  finishedOn?: number;
+}
+
+interface QueueStats {
+  queue: {
+    name: string;
+    counts: {
+      waiting: number;
+      active: number;
+      completed: number;
+      failed: number;
+      delayed: number;
+    };
+  };
+  jobs: {
+    waiting: JobInfo[];
+    active: JobInfo[];
+    completed: JobInfo[];
+    failed: JobInfo[];
+  };
+}
+
 type SortBy = "price" | "sold" | "createdAt" | "updatedAt";
 type SortOrder = "asc" | "desc";
 
@@ -72,6 +102,10 @@ export default function ProductsList() {
   const isLoading = useSignal(false);
   const error = useSignal<string | null>(null);
 
+  // Queue stats state
+  const [queueStats, setQueueStats] = useState<QueueStats | null>(null);
+  const [isLoadingQueue, setIsLoadingQueue] = useState(true);
+
   // Filter and sort state
   const searchQuery = useSignal("");
   const legoSetFilter = useSignal("");
@@ -79,6 +113,13 @@ export default function ProductsList() {
   const sortBy = useSignal<SortBy>("updatedAt");
   const sortOrder = useSignal<SortOrder>("desc");
   const currentPage = useSignal(1);
+
+  // Manual add modal state
+  const showAddModal = useSignal(false);
+  const addLegoSetNumber = useSignal("");
+  const isAdding = useSignal(false);
+  const addError = useSignal<string | null>(null);
+  const addSuccess = useSignal<string | null>(null);
 
   // Debounced search query
   const debouncedSearch = useSignal("");
@@ -135,6 +176,89 @@ export default function ProductsList() {
     }
   };
 
+  // Fetch queue status
+  const fetchQueueStats = async () => {
+    setIsLoadingQueue(true);
+
+    try {
+      const response = await fetch("/api/scrape-queue-status");
+      if (response.ok) {
+        const data = await response.json();
+        setQueueStats(data);
+      } else {
+        setQueueStats(null);
+      }
+    } catch (err) {
+      console.error("Queue stats fetch error:", err);
+      setQueueStats(null);
+    } finally {
+      setIsLoadingQueue(false);
+    }
+  };
+
+  // Handle manual product add
+  const handleAddProduct = async () => {
+    const setNumber = addLegoSetNumber.value.trim();
+
+    // Validate input
+    if (!setNumber) {
+      addError.value = "Please enter a LEGO set number";
+      return;
+    }
+
+    if (!/^\d{5}$/.test(setNumber)) {
+      addError.value = "Please enter a valid 5-digit LEGO set number (e.g., 75192)";
+      return;
+    }
+
+    isAdding.value = true;
+    addError.value = null;
+    addSuccess.value = null;
+
+    try {
+      const response = await fetch("/api/products/manual", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          legoSetNumber: setNumber,
+        }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || `HTTP error! status: ${response.status}`);
+      }
+
+      addSuccess.value = data.message || "Product added successfully!";
+      addLegoSetNumber.value = "";
+
+      // Refresh the product list after a short delay
+      setTimeout(() => {
+        showAddModal.value = false;
+        addSuccess.value = null;
+        fetchProducts();
+      }, 2000);
+    } catch (err) {
+      addError.value = err instanceof Error
+        ? err.message
+        : "Failed to add product";
+      console.error("Error adding product:", err);
+    } finally {
+      isAdding.value = false;
+    }
+  };
+
+  // Handle modal close
+  const handleCloseModal = () => {
+    showAddModal.value = false;
+    addLegoSetNumber.value = "";
+    addError.value = null;
+    addSuccess.value = null;
+  };
+
   // Fetch on mount and when dependencies change
   useEffect(() => {
     fetchProducts();
@@ -146,6 +270,13 @@ export default function ProductsList() {
     sortOrder.value,
     currentPage.value,
   ]);
+
+  // Fetch queue stats on mount and auto-refresh every 30 seconds
+  useEffect(() => {
+    fetchQueueStats();
+    const interval = setInterval(fetchQueueStats, 30000);
+    return () => clearInterval(interval);
+  }, []);
 
   // Get badge color based on sold volume
   const getSoldBadgeColor = (unitsSold: number | null): string => {
@@ -234,6 +365,43 @@ export default function ProductsList() {
   return (
     <div class="card bg-base-100 shadow-xl">
       <div class="card-body">
+        {/* Queue Statistics Banner */}
+        <QueueStatsBanner
+          stats={queueStats
+            ? {
+              counts: queueStats.queue.counts,
+              lastCompleted: queueStats.jobs.completed[0],
+            }
+            : null}
+          isLoading={isLoadingQueue}
+          onRefresh={fetchQueueStats}
+        />
+
+        {/* Header with Add Button */}
+        <div class="flex justify-between items-center mb-4">
+          <h2 class="text-xl font-semibold">Products</h2>
+          <button
+            class="btn btn-primary btn-sm"
+            onClick={() => showAddModal.value = true}
+          >
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              class="h-5 w-5"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+            >
+              <path
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                stroke-width="2"
+                d="M12 4v16m8-8H4"
+              />
+            </svg>
+            Add Product
+          </button>
+        </div>
+
         {/* Filters */}
         <div class="flex flex-col lg:flex-row gap-4 mb-6">
           <div class="form-control flex-1">
@@ -279,6 +447,7 @@ export default function ProductsList() {
               <option value="all">All Platforms</option>
               <option value="shopee">Shopee</option>
               <option value="toysrus">Toys"R"Us</option>
+              <option value="self">Manual Entry</option>
             </select>
           </div>
         </div>
@@ -365,10 +534,16 @@ export default function ProductsList() {
                         class={`badge badge-sm ${
                           item.source === "shopee"
                             ? "badge-primary"
-                            : "badge-secondary"
+                            : item.source === "toysrus"
+                            ? "badge-secondary"
+                            : "badge-accent"
                         }`}
                       >
-                        {item.source === "shopee" ? "Shopee" : 'Toys"R"Us'}
+                        {item.source === "shopee"
+                          ? "Shopee"
+                          : item.source === "toysrus"
+                          ? 'Toys"R"Us'
+                          : "Manual"}
                       </span>
                     </td>
                     <td>
@@ -393,9 +568,12 @@ export default function ProductsList() {
                         )}
                     </td>
                     <td class="max-w-xs">
-                      <div class="font-medium line-clamp-2">
+                      <a
+                        href={`/product/${item.productId}`}
+                        class="font-medium line-clamp-2 link link-hover text-primary"
+                      >
                         {item.name || "Unnamed product"}
-                      </div>
+                      </a>
                       {item.brand && (
                         <div class="text-xs text-base-content/60 mt-1">
                           {item.brand}
@@ -531,6 +709,99 @@ export default function ProductsList() {
             >
               Next »
             </button>
+          </div>
+        )}
+
+        {/* Add Product Modal */}
+        {showAddModal.value && (
+          <div class="modal modal-open">
+            <div class="modal-box">
+              <h3 class="font-bold text-lg mb-4">Add LEGO Product Manually</h3>
+
+              <div class="form-control">
+                <label class="label">
+                  <span class="label-text">
+                    LEGO Set Number (5 digits)
+                  </span>
+                </label>
+                <input
+                  type="text"
+                  placeholder="e.g., 75192"
+                  class="input input-bordered w-full"
+                  value={addLegoSetNumber.value}
+                  onInput={(e) =>
+                    addLegoSetNumber.value = (e.target as HTMLInputElement).value}
+                  disabled={isAdding.value}
+                  maxLength={5}
+                />
+                <label class="label">
+                  <span class="label-text-alt text-base-content/60">
+                    Product details will be fetched from Rebrickable
+                  </span>
+                </label>
+              </div>
+
+              {/* Error message */}
+              {addError.value && (
+                <div class="alert alert-error mt-4">
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    class="stroke-current shrink-0 h-6 w-6"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      stroke-width="2"
+                      d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z"
+                    />
+                  </svg>
+                  <span>{addError.value}</span>
+                </div>
+              )}
+
+              {/* Success message */}
+              {addSuccess.value && (
+                <div class="alert alert-success mt-4">
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    class="stroke-current shrink-0 h-6 w-6"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      stroke-width="2"
+                      d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"
+                    />
+                  </svg>
+                  <span>{addSuccess.value}</span>
+                </div>
+              )}
+
+              <div class="modal-action">
+                <button
+                  class="btn btn-ghost"
+                  onClick={handleCloseModal}
+                  disabled={isAdding.value}
+                >
+                  Cancel
+                </button>
+                <button
+                  class="btn btn-primary"
+                  onClick={handleAddProduct}
+                  disabled={isAdding.value}
+                >
+                  {isAdding.value && (
+                    <span class="loading loading-spinner"></span>
+                  )}
+                  {isAdding.value ? "Adding..." : "Add Product"}
+                </button>
+              </div>
+            </div>
+            <div class="modal-backdrop" onClick={handleCloseModal}></div>
           </div>
         )}
       </div>
