@@ -199,25 +199,69 @@ export class DemandAnalyzer extends BaseAnalyzer<DemandData> {
 
   /**
    * Score Bricklink resale activity
+   * Factors in both transaction count and total volume
    */
   private analyzeBricklinkActivity(
     timesSold?: number,
-    _totalQty?: number,
+    totalQty?: number,
   ): number {
     const transactions = timesSold ?? 0;
+    const volume = totalQty ?? 0;
 
-    // Scoring based on transaction count
+    // If we have both metrics, combine them with weights
+    // Transaction count (60% weight) - shows market liquidity
+    // Total volume (40% weight) - shows actual demand magnitude
+
+    if (transactions === 0 && volume === 0) return 0;
+
+    let transactionScore = 0;
+    let volumeScore = 0;
+
+    // Transaction score (0-100)
     // 0 = 0 (no activity)
     // 1-10 = 20-40 (minimal)
     // 10-50 = 40-60 (low)
     // 50-100 = 60-80 (moderate)
     // >100 = 80-100 (active market)
+    if (transactions === 0) {
+      transactionScore = 0;
+    } else if (transactions < 10) {
+      transactionScore = 20 + (transactions / 10) * 20; // 20-40
+    } else if (transactions < 50) {
+      transactionScore = 40 + ((transactions - 10) / 40) * 20; // 40-60
+    } else if (transactions < 100) {
+      transactionScore = 60 + ((transactions - 50) / 50) * 20; // 60-80
+    } else {
+      transactionScore = Math.min(100, 80 + ((transactions - 100) / 100) * 20); // 80-100
+    }
 
-    if (transactions === 0) return 0;
-    if (transactions < 10) return 20 + (transactions / 10) * 20; // 20-40
-    if (transactions < 50) return 40 + ((transactions - 10) / 40) * 20; // 40-60
-    if (transactions < 100) return 60 + ((transactions - 50) / 50) * 20; // 60-80
-    return Math.min(100, 80 + ((transactions - 100) / 100) * 20); // 80-100
+    // Volume score (0-100)
+    // 0 = 0 (no volume)
+    // 1-50 = 20-40 (minimal volume)
+    // 50-200 = 40-60 (low volume)
+    // 200-500 = 60-75 (moderate volume)
+    // 500-1000 = 75-85 (high volume)
+    // >1000 = 85-100 (very high volume)
+    if (volume === 0) {
+      volumeScore = 0;
+    } else if (volume < 50) {
+      volumeScore = 20 + (volume / 50) * 20; // 20-40
+    } else if (volume < 200) {
+      volumeScore = 40 + ((volume - 50) / 150) * 20; // 40-60
+    } else if (volume < 500) {
+      volumeScore = 60 + ((volume - 200) / 300) * 15; // 60-75
+    } else if (volume < 1000) {
+      volumeScore = 75 + ((volume - 500) / 500) * 10; // 75-85
+    } else {
+      volumeScore = Math.min(100, 85 + ((volume - 1000) / 1000) * 15); // 85-100
+    }
+
+    // If only one metric is available, use it at full weight
+    if (transactions === 0 && volume > 0) return volumeScore;
+    if (volume === 0 && transactions > 0) return transactionScore;
+
+    // Weighted average: 60% transactions, 40% volume
+    return Math.round(transactionScore * 0.6 + volumeScore * 0.4);
   }
 
   /**

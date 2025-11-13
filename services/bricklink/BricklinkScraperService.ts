@@ -239,6 +239,14 @@ export class BricklinkScraperService {
           currentNew: data.current_new,
           currentUsed: data.current_used,
         });
+        // Also create normalized volume history
+        await this.repository.createVolumeHistory({
+          itemId: data.item_id,
+          sixMonthNew: data.six_month_new,
+          sixMonthUsed: data.six_month_used,
+          currentNew: data.current_new,
+          currentUsed: data.current_used,
+        });
       } else {
         // Existing item - check if prices changed
         if (item.watchStatus === "active") {
@@ -268,6 +276,16 @@ export class BricklinkScraperService {
           } else {
             console.log(`📊 No price change for: ${data.item_id}`);
           }
+
+          // Always record volume history on every scrape (regardless of price change)
+          // This allows tracking volume trends over time
+          await this.repository.createVolumeHistory({
+            itemId: data.item_id,
+            sixMonthNew: data.six_month_new,
+            sixMonthUsed: data.six_month_used,
+            currentNew: data.current_new,
+            currentUsed: data.current_used,
+          });
         }
       }
 

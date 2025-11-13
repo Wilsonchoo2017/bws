@@ -19,11 +19,13 @@ import {
   type BricklinkItem,
   bricklinkItems,
   bricklinkPriceHistory,
+  bricklinkVolumeHistory,
   type NewBricklinkItem,
   type NewBricklinkPriceHistory,
+  type NewBricklinkVolumeHistory,
 } from "../../db/schema.ts";
 import { eq } from "drizzle-orm";
-import type { PricingBox } from "./BricklinkParser.ts";
+import type { PricingBox, PriceData } from "./BricklinkParser.ts";
 
 /**
  * Interface for update data
@@ -274,6 +276,99 @@ export class BricklinkRepository {
       .where(eq(bricklinkItems.watchStatus, watchStatus));
 
     return result.length;
+  }
+
+  /**
+   * Helper to convert price to cents (integer)
+   */
+  private priceToInteger(priceData?: PriceData): number | undefined {
+    if (!priceData) return undefined;
+    return Math.round(priceData.amount * 100);
+  }
+
+  /**
+   * Create normalized volume history records from pricing boxes
+   * Creates 4 records (six_month new/used, current new/used)
+   */
+  async createVolumeHistory(data: {
+    itemId: string;
+    sixMonthNew: PricingBox | null;
+    sixMonthUsed: PricingBox | null;
+    currentNew: PricingBox | null;
+    currentUsed: PricingBox | null;
+  }): Promise<void> {
+    const records: NewBricklinkVolumeHistory[] = [];
+    const now = new Date();
+
+    // Helper to create record from pricing box
+    const createRecord = (
+      box: PricingBox | null,
+      condition: "new" | "used",
+      timePeriod: "six_month" | "current",
+    ): NewBricklinkVolumeHistory | null => {
+      if (!box) return null;
+
+      return {
+        itemId: data.itemId,
+        condition,
+        timePeriod,
+        totalQty: box.total_qty ?? null,
+        timesSold: box.times_sold ?? null,
+        totalLots: box.total_lots ?? null,
+        minPrice: this.priceToInteger(box.min_price) ?? null,
+        avgPrice: this.priceToInteger(box.avg_price) ?? null,
+        qtyAvgPrice: this.priceToInteger(box.qty_avg_price) ?? null,
+        maxPrice: this.priceToInteger(box.max_price) ?? null,
+        currency: box.min_price?.currency ||
+                  box.avg_price?.currency ||
+                  box.max_price?.currency ||
+                  "USD",
+        recordedAt: now,
+      };
+    };
+
+    // Create records for all 4 boxes
+    const sixMonthNewRecord = createRecord(data.sixMonthNew, "new", "six_month");
+    const sixMonthUsedRecord = createRecord(data.sixMonthUsed, "used", "six_month");
+    const currentNewRecord = createRecord(data.currentNew, "new", "current");
+    const currentUsedRecord = createRecord(data.currentUsed, "used", "current");
+
+    // Add non-null records
+    if (sixMonthNewRecord) records.push(sixMonthNewRecord);
+    if (sixMonthUsedRecord) records.push(sixMonthUsedRecord);
+    if (currentNewRecord) records.push(currentNewRecord);
+    if (currentUsedRecord) records.push(currentUsedRecord);
+
+    // Batch insert all records
+    if (records.length > 0) {
+      await db.insert(bricklinkVolumeHistory).values(records);
+    }
+  }
+
+  /**
+   * Get volume history for an item
+   */
+  async getVolumeHistory(
+    itemId: string,
+    options?: {
+      condition?: "new" | "used";
+      timePeriod?: "six_month" | "current";
+      limit?: number;
+      startDate?: Date;
+      endDate?: Date;
+    },
+  ): Promise<typeof bricklinkVolumeHistory.$inferSelect[]> {
+    let query = db.select()
+      .from(bricklinkVolumeHistory)
+      .where(eq(bricklinkVolumeHistory.itemId, itemId));
+
+    // Note: Additional filtering would require building the query dynamically
+    // For now, we return all records and let the caller filter
+    const results = await query
+      .orderBy(bricklinkVolumeHistory.recordedAt)
+      .limit(options?.limit || 1000);
+
+    return results;
   }
 }
 

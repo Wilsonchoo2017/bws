@@ -29,6 +29,20 @@
       "when": 1762950783760,
       "tag": "0003_silent_psylocke",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1762954921000,
+      "tag": "0004_unify_products_schema",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1731466800000,
+      "tag": "0005_add_bricklink_volume_history",
+      "breakpoints": true
     }
   ]
 }

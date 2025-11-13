@@ -173,7 +173,7 @@ export const priceHistory = pgTable(
   }),
 );
 
-// Bricklink price history for tracking price changes over time
+// Bricklink price history for tracking price changes over time (legacy JSONB format)
 export const bricklinkPriceHistory = pgTable(
   "bricklink_price_history",
   {
@@ -189,6 +189,55 @@ export const bricklinkPriceHistory = pgTable(
     // Composite index for efficient time-series queries
     itemTimeIdx: index("idx_bricklink_price_history_item_time").on(
       table.itemId,
+      table.recordedAt,
+    ),
+  }),
+);
+
+// Enum for condition type (new vs used)
+export const conditionEnum = pgEnum("condition_type", ["new", "used"]);
+
+// Enum for time period (6-month vs current)
+export const timePeriodEnum = pgEnum("time_period", ["six_month", "current"]);
+
+// Normalized Bricklink volume history for dashboard-friendly time-series tracking
+export const bricklinkVolumeHistory = pgTable(
+  "bricklink_volume_history",
+  {
+    id: serial("id").primaryKey(),
+    itemId: varchar("item_id", { length: 50 }).notNull(),
+
+    // Condition and time period for this record
+    condition: conditionEnum("condition").notNull(),
+    timePeriod: timePeriodEnum("time_period").notNull(),
+
+    // Volume and transaction metrics
+    totalQty: integer("total_qty"), // Total quantity sold (main metric)
+    timesSold: integer("times_sold"), // Number of transactions
+    totalLots: integer("total_lots"), // Number of lots sold
+
+    // Price metrics (stored as cents/smallest currency unit)
+    minPrice: integer("min_price"),
+    avgPrice: integer("avg_price"),
+    qtyAvgPrice: integer("qty_avg_price"), // Quantity-weighted average
+    maxPrice: integer("max_price"),
+    currency: varchar("currency", { length: 3 }).default("USD"),
+
+    // Timestamp for time-series tracking
+    recordedAt: timestamp("recorded_at").defaultNow().notNull(),
+  },
+  (table) => ({
+    // Composite index for efficient time-series queries
+    itemConditionTimeIdx: index("idx_bricklink_volume_item_condition_time").on(
+      table.itemId,
+      table.condition,
+      table.timePeriod,
+      table.recordedAt,
+    ),
+    // Index for filtering by condition
+    conditionIdx: index("idx_bricklink_volume_condition").on(table.condition),
+    // Index for time-based queries
+    recordedAtIdx: index("idx_bricklink_volume_recorded_at").on(
       table.recordedAt,
     ),
   }),
@@ -334,6 +383,10 @@ export type NewBricklinkItem = typeof bricklinkItems.$inferInsert;
 export type BricklinkPriceHistory = typeof bricklinkPriceHistory.$inferSelect;
 export type NewBricklinkPriceHistory =
   typeof bricklinkPriceHistory.$inferInsert;
+
+export type BricklinkVolumeHistory = typeof bricklinkVolumeHistory.$inferSelect;
+export type NewBricklinkVolumeHistory =
+  typeof bricklinkVolumeHistory.$inferInsert;
 
 export type Product = typeof products.$inferSelect;
 export type NewProduct = typeof products.$inferInsert;
