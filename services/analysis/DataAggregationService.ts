@@ -202,11 +202,11 @@ export class DataAggregationService {
     bricklinkData: BricklinkItem | null,
   ): PricingData {
     return {
-      currentRetailPrice: this.safeNumber(product.price),
-      originalRetailPrice: this.safeNumber(product.priceBeforeDiscount),
+      currentRetailPrice: this.safeNumberInDollars(product.price),
+      originalRetailPrice: this.safeNumberInDollars(product.priceBeforeDiscount),
       discountPercentage: this.calculateDiscountPercentage(
-        this.safeNumber(product.price),
-        this.safeNumber(product.priceBeforeDiscount),
+        this.safeNumberInDollars(product.price),
+        this.safeNumberInDollars(product.priceBeforeDiscount),
       ),
       bricklink: bricklinkData
         ? this.normalizeBricklinkPricing(bricklinkData)
@@ -386,6 +386,13 @@ export class DataAggregationService {
     if (typeof value === "bigint") return Number(value);
     if (typeof value === "number") return value;
     return undefined;
+  }
+
+  private safeNumberInDollars(
+    value: number | bigint | null | undefined,
+  ): number | undefined {
+    const cents = this.safeNumber(value);
+    return cents !== undefined ? cents / 100 : undefined;
   }
 
   private calculateDiscountPercentage(
