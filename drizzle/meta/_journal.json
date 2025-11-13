@@ -57,6 +57,13 @@
       "when": 1763003231131,
       "tag": "0007_uneven_juggernaut",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1763006910205,
+      "tag": "0008_graceful_glorian",
+      "breakpoints": true
     }
   ]
 }
