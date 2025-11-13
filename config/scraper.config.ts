@@ -252,6 +252,23 @@ export const BRICKRANKER_CONFIG = {
 } as const;
 
 /**
+ * WorldBricks LEGO set database configuration
+ */
+export const WORLDBRICKS_CONFIG = {
+  /** Base URL for WorldBricks */
+  BASE_URL: "https://www.worldbricks.com",
+  /** Rate limiting - Conservative approach (quarterly scraping) */
+  RATE_LIMIT_MIN_DELAY_MS: 60000, // 1 minute
+  RATE_LIMIT_MAX_DELAY_MS: 180000, // 3 minutes
+  /** Scraping schedule - Quarterly updates (LEGO set data doesn't change often) */
+  SCHEDULE_INTERVAL_DAYS: 90,
+  /** Maximum requests per hour */
+  MAX_REQUESTS_PER_HOUR: 30,
+  /** Default language code */
+  LANGUAGE: "en",
+} as const;
+
+/**
  * Helper function to get a random user agent
  */
 export function getRandomUserAgent(): string {

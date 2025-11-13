@@ -429,5 +429,56 @@ export type NewBrickrankerRetirementItem =
 export type ProductAnalysis = typeof productAnalysis.$inferSelect;
 export type NewProductAnalysis = typeof productAnalysis.$inferInsert;
 
+// WorldBricks LEGO set information
+export const worldbricksSets = pgTable(
+  "worldbricks_sets",
+  {
+    id: serial("id").primaryKey(),
+    setNumber: varchar("set_number", { length: 20 }).notNull().unique(),
+    setName: text("set_name"),
+    description: text("description"),
+
+    // Primary fields (year released and retired year are high priority)
+    yearReleased: integer("year_released"),
+    yearRetired: integer("year_retired"),
+
+    // Secondary fields
+    designer: varchar("designer", { length: 255 }),
+    partsCount: integer("parts_count"),
+    dimensions: varchar("dimensions", { length: 255 }),
+
+    // Media
+    imageUrl: text("image_url"),
+    localImagePath: text("local_image_path"),
+    imageDownloadedAt: timestamp("image_downloaded_at"),
+    imageDownloadStatus: varchar("image_download_status", { length: 20 }),
+
+    // Source tracking
+    sourceUrl: text("source_url"),
+
+    // Scraping metadata
+    lastScrapedAt: timestamp("last_scraped_at"),
+    scrapeStatus: varchar("scrape_status", { length: 20 }), // success, failed, partial
+
+    // Timestamps
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+  },
+  (table) => ({
+    // Index for fast lookups by set number
+    setNumberIdx: index("idx_worldbricks_set_number").on(table.setNumber),
+    // Index for year filtering
+    yearReleasedIdx: index("idx_worldbricks_year_released").on(table.yearReleased),
+    yearRetiredIdx: index("idx_worldbricks_year_retired").on(table.yearRetired),
+    // Index for image download status
+    imageStatusIdx: index("idx_worldbricks_image_status").on(table.imageDownloadStatus),
+    // Index for scrape status
+    scrapeStatusIdx: index("idx_worldbricks_scrape_status").on(table.scrapeStatus),
+  }),
+);
+
+export type WorldbricksSet = typeof worldbricksSets.$inferSelect;
+export type NewWorldbricksSet = typeof worldbricksSets.$inferInsert;
+
 export type WatchStatus = "active" | "paused" | "stopped" | "archived";
 export type ProductSource = "shopee" | "toysrus" | "self";
