@@ -1,6 +1,6 @@
 /**
  * QualityAnalyzer - Analyzes product and seller quality signals
- * Focuses on: ratings, reviews, seller trust, brand reputation
+ * Focuses on: ratings, reviews, brand reputation
  */
 
 import { BaseAnalyzer } from "./BaseAnalyzer.ts";
@@ -15,22 +15,20 @@ export class QualityAnalyzer extends BaseAnalyzer<QualityData> {
   constructor() {
     super(
       "Quality Analyzer",
-      "Evaluates product quality, ratings, and seller trustworthiness",
+      "Evaluates product quality, ratings, and brand authenticity",
     );
   }
 
   // deno-lint-ignore require-await
   async analyze(data: QualityData): Promise<AnalysisScore | null> {
-    // Prerequisite check: Need at least ratings OR trust signals
+    // Prerequisite check: Need at least ratings OR brand data
     const hasRatings = data.avgStarRating !== undefined &&
       data.ratingCount !== undefined;
-    const hasTrustSignals = data.isPreferredSeller !== undefined ||
-      data.isServiceByShopee !== undefined || data.isMart !== undefined;
     const hasBrandData = data.brand !== undefined;
     const hasMetadata = data.legoSetNumber !== undefined ||
       data.theme !== undefined;
 
-    if (!hasRatings && !hasTrustSignals && !hasBrandData && !hasMetadata) {
+    if (!hasRatings && !hasBrandData && !hasMetadata) {
       return null; // Skip analysis - insufficient quality data
     }
 
@@ -49,7 +47,7 @@ export class QualityAnalyzer extends BaseAnalyzer<QualityData> {
         data.ratingCount,
         data.ratingDistribution,
       );
-      scores.push({ score: ratingScore, weight: 0.4 });
+      scores.push({ score: ratingScore, weight: 0.57 });
 
       dataPoints.avgStarRating = data.avgStarRating;
       dataPoints.ratingCount = data.ratingCount;
@@ -98,7 +96,7 @@ export class QualityAnalyzer extends BaseAnalyzer<QualityData> {
 
       components.push({
         name: "Product Ratings",
-        weight: 0.4,
+        weight: 0.57,
         score: ratingScore,
         rawValue: `${data.avgStarRating.toFixed(1)}/5 (${data.ratingCount} reviews)`,
         calculation: ratingCalc,
@@ -108,49 +106,10 @@ export class QualityAnalyzer extends BaseAnalyzer<QualityData> {
       missingData.push("Product ratings data");
     }
 
-    // 2. Seller trust signals
-    const trustScore = this.analyzeSellerTrust(
-      data.isPreferredSeller,
-      data.isServiceByShopee,
-      data.isMart,
-    );
-    scores.push({ score: trustScore, weight: 0.3 });
-
-    const trustSignals: string[] = [];
-    if (data.isPreferredSeller) {
-      trustSignals.push("Preferred Seller (+20)");
-      dataPoints.isPreferredSeller = true;
-    }
-    if (data.isServiceByShopee) {
-      trustSignals.push("Service by Shopee (+20)");
-      dataPoints.isServiceByShopee = true;
-    }
-    if (data.isMart) {
-      trustSignals.push("Shopee Mall (+20)");
-      dataPoints.isMart = true;
-    }
-
-    const trustCalc = trustSignals.length > 0
-      ? `Base 40 + ${trustSignals.join(" + ")}`
-      : "Base score: 40 (no trust badges)";
-
-    if (trustSignals.length > 0) {
-      reasons.push(`Trusted seller (${trustSignals.map(s => s.split(" (+")[0]).join(", ")})`);
-    }
-
-    components.push({
-      name: "Seller Trust Signals",
-      weight: 0.3,
-      score: trustScore,
-      rawValue: trustSignals.length > 0 ? trustSignals.map(s => s.split(" (+")[0]).join(", ") : "No badges",
-      calculation: trustCalc,
-      reasoning: "Seller credibility indicator. Base score: 40. Each badge adds +20 points (Preferred Seller, Service by Shopee, Shopee Mall). Max score: 100.",
-    });
-
-    // 3. Brand authenticity (LEGO official)
+    // 2. Brand authenticity (LEGO official)
     if (data.brand) {
       const brandScore = this.analyzeBrand(data.brand);
-      scores.push({ score: brandScore, weight: 0.2 });
+      scores.push({ score: brandScore, weight: 0.29 });
 
       dataPoints.brand = data.brand;
 
@@ -166,7 +125,7 @@ export class QualityAnalyzer extends BaseAnalyzer<QualityData> {
 
       components.push({
         name: "Brand Authenticity",
-        weight: 0.2,
+        weight: 0.29,
         score: brandScore,
         rawValue: data.brand,
         calculation: brandCalc,
@@ -176,9 +135,9 @@ export class QualityAnalyzer extends BaseAnalyzer<QualityData> {
       missingData.push("Brand information");
     }
 
-    // 4. Set metadata quality
+    // 3. Set metadata quality
     if (data.legoSetNumber && data.theme) {
-      scores.push({ score: 80, weight: 0.1 }); // Bonus for having proper metadata
+      scores.push({ score: 80, weight: 0.14 }); // Bonus for having proper metadata
 
       dataPoints.legoSetNumber = data.legoSetNumber;
       dataPoints.theme = data.theme;
@@ -204,7 +163,7 @@ export class QualityAnalyzer extends BaseAnalyzer<QualityData> {
 
       components.push({
         name: "Set Metadata Quality",
-        weight: 0.1,
+        weight: 0.14,
         score: 80,
         rawValue: `${data.legoSetNumber} (${data.theme})`,
         calculation: metadataCalc,
@@ -223,7 +182,6 @@ export class QualityAnalyzer extends BaseAnalyzer<QualityData> {
       data.ratingCount,
       data.brand,
       data.legoSetNumber,
-      data.isPreferredSeller,
     ]);
 
     // Build formula string
