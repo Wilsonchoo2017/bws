@@ -1,0 +1,19 @@
+ALTER TABLE "products" DROP COLUMN "first_seen_at";--> statement-breakpoint
+ALTER TABLE "products" DROP COLUMN "last_seen_at";--> statement-breakpoint
+ALTER TABLE "shopee_scrapes" DROP COLUMN "price_before_discount";--> statement-breakpoint
+ALTER TABLE "shopee_scrapes" DROP COLUMN "price_min";--> statement-breakpoint
+ALTER TABLE "shopee_scrapes" DROP COLUMN "price_max";--> statement-breakpoint
+ALTER TABLE "shopee_scrapes" DROP COLUMN "lifetime_sold";--> statement-breakpoint
+ALTER TABLE "shopee_scrapes" DROP COLUMN "shop_location";--> statement-breakpoint
+ALTER TABLE "shopee_scrapes" DROP COLUMN "current_stock";--> statement-breakpoint
+ALTER TABLE "shopee_scrapes" DROP COLUMN "stock_type";--> statement-breakpoint
+ALTER TABLE "shopee_scrapes" DROP COLUMN "stock_info_summary";--> statement-breakpoint
+ALTER TABLE "shopee_scrapes" DROP COLUMN "liked_count";--> statement-breakpoint
+ALTER TABLE "shopee_scrapes" DROP COLUMN "comment_count";--> statement-breakpoint
+ALTER TABLE "shopee_scrapes" DROP COLUMN "view_count";--> statement-breakpoint
+ALTER TABLE "shopee_scrapes" DROP COLUMN "avg_star_rating";--> statement-breakpoint
+ALTER TABLE "shopee_scrapes" DROP COLUMN "rating_count";--> statement-breakpoint
+ALTER TABLE "shopee_scrapes" DROP COLUMN "is_adult";--> statement-breakpoint
+ALTER TABLE "shopee_scrapes" DROP COLUMN "is_mart";--> statement-breakpoint
+ALTER TABLE "shopee_scrapes" DROP COLUMN "is_preferred";--> statement-breakpoint
+ALTER TABLE "shopee_scrapes" DROP COLUMN "is_service_by_shopee";

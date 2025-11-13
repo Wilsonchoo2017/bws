@@ -93,7 +93,7 @@ export function parseWorldBricksHtml(html: string, sourceUrl: string): WorldBric
  * Extract LEGO set number from page
  * Checks: JSON-LD, meta tags, URL pattern
  */
-function extractSetNumber(doc: any, sourceUrl: string): string | null {
+function extractSetNumber(doc: HTMLDocument, sourceUrl: string): string | null {
   // Try JSON-LD structured data first
   const jsonLd = extractJsonLdProduct(doc);
   if (jsonLd?.productID) {
@@ -174,7 +174,7 @@ function extractLegoYearField(doc: HTMLDocument): string | null {
     const text = heading.textContent?.trim();
     if (text && text.toLowerCase().includes('lego year')) {
       // Get the next sibling with class tab-value
-      let sibling = heading.nextElementSibling;
+      let sibling = (heading as Element).nextElementSibling;
       while (sibling) {
         if (sibling.classList && sibling.classList.contains('tab-value')) {
           return sibling.textContent?.trim() || null;
@@ -247,7 +247,7 @@ function extractYearRetired(doc: HTMLDocument): number | null {
  * Extract designer/creator information
  * Currently not available on WorldBricks - returns null
  */
-function extractDesigner(doc: HTMLDocument): string | null {
+function extractDesigner(_doc: HTMLDocument): string | null {
   // WorldBricks doesn't appear to have designer information
   // This would need to come from Brickset or official LEGO data
   return null;
@@ -400,7 +400,7 @@ export function parseSearchResults(html: string, setNumber: string): string | nu
   const links = doc.querySelectorAll('a[href*="lego-set"]');
 
   for (const link of links) {
-    const href = link.getAttribute("href");
+    const href = (link as Element).getAttribute("href");
     if (!href) continue;
 
     // Check if the link contains the set number

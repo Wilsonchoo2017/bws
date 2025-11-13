@@ -1,7 +1,7 @@
 import { FreshContext } from "$fresh/server.ts";
-import { eq, sql } from "drizzle-orm";
+import { eq, sql, desc } from "drizzle-orm";
 import { db } from "../../db/client.ts";
-import { priceHistory, products, scrapeSessions } from "../../db/schema.ts";
+import { shopeeScrapes, products, scrapeSessions } from "../../db/schema.ts";
 import { extractShopUsername, findExistingProduct } from "../../db/utils.ts";
 import { parseShopeeHtml } from "../../utils/shopee-extractors.ts";
 
@@ -144,15 +144,15 @@ export const handler = async (
           where: eq(products.productId, product.product_id),
         });
 
-        // Get the most recent price history entry (before this update)
-        let previousHistory = null;
+        // Get the most recent scrape entry (before this update)
+        let previousScrape = null;
         if (existingProduct) {
-          const histories = await db.query.priceHistory.findMany({
-            where: eq(priceHistory.productId, product.product_id),
-            orderBy: (history, { desc }) => [desc(history.recordedAt)],
+          const scrapes = await db.query.shopeeScrapes.findMany({
+            where: eq(shopeeScrapes.productId, product.product_id),
+            orderBy: [desc(shopeeScrapes.scrapedAt)],
             limit: 1,
           });
-          previousHistory = histories[0] || null;
+          previousScrape = scrapes[0] || null;
         }
 
         // Upsert product into products table
@@ -188,37 +188,46 @@ export const handler = async (
           },
         }).returning();
 
-        // Record price history - only if values have changed or it's a new product
-        // This prevents duplicate entries and optimizes storage
-        const shouldRecordHistory = !existingProduct || // New product, always record
-          (previousHistory && (
-            previousHistory.price !== product.price || // Price changed
-            previousHistory.unitsSoldSnapshot !== product.units_sold // Sold units changed
-          )) ||
-          !previousHistory; // No previous history exists
+        // Always insert a new scrape record - this is a complete snapshot at this point in time
+        await db.insert(shopeeScrapes).values({
+          productId: product.product_id,
+          scrapeSessionId: sessionId,
+          price: product.price,
+          currency: "MYR",
+          unitsSold: product.units_sold,
+          shopId: product.shop_id,
+          shopName: product.shop_name,
+          productUrl: product.product_url,
+          rawData: {
+            product_url: product.product_url,
+            price_string: product.price_string,
+            units_sold_string: product.units_sold_string,
+          },
+        });
 
-        if (shouldRecordHistory && product.price !== null) {
-          await db.insert(priceHistory).values({
-            productId: product.product_id,
-            price: product.price,
-            unitsSoldSnapshot: product.units_sold,
-          });
-        }
+        // Calculate deltas and price change percentage
+        const previousPrice = previousScrape?.price || null;
+        const previousSold = previousScrape?.unitsSold || null;
+        const priceDelta = existingProduct && product.price !== null && previousPrice
+          ? product.price - previousPrice
+          : null;
+        const soldDelta = existingProduct && product.units_sold !== null && previousSold
+          ? product.units_sold - previousSold
+          : null;
+        const priceChangePercent = previousPrice && priceDelta
+          ? Math.round((priceDelta / previousPrice) * 10000) / 100 // 2 decimal places
+          : null;
 
         // Add metadata about whether this was an update
         const productWithMeta = {
           ...insertedProduct,
           wasUpdated: !!existingProduct,
-          previousSold: previousHistory?.unitsSoldSnapshot || null,
-          previousPrice: previousHistory?.price || null,
-          soldDelta: existingProduct && product.units_sold !== null &&
-              previousHistory?.unitsSoldSnapshot
-            ? product.units_sold - (previousHistory.unitsSoldSnapshot || 0)
-            : null,
-          priceDelta:
-            existingProduct && product.price !== null && previousHistory?.price
-              ? product.price - (previousHistory.price || 0)
-              : null,
+          previousSold,
+          previousPrice,
+          soldDelta,
+          priceDelta,
+          priceChangePercent,
+          isNew: !existingProduct,
         };
 
         insertedProducts.push(productWithMeta);

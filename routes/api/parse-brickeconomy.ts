@@ -30,7 +30,7 @@ export const handler = async (
 ): Promise<Response> => {
   // Create a scrape session record
   let sessionId: number | null = null;
-  let sessionStatus: "success" | "partial" | "failed" = "failed";
+  let _sessionStatus: "success" | "partial" | "failed" = "failed";
   let sessionError: string | null = null;
 
   try {
@@ -235,7 +235,7 @@ export const handler = async (
       },
     };
 
-    sessionStatus = "success";
+    _sessionStatus = "success";
 
     return new Response(
       JSON.stringify({
@@ -256,7 +256,7 @@ export const handler = async (
     console.error("Error parsing BrickEconomy HTML:", error);
 
     sessionError = error instanceof Error ? error.message : "Unknown error";
-    sessionStatus = "failed";
+    _sessionStatus = "failed";
 
     // Update session with failed status if session was created
     if (sessionId) {

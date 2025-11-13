@@ -191,6 +191,61 @@ export const priceHistory = pgTable(
   }),
 );
 
+// Shopee scrapes table - time-series data for Shopee products
+// This table stores product snapshots at each scrape time
+// Only includes fields that are actually scraped from Shopee
+export const shopeeScrapes = pgTable(
+  "shopee_scrapes",
+  {
+    id: serial("id").primaryKey(),
+
+    // Foreign key to products table
+    productId: varchar("product_id", { length: 100 }).notNull(),
+
+    // Foreign key to scrape session
+    scrapeSessionId: integer("scrape_session_id"),
+
+    // Price data (only what's actually scraped)
+    price: bigint("price", { mode: "number" }),
+    currency: varchar("currency", { length: 10 }),
+
+    // Sales data
+    unitsSold: bigint("units_sold", { mode: "number" }),
+
+    // Shop data
+    shopId: bigint("shop_id", { mode: "number" }),
+    shopName: varchar("shop_name", { length: 255 }),
+
+    // Product URL (may change over time)
+    productUrl: text("product_url"),
+
+    // Full data snapshot
+    rawData: jsonb("raw_data"),
+
+    // Timestamp - critical for timeline queries
+    scrapedAt: timestamp("scraped_at").defaultNow().notNull(),
+  },
+  (table) => ({
+    // Index for product lookup
+    productIdIdx: index("idx_shopee_scrapes_product_id").on(table.productId),
+
+    // Index for session lookup
+    sessionIdIdx: index("idx_shopee_scrapes_session_id").on(table.scrapeSessionId),
+
+    // Composite index for time-series queries (most important!)
+    productTimeIdx: index("idx_shopee_scrapes_product_time").on(
+      table.productId,
+      table.scrapedAt,
+    ),
+
+    // Index for shop queries
+    shopIdIdx: index("idx_shopee_scrapes_shop_id").on(table.shopId),
+
+    // Index for time-based queries
+    scrapedAtIdx: index("idx_shopee_scrapes_scraped_at").on(table.scrapedAt),
+  }),
+);
+
 // Bricklink price history for tracking price changes over time (legacy JSONB format)
 export const bricklinkPriceHistory = pgTable(
   "bricklink_price_history",
@@ -272,11 +327,22 @@ export const scrapeSessions = pgTable(
     productsStored: integer("products_stored").notNull().default(0),
     status: varchar("status", { length: 20 }).notNull().default("success"), // success, partial, failed
     errorMessage: text("error_message"),
+
+    // Optional session label for promotion tracking (e.g., "12.12 Sale")
+    sessionLabel: varchar("session_label", { length: 255 }),
+
+    // Filter context - what shop filter was used during scrape
+    filterContext: text("filter_context"),
+
+    // Shop name for Shopee scrapes
+    shopName: varchar("shop_name", { length: 255 }),
+
     scrapedAt: timestamp("scraped_at").defaultNow().notNull(),
   },
   (table) => ({
     scrapedAtIdx: index("idx_scrape_sessions_scraped_at").on(table.scrapedAt),
     sourceIdx: index("idx_scrape_sessions_source").on(table.source),
+    shopNameIdx: index("idx_scrape_sessions_shop_name").on(table.shopName),
   }),
 );
 
@@ -442,6 +508,9 @@ export type NewProduct = typeof products.$inferInsert;
 
 export type PriceHistory = typeof priceHistory.$inferSelect;
 export type NewPriceHistory = typeof priceHistory.$inferInsert;
+
+export type ShopeeScrape = typeof shopeeScrapes.$inferSelect;
+export type NewShopeeScrape = typeof shopeeScrapes.$inferInsert;
 
 export type ScrapeSession = typeof scrapeSessions.$inferSelect;
 export type NewScrapeSession = typeof scrapeSessions.$inferInsert;

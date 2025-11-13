@@ -16,10 +16,12 @@ interface Product {
   brand?: string;
   sku?: string;
   wasUpdated?: boolean;
+  isNew?: boolean;
   previousSold?: number | null;
   previousPrice?: number | null;
   soldDelta?: number | null;
   priceDelta?: number | null;
+  priceChangePercent?: number | null;
   createdAt?: string;
   updatedAt?: string;
 }
@@ -46,7 +48,7 @@ interface ProductNeedingValidation {
   shopName?: string | null;
   brand?: string | null;
   sku?: string | null;
-  _originalData: any;
+  _originalData: Record<string, unknown>;
 }
 
 interface ValidationResponse {
@@ -191,7 +193,7 @@ export default function UnifiedParser() {
     error.value = null; // Clear error instead of showing cancellation message
   };
 
-  const handleSkipProduct = () => {
+  const _handleSkipProduct = () => {
     // Move to next product or close modal if done
     if (
       currentValidationIndex.value < productsNeedingValidation.value.length - 1
@@ -255,7 +257,7 @@ export default function UnifiedParser() {
           ageRange: currentProduct._originalData.ageRange,
           rawData: {
             product_url: currentProduct._originalData.productUrl,
-            ...currentProduct._originalData.rawData,
+            ...(currentProduct._originalData.rawData as Record<string, unknown> || {}),
           },
         };
 
@@ -567,46 +569,44 @@ export default function UnifiedParser() {
                           "price",
                         );
 
+                        // Determine row background color based on price change
+                        const isPriceDrop = product.priceDelta && product.priceDelta < 0;
+                        const isPriceIncrease = product.priceDelta && product.priceDelta > 0;
+                        const rowBgClass = product.isNew
+                          ? "bg-warning/10 hover:bg-warning/20"
+                          : isPriceDrop
+                          ? "bg-success/10 hover:bg-success/20"
+                          : isPriceIncrease
+                          ? "bg-error/10 hover:bg-error/20"
+                          : "hover:bg-base-200/50";
+
                         return (
                           <tr
                             key={product.id}
-                            class="hover:bg-base-200/50 transition-colors"
+                            class={`${rowBgClass} transition-colors`}
                           >
                             <td class="py-3">
-                              {product.wasUpdated
+                              {product.isNew
                                 ? (
-                                  <span class="badge badge-info badge-sm gap-1">
-                                    <svg
-                                      xmlns="http://www.w3.org/2000/svg"
-                                      class="h-3 w-3"
-                                      viewBox="0 0 20 20"
-                                      fill="currentColor"
-                                    >
-                                      <path d="M4 4a2 2 0 00-2 2v1h16V6a2 2 0 00-2-2H4z" />
-                                      <path
-                                        fill-rule="evenodd"
-                                        d="M18 9H2v5a2 2 0 002 2h12a2 2 0 002-2V9zM4 13a1 1 0 011-1h1a1 1 0 110 2H5a1 1 0 01-1-1zm5-1a1 1 0 100 2h1a1 1 0 100-2H9z"
-                                        clip-rule="evenodd"
-                                      />
-                                    </svg>
-                                    Updated
+                                  <span class="badge badge-warning badge-sm gap-1 font-semibold">
+                                    ⚡ New
+                                  </span>
+                                )
+                                : isPriceDrop
+                                ? (
+                                  <span class="badge badge-success badge-sm gap-1 font-semibold">
+                                    🔻 Drop
+                                  </span>
+                                )
+                                : isPriceIncrease
+                                ? (
+                                  <span class="badge badge-error badge-sm gap-1 font-semibold">
+                                    🔺 Up
                                   </span>
                                 )
                                 : (
-                                  <span class="badge badge-success badge-sm gap-1">
-                                    <svg
-                                      xmlns="http://www.w3.org/2000/svg"
-                                      class="h-3 w-3"
-                                      viewBox="0 0 20 20"
-                                      fill="currentColor"
-                                    >
-                                      <path
-                                        fill-rule="evenodd"
-                                        d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-11a1 1 0 10-2 0v2H7a1 1 0 100 2h2v2a1 1 0 102 0v-2h2a1 1 0 100-2h-2V7z"
-                                        clip-rule="evenodd"
-                                      />
-                                    </svg>
-                                    New
+                                  <span class="badge badge-ghost badge-sm gap-1">
+                                    —
                                   </span>
                                 )}
                             </td>
@@ -667,8 +667,26 @@ export default function UnifiedParser() {
                                 : <span class="text-xs opacity-40">—</span>}
                             </td>
                             <td class="py-3">
-                              <div class="font-semibold text-base">
-                                {formatPrice(product.price)}
+                              <div class="flex items-center gap-2">
+                                <div class="font-semibold text-base">
+                                  {formatPrice(product.price)}
+                                </div>
+                                {product.priceChangePercent !== null && product.priceChangePercent !== undefined && (
+                                  <span
+                                    class={`badge badge-sm font-bold ${
+                                      product.priceChangePercent < 0
+                                        ? product.priceChangePercent <= -20
+                                          ? "badge-success"
+                                          : product.priceChangePercent <= -10
+                                          ? "bg-success/70 text-success-content"
+                                          : "bg-success/40 text-success-content"
+                                        : "badge-error"
+                                    }`}
+                                  >
+                                    {product.priceChangePercent > 0 ? "+" : ""}
+                                    {product.priceChangePercent}%
+                                  </span>
+                                )}
                               </div>
                               {priceDelta && (
                                 <div

@@ -126,7 +126,7 @@ export class ValueCalculator {
     }
 
     // Retirement status multiplier (retired sets appreciate)
-    let retirementMultiplier =
+    let retirementMultiplier: number =
       CONFIG.INTRINSIC_VALUE.RETIREMENT_MULTIPLIERS.ACTIVE;
     if (retirementStatus === "retired") {
       retirementMultiplier =

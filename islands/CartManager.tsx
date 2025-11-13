@@ -17,7 +17,6 @@ import {
   removeCartItem,
   saveAppliedVouchers,
   saveTotalCartPrice,
-  saveVoucherTemplates,
   updateCartItem,
 } from "../utils/cart.ts";
 import { formatPrice } from "../utils/formatters.ts";
@@ -27,7 +26,6 @@ import {
   findOptimalVoucherOrder,
   getDiscountDescription,
 } from "../utils/voucher.ts";
-import { DiscountType, VoucherType } from "../types/voucher.ts";
 
 export default function CartManager() {
   const cartItems = useSignal<CartItem[]>([]);

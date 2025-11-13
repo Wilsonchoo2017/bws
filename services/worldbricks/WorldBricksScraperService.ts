@@ -22,7 +22,6 @@ import type { RateLimiterService } from "../rate-limiter/RateLimiterService.ts";
 import type { WorldBricksRepository } from "./WorldBricksRepository.ts";
 import {
   constructSearchUrl,
-  constructWorldBricksUrl,
   isValidWorldBricksPage,
   parseSearchResults,
   parseWorldBricksHtml,
@@ -75,7 +74,7 @@ export class WorldBricksScraperService {
    * Scrape a LEGO set from WorldBricks
    */
   async scrape(options: ScrapeOptions): Promise<ScrapeResult> {
-    const { setNumber, setName, url, saveToDb = false, skipRateLimit = false } =
+    const { setNumber, setName: _setName, url, saveToDb = false, skipRateLimit = false } =
       options;
 
     // Check circuit breaker

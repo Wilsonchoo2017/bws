@@ -190,7 +190,7 @@ export class ImageStorageService {
    */
   private createStorageResult(
     absolutePath: string,
-    storageDir: string,
+    _storageDir: string,
     filename: string,
     productId?: string,
   ): StorageResult {

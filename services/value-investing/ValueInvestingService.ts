@@ -15,6 +15,7 @@
 
 import type { Product } from "../../db/schema.ts";
 import type { AnalysisService } from "../analysis/AnalysisService.ts";
+import type { ProductRecommendation } from "../analysis/types.ts";
 import { ValueCalculator } from "./ValueCalculator.ts";
 import type {
   IntrinsicValueInputs,
@@ -146,7 +147,7 @@ export class ValueInvestingService {
    */
   private transformToValueProduct(
     product: Product,
-    analysisResults: Map<string, any>,
+    analysisResults: Map<string, ProductRecommendation>,
     stats: ProcessingStats,
   ): ValueInvestingProduct | null {
     const analysis = analysisResults.get(product.productId);
@@ -181,11 +182,12 @@ export class ValueInvestingService {
     }
 
     // Build intrinsic value inputs
-    const retirementStatus = analysis.dimensions?.availability
-      ?.retirementStatus;
+    const availabilityDataPoints = analysis.dimensions?.availability?.dataPoints || {};
+    const pricingDataPoints = analysis.dimensions?.pricing?.dataPoints || {};
+    const retirementStatus = availabilityDataPoints.retirementStatus as string | undefined;
     const intrinsicValueInputs: IntrinsicValueInputs = {
-      bricklinkAvgPrice: analysis.dimensions?.pricing?.bricklinkAvgPrice,
-      bricklinkMaxPrice: analysis.dimensions?.pricing?.bricklinkMaxPrice,
+      bricklinkAvgPrice: pricingDataPoints.bricklinkAvgPrice as number | undefined,
+      bricklinkMaxPrice: pricingDataPoints.bricklinkMaxPrice as number | undefined,
       demandScore: analysis.dimensions?.demand?.value ?? 50,
       qualityScore: analysis.dimensions?.quality?.value ?? 50,
       retirementStatus: isRetirementStatus(retirementStatus)
@@ -197,7 +199,7 @@ export class ValueInvestingService {
     let valueMetrics;
     try {
       valueMetrics = ValueCalculator.calculateValueMetrics(
-        product.price,
+        product.price!,
         intrinsicValueInputs,
         analysis.urgency,
       );
@@ -220,13 +222,13 @@ export class ValueInvestingService {
     return {
       id: product.id,
       productId: product.productId,
-      name: product.name,
-      image: product.image,
+      name: product.name!, // Safe: validated by isValidProduct
+      image: product.image!, // Safe: validated by isValidProduct
       legoSetNumber: product.legoSetNumber,
       source: product.source,
-      brand: product.brand,
-      currentPrice: product.price,
-      currency: product.currency,
+      brand: product.brand!, // Safe: validated by isValidProduct
+      currentPrice: product.price!, // Safe: validated by isValidProduct
+      currency: product.currency || "MYR",
       valueMetrics,
       strategy: analysis.strategy || "Unknown",
       action: analysis.action,

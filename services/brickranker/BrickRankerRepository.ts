@@ -340,7 +340,7 @@ export class BrickRankerRepository {
     total: number;
   }> {
     // Wrap all operations in a transaction for atomicity
-    return await db.transaction(async (tx) => {
+    return await db.transaction(async (_tx) => {
       let created = 0;
       let updated = 0;
 

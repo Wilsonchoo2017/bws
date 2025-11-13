@@ -280,7 +280,7 @@ export class BricklinkScraperService {
       }
 
       // Wrap all database operations in a transaction for atomicity
-      await db.transaction(async (tx) => {
+      await db.transaction(async (_tx) => {
         // Upsert the item
         const { item, isNew } = await this.repository.upsert(
           data.item_id,

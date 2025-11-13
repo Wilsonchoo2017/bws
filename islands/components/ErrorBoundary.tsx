@@ -1,9 +1,13 @@
 import { Component, type ComponentChildren } from "preact";
 
+interface ErrorInfo {
+  componentStack?: string;
+}
+
 interface ErrorBoundaryProps {
   children: ComponentChildren;
   fallback?: ComponentChildren;
-  onError?: (error: Error, errorInfo: any) => void;
+  onError?: (error: Error, errorInfo: ErrorInfo) => void;
 }
 
 interface ErrorBoundaryState {
@@ -31,7 +35,7 @@ export class ErrorBoundary extends Component<
     return { hasError: true, error };
   }
 
-  componentDidCatch(error: Error, errorInfo: any) {
+  componentDidCatch(error: Error, errorInfo: ErrorInfo) {
     // Log error details for debugging
     console.error("[ErrorBoundary] Caught error:", {
       error: error.message,

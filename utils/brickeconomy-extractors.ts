@@ -107,12 +107,12 @@ function extractRowValue(doc: HTMLDocument, labelText: string): string | null {
   const rows = doc.querySelectorAll(".row.rowlist");
 
   for (const row of rows) {
-    const label = row.querySelector(".text-muted");
+    const label = (row as unknown as Element).querySelector(".text-muted");
     if (
       label &&
       label.textContent?.trim().toLowerCase().includes(labelText.toLowerCase())
     ) {
-      const valueCol = row.querySelector(".col-xs-7");
+      const valueCol = (row as unknown as Element).querySelector(".col-xs-7");
       if (valueCol) {
         // Get text content, strip HTML tags and extra whitespace
         return valueCol.textContent?.trim() || null;
@@ -179,9 +179,9 @@ export function extractUsedValue(doc: HTMLDocument): number | null {
   const valueRows: Array<{ row: Element; value: string }> = [];
 
   for (const row of rows) {
-    const label = row.querySelector(".col-xs-5.text-muted");
+    const label = (row as unknown as Element).querySelector(".col-xs-5.text-muted");
     if (label && label.textContent?.trim().toLowerCase() === "value") {
-      const valueCol = row.querySelector(".col-xs-7");
+      const valueCol = (row as unknown as Element).querySelector(".col-xs-7");
       if (valueCol) {
         const valueText = valueCol.textContent?.trim() || "";
 
@@ -189,7 +189,7 @@ export function extractUsedValue(doc: HTMLDocument): number | null {
         const hasBoldTag = valueCol.querySelector("b") !== null;
 
         if (!hasBoldTag && valueText.startsWith("$")) {
-          valueRows.push({ row, value: valueText });
+          valueRows.push({ row: row as unknown as Element, value: valueText });
         }
       }
     }
@@ -354,7 +354,7 @@ export function extractQuickBuyPrices(doc: HTMLDocument): {
 
   for (const row of rows) {
     // Check for marketplace header (semibold div)
-    const prevSibling = row.previousElementSibling;
+    const prevSibling = (row as unknown as Element).previousElementSibling;
     if (prevSibling?.classList.contains("semibold")) {
       const headerText = prevSibling.textContent?.toLowerCase() || "";
       if (headerText.includes("ebay")) currentMarketplace = "ebay";
@@ -365,8 +365,8 @@ export function extractQuickBuyPrices(doc: HTMLDocument): {
       }
     }
 
-    const label = row.querySelector(".text-muted");
-    const valueCol = row.querySelector(".col-xs-7");
+    const label = (row as unknown as Element).querySelector(".text-muted");
+    const valueCol = (row as unknown as Element).querySelector(".col-xs-7");
 
     if (!label || !valueCol) continue;
 
@@ -412,8 +412,8 @@ export function extractForecasts(
   let fiveYear: number | null = null;
 
   for (const row of rows) {
-    const label = row.querySelector(".text-muted");
-    const valueCol = row.querySelector(".col-xs-7");
+    const label = (row as unknown as Element).querySelector(".text-muted");
+    const valueCol = (row as unknown as Element).querySelector(".col-xs-7");
 
     if (!label || !valueCol) continue;
 

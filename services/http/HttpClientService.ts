@@ -54,10 +54,10 @@ export class HttpClientService {
    * Initialize the browser instance
    * Thread-safe: Multiple concurrent calls will wait for the same initialization
    */
-  async initialize(): Promise<void> {
+  initialize(): Promise<void> {
     // If already initialized, return immediately
     if (this.isInitialized) {
-      return;
+      return Promise.resolve();
     }
 
     // If initialization is in progress, wait for it

@@ -13,7 +13,10 @@
  * - Pure functions: No side effects, easy to test
  */
 
-import { DOMParser } from "https://deno.land/x/deno_dom@v0.1.45/deno-dom-wasm.ts";
+import {
+  DOMParser,
+  type HTMLDocument,
+} from "https://deno.land/x/deno_dom@v0.1.45/deno-dom-wasm.ts";
 
 /**
  * Price data structure
@@ -197,7 +200,7 @@ export function parseItemInfo(html: string): {
  * Extract image URL from Bricklink item page
  * Pure function - no side effects
  */
-export function extractImageUrl(doc: any): string | null {
+export function extractImageUrl(doc: HTMLDocument): string | null {
   // Try to find the main product image
   // Bricklink typically shows the image in an <img> tag with id "ItemEditForm:largeImg" or similar
 
@@ -225,7 +228,7 @@ export function extractImageUrl(doc: any): string | null {
   // Fourth try: look for images in the page that contain "img.bricklink.com"
   const allImages = doc.querySelectorAll("img");
   for (const img of allImages) {
-    const src = img.getAttribute("src");
+    const src = (img as unknown as Element).getAttribute("src");
     if (src && (src.includes("img.bricklink.com") || src.includes("brickimg"))) {
       // Avoid small icons and thumbnails
       if (!src.includes("/icon/") && !src.includes("_thumb") && !src.includes("small")) {
