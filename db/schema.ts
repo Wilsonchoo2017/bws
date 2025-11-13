@@ -39,6 +39,12 @@ export const bricklinkItems = pgTable(
     title: text("title"),
     weight: varchar("weight", { length: 50 }),
 
+    // Image fields
+    imageUrl: text("image_url"),
+    localImagePath: text("local_image_path"),
+    imageDownloadedAt: timestamp("image_downloaded_at"),
+    imageDownloadStatus: varchar("image_download_status", { length: 20 }),
+
     // Store pricing data as JSONB for flexibility
     sixMonthNew: jsonb("six_month_new"),
     sixMonthUsed: jsonb("six_month_used"),
@@ -64,6 +70,8 @@ export const bricklinkItems = pgTable(
     nextScrapeAtIdx: index("idx_bricklink_next_scrape_at").on(
       table.nextScrapeAt,
     ),
+    // Index for image download status
+    imageStatusIdx: index("idx_bricklink_image_status").on(table.imageDownloadStatus),
   }),
 );
 
@@ -144,6 +152,7 @@ export const products = pgTable(
     createdAtIdx: index("idx_products_created_at").on(table.createdAt),
     legoSetNumberIdx: index("idx_products_lego_set").on(table.legoSetNumber),
     watchStatusIdx: index("idx_products_watch_status").on(table.watchStatus),
+    imageStatusIdx: index("idx_products_image_status").on(table.imageDownloadStatus),
     // Full-text search index on name
     nameSearchIdx: index("idx_products_name_search").using(
       "gin",
@@ -299,6 +308,12 @@ export const brickrankerRetirementItems = pgTable(
     expectedRetirementDate: varchar("expected_retirement_date", { length: 50 }),
     theme: varchar("theme", { length: 100 }),
 
+    // Image fields
+    imageUrl: text("image_url"),
+    localImagePath: text("local_image_path"),
+    imageDownloadedAt: timestamp("image_downloaded_at"),
+    imageDownloadStatus: varchar("image_download_status", { length: 20 }),
+
     // Optional link to products table for sets we already track
     productId: integer("product_id"),
 
@@ -328,6 +343,8 @@ export const brickrankerRetirementItems = pgTable(
     nextScrapeAtIdx: index("idx_brickranker_next_scrape_at").on(
       table.nextScrapeAt,
     ),
+    // Index for image download status
+    imageStatusIdx: index("idx_brickranker_image_status").on(table.imageDownloadStatus),
   }),
 );
 

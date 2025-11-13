@@ -33,6 +33,10 @@ import type { PricingBox, PriceData } from "./BricklinkParser.ts";
 export interface UpdateBricklinkItemData {
   title?: string | null;
   weight?: string | null;
+  imageUrl?: string | null;
+  localImagePath?: string | null;
+  imageDownloadedAt?: Date;
+  imageDownloadStatus?: string;
   sixMonthNew?: PricingBox | null;
   sixMonthUsed?: PricingBox | null;
   currentNew?: PricingBox | null;
@@ -190,6 +194,9 @@ export class BricklinkRepository {
       itemType: string;
       title: string | null;
       weight: string | null;
+      imageUrl?: string | null;
+      localImagePath?: string | null;
+      imageDownloadStatus?: string;
       sixMonthNew: PricingBox | null;
       sixMonthUsed: PricingBox | null;
       currentNew: PricingBox | null;
@@ -201,14 +208,28 @@ export class BricklinkRepository {
 
     if (existing) {
       // Update existing
-      const updated = await this.update(itemId, {
+      const updateData: UpdateBricklinkItemData = {
         title: data.title,
         weight: data.weight,
         sixMonthNew: data.sixMonthNew,
         sixMonthUsed: data.sixMonthUsed,
         currentNew: data.currentNew,
         currentUsed: data.currentUsed,
-      });
+      };
+
+      // Update image fields if provided
+      if (data.imageUrl !== undefined) {
+        updateData.imageUrl = data.imageUrl;
+      }
+      if (data.localImagePath !== undefined) {
+        updateData.localImagePath = data.localImagePath;
+        updateData.imageDownloadedAt = new Date();
+      }
+      if (data.imageDownloadStatus !== undefined) {
+        updateData.imageDownloadStatus = data.imageDownloadStatus;
+      }
+
+      const updated = await this.update(itemId, updateData);
 
       return { item: updated!, isNew: false };
     } else {
@@ -219,11 +240,15 @@ export class BricklinkRepository {
         now.getTime() + intervalDays * 24 * 60 * 60 * 1000,
       );
 
-      const created = await this.create({
+      const newItemData: NewBricklinkItem = {
         itemId,
         itemType: data.itemType,
         title: data.title,
         weight: data.weight,
+        imageUrl: data.imageUrl || null,
+        localImagePath: data.localImagePath || null,
+        imageDownloadedAt: data.localImagePath ? now : null,
+        imageDownloadStatus: data.imageDownloadStatus || null,
         sixMonthNew: data.sixMonthNew,
         sixMonthUsed: data.sixMonthUsed,
         currentNew: data.currentNew,
@@ -231,7 +256,9 @@ export class BricklinkRepository {
         scrapeIntervalDays: intervalDays,
         lastScrapedAt: now,
         nextScrapeAt: nextScrape,
-      });
+      };
+
+      const created = await this.create(newItemData);
 
       return { item: created, isNew: true };
     }

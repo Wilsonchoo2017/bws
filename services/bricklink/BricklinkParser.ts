@@ -44,6 +44,7 @@ export interface BricklinkData {
   item_type: string;
   title: string | null;
   weight: string | null;
+  image_url: string | null;
   six_month_new: PricingBox | null;
   six_month_used: PricingBox | null;
   current_new: PricingBox | null;
@@ -170,6 +171,7 @@ export function extractPriceBox(boxText: string): PricingBox | null {
 export function parseItemInfo(html: string): {
   title: string | null;
   weight: string | null;
+  image_url: string | null;
 } {
   const parser = new DOMParser();
   const doc = parser.parseFromString(html, "text/html");
@@ -185,7 +187,69 @@ export function parseItemInfo(html: string): {
   const weightElem = doc.querySelector("span#item-weight-info");
   const weight = weightElem?.textContent?.trim() || null;
 
-  return { title, weight };
+  // Extract image URL
+  const image_url = extractImageUrl(doc);
+
+  return { title, weight, image_url };
+}
+
+/**
+ * Extract image URL from Bricklink item page
+ * Pure function - no side effects
+ */
+export function extractImageUrl(doc: any): string | null {
+  // Try to find the main product image
+  // Bricklink typically shows the image in an <img> tag with id "ItemEditForm:largeImg" or similar
+
+  // First try: large image in item edit form
+  let imgElem = doc.querySelector("img#ItemEditForm\\:largeImg");
+  if (imgElem) {
+    const src = imgElem.getAttribute("src");
+    if (src) return normalizeImageUrl(src);
+  }
+
+  // Second try: image in the main catalog display
+  imgElem = doc.querySelector("img[id*='largeImg']");
+  if (imgElem) {
+    const src = imgElem.getAttribute("src");
+    if (src) return normalizeImageUrl(src);
+  }
+
+  // Third try: any img in the item image container
+  imgElem = doc.querySelector("div#item-image-block img, div.item-image img");
+  if (imgElem) {
+    const src = imgElem.getAttribute("src");
+    if (src) return normalizeImageUrl(src);
+  }
+
+  // Fourth try: look for images in the page that contain "img.bricklink.com"
+  const allImages = doc.querySelectorAll("img");
+  for (const img of allImages) {
+    const src = img.getAttribute("src");
+    if (src && (src.includes("img.bricklink.com") || src.includes("brickimg"))) {
+      // Avoid small icons and thumbnails
+      if (!src.includes("/icon/") && !src.includes("_thumb") && !src.includes("small")) {
+        return normalizeImageUrl(src);
+      }
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Normalize Bricklink image URL to get the highest quality version
+ * Pure function - no side effects
+ */
+function normalizeImageUrl(url: string): string {
+  // Ensure absolute URL
+  if (url.startsWith("//")) {
+    return `https:${url}`;
+  }
+  if (url.startsWith("/")) {
+    return `https://www.bricklink.com${url}`;
+  }
+  return url;
 }
 
 /**

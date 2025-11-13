@@ -28,6 +28,9 @@ import {
   parsePriceGuide,
 } from "./BricklinkParser.ts";
 import { calculateBackoff, RETRY_CONFIG } from "../../config/scraper.config.ts";
+import { imageDownloadService } from "../image/ImageDownloadService.ts";
+import { imageStorageService } from "../image/ImageStorageService.ts";
+import { IMAGE_CONFIG, ImageDownloadStatus } from "../../config/image.config.ts";
 
 /**
  * Result of a scraping operation
@@ -124,7 +127,7 @@ export class BricklinkScraperService {
         }
 
         // Parse item info
-        const { title, weight } = parseItemInfo(itemResponse.html);
+        const { title, weight, image_url } = parseItemInfo(itemResponse.html);
 
         // Build price guide URL
         const priceGuideUrl = buildPriceGuideUrl(itemType, itemId);
@@ -158,6 +161,7 @@ export class BricklinkScraperService {
           item_type: itemType,
           title,
           weight,
+          image_url,
           ...pricingData,
         };
 
@@ -209,6 +213,42 @@ export class BricklinkScraperService {
    */
   private async saveToDatabase(data: BricklinkData): Promise<void> {
     try {
+      // Download and store image if available
+      let localImagePath: string | null = null;
+      let imageDownloadStatus = ImageDownloadStatus.SKIPPED;
+
+      if (data.image_url && IMAGE_CONFIG.FEATURES.ENABLE_DEDUPLICATION) {
+        try {
+          console.log(`📸 Downloading image: ${data.image_url}`);
+          imageDownloadStatus = ImageDownloadStatus.DOWNLOADING;
+
+          const imageData = await imageDownloadService.download(data.image_url, {
+            timeoutMs: IMAGE_CONFIG.DOWNLOAD.TIMEOUT_MS,
+            maxRetries: IMAGE_CONFIG.DOWNLOAD.MAX_RETRIES,
+            retryDelayMs: IMAGE_CONFIG.DOWNLOAD.RETRY_DELAY_MS,
+            allowedFormats: IMAGE_CONFIG.VALIDATION.ALLOWED_FORMATS,
+          });
+
+          const storageResult = await imageStorageService.store(
+            imageData.data,
+            data.image_url,
+            imageData.extension,
+            data.item_id,
+          );
+
+          localImagePath = storageResult.relativePath;
+          imageDownloadStatus = ImageDownloadStatus.COMPLETED;
+          console.log(`✅ Image stored: ${localImagePath}`);
+        } catch (error) {
+          console.error(`❌ Image download failed: ${error.message}`);
+          imageDownloadStatus = ImageDownloadStatus.FAILED;
+          // Continue with scraping even if image download fails
+          if (!IMAGE_CONFIG.FEATURES.FALLBACK_TO_EXTERNAL) {
+            throw error; // Re-throw if we don't want to continue without image
+          }
+        }
+      }
+
       // Upsert the item
       const { item, isNew } = await this.repository.upsert(
         data.item_id,
@@ -216,6 +256,9 @@ export class BricklinkScraperService {
           itemType: data.item_type,
           title: data.title,
           weight: data.weight,
+          imageUrl: data.image_url,
+          localImagePath,
+          imageDownloadStatus,
           sixMonthNew: data.six_month_new,
           sixMonthUsed: data.six_month_used,
           currentNew: data.current_new,
