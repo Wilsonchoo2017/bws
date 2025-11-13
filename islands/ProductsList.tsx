@@ -596,6 +596,17 @@ export default function ProductsList() {
                         : <span class="text-base-content/50">—</span>}
                     </td>
                     <td>
+                      <span
+                        class={`badge badge-sm ${
+                          item.hasBricklinkData
+                            ? "badge-success"
+                            : "badge-ghost"
+                        }`}
+                      >
+                        {item.hasBricklinkData ? "Available" : "Missing"}
+                      </span>
+                    </td>
+                    <td>
                       <div class="font-semibold">{formatPrice(item.price)}</div>
                       {item.priceBeforeDiscount &&
                         item.priceBeforeDiscount > (item.price || 0) && (

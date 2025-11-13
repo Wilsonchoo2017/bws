@@ -29,18 +29,19 @@ import type { ProductRecommendation } from "./types.ts";
 export class AnalysisService {
   private recommendationEngine: RecommendationEngine;
   private dataAggregationService: DataAggregationService;
+  private productRepo: ProductRepository;
   private defaultStrategy = "Investment Focus";
 
   constructor() {
     // Initialize repositories (Dependency Injection)
-    const productRepo = new ProductRepository();
+    this.productRepo = new ProductRepository();
     const bricklinkRepo = new BricklinkRepository();
     const redditRepo = new RedditRepository();
     const retirementRepo = new RetirementRepository();
 
     // Initialize data aggregation service with repositories
     this.dataAggregationService = new DataAggregationService(
-      productRepo,
+      this.productRepo,
       bricklinkRepo,
       redditRepo,
       retirementRepo,
@@ -88,27 +89,58 @@ export class AnalysisService {
   }
 
   /**
-   * Analyze multiple products in parallel
+   * Analyze multiple products using batch operations (OPTIMIZED)
+   * Solves N+1 query problem by using batch data fetching
+   * @param productIds - Array of product IDs to analyze
+   * @param strategyName - Optional strategy name
+   * @returns Map of productId -> ProductRecommendation
    */
   async analyzeProducts(
     productIds: string[],
     strategyName?: string,
   ): Promise<Map<string, ProductRecommendation>> {
+    if (productIds.length === 0) return new Map();
+
     const results = new Map<string, ProductRecommendation>();
+    const strategy = strategyName || this.defaultStrategy;
 
-    // Analyze in parallel using Promise.allSettled
-    const analyses = await Promise.allSettled(
-      productIds.map((id) => this.analyzeProduct(id, strategyName)),
-    );
+    try {
+      // Step 1: Batch fetch all products (1 query)
+      const products = await this.productRepo.findByProductIds(productIds);
 
-    // Collect successful results
-    analyses.forEach((result, index) => {
-      if (result.status === "fulfilled") {
-        results.set(productIds[index], result.value);
+      // Step 2: Batch aggregate all related data (3 queries instead of 3*N!)
+      const aggregatedDataMap = await this.dataAggregationService
+        .aggregateProductsData(products);
+
+      // Step 3: Run analysis for each product
+      for (const [productId, input] of aggregatedDataMap.entries()) {
+        try {
+          const recommendation = await this.recommendationEngine.analyze(
+            input,
+            strategy,
+          );
+          results.set(productId, recommendation);
+        } catch (error) {
+          console.warn(
+            `[AnalysisService] Failed to analyze product ${productId}:`,
+            error instanceof Error ? error.message : error,
+          );
+          // Skip failed analyses
+        }
       }
-    });
 
-    return results;
+      console.info(
+        `[AnalysisService] Batch analysis complete: ${results.size}/${productIds.length} successful`,
+      );
+
+      return results;
+    } catch (error) {
+      console.error(
+        "[AnalysisService] Batch analysis failed:",
+        error instanceof Error ? error.message : error,
+      );
+      return results; // Return partial results
+    }
   }
 
   /**

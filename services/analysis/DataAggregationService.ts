@@ -69,6 +69,72 @@ export class DataAggregationService {
   }
 
   /**
+   * Aggregate data for multiple products (BATCH OPERATION)
+   * Solves N+1 query problem by fetching all related data in 3 queries instead of 3*N
+   * @param products - Array of products to aggregate data for
+   * @returns Map of productId -> ProductAnalysisInput
+   */
+  async aggregateProductsData(
+    products: Product[],
+  ): Promise<Map<string, ProductAnalysisInput>> {
+    if (products.length === 0) return new Map();
+
+    // Extract all unique LEGO set numbers
+    const legoSetNumbers = products
+      .map((p) => p.legoSetNumber)
+      .filter((n): n is string => n !== null);
+
+    const uniqueSetNumbers = Array.from(new Set(legoSetNumbers));
+
+    // Batch fetch all related data in parallel (3 queries instead of 3*N!)
+    const [bricklinkMap, redditMap, retirementMap] = await Promise.all([
+      this.bricklinkRepo.findByLegoSetNumbers(uniqueSetNumbers),
+      this.redditRepo.findByLegoSetNumbers(uniqueSetNumbers),
+      this.retirementRepo.findByLegoSetNumbers(uniqueSetNumbers),
+    ]);
+
+    console.info(
+      `[DataAggregationService] Batch aggregation complete:`,
+      {
+        products: products.length,
+        uniqueSetNumbers: uniqueSetNumbers.length,
+        bricklinkHits: bricklinkMap.size,
+        redditHits: redditMap.size,
+        retirementHits: retirementMap.size,
+      },
+    );
+
+    // Build analysis input for each product
+    const resultMap = new Map<string, ProductAnalysisInput>();
+
+    for (const product of products) {
+      // Look up related data from maps (O(1) instead of O(N) queries)
+      const bricklinkData = product.legoSetNumber
+        ? bricklinkMap.get(product.legoSetNumber) || null
+        : null;
+      const redditData = product.legoSetNumber
+        ? redditMap.get(product.legoSetNumber) || null
+        : null;
+      const retirementData = product.legoSetNumber
+        ? retirementMap.get(product.legoSetNumber) || null
+        : null;
+
+      const analysisInput: ProductAnalysisInput = {
+        productId: product.productId,
+        name: product.name || "Unknown Product",
+        pricing: this.buildPricingData(product, bricklinkData),
+        demand: this.buildDemandData(product, bricklinkData, redditData),
+        availability: this.buildAvailabilityData(product, retirementData),
+        quality: this.buildQualityData(product, retirementData),
+      };
+
+      resultMap.set(product.productId, analysisInput);
+    }
+
+    return resultMap;
+  }
+
+  /**
    * Build pricing data from product and Bricklink sources
    * Pure function - no side effects
    */

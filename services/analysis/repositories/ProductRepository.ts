@@ -4,7 +4,7 @@
  * Follows Repository Pattern for clean architecture
  */
 
-import { eq } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 import { db } from "../../../db/client.ts";
 import { type Product, products } from "../../../db/schema.ts";
 import type { IProductRepository } from "./IRepository.ts";
@@ -43,6 +43,27 @@ export class ProductRepository implements IProductRepository {
     } catch (error) {
       console.error(
         `[ProductRepository] Failed to fetch products for set ${setNumber}:`,
+        error instanceof Error ? error.message : error,
+      );
+      return []; // Return empty array on error
+    }
+  }
+
+  /**
+   * Find multiple products by productIds (batch operation)
+   * Solves N+1 query problem by fetching all products in one query
+   */
+  async findByProductIds(productIds: string[]): Promise<Product[]> {
+    if (productIds.length === 0) return [];
+
+    try {
+      return await db
+        .select()
+        .from(products)
+        .where(inArray(products.productId, productIds));
+    } catch (error) {
+      console.error(
+        `[ProductRepository] Failed to fetch products by IDs (count: ${productIds.length}):`,
         error instanceof Error ? error.message : error,
       );
       return []; // Return empty array on error

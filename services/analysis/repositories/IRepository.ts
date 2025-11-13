@@ -17,6 +17,7 @@ import type {
 export interface IProductRepository {
   findByProductId(productId: string): Promise<Product | null>;
   findByLegoSetNumber(setNumber: string): Promise<Product[]>;
+  findByProductIds(productIds: string[]): Promise<Product[]>;
 }
 
 /**
@@ -26,6 +27,9 @@ export interface IProductRepository {
 export interface IBricklinkRepository {
   findByLegoSetNumber(setNumber: string): Promise<BricklinkItem | null>;
   findByItemId(itemId: string): Promise<BricklinkItem | null>;
+  findByLegoSetNumbers(
+    setNumbers: string[],
+  ): Promise<Map<string, BricklinkItem>>;
 }
 
 /**
@@ -34,6 +38,9 @@ export interface IBricklinkRepository {
  */
 export interface IRedditRepository {
   findByLegoSetNumber(setNumber: string): Promise<RedditSearchResult | null>;
+  findByLegoSetNumbers(
+    setNumbers: string[],
+  ): Promise<Map<string, RedditSearchResult>>;
 }
 
 /**
@@ -44,4 +51,7 @@ export interface IRetirementRepository {
   findByLegoSetNumber(
     setNumber: string,
   ): Promise<BrickrankerRetirementItem | null>;
+  findByLegoSetNumbers(
+    setNumbers: string[],
+  ): Promise<Map<string, BrickrankerRetirementItem>>;
 }
