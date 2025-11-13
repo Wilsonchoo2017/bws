@@ -118,6 +118,8 @@ export class QueueService {
         {
           connection: this.connection,
           concurrency: QUEUE_CONFIG.WORKER_CONCURRENCY,
+          lockDuration: QUEUE_CONFIG.LOCK_DURATION,
+          lockRenewTime: QUEUE_CONFIG.LOCK_RENEW_TIME,
         },
       );
 

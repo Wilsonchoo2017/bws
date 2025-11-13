@@ -10,13 +10,24 @@ import {
   calculateTotalSavings,
   type CartItem,
   clearCart,
+  loadAppliedVouchers,
   loadCartItems,
   loadTotalCartPrice,
+  loadVoucherTemplates,
   removeCartItem,
+  saveAppliedVouchers,
   saveTotalCartPrice,
+  saveVoucherTemplates,
   updateCartItem,
 } from "../utils/cart.ts";
 import { formatPrice } from "../utils/formatters.ts";
+import type { TaggedCartItem, VoucherTemplate } from "../types/voucher.ts";
+import {
+  DEFAULT_VOUCHER_TEMPLATES,
+  findOptimalVoucherOrder,
+  getDiscountDescription,
+} from "../utils/voucher.ts";
+import { DiscountType, VoucherType } from "../types/voucher.ts";
 
 export default function CartManager() {
   const cartItems = useSignal<CartItem[]>([]);
@@ -30,17 +41,32 @@ export default function CartManager() {
   const formPurchaseDate = useSignal("");
   const formPlatform = useSignal("");
   const formNotes = useSignal("");
+  const formTags = useSignal(""); // Comma-separated tags
 
   // Cart-level total price (applies to all items)
   const totalCartPriceInput = useSignal("");
 
-  // Load cart items and total price on mount
+  // Voucher state
+  const appliedVouchers = useSignal<VoucherTemplate[]>([]);
+  const voucherTemplates = useSignal<VoucherTemplate[]>([]);
+  const showVoucherManager = useSignal(false);
+
+  // Load cart items, vouchers, and total price on mount
   useEffect(() => {
     cartItems.value = loadCartItems();
     const savedTotal = loadTotalCartPrice();
     if (savedTotal > 0) {
       totalCartPriceInput.value = (savedTotal / 100).toFixed(2);
     }
+
+    // Load vouchers
+    appliedVouchers.value = loadAppliedVouchers();
+
+    // Load custom templates or initialize with defaults
+    const customTemplates = loadVoucherTemplates();
+    voucherTemplates.value = customTemplates.length > 0
+      ? customTemplates
+      : DEFAULT_VOUCHER_TEMPLATES;
   }, []);
 
   const resetForm = () => {
@@ -50,6 +76,7 @@ export default function CartManager() {
     formPurchaseDate.value = "";
     formPlatform.value = "";
     formNotes.value = "";
+    formTags.value = "";
     isAddingNew.value = false;
     editingId.value = null;
   };
@@ -66,6 +93,11 @@ export default function CartManager() {
       return;
     }
 
+    // Parse tags from comma-separated input
+    const tags = formTags.value
+      ? formTags.value.split(",").map((t) => t.trim()).filter(Boolean)
+      : undefined;
+
     const newItem = addCartItem({
       legoId: formLegoId.value,
       unitPrice,
@@ -73,6 +105,7 @@ export default function CartManager() {
       purchaseDate: formPurchaseDate.value || undefined,
       platform: formPlatform.value || undefined,
       notes: formNotes.value || undefined,
+      tags,
     });
 
     cartItems.value = [...cartItems.value, newItem];
@@ -93,6 +126,11 @@ export default function CartManager() {
       return;
     }
 
+    // Parse tags from comma-separated input
+    const tags = formTags.value
+      ? formTags.value.split(",").map((t) => t.trim()).filter(Boolean)
+      : undefined;
+
     const success = updateCartItem(editingId.value, {
       legoId: formLegoId.value,
       unitPrice,
@@ -100,6 +138,7 @@ export default function CartManager() {
       purchaseDate: formPurchaseDate.value || undefined,
       platform: formPlatform.value || undefined,
       notes: formNotes.value || undefined,
+      tags,
     });
 
     if (success) {
@@ -116,6 +155,7 @@ export default function CartManager() {
     formPurchaseDate.value = item.purchaseDate || "";
     formPlatform.value = item.platform || "";
     formNotes.value = item.notes || "";
+    formTags.value = item.tags?.join(", ") || "";
     isAddingNew.value = true;
   };
 
@@ -153,9 +193,52 @@ export default function CartManager() {
     }
   };
 
+  // Voucher handlers
+  const handleAddVoucher = (voucher: VoucherTemplate) => {
+    appliedVouchers.value = [...appliedVouchers.value, voucher];
+    saveAppliedVouchers(appliedVouchers.value);
+  };
+
+  const handleRemoveVoucher = (voucherId: string) => {
+    appliedVouchers.value = appliedVouchers.value.filter((v) => v.id !== voucherId);
+    saveAppliedVouchers(appliedVouchers.value);
+  };
+
+  const handleOptimizeVouchers = () => {
+    if (appliedVouchers.value.length === 0) return;
+
+    const taggedItems: TaggedCartItem[] = cartItems.value.map((item) => ({
+      ...item,
+      quantity: item.quantity || 1,
+    }));
+
+    const result = findOptimalVoucherOrder(taggedItems, appliedVouchers.value);
+    appliedVouchers.value = result.appliedVouchers.map((av) => ({
+      id: av.id,
+      name: av.name,
+      type: av.type,
+      discountType: av.discountType,
+      discountValue: av.discountValue,
+      tieredDiscounts: av.tieredDiscounts,
+      conditions: av.conditions,
+      description: av.description,
+    }));
+    saveAppliedVouchers(appliedVouchers.value);
+  };
+
+  // Calculate voucher-based pricing
+  const taggedItems: TaggedCartItem[] = cartItems.value.map((item) => ({
+    ...item,
+    quantity: item.quantity || 1,
+  }));
+
+  const voucherResult = appliedVouchers.value.length > 0
+    ? findOptimalVoucherOrder(taggedItems, appliedVouchers.value)
+    : null;
+
   const subtotal = calculateCartSubtotal(cartItems.value);
-  const total = calculateCartTotal(cartItems.value);
-  const totalSavings = calculateTotalSavings(cartItems.value);
+  const total = voucherResult ? voucherResult.finalTotal : calculateCartTotal(cartItems.value);
+  const totalSavings = voucherResult ? voucherResult.totalDiscount : calculateTotalSavings(cartItems.value);
   const cartDiscountPct = calculateCartDiscountPercentage(cartItems.value);
 
   return (
@@ -286,6 +369,26 @@ export default function CartManager() {
                       formPlatform.value = (e.target as HTMLInputElement).value}
                   />
                 </div>
+
+                {/* Tags */}
+                <div class="form-control">
+                  <label class="label">
+                    <span class="label-text">Tags</span>
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="e.g., 11.11, Flash Sale"
+                    class="input input-bordered"
+                    value={formTags.value}
+                    onInput={(e) =>
+                      formTags.value = (e.target as HTMLInputElement).value}
+                  />
+                  <label class="label">
+                    <span class="label-text-alt text-info">
+                      Comma-separated tags for voucher filtering
+                    </span>
+                  </label>
+                </div>
               </div>
 
               {/* Notes */}
@@ -317,6 +420,162 @@ export default function CartManager() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Voucher Manager */}
+      {cartItems.value.length > 0 && (
+        <div class="card bg-gradient-to-br from-secondary/10 to-secondary/5 border-2 border-secondary/30 shadow-lg">
+          <div class="card-body">
+            <div class="flex justify-between items-center">
+              <h3 class="card-title text-secondary flex items-center gap-2">
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  class="h-5 w-5"
+                  viewBox="0 0 20 20"
+                  fill="currentColor"
+                >
+                  <path
+                    fill-rule="evenodd"
+                    d="M5 2a1 1 0 011 1v1h1a1 1 0 010 2H6v1a1 1 0 01-2 0V6H3a1 1 0 010-2h1V3a1 1 0 011-1zm0 10a1 1 0 011 1v1h1a1 1 0 110 2H6v1a1 1 0 11-2 0v-1H3a1 1 0 110-2h1v-1a1 1 0 011-1zM12 2a1 1 0 01.967.744L14.146 7.2 17.5 9.134a1 1 0 010 1.732l-3.354 1.935-1.18 4.455a1 1 0 01-1.933 0L9.854 12.8 6.5 10.866a1 1 0 010-1.732l3.354-1.935 1.18-4.455A1 1 0 0112 2z"
+                    clip-rule="evenodd"
+                  />
+                </svg>
+                Voucher Simulation
+              </h3>
+              <button
+                class="btn btn-sm btn-secondary"
+                onClick={() => showVoucherManager.value = !showVoucherManager.value}
+              >
+                {showVoucherManager.value ? "Hide" : "Show"}
+              </button>
+            </div>
+
+            {showVoucherManager.value && (
+              <div class="space-y-4 mt-4">
+                {/* Voucher Template Selector */}
+                <div class="form-control">
+                  <label class="label">
+                    <span class="label-text">Add Voucher from Template</span>
+                  </label>
+                  <select
+                    class="select select-bordered"
+                    onChange={(e) => {
+                      const selectedId = (e.target as HTMLSelectElement).value;
+                      const voucher = voucherTemplates.value.find((v) => v.id === selectedId);
+                      if (voucher) {
+                        handleAddVoucher(voucher);
+                        (e.target as HTMLSelectElement).value = "";
+                      }
+                    }}
+                  >
+                    <option value="">Select a voucher template...</option>
+                    {voucherTemplates.value.map((template) => (
+                      <option key={template.id} value={template.id}>
+                        {template.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Applied Vouchers List */}
+                {appliedVouchers.value.length > 0 && (
+                  <div class="space-y-2">
+                    <div class="flex justify-between items-center">
+                      <span class="font-semibold">Applied Vouchers:</span>
+                      {appliedVouchers.value.length > 1 && (
+                        <button
+                          class="btn btn-xs btn-secondary"
+                          onClick={handleOptimizeVouchers}
+                        >
+                          Optimize Order
+                        </button>
+                      )}
+                    </div>
+                    {voucherResult && voucherResult.appliedVouchers.map((voucher, index) => (
+                      <div
+                        key={voucher.id}
+                        class={`alert ${voucher.isValid ? "alert-success" : "alert-warning"}`}
+                      >
+                        <div class="flex-1">
+                          <div class="flex items-center gap-2">
+                            <span class="badge badge-sm">{index + 1}</span>
+                            <span class="font-semibold">{voucher.name}</span>
+                            {voucher.isValid && (
+                              <svg
+                                xmlns="http://www.w3.org/2000/svg"
+                                class="h-4 w-4"
+                                viewBox="0 0 20 20"
+                                fill="currentColor"
+                              >
+                                <path
+                                  fill-rule="evenodd"
+                                  d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z"
+                                  clip-rule="evenodd"
+                                />
+                              </svg>
+                            )}
+                          </div>
+                          <div class="text-sm mt-1">
+                            {voucher.isValid
+                              ? getDiscountDescription(voucher)
+                              : voucher.validationMessage}
+                          </div>
+                          {voucher.description && (
+                            <div class="text-xs opacity-70 mt-1">
+                              {voucher.description}
+                            </div>
+                          )}
+                        </div>
+                        <button
+                          class="btn btn-ghost btn-xs"
+                          onClick={() => handleRemoveVoucher(voucher.id)}
+                        >
+                          Remove
+                        </button>
+                      </div>
+                    ))}
+
+                    {/* Voucher Breakdown */}
+                    {voucherResult && voucherResult.totalDiscount > 0 && (
+                      <div class="card bg-base-100 mt-4">
+                        <div class="card-body p-4">
+                          <h4 class="font-semibold mb-2">Discount Breakdown</h4>
+                          <div class="space-y-1 text-sm">
+                            <div class="flex justify-between">
+                              <span>Subtotal:</span>
+                              <span>{formatPrice(voucherResult.subtotal)}</span>
+                            </div>
+                            {voucherResult.appliedVouchers.filter((v) => v.isValid).map((voucher) => (
+                              <div key={voucher.id} class="flex justify-between text-success">
+                                <span>- {voucher.name}:</span>
+                                <span>-{formatPrice(voucher.calculatedDiscount)}</span>
+                              </div>
+                            ))}
+                            <div class="divider my-1"></div>
+                            <div class="flex justify-between font-bold text-lg">
+                              <span>Final Total:</span>
+                              <span>{formatPrice(voucherResult.finalTotal)}</span>
+                            </div>
+                            <div class="flex justify-between text-success font-medium">
+                              <span>Total Savings:</span>
+                              <span>{formatPrice(voucherResult.totalDiscount)}</span>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {appliedVouchers.value.length === 0 && (
+                  <div class="text-center py-4 text-base-content/70">
+                    No vouchers applied. Select a template above to simulate vouchers.
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -443,6 +702,15 @@ export default function CartManager() {
                       <tr key={item.id}>
                         <td>
                           <div class="font-bold">{item.legoId}</div>
+                          {item.tags && item.tags.length > 0 && (
+                            <div class="flex gap-1 mt-1 flex-wrap">
+                              {item.tags.map((tag) => (
+                                <span key={tag} class="badge badge-sm badge-secondary">
+                                  {tag}
+                                </span>
+                              ))}
+                            </div>
+                          )}
                           {item.purchaseDate && (
                             <div class="text-sm opacity-70">
                               {new Date(item.purchaseDate).toLocaleDateString()}
@@ -542,7 +810,18 @@ export default function CartManager() {
                   <div key={item.id} class="card bg-base-100 shadow-lg">
                     <div class="card-body">
                       <div class="flex justify-between items-start">
-                        <h3 class="card-title text-lg">{item.legoId}</h3>
+                        <div>
+                          <h3 class="card-title text-lg">{item.legoId}</h3>
+                          {item.tags && item.tags.length > 0 && (
+                            <div class="flex gap-1 mt-1 flex-wrap">
+                              {item.tags.map((tag) => (
+                                <span key={tag} class="badge badge-sm badge-secondary">
+                                  {tag}
+                                </span>
+                              ))}
+                            </div>
+                          )}
+                        </div>
                         <div class="flex gap-1">
                           <button
                             class="btn btn-ghost btn-sm"

@@ -101,11 +101,14 @@ export const handler = async (
       );
     }
 
+    // BrickLink requires -1 suffix for LEGO sets
+    const bricklinkItemId = `${legoSetNumber}-1`;
+
     // Check if Bricklink item already exists
     const existingItems = await db
       .select()
       .from(bricklinkItems)
-      .where(eq(bricklinkItems.itemId, legoSetNumber));
+      .where(eq(bricklinkItems.itemId, bricklinkItemId));
 
     if (existingItems.length > 0) {
       return new Response(
@@ -143,17 +146,17 @@ export const handler = async (
 
     // Build Bricklink URL for LEGO set
     const itemType = "S"; // "S" = Sets
-    const bricklinkUrl = buildBricklinkUrl(itemType, legoSetNumber);
+    const bricklinkUrl = buildBricklinkUrl(itemType, bricklinkItemId);
 
     console.log(
-      `📥 Creating Bricklink item entry for set ${legoSetNumber}...`,
+      `📥 Creating Bricklink item entry for set ${legoSetNumber} (${bricklinkItemId})...`,
     );
 
     // Create initial Bricklink item entry
     const [bricklinkItem] = await db
       .insert(bricklinkItems)
       .values({
-        itemId: legoSetNumber,
+        itemId: bricklinkItemId,
         itemType: itemType,
         watchStatus: "active", // Track this item for price updates
         scrapeIntervalDays: 30, // Default scraping interval

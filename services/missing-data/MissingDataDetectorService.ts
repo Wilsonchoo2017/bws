@@ -68,7 +68,8 @@ export class MissingDataDetectorService {
       }
 
       // Find products with missing Bricklink data
-      const productsWithMissingData = await this.findProductsMissingBricklinkData();
+      const productsWithMissingData = await this
+        .findProductsMissingBricklinkData();
       result.productsChecked = productsWithMissingData.length;
       result.missingBricklinkData = productsWithMissingData.length;
       result.productsWithMissingData = productsWithMissingData.map((p) => ({
@@ -82,7 +83,9 @@ export class MissingDataDetectorService {
       );
 
       if (productsWithMissingData.length === 0) {
-        console.log("✅ All products with LEGO set numbers have Bricklink data");
+        console.log(
+          "✅ All products with LEGO set numbers have Bricklink data",
+        );
         return result;
       }
 
@@ -90,12 +93,14 @@ export class MissingDataDetectorService {
       for (const product of productsWithMissingData) {
         try {
           const legoSetNumber = product.legoSetNumber!;
+          // BrickLink requires -1 suffix for LEGO sets
+          const bricklinkItemId = `${legoSetNumber}-1`;
           const url =
-            `https://www.bricklink.com/v2/catalog/catalogitem.page?S=${legoSetNumber}`;
+            `https://www.bricklink.com/v2/catalog/catalogitem.page?S=${bricklinkItemId}`;
 
           await queueService.addScrapeJob({
             url,
-            itemId: legoSetNumber,
+            itemId: bricklinkItemId,
             saveToDb: true,
           });
 
@@ -178,12 +183,14 @@ export class MissingDataDetectorService {
         };
       }
 
+      // BrickLink requires -1 suffix for LEGO sets
+      const bricklinkItemId = `${product.legoSetNumber}-1`;
       const url =
-        `https://www.bricklink.com/v2/catalog/catalogitem.page?S=${product.legoSetNumber}`;
+        `https://www.bricklink.com/v2/catalog/catalogitem.page?S=${bricklinkItemId}`;
 
       await queueService.addScrapeJob({
         url,
-        itemId: product.legoSetNumber,
+        itemId: bricklinkItemId,
         saveToDb: true,
       });
 
@@ -262,7 +269,8 @@ export class MissingDataDetectorService {
       name: string | null;
     }>;
   }> {
-    const productsWithMissingData = await this.findProductsMissingBricklinkData();
+    const productsWithMissingData = await this
+      .findProductsMissingBricklinkData();
 
     // Get total count of products with LEGO set numbers
     const allProductsWithLegoSets = await db.select({

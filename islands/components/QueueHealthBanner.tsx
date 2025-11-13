@@ -68,6 +68,11 @@ export default function QueueHealthBanner(
   const hasQueued = stats && stats.queue.counts.waiting > 0;
   const hasFailed = stats && stats.queue.counts.failed > 0;
 
+  // Hide banner when queue is healthy
+  if (status === "healthy") {
+    return null;
+  }
+
   return (
     <div class="mb-6">
       {/* Health Status Header */}

@@ -119,12 +119,17 @@ export function normalizeLegoSetNumber(setNumber: string): string {
 export async function findProductsByBaseSetNumber(
   db: any,
   baseSetNumber: string,
-): Promise<Array<{ id: number; name: string; legoSetNumber: string | null; source: string }>> {
+): Promise<
+  Array<
+    { id: number; name: string; legoSetNumber: string | null; source: string }
+  >
+> {
   const { products } = await import("./schema.ts");
 
   // Query all products with non-null LEGO set numbers
   const allProducts = await db.query.products.findMany({
-    where: (products: any, { isNotNull }: any) => isNotNull(products.legoSetNumber),
+    where: (products: any, { isNotNull }: any) =>
+      isNotNull(products.legoSetNumber),
     columns: {
       id: true,
       name: true,

@@ -12,6 +12,7 @@ import {
   getHealthLabel,
   type QueueHealthAssessment,
 } from "../utils/queue-health.ts";
+import QueueHealthBanner from "./components/QueueHealthBanner.tsx";
 
 interface JobInfo {
   id: string;
@@ -108,6 +109,9 @@ export default function QueueDiagnosticsDashboard() {
 
   return (
     <div class="space-y-6">
+      {/* Queue Health Banner */}
+      <QueueHealthBanner stats={stats} />
+
       {/* Health Status Card */}
       {health && (
         <div class="card bg-base-100 shadow-xl">
@@ -400,7 +404,7 @@ function JobsPanel({
               {jobs.map((job) => (
                 <tr key={job.id}>
                   <td class="font-mono text-xs">
-                    {job.id?.toString().substring(0, 8)}...
+                    {job.id?.toString()}
                   </td>
                   <td>
                     <span class="badge badge-sm">

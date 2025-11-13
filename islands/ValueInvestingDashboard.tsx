@@ -1,7 +1,11 @@
 import { useSignal } from "@preact/signals";
 import type { ValueInvestingProduct } from "../types/value-investing.ts";
-import { ValueCalculator } from "../services/value-investing/ValueCalculator.ts";
 import { ErrorBoundary } from "./components/ErrorBoundary.tsx";
+import { ValueRatingBadge } from "./components/ValueRatingBadge.tsx";
+import {
+  formatCurrency,
+  formatPercentage,
+} from "../utils/formatters.ts";
 
 interface ValueInvestingDashboardProps {
   products: ValueInvestingProduct[];
@@ -111,24 +115,6 @@ export default function ValueInvestingDashboard(
     minROI.value = 0;
     minPrice.value = 0;
     maxPrice.value = 10000;
-  };
-
-  const formatCurrency = (amount: number, currency: string = "SGD") => {
-    return `${currency} ${amount.toFixed(2)}`;
-  };
-
-  const formatPercentage = (value: number) => {
-    const sign = value > 0 ? "+" : "";
-    return `${sign}${value.toFixed(1)}%`;
-  };
-
-  const getValueRatingBadge = (marginOfSafety: number) => {
-    const { rating, color } = ValueCalculator.getValueRating(marginOfSafety);
-    return (
-      <span class={`badge badge-${color} badge-sm`}>
-        {rating}
-      </span>
-    );
   };
 
   // Get stats once per render
@@ -417,9 +403,9 @@ export default function ValueInvestingDashboard(
                           </span>
                         </td>
                         <td>
-                          {getValueRatingBadge(
-                            product.valueMetrics.marginOfSafety,
-                          )}
+                          <ValueRatingBadge
+                            marginOfSafety={product.valueMetrics.marginOfSafety}
+                          />
                         </td>
                       </tr>
                     ))}

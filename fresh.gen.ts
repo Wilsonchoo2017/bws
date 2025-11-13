@@ -24,6 +24,7 @@ import * as $api_scrape_queue_status from "./routes/api/scrape-queue-status.ts";
 import * as $api_scrape_scheduler from "./routes/api/scrape-scheduler.ts";
 import * as $api_shopee_items from "./routes/api/shopee-items.ts";
 import * as $bricklink_items from "./routes/bricklink-items.tsx";
+import * as $buy from "./routes/buy.tsx";
 import * as $cart from "./routes/cart.tsx";
 import * as $greet_name_ from "./routes/greet/[name].tsx";
 import * as $index from "./routes/index.tsx";
@@ -40,9 +41,12 @@ import * as $QueueDiagnosticsDashboard from "./islands/QueueDiagnosticsDashboard
 import * as $ShopeeParser from "./islands/ShopeeParser.tsx";
 import * as $Sidebar from "./islands/Sidebar.tsx";
 import * as $UnifiedParser from "./islands/UnifiedParser.tsx";
+import * as $ValueInvestingDashboard from "./islands/ValueInvestingDashboard.tsx";
+import * as $components_ErrorBoundary from "./islands/components/ErrorBoundary.tsx";
 import * as $components_QueueHealthBanner from "./islands/components/QueueHealthBanner.tsx";
 import * as $components_QueueStatsBanner from "./islands/components/QueueStatsBanner.tsx";
 import * as $components_SyncStatusBadge from "./islands/components/SyncStatusBadge.tsx";
+import * as $components_ValueRatingBadge from "./islands/components/ValueRatingBadge.tsx";
 import type { Manifest } from "$fresh/server.ts";
 
 const manifest = {
@@ -70,6 +74,7 @@ const manifest = {
     "./routes/api/scrape-scheduler.ts": $api_scrape_scheduler,
     "./routes/api/shopee-items.ts": $api_shopee_items,
     "./routes/bricklink-items.tsx": $bricklink_items,
+    "./routes/buy.tsx": $buy,
     "./routes/cart.tsx": $cart,
     "./routes/greet/[name].tsx": $greet_name_,
     "./routes/index.tsx": $index,
@@ -88,9 +93,12 @@ const manifest = {
     "./islands/ShopeeParser.tsx": $ShopeeParser,
     "./islands/Sidebar.tsx": $Sidebar,
     "./islands/UnifiedParser.tsx": $UnifiedParser,
+    "./islands/ValueInvestingDashboard.tsx": $ValueInvestingDashboard,
+    "./islands/components/ErrorBoundary.tsx": $components_ErrorBoundary,
     "./islands/components/QueueHealthBanner.tsx": $components_QueueHealthBanner,
     "./islands/components/QueueStatsBanner.tsx": $components_QueueStatsBanner,
     "./islands/components/SyncStatusBadge.tsx": $components_SyncStatusBadge,
+    "./islands/components/ValueRatingBadge.tsx": $components_ValueRatingBadge,
   },
   baseUrl: import.meta.url,
 } satisfies Manifest;

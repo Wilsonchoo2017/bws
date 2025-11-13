@@ -5,10 +5,7 @@
  */
 
 import { DOMParser } from "https://deno.land/x/deno_dom@v0.1.45/deno-dom-wasm.ts";
-import {
-  extractLegoSetNumber,
-  parsePriceToCents,
-} from "../db/utils.ts";
+import { extractLegoSetNumber, parsePriceToCents } from "../db/utils.ts";
 
 /**
  * Parsed BrickEconomy product structure
@@ -81,7 +78,9 @@ export function parseHtmlDocument(htmlContent: string) {
  * @param doc - Parsed document
  * @returns Object with set number and name
  */
-export function extractSetInfo(doc: Document): { setNumber: string | null; name: string | null } {
+export function extractSetInfo(
+  doc: Document,
+): { setNumber: string | null; name: string | null } {
   const header = doc.querySelector("h1.setheader");
   if (!header || !header.textContent) {
     return { setNumber: null, name: null };
@@ -109,7 +108,10 @@ function extractRowValue(doc: Document, labelText: string): string | null {
 
   for (const row of rows) {
     const label = row.querySelector(".text-muted");
-    if (label && label.textContent?.trim().toLowerCase().includes(labelText.toLowerCase())) {
+    if (
+      label &&
+      label.textContent?.trim().toLowerCase().includes(labelText.toLowerCase())
+    ) {
       const valueCol = row.querySelector(".col-xs-7");
       if (valueCol) {
         // Get text content, strip HTML tags and extra whitespace
@@ -250,7 +252,9 @@ export function extractPieces(doc: Document): number | null {
  * @param doc - Parsed document
  * @returns Object with count and value
  */
-export function extractMinifigs(doc: Document): { count: number | null; value: number | null } {
+export function extractMinifigs(
+  doc: Document,
+): { count: number | null; value: number | null } {
   const minifigsStr = extractRowValue(doc, "Minifigs");
   if (!minifigsStr) return { count: null, value: null };
 
@@ -284,7 +288,9 @@ export function extractPPP(doc: Document): number | null {
  * @param doc - Parsed document
  * @returns Object with theme info
  */
-export function extractThemeInfo(doc: Document): { theme: string | null; subtheme: string | null; year: string | null } {
+export function extractThemeInfo(
+  doc: Document,
+): { theme: string | null; subtheme: string | null; year: string | null } {
   const theme = extractRowValue(doc, "Theme");
   const subtheme = extractRowValue(doc, "Subtheme");
   const year = extractRowValue(doc, "Year");
@@ -297,7 +303,9 @@ export function extractThemeInfo(doc: Document): { theme: string | null; subthem
  * @param doc - Parsed document
  * @returns Object with dates
  */
-export function extractDates(doc: Document): { released: string | null; retired: string | null } {
+export function extractDates(
+  doc: Document,
+): { released: string | null; retired: string | null } {
   const released = extractRowValue(doc, "Released");
   const retired = extractRowValue(doc, "Retired");
 
@@ -336,7 +344,9 @@ export function extractQuickBuyPrices(doc: Document): {
   };
 
   // Find Quick Buy section
-  const quickBuyPanel = doc.querySelector("#ContentPlaceHolder1_PanelSetBuying");
+  const quickBuyPanel = doc.querySelector(
+    "#ContentPlaceHolder1_PanelSetBuying",
+  );
   if (!quickBuyPanel) return result;
 
   const rows = quickBuyPanel.querySelectorAll(".row.rowlist");
@@ -350,7 +360,9 @@ export function extractQuickBuyPrices(doc: Document): {
       if (headerText.includes("ebay")) currentMarketplace = "ebay";
       else if (headerText.includes("amazon")) currentMarketplace = "amazon";
       else if (headerText.includes("stockx")) currentMarketplace = "stockx";
-      else if (headerText.includes("bricklink")) currentMarketplace = "bricklink";
+      else if (headerText.includes("bricklink")) {
+        currentMarketplace = "bricklink";
+      }
     }
 
     const label = row.querySelector(".text-muted");
@@ -368,7 +380,9 @@ export function extractQuickBuyPrices(doc: Document): {
     } else if (currentMarketplace === "amazon") {
       if (labelText.includes("average")) result.amazon_average = price;
     } else if (currentMarketplace === "stockx") {
-      if (labelText.includes("buy") || labelText.includes("bid")) result.stockx_price = price;
+      if (labelText.includes("buy") || labelText.includes("bid")) {
+        result.stockx_price = price;
+      }
     } else if (currentMarketplace === "bricklink") {
       if (labelText.includes("lowest")) result.bricklink_lowest = price;
       if (labelText.includes("highest")) result.bricklink_highest = price;
@@ -383,9 +397,13 @@ export function extractQuickBuyPrices(doc: Document): {
  * @param doc - Parsed document
  * @returns Object with forecast prices in cents
  */
-export function extractForecasts(doc: Document): { oneYear: number | null; fiveYear: number | null } {
+export function extractForecasts(
+  doc: Document,
+): { oneYear: number | null; fiveYear: number | null } {
   // Find Set Predictions panel
-  const predictionsPanel = doc.querySelector("#ContentPlaceHolder1_PanelSetPredictions");
+  const predictionsPanel = doc.querySelector(
+    "#ContentPlaceHolder1_PanelSetPredictions",
+  );
   if (!predictionsPanel) return { oneYear: null, fiveYear: null };
 
   const rows = predictionsPanel.querySelectorAll(".row.rowlist");
@@ -423,7 +441,7 @@ export function extractForecasts(doc: Document): { oneYear: number | null; fiveY
 export function extractImage(doc: Document): string | null {
   // Look for main product image
   const imgElement = doc.querySelector("img.set-image-main") ||
-                     doc.querySelector("img[alt*='LEGO']");
+    doc.querySelector("img[alt*='LEGO']");
 
   if (!imgElement) return null;
 
@@ -442,7 +460,9 @@ export function extractImage(doc: Document): string | null {
  * @param doc - Parsed document
  * @returns Object with barcodes
  */
-export function extractBarcodes(doc: Document): { upc: string | null; ean: string | null } {
+export function extractBarcodes(
+  doc: Document,
+): { upc: string | null; ean: string | null } {
   const upc = extractRowValue(doc, "UPC");
   const ean = extractRowValue(doc, "EAN");
 
@@ -462,7 +482,9 @@ export function parseBrickEconomyHtml(
 
     const { setNumber, name } = extractSetInfo(doc);
     if (!setNumber || !name) {
-      console.warn("Could not extract set number or name from BrickEconomy page");
+      console.warn(
+        "Could not extract set number or name from BrickEconomy page",
+      );
       return null;
     }
 
@@ -516,10 +538,16 @@ export function parseBrickEconomyHtml(
       retired,
       availability,
       quickBuy: {
-        ebay: { lowest: quickBuyPrices.ebay_lowest, highest: quickBuyPrices.ebay_highest },
+        ebay: {
+          lowest: quickBuyPrices.ebay_lowest,
+          highest: quickBuyPrices.ebay_highest,
+        },
         amazon: quickBuyPrices.amazon_average,
         stockx: quickBuyPrices.stockx_price,
-        bricklink: { lowest: quickBuyPrices.bricklink_lowest, highest: quickBuyPrices.bricklink_highest },
+        bricklink: {
+          lowest: quickBuyPrices.bricklink_lowest,
+          highest: quickBuyPrices.bricklink_highest,
+        },
       },
       forecasts: { oneYear, fiveYear },
       barcodes: { upc, ean },

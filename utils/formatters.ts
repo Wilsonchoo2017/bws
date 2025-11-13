@@ -100,3 +100,44 @@ export function formatDelta(
     return { text: `${prefix}RM ${formatted}`, isPositive };
   }
 }
+
+/**
+ * Formats currency with custom currency code
+ * @param amount - Amount to format (already in base units, not cents)
+ * @param currency - Currency code (e.g., "SGD", "RM", "USD")
+ * @param decimals - Number of decimal places (default: 2)
+ * @returns Formatted currency string
+ * @example
+ * formatCurrency(129.99, "SGD") // "SGD 129.99"
+ * formatCurrency(50, "RM", 0) // "RM 50"
+ */
+export function formatCurrency(
+  amount: number | null | undefined,
+  currency: string = "SGD",
+  decimals: number = 2,
+): string {
+  if (amount === null || amount === undefined || isNaN(amount)) return "N/A";
+  return `${currency} ${amount.toFixed(decimals)}`;
+}
+
+/**
+ * Formats percentage with optional sign
+ * @param value - Percentage value to format
+ * @param decimals - Number of decimal places (default: 1)
+ * @param showSign - Whether to show + sign for positive values (default: true)
+ * @returns Formatted percentage string
+ * @example
+ * formatPercentage(25.5) // "+25.5%"
+ * formatPercentage(-10.2) // "-10.2%"
+ * formatPercentage(15, 0, false) // "15%"
+ */
+export function formatPercentage(
+  value: number | null | undefined,
+  decimals: number = 1,
+  showSign: boolean = true,
+): string {
+  if (value === null || value === undefined || isNaN(value)) return "0%";
+
+  const sign = showSign && value > 0 ? "+" : "";
+  return `${sign}${value.toFixed(decimals)}%`;
+}

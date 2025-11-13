@@ -195,6 +195,10 @@ export const QUEUE_CONFIG = {
   },
   /** Worker concurrency */
   WORKER_CONCURRENCY: 1, // Process one job at a time
+  /** Lock duration for jobs (must be longer than expected job duration) */
+  LOCK_DURATION: 180000, // 3 minutes (BrickLink scraping takes ~60-90s with rate limiting)
+  /** Lock renewal interval (renew lock every 30s to prevent stalling) */
+  LOCK_RENEW_TIME: 30000, // 30 seconds
 } as const;
 
 /**
