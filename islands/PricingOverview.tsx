@@ -178,11 +178,19 @@ export default function PricingOverview(
                 {comparison.label}
               </p>
               <p class="text-sm text-base-content/70">
-                Current price is{" "}
-                {currentPrice < recommendedBuyPrice.price
-                  ? `${formatPrice(recommendedBuyPrice.price - currentPrice, currency)} below`
-                  : `${formatPrice(currentPrice - recommendedBuyPrice.price, currency)} above`}{" "}
-                target
+                Current price is {currentPrice < recommendedBuyPrice.price
+                  ? `${
+                    formatPrice(
+                      recommendedBuyPrice.price - currentPrice,
+                      currency,
+                    )
+                  } below`
+                  : `${
+                    formatPrice(
+                      currentPrice - recommendedBuyPrice.price,
+                      currency,
+                    )
+                  } above`} target
               </p>
             </div>
           )}

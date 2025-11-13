@@ -494,7 +494,7 @@ export function parseBrickEconomyHtml(
     }
 
     // Generate product ID
-    const productId = `brickeconomy_${setNumber}`;
+    const productId = crypto.randomUUID();
 
     // Extract pricing
     const retailPrice = extractRetailPrice(doc);

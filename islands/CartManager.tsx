@@ -772,7 +772,8 @@ export default function CartManager() {
                         <td>
                           <PriceComparison
                             unitPriceCents={item.unitPrice}
-                            recommendedBuyPrice={priceGuideMap.get(item.legoId)?.recommendedBuyPrice}
+                            recommendedBuyPrice={priceGuideMap.get(item.legoId)
+                              ?.recommendedBuyPrice}
                             loading={priceGuideMap.get(item.legoId)?.loading}
                             error={priceGuideMap.get(item.legoId)?.error}
                           />
@@ -907,11 +908,15 @@ export default function CartManager() {
                           <span>{formatPrice(savings)}</span>
                         </div>
                         <div class="flex justify-between items-center border-t pt-2 mt-2">
-                          <span class="text-base-content/70 font-medium">Deal Quality:</span>
+                          <span class="text-base-content/70 font-medium">
+                            Deal Quality:
+                          </span>
                           <div>
                             <PriceComparison
                               unitPriceCents={item.unitPrice}
-                              recommendedBuyPrice={priceGuideMap.get(item.legoId)?.recommendedBuyPrice}
+                              recommendedBuyPrice={priceGuideMap.get(
+                                item.legoId,
+                              )?.recommendedBuyPrice}
                               loading={priceGuideMap.get(item.legoId)?.loading}
                               error={priceGuideMap.get(item.legoId)?.error}
                             />

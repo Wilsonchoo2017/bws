@@ -16,11 +16,25 @@ import { getBricklinkRepository } from "../../../services/bricklink/BricklinkRep
 export class BricklinkRepository implements IBricklinkRepository {
   /**
    * Find Bricklink item by LEGO set number
-   * Automatically prefixes with "S-" for sets
+   * Tries both exact match and with "-1" suffix (e.g., "10368" and "10368-1")
    */
   async findByLegoSetNumber(setNumber: string): Promise<BricklinkItem | null> {
-    const itemId = `S-${setNumber}`;
-    return await this.findByItemId(itemId);
+    // Try exact match first
+    let item = await this.findByItemId(setNumber);
+    if (item) {
+      return item;
+    }
+
+    // Try with "-1" suffix if not already present
+    if (!setNumber.endsWith("-1")) {
+      const itemIdWithSuffix = `${setNumber}-1`;
+      item = await this.findByItemId(itemIdWithSuffix);
+      if (item) {
+        return item;
+      }
+    }
+
+    return null;
   }
 
   /**
@@ -55,8 +69,15 @@ export class BricklinkRepository implements IBricklinkRepository {
   ): Promise<Map<string, BricklinkItem>> {
     if (setNumbers.length === 0) return new Map();
 
-    // Convert to item IDs (prefix with "S-")
-    const itemIds = setNumbers.map((num) => `S-${num}`);
+    // Try both formats: exact match and with "-1" suffix
+    // Some sets use "10368" and some use "10368-1"
+    const itemIds: string[] = [];
+    for (const num of setNumbers) {
+      itemIds.push(num); // Exact match
+      if (!num.endsWith("-1")) {
+        itemIds.push(`${num}-1`); // Try with -1 suffix
+      }
+    }
 
     try {
       const results = await db
@@ -65,11 +86,15 @@ export class BricklinkRepository implements IBricklinkRepository {
         .where(inArray(bricklinkItems.itemId, itemIds));
 
       // Build map: setNumber -> BricklinkItem
+      // Map using the original set number (without -1 suffix)
       const resultMap = new Map<string, BricklinkItem>();
       for (const item of results) {
-        // Remove "S-" prefix to get set number
-        const setNumber = item.itemId.replace(/^S-/, "");
-        resultMap.set(setNumber, item);
+        // Remove "-1" suffix if present to get original set number
+        const setNumber = item.itemId.replace(/-1$/, "");
+        // Only set if not already mapped (prefer exact match over -1 variant)
+        if (!resultMap.has(setNumber)) {
+          resultMap.set(setNumber, item);
+        }
       }
 
       return resultMap;

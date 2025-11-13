@@ -227,21 +227,14 @@ export function extractProductUrl(element: Element): string | null {
 }
 
 /**
- * Generate a unique product ID from SKU or name
+ * Generate a unique product ID using UUID
  */
 export function generateProductId(
-  sku: string | null,
-  pid: string | null,
-  name: string | null,
+  _sku: string | null,
+  _pid: string | null,
+  _name: string | null,
 ): string {
-  if (pid) return `toysrus_${pid}`;
-  if (sku) return `toysrus_${sku}`;
-  if (name) {
-    // Create hash from name
-    const hash = name.toLowerCase().replace(/[^a-z0-9]/g, "_");
-    return `toysrus_${hash}`;
-  }
-  return `toysrus_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+  return crypto.randomUUID();
 }
 
 /**

@@ -9,7 +9,6 @@ import { desc, eq } from "drizzle-orm";
 import { db } from "../../db/client.ts";
 import {
   type BricklinkItem,
-  bricklinkItems,
   priceHistory,
   type Product,
   products,
@@ -173,24 +172,27 @@ export default function ProductDetailPage(
     return new Date(date).toLocaleString();
   };
 
-  const calculateDiscount = () => {
-    if (!product.price || !product.priceBeforeDiscount) return null;
-    if (product.priceBeforeDiscount <= product.price) return null;
-    return (
-      ((product.priceBeforeDiscount - product.price) /
-        product.priceBeforeDiscount) * 100
-    ).toFixed(0);
-  };
-
-  const discount = calculateDiscount();
-
-  // Prepare images array for gallery
-  const productImages =
-    product.images && Array.isArray(product.images) && product.images.length > 0
-      ? product.images as string[]
-      : product.image
-      ? [product.image]
-      : [];
+  // Prepare images array for gallery - prioritize local images over remote URLs
+  const productImages = (() => {
+    // First priority: local images array
+    if (product.localImages && Array.isArray(product.localImages) && product.localImages.length > 0) {
+      return product.localImages as string[];
+    }
+    // Second priority: single local image path
+    if (product.localImagePath) {
+      return [product.localImagePath];
+    }
+    // Third priority: remote images array
+    if (product.images && Array.isArray(product.images) && product.images.length > 0) {
+      return product.images as string[];
+    }
+    // Fourth priority: single remote image
+    if (product.image) {
+      return [product.image];
+    }
+    // No images available
+    return [];
+  })();
 
   return (
     <>

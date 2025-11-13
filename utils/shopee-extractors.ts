@@ -7,8 +7,6 @@
 import { DOMParser } from "https://deno.land/x/deno_dom@v0.1.45/deno-dom-wasm.ts";
 import {
   extractLegoSetNumber,
-  extractShopeeProductId,
-  generateProductIdFromName,
   normalizeSoldUnits,
   parsePriceToCents,
 } from "../db/utils.ts";
@@ -90,28 +88,12 @@ export function extractProductUrl(item: Element): string | null {
  */
 export function generateProductId(
   _item: Element,
-  productUrl: string | null,
-  productName: string,
-  shopUsername: string,
+  _productUrl: string | null,
+  _productName: string,
+  _shopUsername: string,
 ): string {
-  let productId: string;
-
-  // Try to extract ID from URL
-  if (productUrl) {
-    const extractedId = extractShopeeProductId(productUrl);
-    if (extractedId) {
-      productId = extractedId;
-    } else {
-      // Fallback to generating from name
-      productId = generateProductIdFromName(productName);
-    }
-  } else {
-    // No URL, generate from name
-    productId = generateProductIdFromName(productName);
-  }
-
-  // Prefix with shop username to ensure uniqueness across shops
-  return `${shopUsername}:${productId}`;
+  // Return a UUID for product identification
+  return crypto.randomUUID();
 }
 
 /**

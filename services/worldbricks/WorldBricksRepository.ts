@@ -16,11 +16,13 @@
 
 import { db } from "../../db/client.ts";
 import {
+  brickrankerRetirementItems,
   type NewWorldbricksSet,
+  products,
   type WorldbricksSet,
   worldbricksSets,
 } from "../../db/schema.ts";
-import { and, eq, inArray, isNull, or, sql } from "drizzle-orm";
+import { and, eq, inArray, isNull, lte, or, sql } from "drizzle-orm";
 
 /**
  * Interface for update data
@@ -40,6 +42,8 @@ export interface UpdateWorldBricksSetData {
   sourceUrl?: string | null;
   lastScrapedAt?: Date;
   scrapeStatus?: string;
+  scrapeIntervalDays?: number;
+  nextScrapeAt?: Date;
   updatedAt?: Date;
 }
 
@@ -224,18 +228,103 @@ export class WorldBricksRepository {
   }
 
   /**
-   * Find sets that haven't been scraped yet or failed
-   * Useful for initial scraping or retries
+   * Find sets that need scraping based on schedule and retirement status
+   *
+   * Rules:
+   * - Only include sets linked to active products
+   * - Exclude retired sets (year_retired <= current year)
+   * - Exclude retiring_soon sets from BrickRanker
+   * - Include sets where next_scrape_at is NULL or <= NOW()
+   * - Respects 90-day scrape interval
    */
   async findSetsNeedingScraping(): Promise<WorldbricksSet[]> {
-    return await db.select()
+    const now = new Date();
+    const currentYear = now.getFullYear();
+
+    // Query sets that need scraping with all filters
+    const results = await db
+      .selectDistinct({
+        id: worldbricksSets.id,
+        setNumber: worldbricksSets.setNumber,
+        setName: worldbricksSets.setName,
+        description: worldbricksSets.description,
+        yearReleased: worldbricksSets.yearReleased,
+        yearRetired: worldbricksSets.yearRetired,
+        designer: worldbricksSets.designer,
+        partsCount: worldbricksSets.partsCount,
+        dimensions: worldbricksSets.dimensions,
+        imageUrl: worldbricksSets.imageUrl,
+        localImagePath: worldbricksSets.localImagePath,
+        imageDownloadedAt: worldbricksSets.imageDownloadedAt,
+        imageDownloadStatus: worldbricksSets.imageDownloadStatus,
+        sourceUrl: worldbricksSets.sourceUrl,
+        lastScrapedAt: worldbricksSets.lastScrapedAt,
+        scrapeStatus: worldbricksSets.scrapeStatus,
+        scrapeIntervalDays: worldbricksSets.scrapeIntervalDays,
+        nextScrapeAt: worldbricksSets.nextScrapeAt,
+        createdAt: worldbricksSets.createdAt,
+        updatedAt: worldbricksSets.updatedAt,
+      })
       .from(worldbricksSets)
+      .innerJoin(
+        products,
+        eq(worldbricksSets.setNumber, products.legoSetNumber),
+      )
+      .leftJoin(
+        brickrankerRetirementItems,
+        eq(worldbricksSets.setNumber, brickrankerRetirementItems.setNumber),
+      )
       .where(
-        or(
-          isNull(worldbricksSets.lastScrapedAt),
-          eq(worldbricksSets.scrapeStatus, "failed"),
+        and(
+          // Only active products
+          eq(products.watchStatus, "active"),
+          // Not retired (year_retired is NULL or > current year)
+          or(
+            isNull(worldbricksSets.yearRetired),
+            sql`${worldbricksSets.yearRetired} > ${currentYear}`,
+          ),
+          // Not retiring soon (no BrickRanker entry or retiring_soon = false)
+          or(
+            isNull(brickrankerRetirementItems.retiringSoon),
+            eq(brickrankerRetirementItems.retiringSoon, false),
+          ),
+          // Due for scraping (next_scrape_at is NULL or <= now)
+          or(
+            isNull(worldbricksSets.nextScrapeAt),
+            lte(worldbricksSets.nextScrapeAt, now),
+          ),
         ),
       );
+
+    return results;
+  }
+
+  /**
+   * Update next_scrape_at timestamp after successful scrape
+   * Calculates next scrape time based on scrape_interval_days
+   *
+   * @param setNumber - The LEGO set number
+   * @param intervalDays - Override interval (defaults to set's scrape_interval_days or 90)
+   */
+  async updateNextScrapeAt(
+    setNumber: string,
+    intervalDays?: number,
+  ): Promise<void> {
+    const set = await this.findBySetNumber(setNumber);
+    if (!set) {
+      throw new Error(`WorldBricks set ${setNumber} not found`);
+    }
+
+    const interval = intervalDays || set.scrapeIntervalDays || 90;
+    const nextScrapeAt = new Date();
+    nextScrapeAt.setDate(nextScrapeAt.getDate() + interval);
+
+    await db.update(worldbricksSets)
+      .set({
+        nextScrapeAt,
+        updatedAt: new Date(),
+      })
+      .where(eq(worldbricksSets.setNumber, setNumber));
   }
 
   /**

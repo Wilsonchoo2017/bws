@@ -3,11 +3,13 @@ import { eq, sql } from "drizzle-orm";
 import { db } from "../../db/client.ts";
 import { priceHistory, products, scrapeSessions } from "../../db/schema.ts";
 import { parseBrickEconomyHtml } from "../../utils/brickeconomy-extractors.ts";
+import { scraperLogger } from "../../utils/logger.ts";
+import { ImageDownloadService } from "../../services/image/ImageDownloadService.ts";
+import { ImageStorageService } from "../../services/image/ImageStorageService.ts";
 
 // Re-export type from brickeconomy-extractors for backwards compatibility
 import type { ParsedBrickEconomyProduct } from "../../utils/brickeconomy-extractors.ts";
 type BrickEconomyProduct = ParsedBrickEconomyProduct;
-
 
 export const handler = async (
   req: Request,
@@ -63,9 +65,18 @@ export const handler = async (
     }
 
     // Parse HTML to extract product
+    scraperLogger.info("Parsing BrickEconomy HTML", {
+      sourceUrl: sourceUrl || "unknown",
+      source: "brickeconomy",
+    });
+
     const parsedProduct = parseBrickEconomyHtml(htmlContent);
 
     if (!parsedProduct) {
+      scraperLogger.warn("Failed to parse BrickEconomy HTML", {
+        sourceUrl: sourceUrl || "unknown",
+        source: "brickeconomy",
+      });
       return new Response(
         JSON.stringify({
           error:
@@ -78,6 +89,14 @@ export const handler = async (
       );
     }
 
+    scraperLogger.info("Successfully parsed BrickEconomy product", {
+      productId: parsedProduct.product_id,
+      productName: parsedProduct.product_name,
+      legoSetNumber: parsedProduct.lego_set_number,
+      marketValue: parsedProduct.market_value,
+      sourceUrl: sourceUrl || "unknown",
+      source: "brickeconomy",
+    });
 
     // Create scrape session
     const [session] = await db.insert(scrapeSessions).values({
@@ -89,6 +108,12 @@ export const handler = async (
     }).returning();
 
     sessionId = session.id;
+
+    scraperLogger.info("Created BrickEconomy scrape session", {
+      sessionId,
+      productId: parsedProduct.product_id,
+      source: "brickeconomy",
+    });
 
     // Check if BrickEconomy product already exists
     const existingProduct = await db.query.products.findFirst({
@@ -152,6 +177,96 @@ export const handler = async (
         price: productPrice,
         priceBeforeDiscount: priceBeforeDiscount,
       });
+
+      scraperLogger.info("Recorded BrickEconomy price history", {
+        productId: parsedProduct.product_id,
+        price: productPrice,
+        priceBeforeDiscount: priceBeforeDiscount,
+        previousPrice: previousHistory?.price || null,
+        isNewProduct: !existingProduct,
+        source: "brickeconomy",
+      });
+    }
+
+    // Download and store image locally if available
+    if (parsedProduct.image) {
+      try {
+        scraperLogger.info("Downloading image for BrickEconomy product", {
+          productId: parsedProduct.product_id,
+          imageUrl: parsedProduct.image,
+          source: "brickeconomy",
+        });
+
+        // Download the image
+        const imageBlob = await ImageDownloadService.downloadImage(
+          parsedProduct.image,
+        );
+
+        if (imageBlob) {
+          // Store the image locally
+          const storageResult = await ImageStorageService.saveImage(
+            imageBlob,
+            parsedProduct.product_id,
+            "brickeconomy",
+          );
+
+          if (storageResult.success && storageResult.localPath) {
+            // Update the product with local image path
+            await db.update(products).set({
+              localImagePath: storageResult.localPath,
+              imageUrl: parsedProduct.image,
+              imageDownloadedAt: new Date(),
+              imageDownloadStatus: "completed",
+            }).where(eq(products.productId, parsedProduct.product_id));
+
+            scraperLogger.info("Successfully downloaded and stored image", {
+              productId: parsedProduct.product_id,
+              localPath: storageResult.localPath,
+              source: "brickeconomy",
+            });
+          } else {
+            // Mark as failed in database
+            await db.update(products).set({
+              imageUrl: parsedProduct.image,
+              imageDownloadStatus: "failed",
+            }).where(eq(products.productId, parsedProduct.product_id));
+
+            scraperLogger.warn("Failed to store image", {
+              productId: parsedProduct.product_id,
+              error: storageResult.error,
+              source: "brickeconomy",
+            });
+          }
+        } else {
+          // Mark as failed in database
+          await db.update(products).set({
+            imageUrl: parsedProduct.image,
+            imageDownloadStatus: "failed",
+          }).where(eq(products.productId, parsedProduct.product_id));
+
+          scraperLogger.warn("Failed to download image", {
+            productId: parsedProduct.product_id,
+            source: "brickeconomy",
+          });
+        }
+      } catch (imageError) {
+        // Log error but don't fail the entire product save
+        scraperLogger.error("Error downloading/storing image", {
+          productId: parsedProduct.product_id,
+          error: (imageError as Error).message,
+          source: "brickeconomy",
+        });
+
+        // Mark as failed in database
+        try {
+          await db.update(products).set({
+            imageUrl: parsedProduct.image,
+            imageDownloadStatus: "failed",
+          }).where(eq(products.productId, parsedProduct.product_id));
+        } catch (_updateError) {
+          // Ignore errors updating status
+        }
+      }
     }
 
     // Update session with success status
@@ -161,6 +276,14 @@ export const handler = async (
         status: "success",
       })
       .where(eq(scrapeSessions.id, sessionId));
+
+    scraperLogger.info("Successfully saved BrickEconomy product to database", {
+      productId: parsedProduct.product_id,
+      sessionId,
+      wasUpdated: !!existingProduct,
+      priceRecorded: shouldRecordHistory,
+      source: "brickeconomy",
+    });
 
     // Add metadata about whether this was an update
     const productWithMeta = {
@@ -201,10 +324,15 @@ export const handler = async (
       },
     );
   } catch (error) {
-    console.error("Error parsing BrickEconomy HTML:", error);
-
     sessionError = error instanceof Error ? error.message : "Unknown error";
     _sessionStatus = "failed";
+
+    scraperLogger.error("Error parsing BrickEconomy HTML", {
+      error: error instanceof Error ? error.message : String(error),
+      stack: error instanceof Error ? error.stack : undefined,
+      sessionId,
+      source: "brickeconomy",
+    });
 
     // Update session with failed status if session was created
     if (sessionId) {

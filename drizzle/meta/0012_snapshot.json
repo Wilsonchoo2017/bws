@@ -1,6 +1,6 @@
 {
-  "id": "e6721a46-6ebd-499d-a800-415b48ad336f",
-  "prevId": "b7c230d3-a1d8-4e14-955f-2890e199cb82",
+  "id": "931488b8-1043-4175-bee3-0d66e7a6c201",
+  "prevId": "e6721a46-6ebd-499d-a800-415b48ad336f",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -2056,6 +2056,19 @@
           "primaryKey": false,
           "notNull": false
         },
+        "scrape_interval_days": {
+          "name": "scrape_interval_days",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "default": 90
+        },
+        "next_scrape_at": {
+          "name": "next_scrape_at",
+          "type": "timestamp",
+          "primaryKey": false,
+          "notNull": false
+        },
         "created_at": {
           "name": "created_at",
           "type": "timestamp",
@@ -2137,6 +2150,21 @@
           "columns": [
             {
               "expression": "scrape_status",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "idx_worldbricks_next_scrape_at": {
+          "name": "idx_worldbricks_next_scrape_at",
+          "columns": [
+            {
+              "expression": "next_scrape_at",
               "isExpression": false,
               "asc": true,
               "nulls": "last"

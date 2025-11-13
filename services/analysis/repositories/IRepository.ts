@@ -110,3 +110,25 @@ export interface IRetirementRepository {
     setNumbers: string[],
   ): Promise<Map<string, BrickrankerRetirementItem>>;
 }
+
+/**
+ * WorldBricks repository interface
+ * Single Responsibility: WorldBricks set data access (parts count, retirement years)
+ */
+export interface IWorldBricksRepository {
+  findBySetNumber(setNumber: string): Promise<WorldBricksSet | null>;
+  findBySetNumbers(setNumbers: string[]): Promise<Map<string, WorldBricksSet>>;
+}
+
+/**
+ * WorldBricks set data
+ */
+export interface WorldBricksSet {
+  setNumber: string;
+  setName: string | null;
+  yearReleased: number | null;
+  yearRetired: number | null;
+  partsCount: number | null;
+  designer: string | null;
+  dimensions: string | null;
+}

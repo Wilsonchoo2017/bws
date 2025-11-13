@@ -21,7 +21,7 @@ interface DealAnalysis {
  */
 function analyzeDeal(
   unitPriceCents: number,
-  recommendedPriceDollars: number
+  recommendedPriceDollars: number,
 ): DealAnalysis {
   const unitPriceDollars = unitPriceCents / 100;
   const diff = unitPriceDollars - recommendedPriceDollars;
@@ -89,14 +89,17 @@ export function PriceComparison({
   const percentageText = Math.abs(analysis.percentageDiff) < 0.1
     ? "at recommended"
     : `${Math.abs(analysis.percentageDiff).toFixed(0)}% ${
-        analysis.percentageDiff < 0 ? "below" : "above"
-      }`;
+      analysis.percentageDiff < 0 ? "below" : "above"
+    }`;
 
   return (
     <div class="flex flex-col gap-1 text-sm">
       {/* Recommended Price */}
       <div class="text-gray-600">
-        Rec: <span class="font-medium text-gray-800">{recommendedPriceFormatted}</span>
+        Rec:{" "}
+        <span class="font-medium text-gray-800">
+          {recommendedPriceFormatted}
+        </span>
       </div>
 
       {/* Deal Quality Badge */}

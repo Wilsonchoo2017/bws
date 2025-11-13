@@ -4,6 +4,9 @@ import { db } from "../../db/client.ts";
 import { products, scrapeSessions, shopeeScrapes } from "../../db/schema.ts";
 import { extractShopUsername, findExistingProduct } from "../../db/utils.ts";
 import { parseShopeeHtml } from "../../utils/shopee-extractors.ts";
+import { scraperLogger } from "../../utils/logger.ts";
+import { ImageDownloadService } from "../../services/image/ImageDownloadService.ts";
+import { ImageStorageService } from "../../services/image/ImageStorageService.ts";
 
 // Re-export type from shopee-extractors for backwards compatibility
 import type { ParsedShopeeProduct } from "../../utils/shopee-extractors.ts";
@@ -80,7 +83,20 @@ export const handler = async (
     }
 
     // Parse HTML to extract products
+    scraperLogger.info("Parsing Shopee HTML", {
+      shopUsername,
+      sourceUrl: sourceUrl || "unknown",
+      source: "shopee",
+    });
+
     const parsedProducts = parseShopeeHtml(htmlContent, shopUsername);
+
+    scraperLogger.info("Successfully parsed Shopee products", {
+      shopUsername,
+      productsFound: parsedProducts.length,
+      sourceUrl: sourceUrl || "unknown",
+      source: "shopee",
+    });
 
     // Check database for existing products and populate LEGO IDs
     const productsWithLegoIdResolution = await Promise.all(
@@ -132,6 +148,14 @@ export const handler = async (
     }).returning();
 
     sessionId = session.id;
+
+    scraperLogger.info("Created Shopee scrape session", {
+      sessionId,
+      shopUsername,
+      productsWithLegoId: productsWithLegoId.length,
+      productsWithoutLegoId: productsWithoutLegoId.length,
+      source: "shopee",
+    });
 
     // Insert/update products in database
     let productsStored = 0;
@@ -234,11 +258,104 @@ export const handler = async (
 
         insertedProducts.push(productWithMeta);
         productsStored++;
+
+        // Download and store image locally if available
+        if (product.image) {
+          try {
+            scraperLogger.info("Downloading image for Shopee product", {
+              productId: product.product_id,
+              imageUrl: product.image,
+              source: "shopee",
+            });
+
+            // Download the image
+            const imageBlob = await ImageDownloadService.downloadImage(
+              product.image,
+            );
+
+            if (imageBlob) {
+              // Store the image locally
+              const storageResult = await ImageStorageService.saveImage(
+                imageBlob,
+                product.product_id,
+                "shopee",
+              );
+
+              if (storageResult.success && storageResult.localPath) {
+                // Update the product with local image path
+                await db.update(products).set({
+                  localImagePath: storageResult.localPath,
+                  imageUrl: product.image,
+                  imageDownloadedAt: new Date(),
+                  imageDownloadStatus: "completed",
+                }).where(eq(products.productId, product.product_id));
+
+                scraperLogger.info("Successfully downloaded and stored image", {
+                  productId: product.product_id,
+                  localPath: storageResult.localPath,
+                  source: "shopee",
+                });
+              } else {
+                // Mark as failed in database
+                await db.update(products).set({
+                  imageUrl: product.image,
+                  imageDownloadStatus: "failed",
+                }).where(eq(products.productId, product.product_id));
+
+                scraperLogger.warn("Failed to store image", {
+                  productId: product.product_id,
+                  error: storageResult.error,
+                  source: "shopee",
+                });
+              }
+            } else {
+              // Mark as failed in database
+              await db.update(products).set({
+                imageUrl: product.image,
+                imageDownloadStatus: "failed",
+              }).where(eq(products.productId, product.product_id));
+
+              scraperLogger.warn("Failed to download image", {
+                productId: product.product_id,
+                source: "shopee",
+              });
+            }
+          } catch (imageError) {
+            // Log error but don't fail the entire product save
+            scraperLogger.error("Error downloading/storing image", {
+              productId: product.product_id,
+              error: (imageError as Error).message,
+              source: "shopee",
+            });
+
+            // Mark as failed in database
+            try {
+              await db.update(products).set({
+                imageUrl: product.image,
+                imageDownloadStatus: "failed",
+              }).where(eq(products.productId, product.product_id));
+            } catch (_updateError) {
+              // Ignore errors updating status
+            }
+          }
+        }
+
+        scraperLogger.info("Saved Shopee product to database", {
+          productId: product.product_id,
+          productName: product.product_name,
+          price: product.price,
+          unitsSold: product.units_sold,
+          wasUpdated: !!existingProduct,
+          sessionId,
+          source: "shopee",
+        });
       } catch (productError) {
-        console.error(
-          `Failed to insert product ${product.product_id}:`,
-          productError,
-        );
+        scraperLogger.error("Failed to insert Shopee product", {
+          productId: product.product_id,
+          error: (productError as Error).message,
+          sessionId,
+          source: "shopee",
+        });
         // Continue with other products
       }
     }
@@ -252,6 +369,15 @@ export const handler = async (
     sessionStatus = productsStored === finalProducts.length
       ? "success"
       : "partial";
+
+    scraperLogger.info("Completed Shopee scrape session", {
+      sessionId,
+      productsStored,
+      totalProducts: finalProducts.length,
+      status: sessionStatus,
+      productsWithoutLegoId: productsWithoutLegoId.length,
+      source: "shopee",
+    });
 
     // If there are products without LEGO IDs, return them for manual validation
     // along with the session info and already-saved products
@@ -304,6 +430,13 @@ export const handler = async (
     );
   } catch (error) {
     sessionError = error instanceof Error ? error.message : "Unknown error";
+
+    scraperLogger.error("Error parsing Shopee HTML", {
+      error: error instanceof Error ? error.message : String(error),
+      stack: error instanceof Error ? error.stack : undefined,
+      sessionId,
+      source: "shopee",
+    });
 
     // Update session with error if we have a session ID
     if (sessionId) {

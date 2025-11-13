@@ -81,11 +81,23 @@ export interface DemandData {
   unitsSold?: number;
   lifetimeSold?: number;
 
+  // PRIMARY: Bricklink pricing data (market indicators)
+  bricklinkCurrentNewAvg?: number;
+  bricklinkCurrentNewMin?: number;
+  bricklinkCurrentNewMax?: number;
+  bricklinkCurrentNewQty?: number;
+  bricklinkCurrentNewLots?: number;
+  bricklinkSixMonthNewAvg?: number;
+  bricklinkSixMonthNewMin?: number;
+  bricklinkSixMonthNewMax?: number;
+  bricklinkSixMonthNewTimesSold?: number;
+  bricklinkSixMonthNewQty?: number;
+
   // Legacy Bricklink aggregated metrics (from pricing boxes)
   bricklinkTimesSold?: number;
   bricklinkTotalQty?: number;
 
-  // NEW: Market-driven Bricklink metrics (from past sales data)
+  // SECONDARY: Market-driven Bricklink metrics (from past sales data)
   // Inspired by stock market analysis principles
 
   // Liquidity & Velocity metrics (like trading volume)
@@ -114,7 +126,7 @@ export interface DemandData {
   // Condition-specific weighting (new items prioritized for investment)
   bricklinkNewConditionWeight?: number; // 0-1 weight for 'new' vs 'used' data
 
-  // Engagement metrics (Shopee)
+  // TERTIARY: Engagement metrics (Shopee)
   viewCount?: number;
   likedCount?: number;
   commentCount?: number;
@@ -135,6 +147,7 @@ export interface AvailabilityData {
   retiringSoon?: boolean;
   expectedRetirementDate?: Date;
   yearReleased?: number;
+  yearRetired?: number; // NEW: Official retirement year from WorldBricks
   daysUntilRetirement?: number;
 
   // Platform availability
@@ -158,6 +171,7 @@ export interface QualityData {
   brand?: string;
   theme?: string;
   legoSetNumber?: string;
+  partsCount?: number; // NEW: For PPD calculation
 }
 
 export interface ProductAnalysisInput {

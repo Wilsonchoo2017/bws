@@ -56,12 +56,11 @@ export class RecommendationEngine {
     }
 
     // Run all analyzers in parallel
-    const [demandScore, availabilityScore, qualityScore] =
-      await Promise.all([
-        this.demandAnalyzer.analyze(input.demand),
-        this.availabilityAnalyzer.analyze(input.availability),
-        this.qualityAnalyzer.analyze(input.quality),
-      ]);
+    const [demandScore, availabilityScore, qualityScore] = await Promise.all([
+      this.demandAnalyzer.analyze(input.demand),
+      this.availabilityAnalyzer.analyze(input.availability),
+      this.qualityAnalyzer.analyze(input.quality),
+    ]);
 
     // Build dimensional scores
     const scores: DimensionalScores = {
@@ -79,6 +78,7 @@ export class RecommendationEngine {
       strategyName as StrategyType,
       demandScore,
       availabilityScore,
+      qualityScore,
     );
 
     if (recommendedBuyPrice) {
@@ -96,16 +96,60 @@ export class RecommendationEngine {
     strategy: StrategyType,
     demandScore: { value: number } | null,
     availabilityScore: { value: number } | null,
+    qualityScore: { value: number } | null,
   ): { price: number; reasoning: string; confidence: number } | null {
-    // Prepare inputs for ValueCalculator
+    // Determine retirement status with time-decay support
+    // IMPROVED: Use WorldBricks yearRetired for accurate calculation
+    let retirementStatus: "active" | "retiring_soon" | "retired" | undefined;
+    let yearsPostRetirement: number | undefined;
+
+    const currentYear = new Date().getFullYear();
+
+    if (input.availability.retiringSoon) {
+      retirementStatus = "retiring_soon";
+    } else if (input.availability.yearRetired) {
+      // BEST: We have official retirement year from WorldBricks
+      retirementStatus = "retired";
+      yearsPostRetirement = currentYear - input.availability.yearRetired;
+    } else if (input.availability.yearReleased) {
+      // Fallback: Estimate based on age (LEGO sets typically 2-3 years before retirement)
+      const yearsOld = currentYear - input.availability.yearReleased;
+
+      if (yearsOld > 3) {
+        // Likely retired
+        retirementStatus = "retired";
+        yearsPostRetirement = yearsOld - 3; // Approximate years post-retirement
+      } else {
+        retirementStatus = "active";
+      }
+    }
+
+    // Prepare inputs for ValueCalculator with ALL IMPROVEMENTS
     const valueInputs: IntrinsicValueInputs = {
+      // FUNDAMENTAL VALUE (MSRP-based)
+      msrp: input.pricing.originalRetailPrice, // CRITICAL: Original retail price
+      currentRetailPrice: input.pricing.currentRetailPrice,
+      // Market prices (for comparison only)
       bricklinkAvgPrice: input.pricing.bricklink?.current.newAvg,
       bricklinkMaxPrice: input.pricing.bricklink?.current.newMax,
-      retirementStatus: input.availability.retiringSoon
-        ? "retiring_soon"
-        : undefined,
+      // Retirement data
+      retirementStatus,
+      yearsPostRetirement,
+      yearReleased: input.availability.yearReleased,
+      // Analysis scores
       demandScore: demandScore?.value,
-      qualityScore: undefined, // Not used in intrinsic value calculation currently
+      qualityScore: qualityScore?.value,
+      // Liquidity metrics
+      salesVelocity: input.demand.bricklinkSalesVelocity,
+      avgDaysBetweenSales: input.demand.bricklinkAvgDaysBetweenSales,
+      // Volatility metric
+      priceVolatility: input.demand.bricklinkPriceVolatility,
+      // Saturation metrics
+      availableQty: input.demand.bricklinkCurrentNewQty,
+      availableLots: input.demand.bricklinkCurrentNewLots,
+      // NEW: Set characteristics for theme and PPD multipliers
+      theme: input.quality.theme,
+      partsCount: input.quality.partsCount,
     };
 
     // Calculate recommended buy price

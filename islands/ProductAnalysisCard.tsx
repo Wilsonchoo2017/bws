@@ -235,7 +235,8 @@ export default function ProductAnalysisCard(
                     💰 Recommended Buy Price
                   </p>
                   <p class="text-xs text-success/70">
-                    {Math.round(rec.recommendedBuyPrice.confidence * 100)}% confidence
+                    {Math.round(rec.recommendedBuyPrice.confidence * 100)}%
+                    confidence
                   </p>
                 </div>
                 <p class="text-3xl font-bold text-success mb-2">

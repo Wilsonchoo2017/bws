@@ -24,7 +24,9 @@ import type {
   IProductRepository,
   IRedditRepository,
   IRetirementRepository,
+  IWorldBricksRepository,
   PastSalesStatistics,
+  WorldBricksSet,
 } from "./repositories/IRepository.ts";
 
 export class DataAggregationService {
@@ -33,6 +35,7 @@ export class DataAggregationService {
     private bricklinkRepo: IBricklinkRepository,
     private redditRepo: IRedditRepository,
     private retirementRepo: IRetirementRepository,
+    private worldBricksRepo: IWorldBricksRepository,
   ) {}
 
   /**
@@ -46,23 +49,31 @@ export class DataAggregationService {
     }
 
     // Fetch related data in parallel (only if LEGO set number exists)
-    const [bricklinkData, redditData, retirementData, pastSalesStats] =
-      await Promise.all([
-        product.legoSetNumber
-          ? this.bricklinkRepo.findByLegoSetNumber(product.legoSetNumber)
-          : Promise.resolve(null),
-        product.legoSetNumber
-          ? this.redditRepo.findByLegoSetNumber(product.legoSetNumber)
-          : Promise.resolve(null),
-        product.legoSetNumber
-          ? this.retirementRepo.findByLegoSetNumber(product.legoSetNumber)
-          : Promise.resolve(null),
-        product.legoSetNumber
-          ? this.bricklinkRepo.getPastSalesStatistics(
-            `S-${product.legoSetNumber}`,
-          )
-          : Promise.resolve(null),
-      ]);
+    const [
+      bricklinkData,
+      redditData,
+      retirementData,
+      worldBricksData,
+      pastSalesStats,
+    ] = await Promise.all([
+      product.legoSetNumber
+        ? this.bricklinkRepo.findByLegoSetNumber(product.legoSetNumber)
+        : Promise.resolve(null),
+      product.legoSetNumber
+        ? this.redditRepo.findByLegoSetNumber(product.legoSetNumber)
+        : Promise.resolve(null),
+      product.legoSetNumber
+        ? this.retirementRepo.findByLegoSetNumber(product.legoSetNumber)
+        : Promise.resolve(null),
+      product.legoSetNumber
+        ? this.worldBricksRepo.findBySetNumber(product.legoSetNumber)
+        : Promise.resolve(null),
+      product.legoSetNumber
+        ? this.bricklinkRepo.getPastSalesStatistics(
+          `S-${product.legoSetNumber}`,
+        )
+        : Promise.resolve(null),
+    ]);
 
     // Build analysis input using pure transformation functions
     return {
@@ -75,8 +86,12 @@ export class DataAggregationService {
         redditData,
         pastSalesStats,
       ),
-      availability: this.buildAvailabilityData(product, retirementData),
-      quality: this.buildQualityData(product, retirementData),
+      availability: this.buildAvailabilityData(
+        product,
+        retirementData,
+        worldBricksData,
+      ),
+      quality: this.buildQualityData(product, retirementData, worldBricksData),
     };
   }
 
@@ -101,14 +116,20 @@ export class DataAggregationService {
     // Convert set numbers to Bricklink item IDs for past sales
     const bricklinkItemIds = uniqueSetNumbers.map((num) => `S-${num}`);
 
-    // Batch fetch all related data in parallel (4 queries instead of 4*N!)
-    const [bricklinkMap, redditMap, retirementMap, pastSalesMap] = await Promise
-      .all([
-        this.bricklinkRepo.findByLegoSetNumbers(uniqueSetNumbers),
-        this.redditRepo.findByLegoSetNumbers(uniqueSetNumbers),
-        this.retirementRepo.findByLegoSetNumbers(uniqueSetNumbers),
-        this.bricklinkRepo.getPastSalesStatisticsBatch(bricklinkItemIds),
-      ]);
+    // Batch fetch all related data in parallel (5 queries instead of 5*N!)
+    const [
+      bricklinkMap,
+      redditMap,
+      retirementMap,
+      worldBricksMap,
+      pastSalesMap,
+    ] = await Promise.all([
+      this.bricklinkRepo.findByLegoSetNumbers(uniqueSetNumbers),
+      this.redditRepo.findByLegoSetNumbers(uniqueSetNumbers),
+      this.retirementRepo.findByLegoSetNumbers(uniqueSetNumbers),
+      this.worldBricksRepo.findBySetNumbers(uniqueSetNumbers),
+      this.bricklinkRepo.getPastSalesStatisticsBatch(bricklinkItemIds),
+    ]);
 
     console.info(
       `[DataAggregationService] Batch aggregation complete:`,
@@ -118,6 +139,7 @@ export class DataAggregationService {
         bricklinkHits: bricklinkMap.size,
         redditHits: redditMap.size,
         retirementHits: retirementMap.size,
+        worldBricksHits: worldBricksMap.size,
         pastSalesHits: pastSalesMap.size,
       },
     );
@@ -136,6 +158,9 @@ export class DataAggregationService {
       const retirementData = product.legoSetNumber
         ? retirementMap.get(product.legoSetNumber) || null
         : null;
+      const worldBricksData = product.legoSetNumber
+        ? worldBricksMap.get(product.legoSetNumber) || null
+        : null;
       const pastSalesStats = product.legoSetNumber
         ? pastSalesMap.get(`S-${product.legoSetNumber}`) || null
         : null;
@@ -150,8 +175,16 @@ export class DataAggregationService {
           redditData,
           pastSalesStats,
         ),
-        availability: this.buildAvailabilityData(product, retirementData),
-        quality: this.buildQualityData(product, retirementData),
+        availability: this.buildAvailabilityData(
+          product,
+          retirementData,
+          worldBricksData,
+        ),
+        quality: this.buildQualityData(
+          product,
+          retirementData,
+          worldBricksData,
+        ),
       };
 
       resultMap.set(product.productId, analysisInput);
@@ -191,13 +224,16 @@ export class DataAggregationService {
     redditData: RedditSearchResult | null,
     pastSalesStats: PastSalesStatistics | null,
   ): DemandData {
-    // Base data from product and legacy Bricklink
+    // Base data from product and PRIMARY Bricklink pricing data
     const baseData: DemandData = {
       unitsSold: this.safeNumber(product.unitsSold),
       lifetimeSold: this.safeNumber(product.lifetimeSold),
       viewCount: this.safeNumber(product.view_count),
       likedCount: this.safeNumber(product.liked_count),
       commentCount: this.safeNumber(product.commentCount),
+      // PRIMARY: Extract Bricklink pricing data for demand analysis
+      ...this.extractBricklinkPricingForDemand(bricklinkData),
+      // Legacy metrics
       bricklinkTimesSold: bricklinkData
         ? this.extractBricklinkTimesSold(bricklinkData)
         : undefined,
@@ -281,11 +317,20 @@ export class DataAggregationService {
   /**
    * Build availability data
    * Pure function - no side effects
+   * UPDATED: Now includes WorldBricks data for year released/retired
    */
   private buildAvailabilityData(
     product: Product,
     retirementData: BrickrankerRetirementItem | null,
+    worldBricksData: WorldBricksSet | null,
   ): AvailabilityData {
+    // Prefer WorldBricks for year data (more accurate)
+    const yearReleased = worldBricksData?.yearReleased ||
+      retirementData?.yearReleased ||
+      undefined;
+
+    const yearRetired = worldBricksData?.yearRetired || undefined;
+
     return {
       currentStock: this.safeNumber(product.currentStock),
       stockType: product.stockType?.toString(),
@@ -293,7 +338,8 @@ export class DataAggregationService {
       expectedRetirementDate: retirementData?.expectedRetirementDate
         ? this.parseRetirementDate(retirementData.expectedRetirementDate)
         : undefined,
-      yearReleased: retirementData?.yearReleased || undefined,
+      yearReleased,
+      yearRetired, // NEW: Official retirement year from WorldBricks
       daysUntilRetirement: retirementData
         ? this.calculateDaysUntilRetirement(retirementData)
         : undefined,
@@ -305,10 +351,12 @@ export class DataAggregationService {
   /**
    * Build quality data
    * Pure function - no side effects
+   * UPDATED: Now includes WorldBricks parts count
    */
   private buildQualityData(
     product: Product,
     retirementData: BrickrankerRetirementItem | null,
+    worldBricksData: WorldBricksSet | null,
   ): QualityData {
     return {
       avgStarRating: this.safeNumber(product.avgStarRating)
@@ -323,6 +371,7 @@ export class DataAggregationService {
       brand: product.brand || undefined,
       theme: retirementData?.theme || undefined,
       legoSetNumber: product.legoSetNumber || undefined,
+      partsCount: worldBricksData?.partsCount || undefined, // NEW: For PPD calculation
     };
   }
 
@@ -407,6 +456,58 @@ export class DataAggregationService {
     if (!box?.totalQty) return undefined;
     const parsed = parseInt(box.totalQty.replace(/,/g, ""), 10);
     return isNaN(parsed) ? undefined : parsed;
+  }
+
+  /**
+   * Extract Bricklink pricing data for demand analysis
+   * Treats market pricing as PRIMARY demand signal
+   */
+  private extractBricklinkPricingForDemand(
+    item: BricklinkItem | null,
+  ): Partial<DemandData> {
+    if (!item) {
+      return {};
+    }
+
+    const parsePrice = (
+      priceObj: Record<string, unknown> | null,
+      key: string,
+    ) => {
+      if (!priceObj || typeof priceObj !== "object") return undefined;
+      const value = priceObj[key];
+      if (!value || typeof value !== "object") return undefined;
+      const valueObj = value as Record<string, unknown>;
+      return typeof valueObj.amount === "number" ? valueObj.amount : undefined;
+    };
+
+    const parseNumber = (value: unknown): number | undefined => {
+      if (value === null || value === undefined) return undefined;
+      if (typeof value === "number") return value;
+      if (typeof value === "string") {
+        const parsed = Number(value.replace(/,/g, ""));
+        return isNaN(parsed) ? undefined : parsed;
+      }
+      return undefined;
+    };
+
+    const currentNew = item.currentNew as Record<string, unknown> | null;
+    const sixMonthNew = item.sixMonthNew as Record<string, unknown> | null;
+
+    return {
+      // Current market data (indicates active supply/demand)
+      bricklinkCurrentNewAvg: parsePrice(currentNew, "avg_price"),
+      bricklinkCurrentNewMin: parsePrice(currentNew, "min_price"),
+      bricklinkCurrentNewMax: parsePrice(currentNew, "max_price"),
+      bricklinkCurrentNewQty: parseNumber(currentNew?.total_qty),
+      bricklinkCurrentNewLots: parseNumber(currentNew?.total_lots),
+
+      // Historical data (indicates market trends)
+      bricklinkSixMonthNewAvg: parsePrice(sixMonthNew, "avg_price"),
+      bricklinkSixMonthNewMin: parsePrice(sixMonthNew, "min_price"),
+      bricklinkSixMonthNewMax: parsePrice(sixMonthNew, "max_price"),
+      bricklinkSixMonthNewTimesSold: parseNumber(sixMonthNew?.times_sold),
+      bricklinkSixMonthNewQty: parseNumber(sixMonthNew?.total_qty),
+    };
   }
 
   private normalizeRedditData(

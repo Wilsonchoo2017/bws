@@ -12,17 +12,8 @@
     "db:migrate": "deno run -A db/migrate.ts",
     "db:studio": "deno run -A npm:drizzle-kit studio"
   },
-  "lint": {
-    "rules": {
-      "tags": [
-        "fresh",
-        "recommended"
-      ]
-    }
-  },
-  "exclude": [
-    "**/_fresh/*"
-  ],
+  "lint": { "rules": { "tags": ["fresh", "recommended"] } },
+  "exclude": ["**/_fresh/*"],
   "imports": {
     "$fresh/": "https://deno.land/x/fresh@1.7.3/",
     "preact": "https://esm.sh/preact@10.22.0",
@@ -44,8 +35,5 @@
     "puppeteer": "npm:puppeteer@^23.11.1",
     "puppeteer-core": "npm:puppeteer-core@^23.11.1"
   },
-  "compilerOptions": {
-    "jsx": "react-jsx",
-    "jsxImportSource": "preact"
-  }
+  "compilerOptions": { "jsx": "react-jsx", "jsxImportSource": "preact" }
 }

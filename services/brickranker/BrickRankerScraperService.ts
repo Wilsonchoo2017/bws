@@ -41,6 +41,7 @@ import {
   createCircuitBreaker,
   type RedisCircuitBreaker,
 } from "../../utils/RedisCircuitBreaker.ts";
+import { scraperLogger } from "../../utils/logger.ts";
 
 /**
  * Result of a scraping operation
@@ -94,6 +95,10 @@ export class BrickRankerScraperService {
 
     // Validate URL
     if (!isValidBrickRankerUrl(url)) {
+      scraperLogger.error("Invalid BrickRanker URL provided", {
+        url,
+        source: "brickranker",
+      });
       return {
         success: false,
         error: `Invalid BrickRanker URL: ${url}`,
@@ -102,6 +107,10 @@ export class BrickRankerScraperService {
 
     // Check circuit breaker
     if (await this.circuitBreaker.isCircuitOpen()) {
+      scraperLogger.warn("BrickRanker circuit breaker is open", {
+        url,
+        source: "brickranker",
+      });
       return {
         success: false,
         error: "Circuit breaker is open. Too many recent failures.",
@@ -116,9 +125,12 @@ export class BrickRankerScraperService {
       try {
         retries = attempt - 1;
 
-        console.log(
-          `🔄 Scraping BrickRanker attempt ${attempt}/${RETRY_CONFIG.MAX_RETRIES}: ${url}`,
-        );
+        scraperLogger.info("Starting BrickRanker scraping attempt", {
+          url,
+          attempt,
+          maxRetries: RETRY_CONFIG.MAX_RETRIES,
+          source: "brickranker",
+        });
 
         // Rate limiting (unless skipped)
         if (!skipRateLimit) {
@@ -128,7 +140,10 @@ export class BrickRankerScraperService {
         }
 
         // Fetch retirement tracker page
-        console.log(`📥 Fetching retirement tracker page...`);
+        scraperLogger.info("Fetching BrickRanker retirement tracker page", {
+          url,
+          source: "brickranker",
+        });
         const response = await this.httpClient.fetch({
           url,
           waitForSelector: "table", // Wait for tables to load
@@ -141,13 +156,18 @@ export class BrickRankerScraperService {
         }
 
         // Parse the page to extract all retirement items
-        console.log(`🔍 Parsing retirement data...`);
+        scraperLogger.info("Parsing BrickRanker retirement data", {
+          url,
+          source: "brickranker",
+        });
         const data = parseRetirementTrackerPage(response.html);
 
-        console.log(
-          `✅ Successfully parsed ${data.totalItems} items across ${data.themes.length} themes`,
-        );
-        console.log(`📋 Themes found: ${data.themes.join(", ")}`);
+        scraperLogger.info("Successfully parsed BrickRanker data", {
+          totalItems: data.totalItems,
+          themesCount: data.themes.length,
+          themes: data.themes.join(", "),
+          source: "brickranker",
+        });
 
         // Save to database if requested
         let saved = false;
@@ -169,17 +189,25 @@ export class BrickRankerScraperService {
         };
       } catch (error) {
         lastError = error as Error;
-        console.error(
-          `❌ Scraping attempt ${attempt} failed:`,
-          error.message,
-        );
+        scraperLogger.error("BrickRanker scraping attempt failed", {
+          url,
+          attempt,
+          maxRetries: RETRY_CONFIG.MAX_RETRIES,
+          error: error.message,
+          stack: error.stack,
+          source: "brickranker",
+        });
 
         // If not the last attempt, wait with exponential backoff
         if (attempt < RETRY_CONFIG.MAX_RETRIES) {
           const backoffDelay = calculateBackoff(attempt);
-          console.log(
-            `⏳ Waiting ${backoffDelay / 1000}s before retry...`,
-          );
+          scraperLogger.info("Waiting before retry with exponential backoff", {
+            url,
+            backoffMs: backoffDelay,
+            backoffSeconds: backoffDelay / 1000,
+            nextAttempt: attempt + 1,
+            source: "brickranker",
+          });
           await this.delay(backoffDelay);
         }
       }
@@ -187,6 +215,13 @@ export class BrickRankerScraperService {
 
     // All retries failed
     await this.circuitBreaker.recordFailure();
+
+    scraperLogger.error("All BrickRanker scraping attempts failed", {
+      url,
+      totalAttempts: RETRY_CONFIG.MAX_RETRIES,
+      finalError: lastError?.message || "Unknown error",
+      source: "brickranker",
+    });
 
     return {
       success: false,
@@ -202,7 +237,10 @@ export class BrickRankerScraperService {
     items: RetirementItemData[],
   ): Promise<{ created: number; updated: number; total: number }> {
     try {
-      console.log(`💾 Saving ${items.length} items to database...`);
+      scraperLogger.info("Saving BrickRanker data to database", {
+        itemsCount: items.length,
+        source: "brickranker",
+      });
 
       // Download images for all items with imageUrl
       const itemsWithImages = await this.downloadImagesForItems(items);
@@ -210,13 +248,20 @@ export class BrickRankerScraperService {
       // Batch upsert all items
       const stats = await this.repository.batchUpsert(itemsWithImages);
 
-      console.log(
-        `✅ Database save complete: ${stats.created} created, ${stats.updated} updated, ${stats.total} total`,
-      );
+      scraperLogger.info("BrickRanker database save complete", {
+        created: stats.created,
+        updated: stats.updated,
+        total: stats.total,
+        source: "brickranker",
+      });
 
       return stats;
     } catch (error) {
-      console.error(`❌ Database save failed:`, error);
+      scraperLogger.error("BrickRanker database save failed", {
+        error: (error as Error).message,
+        stack: (error as Error).stack,
+        source: "brickranker",
+      });
       throw new Error(`Database save failed: ${error.message}`);
     }
   }
@@ -252,9 +297,11 @@ export class BrickRankerScraperService {
       }
 
       try {
-        console.log(
-          `📸 Downloading image for ${item.setNumber}: ${item.imageUrl}`,
-        );
+        scraperLogger.info("Downloading image for BrickRanker item", {
+          setNumber: item.setNumber,
+          imageUrl: item.imageUrl,
+          source: "brickranker",
+        });
 
         const imageData = await imageDownloadService.download(item.imageUrl, {
           timeoutMs: IMAGE_CONFIG.DOWNLOAD.TIMEOUT_MS,
@@ -276,14 +323,17 @@ export class BrickRankerScraperService {
           imageDownloadStatus: ImageDownloadStatus.COMPLETED,
         });
 
-        console.log(
-          `✅ Image stored for ${item.setNumber}: ${storageResult.relativePath}`,
-        );
+        scraperLogger.info("Image stored for BrickRanker item", {
+          setNumber: item.setNumber,
+          localImagePath: storageResult.relativePath,
+          source: "brickranker",
+        });
       } catch (error) {
-        console.error(
-          `❌ Image download failed for ${item.setNumber}:`,
-          error.message,
-        );
+        scraperLogger.error("Image download failed for BrickRanker item", {
+          setNumber: item.setNumber,
+          error: (error as Error).message,
+          source: "brickranker",
+        });
         results.push({
           ...item,
           imageDownloadStatus: ImageDownloadStatus.FAILED,

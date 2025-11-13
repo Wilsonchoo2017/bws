@@ -16,11 +16,15 @@ export class DemandAnalyzer extends BaseAnalyzer<DemandData> {
 
   // deno-lint-ignore require-await
   async analyze(data: DemandData): Promise<AnalysisScore | null> {
-    // Check for new market-driven Bricklink data
+    // PRIMARY: Check for Bricklink pricing data (market indicators)
+    const hasBricklinkPricing = data.bricklinkCurrentNewAvg !== undefined ||
+      data.bricklinkSixMonthNewAvg !== undefined;
+
+    // SECONDARY: Check for market-driven Bricklink past sales data
     const hasPastSalesData = data.bricklinkPastSalesCount !== undefined &&
       data.bricklinkPastSalesCount > 0;
 
-    // Legacy data checks
+    // TERTIARY: Legacy data checks
     const hasSalesData = data.unitsSold !== undefined ||
       data.lifetimeSold !== undefined;
     const hasLegacyBricklinkData = data.bricklinkTimesSold !== undefined ||
@@ -29,10 +33,10 @@ export class DemandAnalyzer extends BaseAnalyzer<DemandData> {
     const hasEngagementData = data.viewCount !== undefined ||
       data.likedCount !== undefined || data.commentCount !== undefined;
 
-    // Require at least one demand signal
+    // Require at least one demand signal (prioritize Bricklink pricing)
     if (
-      !hasPastSalesData && !hasSalesData && !hasLegacyBricklinkData &&
-      !hasRedditData && !hasEngagementData
+      !hasBricklinkPricing && !hasPastSalesData && !hasSalesData &&
+      !hasLegacyBricklinkData && !hasRedditData && !hasEngagementData
     ) {
       return null; // Skip analysis - insufficient demand data
     }
@@ -41,10 +45,65 @@ export class DemandAnalyzer extends BaseAnalyzer<DemandData> {
     const reasons: string[] = [];
     const dataPoints: Record<string, unknown> = {};
 
-    // NEW: 1. Liquidity & Velocity (35% weight) - Like trading volume in stocks
+    // PRIMARY: 1. Bricklink Market Pricing (60% weight) - Direct market indicators
+    if (hasBricklinkPricing) {
+      const pricingScore = this.analyzeBricklinkPricing(data);
+      scores.push({ score: pricingScore, weight: 0.60 });
+
+      // Add reasoning based on market data
+      if (data.bricklinkCurrentNewAvg) {
+        dataPoints.bricklinkCurrentNewAvg = data.bricklinkCurrentNewAvg;
+        reasons.push(
+          `Active market (Avg: $${data.bricklinkCurrentNewAvg.toFixed(2)})`,
+        );
+      }
+
+      // Price trend analysis
+      if (
+        data.bricklinkCurrentNewAvg && data.bricklinkSixMonthNewAvg &&
+        data.bricklinkCurrentNewAvg > data.bricklinkSixMonthNewAvg
+      ) {
+        const increase = ((data.bricklinkCurrentNewAvg -
+          data.bricklinkSixMonthNewAvg) / data.bricklinkSixMonthNewAvg * 100)
+          .toFixed(1);
+        reasons.push(`Price trending up (+${increase}% vs 6mo avg)`);
+      } else if (
+        data.bricklinkCurrentNewAvg && data.bricklinkSixMonthNewAvg &&
+        data.bricklinkCurrentNewAvg < data.bricklinkSixMonthNewAvg
+      ) {
+        const decrease = ((data.bricklinkSixMonthNewAvg -
+          data.bricklinkCurrentNewAvg) / data.bricklinkSixMonthNewAvg * 100)
+          .toFixed(1);
+        reasons.push(`Price trending down (-${decrease}% vs 6mo avg)`);
+      }
+
+      // Market activity
+      if (data.bricklinkCurrentNewLots) {
+        dataPoints.bricklinkCurrentNewLots = data.bricklinkCurrentNewLots;
+        if (data.bricklinkCurrentNewLots > 50) {
+          reasons.push(
+            `High market availability (${data.bricklinkCurrentNewLots} lots)`,
+          );
+        } else if (data.bricklinkCurrentNewLots < 10) {
+          reasons.push(`Limited supply (${data.bricklinkCurrentNewLots} lots)`);
+        }
+      }
+
+      if (data.bricklinkSixMonthNewTimesSold) {
+        dataPoints.bricklinkSixMonthNewTimesSold =
+          data.bricklinkSixMonthNewTimesSold;
+        if (data.bricklinkSixMonthNewTimesSold > 100) {
+          reasons.push(
+            `Strong 6mo sales (${data.bricklinkSixMonthNewTimesSold} transactions)`,
+          );
+        }
+      }
+    }
+
+    // SECONDARY: 2. Liquidity & Velocity (25% weight) - Like trading volume in stocks
     if (hasPastSalesData) {
       const liquidityScore = this.analyzeLiquidityVelocity(data);
-      scores.push({ score: liquidityScore, weight: 0.35 });
+      scores.push({ score: liquidityScore, weight: 0.25 });
 
       // Add reasoning based on velocity and liquidity
       if (data.bricklinkSalesVelocity !== undefined) {
@@ -74,13 +133,13 @@ export class DemandAnalyzer extends BaseAnalyzer<DemandData> {
           );
         }
       }
-    } else if (hasLegacyBricklinkData) {
-      // Fallback to legacy Bricklink data with reduced weight
+    } else if (hasLegacyBricklinkData && !hasBricklinkPricing) {
+      // Fallback to legacy Bricklink data ONLY if no pricing data (reduced weight)
       const resaleScore = this.analyzeBricklinkActivity(
         data.bricklinkTimesSold,
         data.bricklinkTotalQty,
       );
-      scores.push({ score: resaleScore, weight: 0.30 });
+      scores.push({ score: resaleScore, weight: 0.15 });
 
       if (data.bricklinkTimesSold !== undefined) {
         dataPoints.bricklinkTimesSold = data.bricklinkTimesSold;
@@ -92,10 +151,10 @@ export class DemandAnalyzer extends BaseAnalyzer<DemandData> {
       }
     }
 
-    // NEW: 2. Momentum & Trends (30% weight) - Like price/volume trends
+    // 3. Momentum & Trends (10% weight) - Like price/volume trends
     if (hasPastSalesData && data.bricklinkPriceTrend) {
       const momentumScore = this.analyzeMomentumTrends(data);
-      scores.push({ score: momentumScore, weight: 0.30 });
+      scores.push({ score: momentumScore, weight: 0.10 });
 
       // Add reasoning based on trends
       if (data.bricklinkPriceTrend === "increasing") {
@@ -118,24 +177,14 @@ export class DemandAnalyzer extends BaseAnalyzer<DemandData> {
       }
     }
 
-    // 3. Market Depth - Legacy Bricklink activity (20% weight)
-    // Only if not already counted in liquidity section
-    if (!hasPastSalesData && hasLegacyBricklinkData) {
-      const resaleScore = this.analyzeBricklinkActivity(
-        data.bricklinkTimesSold,
-        data.bricklinkTotalQty,
-      );
-      scores.push({ score: resaleScore, weight: 0.30 });
-    }
-
-    // 4. Community Sentiment (10% weight) - Like analyst ratings
+    // 4. Community Sentiment (3% weight) - Like analyst ratings
     if (hasRedditData) {
       const communityScore = this.analyzeCommunitySentiment(
         data.redditPosts,
         data.redditAverageScore,
         data.redditTotalComments,
       );
-      scores.push({ score: communityScore, weight: 0.10 });
+      scores.push({ score: communityScore, weight: 0.03 });
 
       if (data.redditPosts !== undefined && data.redditPosts > 0) {
         dataPoints.redditPosts = data.redditPosts;
@@ -145,13 +194,13 @@ export class DemandAnalyzer extends BaseAnalyzer<DemandData> {
       }
     }
 
-    // 5. Retail Activity (5% weight) - Market awareness indicator
+    // 5. Retail Activity (2% weight) - Market awareness indicator
     if (hasSalesData) {
       const salesScore = this.analyzeSalesVelocity(
         data.unitsSold,
         data.lifetimeSold,
       );
-      scores.push({ score: salesScore, weight: 0.05 });
+      scores.push({ score: salesScore, weight: 0.02 });
 
       if (data.unitsSold !== undefined && data.unitsSold > 1000) {
         dataPoints.unitsSold = data.unitsSold;
@@ -593,6 +642,149 @@ export class DemandAnalyzer extends BaseAnalyzer<DemandData> {
     }
 
     // Return weighted average
+    return scores.length > 0
+      ? scores.reduce((sum, s) => sum + s, 0) / scores.length
+      : 50;
+  }
+
+  /**
+   * PRIMARY: Analyze Bricklink market pricing data
+   * Treats pricing as a direct indicator of market demand
+   * Higher prices + limited supply = higher demand score
+   * Price growth trends = increasing demand
+   */
+  private analyzeBricklinkPricing(data: DemandData): number {
+    const scores: number[] = [];
+
+    // 1. Price trend score (comparing current vs 6-month average)
+    if (data.bricklinkCurrentNewAvg && data.bricklinkSixMonthNewAvg) {
+      const current = data.bricklinkCurrentNewAvg;
+      const sixMonth = data.bricklinkSixMonthNewAvg;
+      const percentChange = ((current - sixMonth) / sixMonth) * 100;
+
+      // Positive trend = increasing demand
+      // >20% increase = 90-100 (very strong demand)
+      // 10-20% increase = 75-90 (strong demand)
+      // 0-10% increase = 60-75 (moderate demand)
+      // Stable (-5 to 0%) = 50-60 (stable demand)
+      // Declining = 20-50 (weakening demand)
+
+      if (percentChange > 20) {
+        scores.push(Math.min(100, 90 + percentChange / 2));
+      } else if (percentChange > 10) {
+        scores.push(75 + (percentChange - 10) * 1.5);
+      } else if (percentChange > 0) {
+        scores.push(60 + percentChange * 1.5);
+      } else if (percentChange > -5) {
+        scores.push(50 + percentChange * 2);
+      } else if (percentChange > -15) {
+        scores.push(35 + (percentChange + 15) * 1.5);
+      } else {
+        scores.push(Math.max(10, 35 + (percentChange + 15)));
+      }
+    } else if (data.bricklinkCurrentNewAvg) {
+      // Only current price available - assume moderate demand
+      scores.push(60);
+    }
+
+    // 2. Market liquidity score (based on lots available)
+    if (data.bricklinkCurrentNewLots !== undefined) {
+      const lots = data.bricklinkCurrentNewLots;
+
+      // Interpret lots in context of demand:
+      // Very few lots (<5) = HIGH demand (items selling fast) = 80-100
+      // Few lots (5-15) = Good demand = 65-80
+      // Moderate lots (15-30) = Moderate demand = 50-65
+      // Many lots (30-70) = Lower demand = 35-50
+      // Excessive lots (>70) = Oversupply/low demand = 20-35
+
+      if (lots < 5) {
+        scores.push(Math.max(80, 100 - lots * 4));
+      } else if (lots < 15) {
+        scores.push(65 + (15 - lots) * 1.5);
+      } else if (lots < 30) {
+        scores.push(50 + (30 - lots) * 1);
+      } else if (lots < 70) {
+        scores.push(35 + (70 - lots) * 0.375);
+      } else {
+        scores.push(Math.max(10, 35 - (lots - 70) * 0.25));
+      }
+    }
+
+    // 3. Transaction volume score (6-month times sold)
+    if (data.bricklinkSixMonthNewTimesSold !== undefined) {
+      const timesSold = data.bricklinkSixMonthNewTimesSold;
+
+      // More transactions = higher demand
+      // >200 times = 90-100 (very high demand)
+      // 100-200 = 75-90 (high demand)
+      // 50-100 = 60-75 (moderate-high demand)
+      // 20-50 = 45-60 (moderate demand)
+      // 5-20 = 30-45 (low-moderate demand)
+      // <5 = 10-30 (low demand)
+
+      if (timesSold > 200) {
+        scores.push(Math.min(100, 90 + (timesSold - 200) / 20));
+      } else if (timesSold > 100) {
+        scores.push(75 + (timesSold - 100) * 0.15);
+      } else if (timesSold > 50) {
+        scores.push(60 + (timesSold - 50) * 0.3);
+      } else if (timesSold > 20) {
+        scores.push(45 + (timesSold - 20) * 0.5);
+      } else if (timesSold > 5) {
+        scores.push(30 + (timesSold - 5) * 1);
+      } else {
+        scores.push(10 + timesSold * 4);
+      }
+    }
+
+    // 4. Quantity sold score (total quantity in 6 months)
+    if (data.bricklinkSixMonthNewQty !== undefined) {
+      const qty = data.bricklinkSixMonthNewQty;
+
+      // Higher quantity = higher market interest
+      // >500 units = 90-100 (very high demand)
+      // 200-500 = 75-90 (high demand)
+      // 100-200 = 60-75 (moderate-high demand)
+      // 50-100 = 45-60 (moderate demand)
+      // 20-50 = 30-45 (low-moderate demand)
+      // <20 = 10-30 (low demand)
+
+      if (qty > 500) {
+        scores.push(Math.min(100, 90 + (qty - 500) / 50));
+      } else if (qty > 200) {
+        scores.push(75 + (qty - 200) * 0.05);
+      } else if (qty > 100) {
+        scores.push(60 + (qty - 100) * 0.15);
+      } else if (qty > 50) {
+        scores.push(45 + (qty - 50) * 0.3);
+      } else if (qty > 20) {
+        scores.push(30 + (qty - 20) * 0.5);
+      } else {
+        scores.push(10 + qty);
+      }
+    }
+
+    // 5. Price spread score (min vs max indicates market competitiveness)
+    if (data.bricklinkCurrentNewMin && data.bricklinkCurrentNewMax) {
+      const min = data.bricklinkCurrentNewMin;
+      const max = data.bricklinkCurrentNewMax;
+      const spread = (max - min) / min * 100;
+
+      // Narrow spread (<20%) = competitive market, high demand = 80-100
+      // Moderate spread (20-50%) = normal market = 60-80
+      // Wide spread (>50%) = fragmented market, uncertain demand = 40-60
+
+      if (spread < 20) {
+        scores.push(80 + (20 - spread));
+      } else if (spread < 50) {
+        scores.push(60 + (50 - spread) * 0.67);
+      } else {
+        scores.push(Math.max(30, 60 - (spread - 50) * 0.4));
+      }
+    }
+
+    // Return average of available scores, or neutral score if no data
     return scores.length > 0
       ? scores.reduce((sum, s) => sum + s, 0) / scores.length
       : 50;

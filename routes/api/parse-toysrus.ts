@@ -4,6 +4,9 @@ import { db } from "../../db/client.ts";
 import { priceHistory, products, scrapeSessions } from "../../db/schema.ts";
 import { findExistingProduct } from "../../db/utils.ts";
 import { parseToysRUsHtml } from "../../utils/toysrus-extractors.ts";
+import { scraperLogger } from "../../utils/logger.ts";
+import { ImageDownloadService } from "../../services/image/ImageDownloadService.ts";
+import { ImageStorageService } from "../../services/image/ImageStorageService.ts";
 
 export const handler = async (
   req: Request,
@@ -59,7 +62,18 @@ export const handler = async (
     }
 
     // Parse HTML to extract products
+    scraperLogger.info('Parsing Toys"R"Us HTML', {
+      sourceUrl: sourceUrl || "unknown",
+      source: "toysrus",
+    });
+
     const parsedProducts = parseToysRUsHtml(htmlContent);
+
+    scraperLogger.info('Successfully parsed Toys"R"Us products', {
+      productsFound: parsedProducts.length,
+      sourceUrl: sourceUrl || "unknown",
+      source: "toysrus",
+    });
 
     // Check database for existing products and populate LEGO IDs
     const productsWithLegoIdResolution = await Promise.all(
@@ -111,6 +125,13 @@ export const handler = async (
     }).returning();
 
     sessionId = session.id;
+
+    scraperLogger.info('Created Toys"R"Us scrape session', {
+      sessionId,
+      productsWithLegoId: productsWithLegoId.length,
+      productsWithoutLegoId: productsWithoutLegoId.length,
+      source: "toysrus",
+    });
 
     // Insert/update products in database
     let productsStored = 0;
@@ -189,6 +210,87 @@ export const handler = async (
           });
         }
 
+        // Download and store image locally if available
+        if (product.image) {
+          try {
+            scraperLogger.info('Downloading image for Toys"R"Us product', {
+              productId: product.productId,
+              imageUrl: product.image,
+              source: "toysrus",
+            });
+
+            // Download the image
+            const imageBlob = await ImageDownloadService.downloadImage(
+              product.image,
+            );
+
+            if (imageBlob) {
+              // Store the image locally
+              const storageResult = await ImageStorageService.saveImage(
+                imageBlob,
+                product.productId,
+                "toysrus",
+              );
+
+              if (storageResult.success && storageResult.localPath) {
+                // Update the product with local image path
+                await db.update(products).set({
+                  localImagePath: storageResult.localPath,
+                  imageUrl: product.image,
+                  imageDownloadedAt: new Date(),
+                  imageDownloadStatus: "completed",
+                }).where(eq(products.productId, product.productId));
+
+                scraperLogger.info("Successfully downloaded and stored image", {
+                  productId: product.productId,
+                  localPath: storageResult.localPath,
+                  source: "toysrus",
+                });
+              } else {
+                // Mark as failed in database
+                await db.update(products).set({
+                  imageUrl: product.image,
+                  imageDownloadStatus: "failed",
+                }).where(eq(products.productId, product.productId));
+
+                scraperLogger.warn("Failed to store image", {
+                  productId: product.productId,
+                  error: storageResult.error,
+                  source: "toysrus",
+                });
+              }
+            } else {
+              // Mark as failed in database
+              await db.update(products).set({
+                imageUrl: product.image,
+                imageDownloadStatus: "failed",
+              }).where(eq(products.productId, product.productId));
+
+              scraperLogger.warn("Failed to download image", {
+                productId: product.productId,
+                source: "toysrus",
+              });
+            }
+          } catch (imageError) {
+            // Log error but don't fail the entire product save
+            scraperLogger.error("Error downloading/storing image", {
+              productId: product.productId,
+              error: (imageError as Error).message,
+              source: "toysrus",
+            });
+
+            // Mark as failed in database
+            try {
+              await db.update(products).set({
+                imageUrl: product.image,
+                imageDownloadStatus: "failed",
+              }).where(eq(products.productId, product.productId));
+            } catch (_updateError) {
+              // Ignore errors updating status
+            }
+          }
+        }
+
         // Add metadata about whether this was an update
         const productWithMeta = {
           ...insertedProduct,
@@ -204,11 +306,23 @@ export const handler = async (
 
         insertedProducts.push(productWithMeta);
         productsStored++;
+
+        scraperLogger.info('Saved Toys"R"Us product to database', {
+          productId: product.productId,
+          productName: product.name,
+          price: product.price,
+          priceBeforeDiscount: product.priceBeforeDiscount,
+          wasUpdated: !!existingProduct,
+          sessionId,
+          source: "toysrus",
+        });
       } catch (productError) {
-        console.error(
-          `Failed to insert product ${product.productId}:`,
-          productError,
-        );
+        scraperLogger.error('Failed to insert Toys"R"Us product', {
+          productId: product.productId,
+          error: (productError as Error).message,
+          sessionId,
+          source: "toysrus",
+        });
         // Continue with other products
       }
     }
@@ -222,6 +336,15 @@ export const handler = async (
     sessionStatus = productsStored === finalProducts.length
       ? "success"
       : "partial";
+
+    scraperLogger.info('Completed Toys"R"Us scrape session', {
+      sessionId,
+      productsStored,
+      totalProducts: finalProducts.length,
+      status: sessionStatus,
+      productsWithoutLegoId: productsWithoutLegoId.length,
+      source: "toysrus",
+    });
 
     // If there are products without LEGO IDs, return them for manual validation
     // along with the session info and already-saved products
@@ -273,6 +396,13 @@ export const handler = async (
     );
   } catch (error) {
     sessionError = error instanceof Error ? error.message : "Unknown error";
+
+    scraperLogger.error('Error parsing Toys"R"Us HTML', {
+      error: error instanceof Error ? error.message : String(error),
+      stack: error instanceof Error ? error.stack : undefined,
+      sessionId,
+      source: "toysrus",
+    });
 
     // Update session with error if we have a session ID
     if (sessionId) {

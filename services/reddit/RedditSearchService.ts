@@ -22,6 +22,7 @@ import {
   REDDIT_INTERVALS,
   RETRY_CONFIG,
 } from "../../config/scraper.config.ts";
+import { scraperLogger } from "../../utils/logger.ts";
 
 /**
  * Reddit post interface
@@ -98,9 +99,13 @@ export class RedditSearchService {
       try {
         retries = attempt - 1;
 
-        console.log(
-          `🔍 Reddit search attempt ${attempt}/${RETRY_CONFIG.MAX_RETRIES}: ${setNumber} in r/${subreddit}`,
-        );
+        scraperLogger.info("Starting Reddit search attempt", {
+          setNumber,
+          subreddit,
+          attempt,
+          maxRetries: RETRY_CONFIG.MAX_RETRIES,
+          source: "reddit",
+        });
 
         // Rate limiting
         await this.rateLimiter.waitForNextRequest({
@@ -110,7 +115,12 @@ export class RedditSearchService {
         // Search Reddit
         const posts = await this.searchRedditAPI(setNumber, subreddit);
 
-        console.log(`✅ Found ${posts.length} posts for ${setNumber}`);
+        scraperLogger.info("Reddit search completed successfully", {
+          setNumber,
+          subreddit,
+          postsFound: posts.length,
+          source: "reddit",
+        });
 
         // Save to database if requested
         let saved = false;
@@ -130,20 +140,41 @@ export class RedditSearchService {
         };
       } catch (error) {
         lastError = error as Error;
-        console.error(`❌ Search attempt ${attempt} failed:`, error.message);
+        scraperLogger.error("Reddit search attempt failed", {
+          setNumber,
+          subreddit,
+          attempt,
+          maxRetries: RETRY_CONFIG.MAX_RETRIES,
+          error: error.message,
+          stack: error.stack,
+          source: "reddit",
+        });
 
         // If not the last attempt, wait with exponential backoff
         if (attempt < RETRY_CONFIG.MAX_RETRIES) {
           const backoffDelay = calculateBackoff(attempt);
-          console.log(
-            `⏳ Waiting ${backoffDelay / 1000}s before retry...`,
-          );
+          scraperLogger.info("Waiting before retry with exponential backoff", {
+            setNumber,
+            subreddit,
+            backoffMs: backoffDelay,
+            backoffSeconds: backoffDelay / 1000,
+            nextAttempt: attempt + 1,
+            source: "reddit",
+          });
           await this.delay(backoffDelay);
         }
       }
     }
 
     // All retries failed
+    scraperLogger.error("All Reddit search attempts failed", {
+      setNumber,
+      subreddit,
+      totalAttempts: RETRY_CONFIG.MAX_RETRIES,
+      finalError: lastError?.message || "Unknown error",
+      source: "reddit",
+    });
+
     return {
       success: false,
       error: lastError?.message || "Unknown error",
@@ -203,6 +234,14 @@ export class RedditSearchService {
           REDDIT_INTERVALS.DEFAULT_INTERVAL_DAYS * 24 * 60 * 60 * 1000,
       );
 
+      scraperLogger.info("Saving Reddit search results to database", {
+        setNumber,
+        subreddit,
+        postsCount: posts.length,
+        nextScrapeAt: nextScrape.toISOString(),
+        source: "reddit",
+      });
+
       await this.repository.create({
         legoSetNumber: setNumber,
         subreddit,
@@ -217,11 +256,21 @@ export class RedditSearchService {
         updatedAt: now,
       });
 
-      console.log(
-        `💾 Saved Reddit search results for ${setNumber} (next scrape: ${nextScrape.toISOString()})`,
-      );
+      scraperLogger.info("Successfully saved Reddit search results", {
+        setNumber,
+        subreddit,
+        postsCount: posts.length,
+        nextScrapeAt: nextScrape.toISOString(),
+        source: "reddit",
+      });
     } catch (error) {
-      console.error(`❌ Database save failed:`, error);
+      scraperLogger.error("Failed to save Reddit search results to database", {
+        setNumber,
+        subreddit,
+        error: (error as Error).message,
+        stack: (error as Error).stack,
+        source: "reddit",
+      });
       throw new Error(`Database save failed: ${error.message}`);
     }
   }

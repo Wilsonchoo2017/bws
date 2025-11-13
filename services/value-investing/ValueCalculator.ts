@@ -87,10 +87,365 @@ export class ValueCalculator {
   }
 
   /**
-   * Calculate intrinsic value using multiple approaches:
-   * 1. Resale value (Bricklink data) - what can you sell it for?
-   * 2. Quality adjustments (retirement status, demand)
-   * 3. Conservative discounting for margin of safety
+   * Calculate liquidity multiplier based on sales velocity and days between sales
+   * High liquidity = easier to sell = premium (up to 1.10x)
+   * Low liquidity = harder to sell = discount (down to 0.85x)
+   */
+  private static calculateLiquidityMultiplier(
+    salesVelocity?: number,
+    avgDaysBetweenSales?: number,
+  ): number {
+    const config = CONFIG.INTRINSIC_VALUE.LIQUIDITY_MULTIPLIER;
+
+    // No data = use default (1.0 = no adjustment)
+    if (
+      (salesVelocity === undefined || salesVelocity === null) &&
+      (avgDaysBetweenSales === undefined || avgDaysBetweenSales === null)
+    ) {
+      return config.DEFAULT;
+    }
+
+    // Prefer sales velocity if available, otherwise use days between sales
+    let liquidityScore = 50; // Default to neutral
+
+    if (
+      salesVelocity !== undefined && salesVelocity !== null && salesVelocity > 0
+    ) {
+      // Map sales velocity to 0-100 score
+      if (salesVelocity >= config.VELOCITY_HIGH) {
+        liquidityScore = 90; // Very high liquidity
+      } else if (salesVelocity >= config.VELOCITY_MEDIUM) {
+        // Linear interpolation between medium and high
+        liquidityScore = 65 + ((salesVelocity - config.VELOCITY_MEDIUM) /
+              (config.VELOCITY_HIGH - config.VELOCITY_MEDIUM)) * 25;
+      } else if (salesVelocity >= config.VELOCITY_LOW) {
+        // Linear interpolation between low and medium
+        liquidityScore = 40 + ((salesVelocity - config.VELOCITY_LOW) /
+              (config.VELOCITY_MEDIUM - config.VELOCITY_LOW)) * 25;
+      } else {
+        // Very low liquidity
+        liquidityScore = 10 + (salesVelocity / config.VELOCITY_LOW) * 30;
+      }
+    } else if (
+      avgDaysBetweenSales !== undefined && avgDaysBetweenSales !== null
+    ) {
+      // Map days between sales to 0-100 score (inverse relationship)
+      if (avgDaysBetweenSales <= config.DAYS_FAST) {
+        liquidityScore = 90; // Very high liquidity
+      } else if (avgDaysBetweenSales <= config.DAYS_MEDIUM) {
+        // Linear interpolation between fast and medium
+        liquidityScore = 65 + (1 - (avgDaysBetweenSales - config.DAYS_FAST) /
+                (config.DAYS_MEDIUM - config.DAYS_FAST)) * 25;
+      } else if (avgDaysBetweenSales <= config.DAYS_SLOW) {
+        // Linear interpolation between medium and slow
+        liquidityScore = 40 + (1 - (avgDaysBetweenSales - config.DAYS_MEDIUM) /
+                (config.DAYS_SLOW - config.DAYS_MEDIUM)) * 25;
+      } else {
+        // Very low liquidity
+        liquidityScore = Math.max(
+          10,
+          40 * (config.DAYS_SLOW / avgDaysBetweenSales),
+        );
+      }
+    }
+
+    // Convert 0-100 score to multiplier range (0.85 - 1.10)
+    const range = config.MAX - config.MIN;
+    const multiplier = config.MIN + (liquidityScore / 100) * range;
+
+    return Math.max(config.MIN, Math.min(config.MAX, multiplier));
+  }
+
+  /**
+   * Calculate volatility discount based on price coefficient of variation
+   * High volatility = higher risk = discount
+   * Stable pricing = low risk = minimal discount
+   */
+  private static calculateVolatilityDiscount(
+    priceVolatility?: number,
+  ): number {
+    const config = CONFIG.INTRINSIC_VALUE.VOLATILITY_DISCOUNT;
+
+    // No data = no discount (benefit of doubt)
+    if (
+      priceVolatility === undefined || priceVolatility === null ||
+      priceVolatility < 0
+    ) {
+      return 1.0;
+    }
+
+    // Apply risk-adjusted discount
+    // discount = volatility × risk_aversion_coefficient
+    // Capped at MAX_DISCOUNT (12%)
+    const discount = Math.min(
+      priceVolatility * config.RISK_AVERSION_COEFFICIENT,
+      config.MAX_DISCOUNT,
+    );
+
+    return 1.0 - discount;
+  }
+
+  /**
+   * Calculate market saturation discount
+   * High supply + low sales = oversaturated market = discount
+   *
+   * CRITICAL: Prevents overvaluing sets with no real buyers
+   */
+  private static calculateSaturationDiscount(
+    availableQty?: number,
+    availableLots?: number,
+    salesVelocity?: number,
+  ): number {
+    const config = CONFIG.INTRINSIC_VALUE.SATURATION_PENALTY;
+
+    // No data = no penalty (benefit of doubt)
+    if (
+      (availableQty === undefined || availableQty === null) &&
+      (availableLots === undefined || availableLots === null)
+    ) {
+      return config.MAX;
+    }
+
+    let saturationScore = 0; // 0 = healthy, 100 = saturated
+
+    // Factor 1: Quantity available (40% weight)
+    if (
+      availableQty !== undefined && availableQty !== null && availableQty > 0
+    ) {
+      if (availableQty >= config.QTY_HIGH) {
+        saturationScore += 40; // Severe oversupply
+      } else if (availableQty >= config.QTY_MEDIUM) {
+        // Linear interpolation
+        saturationScore += 20 + ((availableQty - config.QTY_MEDIUM) /
+              (config.QTY_HIGH - config.QTY_MEDIUM)) * 20;
+      } else if (availableQty >= config.QTY_LOW) {
+        // Linear interpolation
+        saturationScore += ((availableQty - config.QTY_LOW) /
+          (config.QTY_MEDIUM - config.QTY_LOW)) * 20;
+      }
+      // else: healthy supply, no points
+    }
+
+    // Factor 2: Number of competing sellers (30% weight)
+    if (
+      availableLots !== undefined && availableLots !== null && availableLots > 0
+    ) {
+      if (availableLots >= config.LOTS_HIGH) {
+        saturationScore += 30; // Too many sellers
+      } else if (availableLots >= config.LOTS_MEDIUM) {
+        saturationScore += 15 + ((availableLots - config.LOTS_MEDIUM) /
+              (config.LOTS_HIGH - config.LOTS_MEDIUM)) * 15;
+      } else if (availableLots >= config.LOTS_LOW) {
+        saturationScore += ((availableLots - config.LOTS_LOW) /
+          (config.LOTS_MEDIUM - config.LOTS_LOW)) * 15;
+      }
+    }
+
+    // Factor 3: Velocity-to-supply ratio (30% weight)
+    if (
+      salesVelocity !== undefined && salesVelocity !== null &&
+      availableQty !== undefined && availableQty !== null &&
+      availableQty > 0
+    ) {
+      const velocityRatio = salesVelocity / availableQty;
+
+      if (velocityRatio <= config.POOR_RATIO) {
+        saturationScore += 30; // Inventory not moving
+      } else if (velocityRatio < config.HEALTHY_RATIO) {
+        // Linear interpolation
+        saturationScore += 30 * (1 - (velocityRatio - config.POOR_RATIO) /
+            (config.HEALTHY_RATIO - config.POOR_RATIO));
+      }
+      // else: healthy turnover, no points
+    }
+
+    // Convert saturation score (0-100) to discount multiplier (0.80-1.0)
+    const range = config.MAX - config.MIN;
+    const discount = config.MAX - (saturationScore / 100) * range;
+
+    return Math.max(config.MIN, Math.min(config.MAX, discount));
+  }
+
+  /**
+   * Calculate time-decayed retirement multiplier
+   * Appreciation accelerates over years after retirement
+   *
+   * CRITICAL: Demand-gated - retirement premium only applies with real demand
+   * A retired set with no buyers is just old inventory!
+   */
+  private static calculateRetirementMultiplier(
+    retirementStatus?: string,
+    yearsPostRetirement?: number,
+    demandScore?: number,
+  ): number {
+    const config = CONFIG.INTRINSIC_VALUE;
+
+    // Active or retiring soon - simple multipliers
+    if (retirementStatus === "retiring_soon") {
+      return config.RETIREMENT_MULTIPLIERS.RETIRING_SOON; // 8%
+    } else if (retirementStatus !== "retired") {
+      return config.RETIREMENT_MULTIPLIERS.ACTIVE; // 1.0
+    }
+
+    // RETIRED STATUS - Apply demand gating
+    // Check if demand meets minimum threshold for retirement premium
+    const hasSufficientDemand = demandScore !== undefined &&
+      demandScore !== null &&
+      demandScore >= config.RETIREMENT_TIME_DECAY.MIN_DEMAND_FOR_PREMIUM;
+
+    if (!hasSufficientDemand) {
+      // Low/no demand: Cap premium at 2% regardless of retirement age
+      // Being retired doesn't matter if nobody wants it!
+      return config.RETIREMENT_TIME_DECAY.LOW_DEMAND_MAX_PREMIUM;
+    }
+
+    // Sufficient demand: Apply REALISTIC J-CURVE appreciation
+    if (
+      yearsPostRetirement !== undefined && yearsPostRetirement !== null &&
+      yearsPostRetirement >= 0
+    ) {
+      // Realistic J-curve: dip, stabilize, then appreciate
+      if (yearsPostRetirement < 1) {
+        return config.RETIREMENT_TIME_DECAY.YEAR_0_1; // 0.95x (market flooded)
+      } else if (yearsPostRetirement < 2) {
+        return config.RETIREMENT_TIME_DECAY.YEAR_1_2; // 1.00x (baseline)
+      } else if (yearsPostRetirement < 5) {
+        return config.RETIREMENT_TIME_DECAY.YEAR_2_5; // 1.15x (genuine appreciation)
+      } else if (yearsPostRetirement < 10) {
+        return config.RETIREMENT_TIME_DECAY.YEAR_5_10; // 1.40x (scarcity premium)
+      } else {
+        return config.RETIREMENT_TIME_DECAY.YEAR_10_PLUS; // 2.00x (vintage)
+      }
+    } else {
+      // No time data - use conservative baseline
+      return config.RETIREMENT_MULTIPLIERS.RETIRED; // 1.15x legacy
+    }
+  }
+
+  /**
+   * Calculate theme-based multiplier
+   * Not all LEGO themes appreciate equally
+   */
+  private static calculateThemeMultiplier(theme?: string): number {
+    if (!theme) {
+      return CONFIG.INTRINSIC_VALUE.THEME_MULTIPLIERS.DEFAULT;
+    }
+
+    // Normalize theme name (case-insensitive, trim)
+    const normalizedTheme = theme.trim();
+
+    // Check for exact match first
+    if (normalizedTheme in CONFIG.INTRINSIC_VALUE.THEME_MULTIPLIERS) {
+      return CONFIG.INTRINSIC_VALUE.THEME_MULTIPLIERS[
+        normalizedTheme as keyof typeof CONFIG.INTRINSIC_VALUE.THEME_MULTIPLIERS
+      ];
+    }
+
+    // Partial matching for common variants
+    const themeLower = normalizedTheme.toLowerCase();
+    if (themeLower.includes("star wars")) {
+      return CONFIG.INTRINSIC_VALUE.THEME_MULTIPLIERS["Star Wars"];
+    }
+    if (themeLower.includes("harry potter")) {
+      return CONFIG.INTRINSIC_VALUE.THEME_MULTIPLIERS["Harry Potter"];
+    }
+    if (themeLower.includes("architecture")) {
+      return CONFIG.INTRINSIC_VALUE.THEME_MULTIPLIERS["Architecture"];
+    }
+    if (themeLower.includes("creator")) {
+      return CONFIG.INTRINSIC_VALUE.THEME_MULTIPLIERS["Creator Expert"];
+    }
+    if (themeLower.includes("technic")) {
+      return CONFIG.INTRINSIC_VALUE.THEME_MULTIPLIERS["Technic"];
+    }
+    if (themeLower.includes("ideas")) {
+      return CONFIG.INTRINSIC_VALUE.THEME_MULTIPLIERS["Ideas"];
+    }
+    if (themeLower.includes("city")) {
+      return CONFIG.INTRINSIC_VALUE.THEME_MULTIPLIERS["City"];
+    }
+    if (themeLower.includes("friends")) {
+      return CONFIG.INTRINSIC_VALUE.THEME_MULTIPLIERS["Friends"];
+    }
+    if (themeLower.includes("duplo")) {
+      return CONFIG.INTRINSIC_VALUE.THEME_MULTIPLIERS["Duplo"];
+    }
+
+    // Default for unknown themes
+    return CONFIG.INTRINSIC_VALUE.THEME_MULTIPLIERS.DEFAULT;
+  }
+
+  /**
+   * Calculate Parts-Per-Dollar (PPD) quality score
+   * Higher PPD = better brick value
+   */
+  private static calculatePPDScore(
+    partsCount?: number,
+    msrp?: number,
+  ): number {
+    if (!partsCount || !msrp || msrp <= 0) {
+      return 1.0; // Neutral if no data
+    }
+
+    const ppd = partsCount / msrp;
+    const config = CONFIG.INTRINSIC_VALUE.PARTS_PER_DOLLAR;
+
+    // Convert PPD to multiplier (0.9-1.1 range)
+    if (ppd >= config.EXCELLENT) {
+      return 1.10; // Excellent value
+    } else if (ppd >= config.GOOD) {
+      return 1.05; // Good value
+    } else if (ppd >= config.FAIR) {
+      return 1.00; // Fair value
+    } else {
+      return 0.95; // Poor value
+    }
+  }
+
+  /**
+   * Calculate Price-to-Retail (P/R) ratio
+   * Filters bubble-priced sets
+   * Returns null if ratio exceeds maximum acceptable threshold
+   */
+  static calculatePriceToRetailRatio(
+    marketPrice?: number,
+    msrp?: number,
+  ): { ratio: number; status: string } | null {
+    if (!marketPrice || !msrp || msrp <= 0) {
+      return null; // Can't calculate
+    }
+
+    const ratio = marketPrice / msrp;
+    const config = CONFIG.INTRINSIC_VALUE.PRICE_TO_RETAIL;
+
+    let status: string;
+    if (ratio <= config.GOOD_DEAL) {
+      status = "Good Deal";
+    } else if (ratio <= config.FAIR) {
+      status = "Fair";
+    } else if (ratio <= config.EXPENSIVE) {
+      status = "Expensive";
+    } else if (ratio <= config.BUBBLE) {
+      status = "Bubble";
+    } else {
+      status = "Extreme Bubble";
+    }
+
+    return { ratio, status };
+  }
+
+  /**
+   * Calculate intrinsic value using FUNDAMENTAL VALUE APPROACH
+   * 1. Base value = MSRP/Retail (replacement cost) - NOT market price
+   * 2. Apply multipliers for retirement, quality, demand, etc.
+   * 3. Apply discounts for risk (volatility, saturation)
+   *
+   * CRITICAL FIX: Using MSRP as base avoids circular reasoning
+   * Market price is what you PAY, intrinsic value is what it's WORTH
+   * 2. Quality adjustments (retirement status, demand, quality)
+   * 3. Liquidity adjustment (sales velocity, time between sales)
+   * 4. Volatility discount (risk-adjusted valuation)
+   * 5. Time-decayed retirement premium (appreciation curve)
    */
   static calculateIntrinsicValue(inputs: IntrinsicValueInputs): number {
     // Validate inputs
@@ -100,9 +455,19 @@ export class ValueCalculator {
     this.validateScore(inputs.qualityScore, "qualityScore");
 
     const {
+      msrp,
+      currentRetailPrice,
       bricklinkAvgPrice,
       bricklinkMaxPrice,
       retirementStatus,
+      yearsPostRetirement,
+      salesVelocity,
+      avgDaysBetweenSales,
+      priceVolatility,
+      availableQty,
+      availableLots,
+      theme,
+      partsCount,
     } = inputs;
 
     // Safe scores with defaults and clamping
@@ -115,35 +480,39 @@ export class ValueCalculator {
       CONFIG.INTRINSIC_VALUE.QUALITY_MULTIPLIER.DEFAULT_SCORE,
     );
 
-    // Base value: conservative estimate of resale potential
+    // CRITICAL FIX: Base value = MSRP/Retail (replacement cost), NOT market price
+    // This avoids circular reasoning - market price is what you PAY, not intrinsic WORTH
     let baseValue = 0;
 
-    if (bricklinkAvgPrice && bricklinkMaxPrice) {
-      // Use weighted average favoring average over max (conservative)
-      baseValue = bricklinkAvgPrice *
+    if (msrp && msrp > 0) {
+      // Best case: We have MSRP (original retail price)
+      baseValue = msrp;
+    } else if (currentRetailPrice && currentRetailPrice > 0) {
+      // Second best: Current retail price (for active sets)
+      baseValue = currentRetailPrice;
+    } else if (bricklinkAvgPrice && bricklinkMaxPrice) {
+      // Fallback: Use conservative Bricklink estimate
+      // Apply 30% discount to account for speculation premium
+      baseValue = (bricklinkAvgPrice *
           CONFIG.INTRINSIC_VALUE.BASE_WEIGHTS.AVG_PRICE +
-        bricklinkMaxPrice * CONFIG.INTRINSIC_VALUE.BASE_WEIGHTS.MAX_PRICE;
+        bricklinkMaxPrice * CONFIG.INTRINSIC_VALUE.BASE_WEIGHTS.MAX_PRICE) *
+        0.70;
     } else if (bricklinkAvgPrice) {
-      baseValue = bricklinkAvgPrice;
+      baseValue = bricklinkAvgPrice * 0.70; // 30% discount
     } else if (bricklinkMaxPrice) {
-      // Very conservative if we only have max
-      baseValue = bricklinkMaxPrice *
-        CONFIG.INTRINSIC_VALUE.BASE_WEIGHTS.MAX_ONLY_DISCOUNT;
+      baseValue = bricklinkMaxPrice * 0.50; // 50% discount (very conservative)
     } else {
-      // No resale data - cannot calculate intrinsic value
+      // No data - cannot calculate intrinsic value
       return 0;
     }
 
-    // Retirement status multiplier (retired sets appreciate)
-    let retirementMultiplier: number =
-      CONFIG.INTRINSIC_VALUE.RETIREMENT_MULTIPLIERS.ACTIVE;
-    if (retirementStatus === "retired") {
-      retirementMultiplier =
-        CONFIG.INTRINSIC_VALUE.RETIREMENT_MULTIPLIERS.RETIRED;
-    } else if (retirementStatus === "retiring_soon") {
-      retirementMultiplier =
-        CONFIG.INTRINSIC_VALUE.RETIREMENT_MULTIPLIERS.RETIRING_SOON;
-    }
+    // DEMAND-GATED retirement multiplier (CRITICAL: demand required for premium)
+    // Passes demandScore to gate retirement premium - no demand = no premium!
+    const retirementMultiplier = this.calculateRetirementMultiplier(
+      retirementStatus,
+      yearsPostRetirement,
+      inputs.demandScore, // Pass raw score for demand gating
+    );
 
     // Quality adjustment (0-100 score -> 0.9-1.1 multiplier)
     const qualityRange = CONFIG.INTRINSIC_VALUE.QUALITY_MULTIPLIER.MAX -
@@ -157,8 +526,42 @@ export class ValueCalculator {
     const demandMultiplier = CONFIG.INTRINSIC_VALUE.DEMAND_MULTIPLIER.MIN +
       (demandScore / 100) * demandRange;
 
-    const intrinsicValue = baseValue * retirementMultiplier *
-      qualityMultiplier * demandMultiplier;
+    // Liquidity multiplier (0.85-1.10 based on sales velocity/days between sales)
+    const liquidityMultiplier = this.calculateLiquidityMultiplier(
+      salesVelocity,
+      avgDaysBetweenSales,
+    );
+
+    // Volatility discount (risk-adjusted, penalizes high volatility)
+    const volatilityDiscount = this.calculateVolatilityDiscount(
+      priceVolatility,
+    );
+
+    // SATURATION discount (CRITICAL: oversupply kills value)
+    // High qty available + many sellers + low velocity = saturated market
+    const saturationDiscount = this.calculateSaturationDiscount(
+      availableQty,
+      availableLots,
+      salesVelocity,
+    );
+
+    // NEW: Theme-based multiplier (not all themes appreciate equally)
+    const themeMultiplier = this.calculateThemeMultiplier(theme);
+
+    // NEW: Parts-per-dollar quality score
+    const ppdScore = this.calculatePPDScore(partsCount, msrp);
+
+    // Calculate intrinsic value with all factors
+    // Structure: Base × Positive Multipliers × Risk Discounts
+    const intrinsicValue = baseValue *
+      retirementMultiplier * // Time-based appreciation
+      themeMultiplier * // Theme quality
+      ppdScore * // Brick value quality
+      qualityMultiplier * // Product quality
+      demandMultiplier * // Market demand
+      liquidityMultiplier * // Ease of selling
+      volatilityDiscount * // Price stability
+      saturationDiscount; // Market oversupply
 
     // Guard against NaN or negative values
     if (isNaN(intrinsicValue) || intrinsicValue < 0) {
@@ -213,7 +616,10 @@ export class ValueCalculator {
     }
 
     // Adjust margin based on availability (retiring soon = higher acceptable price)
-    if (typeof options.availabilityScore === "number" && options.availabilityScore > 80) {
+    if (
+      typeof options.availabilityScore === "number" &&
+      options.availabilityScore > 80
+    ) {
       // High availability score means urgent/retiring soon - reduce margin by up to 5%
       const urgencyAdjustment = ((options.availabilityScore - 80) / 20) * 0.05;
       marginOfSafety = Math.max(0.05, marginOfSafety - urgencyAdjustment);
@@ -224,7 +630,9 @@ export class ValueCalculator {
       // High demand means easier to resell - can reduce margin slightly
       const demandAdjustment = ((options.demandScore - 70) / 30) * 0.03;
       marginOfSafety = Math.max(0.05, marginOfSafety - demandAdjustment);
-    } else if (typeof options.demandScore === "number" && options.demandScore < 40) {
+    } else if (
+      typeof options.demandScore === "number" && options.demandScore < 40
+    ) {
       // Low demand means harder to resell - increase margin for safety
       const demandAdjustment = ((40 - options.demandScore) / 40) * 0.05;
       marginOfSafety = Math.min(0.50, marginOfSafety + demandAdjustment);
@@ -271,8 +679,71 @@ export class ValueCalculator {
   }
 
   /**
+   * Calculate realized value after transaction costs
+   * UPDATED: More realistic costs including returns and damage
+   * Real-world costs: selling fees, shipping, packaging, returns
+   */
+  static calculateRealizedValue(
+    intrinsicValue: number,
+    estimatedWeight: number = 2, // pounds, default estimate
+  ): number {
+    // Validate input
+    if (
+      typeof intrinsicValue !== "number" || isNaN(intrinsicValue) ||
+      intrinsicValue <= 0
+    ) {
+      return 0;
+    }
+
+    const costs = CONFIG.TRANSACTION_COSTS;
+
+    // 1. Subtract selling fees (percentage of sale price)
+    const afterFees = intrinsicValue * (1 - costs.SELLING_FEE_RATE);
+
+    // 2. Subtract shipping costs (base + per-pound)
+    const shippingCost = costs.SHIPPING_BASE +
+      (estimatedWeight * costs.SHIPPING_PER_POUND);
+
+    // 3. Subtract packaging costs
+    const packagingCost = costs.PACKAGING_COST;
+
+    // 4. Account for returns/damage (percentage)
+    const afterReturns = afterFees * (1 - costs.RETURN_DAMAGE_RATE);
+
+    // Total realized value
+    const realizedValue = afterReturns - shippingCost - packagingCost;
+
+    // Guard against negative values
+    return Math.max(0, realizedValue);
+  }
+
+  /**
+   * Calculate annualized holding costs
+   * Includes storage, capital cost, and degradation risk
+   */
+  static calculateHoldingCosts(
+    value: number,
+    holdingPeriodYears: number,
+  ): number {
+    if (value <= 0 || holdingPeriodYears <= 0) {
+      return 0;
+    }
+
+    const costs = CONFIG.TRANSACTION_COSTS;
+
+    // Annual holding cost rate
+    const annualRate = costs.STORAGE_COST_ANNUAL +
+      costs.CAPITAL_COST_ANNUAL +
+      costs.DEGRADATION_RISK_ANNUAL;
+
+    // Total holding costs over period
+    return value * annualRate * holdingPeriodYears;
+  }
+
+  /**
    * Calculate expected ROI based on buying at current price
    * and selling at intrinsic value
+   * NEW: Returns both theoretical and realized ROI (after transaction costs)
    */
   static calculateExpectedROI(
     currentPrice: number,
@@ -305,6 +776,44 @@ export class ValueCalculator {
   }
 
   /**
+   * Calculate realistic expected ROI accounting for transaction costs
+   * More accurate projection of actual profit
+   */
+  static calculateRealizedROI(
+    currentPrice: number,
+    intrinsicValue: number,
+  ): number {
+    // Validate inputs
+    if (
+      typeof currentPrice !== "number" || isNaN(currentPrice) ||
+      currentPrice <= 0
+    ) {
+      return 0;
+    }
+
+    if (
+      typeof intrinsicValue !== "number" || isNaN(intrinsicValue) ||
+      intrinsicValue <= 0
+    ) {
+      return 0;
+    }
+
+    // Calculate realized value after transaction costs
+    const realizedValue = this.calculateRealizedValue(intrinsicValue);
+
+    // ROI based on realized value (what you actually get)
+    const roi = ((realizedValue - currentPrice) / currentPrice) * 100;
+
+    // Guard against extreme values
+    if (isNaN(roi) || !isFinite(roi)) {
+      return 0;
+    }
+
+    return Math.round(roi * Math.pow(10, CONFIG.PRECISION.PERCENTAGE)) /
+      Math.pow(10, CONFIG.PRECISION.PERCENTAGE);
+  }
+
+  /**
    * Estimate time horizon based on retirement status and market conditions
    */
   static estimateTimeHorizon(
@@ -326,6 +835,7 @@ export class ValueCalculator {
 
   /**
    * Calculate complete value metrics for a product
+   * Includes both theoretical and realized (post-transaction cost) metrics
    */
   static calculateValueMetrics(
     currentPrice: number,
@@ -336,12 +846,14 @@ export class ValueCalculator {
     this.validatePrice(currentPrice, "currentPrice");
 
     const intrinsicValue = this.calculateIntrinsicValue(inputs);
+    const realizedValue = this.calculateRealizedValue(intrinsicValue);
     const targetPrice = this.calculateTargetPrice(intrinsicValue);
     const marginOfSafety = this.calculateMarginOfSafety(
       currentPrice,
       intrinsicValue,
     );
     const expectedROI = this.calculateExpectedROI(currentPrice, intrinsicValue);
+    const realizedROI = this.calculateRealizedROI(currentPrice, intrinsicValue);
     const timeHorizon = this.estimateTimeHorizon(
       inputs.retirementStatus,
       urgency,
@@ -351,8 +863,10 @@ export class ValueCalculator {
       currentPrice,
       targetPrice,
       intrinsicValue,
+      realizedValue,
       marginOfSafety,
       expectedROI,
+      realizedROI,
       timeHorizon,
     };
   }
@@ -427,12 +941,16 @@ export class ValueCalculator {
     const strategyConfig = STRATEGY_MARGINS[strategy];
 
     reasoningParts.push(
-      `${strategy} strategy (${strategyConfig.description}, ${Math.round(strategyConfig.margin * 100)}% margin base)`,
+      `${strategy} strategy (${strategyConfig.description}, ${
+        Math.round(strategyConfig.margin * 100)
+      }% margin base)`,
     );
 
     if (inputs.bricklinkAvgPrice) {
       reasoningParts.push(
-        `Based on Bricklink resale value of $${inputs.bricklinkAvgPrice.toFixed(2)}`,
+        `Based on Bricklink resale value of $${
+          inputs.bricklinkAvgPrice.toFixed(2)
+        }`,
       );
     }
 
@@ -450,7 +968,9 @@ export class ValueCalculator {
       }
     }
 
-    if (options.availabilityScore !== undefined && options.availabilityScore > 80) {
+    if (
+      options.availabilityScore !== undefined && options.availabilityScore > 80
+    ) {
       reasoningParts.push("Urgent window justifies higher entry price");
     }
 

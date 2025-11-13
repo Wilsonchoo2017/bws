@@ -22,6 +22,7 @@ import { ProductRepository } from "./repositories/ProductRepository.ts";
 import { BricklinkRepository } from "./repositories/BricklinkRepository.ts";
 import { RedditRepository } from "./repositories/RedditRepository.ts";
 import { RetirementRepository } from "./repositories/RetirementRepository.ts";
+import { WorldBricksRepository } from "./repositories/WorldBricksRepository.ts";
 
 import type { ProductRecommendation } from "./types.ts";
 
@@ -37,6 +38,7 @@ export class AnalysisService {
     const bricklinkRepo = new BricklinkRepository();
     const redditRepo = new RedditRepository();
     const retirementRepo = new RetirementRepository();
+    const worldBricksRepo = new WorldBricksRepository();
 
     // Initialize data aggregation service with repositories
     this.dataAggregationService = new DataAggregationService(
@@ -44,6 +46,7 @@ export class AnalysisService {
       bricklinkRepo,
       redditRepo,
       retirementRepo,
+      worldBricksRepo,
     );
 
     // Initialize analyzers

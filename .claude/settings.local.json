@@ -12,7 +12,9 @@
       "WebFetch(domain:www.worldbricks.com)",
       "Bash(deno run:*)",
       "Bash(git commit:*)",
-      "Bash(git rm:*)"
+      "Bash(git rm:*)",
+      "Bash(psql:*)",
+      "WebSearch"
     ],
     "deny": [],
     "ask": []

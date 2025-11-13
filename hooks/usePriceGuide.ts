@@ -18,8 +18,10 @@ export interface PriceGuideData {
  * @returns Map of legoId to price guide data
  */
 export function usePriceGuide(legoIds: string[]): Map<string, PriceGuideData> {
-  const [priceGuideMap, setPriceGuideMap] = useState<Map<string, PriceGuideData>>(
-    new Map()
+  const [priceGuideMap, setPriceGuideMap] = useState<
+    Map<string, PriceGuideData>
+  >(
+    new Map(),
   );
 
   useEffect(() => {
@@ -34,7 +36,7 @@ export function usePriceGuide(legoIds: string[]): Map<string, PriceGuideData> {
     const fetchPriceGuide = async (legoId: string) => {
       try {
         const response = await fetch(
-          `/api/analysis/${legoId}?strategy=Investment Focus`
+          `/api/analysis/${legoId}?strategy=Investment Focus`,
         );
 
         if (!response.ok) {

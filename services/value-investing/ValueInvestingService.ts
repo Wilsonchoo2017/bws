@@ -16,16 +16,12 @@
 import type { Product } from "../../db/schema.ts";
 import type { AnalysisService } from "../analysis/AnalysisService.ts";
 import type { ProductRecommendation } from "../analysis/types.ts";
-import { ValueCalculator } from "./ValueCalculator.ts";
-import type {
-  IntrinsicValueInputs,
-  ValueInvestingProduct,
-} from "../../types/value-investing.ts";
+import type { ValueInvestingProduct } from "../../types/value-investing.ts";
 
 /**
  * Type guard for retirement status
  */
-function isRetirementStatus(
+function _isRetirementStatus(
   value: unknown,
 ): value is "active" | "retiring_soon" | "retired" {
   return (
@@ -187,8 +183,10 @@ export class ValueInvestingService {
         currentPrice: product.price!,
         targetPrice: analysis.recommendedBuyPrice.price,
         intrinsicValue: analysis.recommendedBuyPrice.price / (1 - 0.25), // Estimate intrinsic value assuming 25% margin
-        marginOfSafety: ((analysis.recommendedBuyPrice.price - product.price!) / analysis.recommendedBuyPrice.price) * 100,
-        expectedROI: ((analysis.recommendedBuyPrice.price - product.price!) / product.price!) * 100,
+        marginOfSafety: ((analysis.recommendedBuyPrice.price - product.price!) /
+          analysis.recommendedBuyPrice.price) * 100,
+        expectedROI: ((analysis.recommendedBuyPrice.price - product.price!) /
+          product.price!) * 100,
         timeHorizon: analysis.timeHorizon || "Unknown",
       };
 

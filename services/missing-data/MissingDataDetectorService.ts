@@ -19,7 +19,7 @@ import {
   bricklinkItems,
   products,
 } from "../../db/schema.ts";
-import { eq, isNotNull, sql } from "drizzle-orm";
+import { and, eq, isNotNull, lte, or, sql } from "drizzle-orm";
 import { getQueueService, JobPriority } from "../queue/QueueService.ts";
 import type { PricingBox } from "../bricklink/BricklinkParser.ts";
 
@@ -233,8 +233,9 @@ export class MissingDataDetectorService {
       }
 
       // Check if Bricklink data exists
+      // BrickLink requires -1 suffix for LEGO sets
       const bricklinkItem = await db.query.bricklinkItems.findFirst({
-        where: eq(bricklinkItems.itemId, product.legoSetNumber),
+        where: eq(bricklinkItems.itemId, `${product.legoSetNumber}-1`),
       });
 
       if (bricklinkItem) {
@@ -309,7 +310,7 @@ export class MissingDataDetectorService {
       .from(products)
       .leftJoin(
         bricklinkItems,
-        eq(products.legoSetNumber, bricklinkItems.itemId),
+        sql`${products.legoSetNumber} || '-1' = ${bricklinkItems.itemId}`,
       )
       .where(
         sql`${products.legoSetNumber} IS NOT NULL AND ${bricklinkItems.itemId} IS NULL`,
@@ -405,6 +406,7 @@ export class MissingDataDetectorService {
   /**
    * Find Bricklink items with missing volume data
    * Only checks items with watch_status = 'active'
+   * Respects scrape intervals: Only returns items where next_scrape_at IS NULL or next_scrape_at <= now
    * Optimized: Uses SQL to filter items with missing volume data instead of checking in application code
    */
   private async findItemsMissingVolumeData(): Promise<
@@ -414,11 +416,18 @@ export class MissingDataDetectorService {
       missingBoxes: string[];
     }>
   > {
+    const now = new Date();
+
     // Use SQL to find items where any pricing box has null total_qty
     // This is much more efficient than fetching all items and checking in JavaScript
     //
     // Important: We only flag as missing if the box EXISTS but total_qty is null.
     // If the box itself is null (no sales exist), that's legitimate, not missing data.
+    //
+    // Respects scrape intervals:
+    // - Items with NULL next_scrape_at → Never scraped before → Will be enqueued immediately
+    // - Items with next_scrape_at <= now → Due for re-scraping → Will be enqueued
+    // - Items with next_scrape_at > now → Not due yet → Will be skipped
     const itemsWithMissingVolume = await db
       .select({
         itemId: bricklinkItems.itemId,
@@ -430,12 +439,19 @@ export class MissingDataDetectorService {
       })
       .from(bricklinkItems)
       .where(
-        sql`${bricklinkItems.watchStatus} = 'active' AND (
-          (${bricklinkItems.sixMonthNew} IS NOT NULL AND ${bricklinkItems.sixMonthNew}->>'total_qty' IS NULL) OR
-          (${bricklinkItems.sixMonthUsed} IS NOT NULL AND ${bricklinkItems.sixMonthUsed}->>'total_qty' IS NULL) OR
-          (${bricklinkItems.currentNew} IS NOT NULL AND ${bricklinkItems.currentNew}->>'total_qty' IS NULL) OR
-          (${bricklinkItems.currentUsed} IS NOT NULL AND ${bricklinkItems.currentUsed}->>'total_qty' IS NULL)
-        )`,
+        and(
+          sql`${bricklinkItems.watchStatus} = 'active'`,
+          or(
+            sql`${bricklinkItems.nextScrapeAt} IS NULL`,
+            lte(bricklinkItems.nextScrapeAt, now),
+          ),
+          or(
+            sql`(${bricklinkItems.sixMonthNew} IS NOT NULL AND ${bricklinkItems.sixMonthNew}->>'total_qty' IS NULL)`,
+            sql`(${bricklinkItems.sixMonthUsed} IS NOT NULL AND ${bricklinkItems.sixMonthUsed}->>'total_qty' IS NULL)`,
+            sql`(${bricklinkItems.currentNew} IS NOT NULL AND ${bricklinkItems.currentNew}->>'total_qty' IS NULL)`,
+            sql`(${bricklinkItems.currentUsed} IS NOT NULL AND ${bricklinkItems.currentUsed}->>'total_qty' IS NULL)`,
+          ),
+        ),
       );
 
     // Now determine which specific boxes are missing for each item

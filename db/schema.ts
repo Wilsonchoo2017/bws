@@ -10,6 +10,7 @@ import {
   text,
   timestamp,
   unique,
+  uuid,
   varchar,
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
@@ -88,7 +89,7 @@ export const products = pgTable(
     source: productSourceEnum("source").notNull(),
 
     // Core product fields (all platforms)
-    productId: varchar("product_id", { length: 100 }).notNull().unique(),
+    productId: uuid("product_id").notNull().unique().defaultRandom(),
     name: text("name"),
     brand: varchar("brand", { length: 255 }),
 
@@ -176,7 +177,7 @@ export const priceHistory = pgTable(
   "price_history",
   {
     id: serial("id").primaryKey(),
-    productId: varchar("product_id", { length: 100 }).notNull(),
+    productId: uuid("product_id").notNull(),
     price: bigint("price", { mode: "number" }),
     priceBeforeDiscount: bigint("price_before_discount", { mode: "number" }),
     unitsSoldSnapshot: bigint("units_sold_snapshot", { mode: "number" }),
@@ -200,7 +201,7 @@ export const shopeeScrapes = pgTable(
     id: serial("id").primaryKey(),
 
     // Foreign key to products table
-    productId: varchar("product_id", { length: 100 }).notNull(),
+    productId: uuid("product_id").notNull(),
 
     // Foreign key to scrape session
     scrapeSessionId: integer("scrape_session_id"),
@@ -495,7 +496,7 @@ export const productAnalysis = pgTable(
   "product_analysis",
   {
     id: serial("id").primaryKey(),
-    productId: varchar("product_id", { length: 100 }).notNull(),
+    productId: uuid("product_id").notNull(),
     strategy: varchar("strategy", { length: 50 }).notNull(),
 
     // Overall score and recommendation
@@ -605,6 +606,10 @@ export const worldbricksSets = pgTable(
     lastScrapedAt: timestamp("last_scraped_at"),
     scrapeStatus: varchar("scrape_status", { length: 20 }), // success, failed, partial
 
+    // Scheduling fields for automated scraping
+    scrapeIntervalDays: integer("scrape_interval_days").default(90), // 90 days = 3 months
+    nextScrapeAt: timestamp("next_scrape_at"),
+
     // Timestamps
     createdAt: timestamp("created_at").defaultNow().notNull(),
     updatedAt: timestamp("updated_at").defaultNow().notNull(),
@@ -624,6 +629,10 @@ export const worldbricksSets = pgTable(
     // Index for scrape status
     scrapeStatusIdx: index("idx_worldbricks_scrape_status").on(
       table.scrapeStatus,
+    ),
+    // Index for next scrape scheduling
+    nextScrapeAtIdx: index("idx_worldbricks_next_scrape_at").on(
+      table.nextScrapeAt,
     ),
   }),
 );

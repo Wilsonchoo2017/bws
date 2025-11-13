@@ -14,6 +14,7 @@
 
 import { getBricklinkRepository } from "../bricklink/BricklinkRepository.ts";
 import { getRedditRepository } from "../reddit/RedditRepository.ts";
+import { getWorldBricksRepository } from "../worldbricks/WorldBricksRepository.ts";
 import { getQueueService, JobPriority } from "../queue/QueueService.ts";
 import { getMissingDataDetector } from "../missing-data/MissingDataDetectorService.ts";
 
@@ -279,21 +280,96 @@ export class SchedulerService {
   }
 
   /**
-   * Run both schedulers (Bricklink and Reddit)
+   * Run the WorldBricks scheduler for automated LEGO set scraping
+   */
+  async runWorldBricks(): Promise<SchedulerResult> {
+    const result: SchedulerResult = {
+      success: true,
+      itemsFound: 0,
+      jobsEnqueued: 0,
+      errors: [],
+      timestamp: new Date(),
+    };
+
+    try {
+      console.log("🕐 Running WorldBricks scheduled scraping check...");
+
+      const worldBricksRepository = getWorldBricksRepository();
+      const queueService = getQueueService();
+
+      // Check if queue is ready
+      if (!queueService.isReady()) {
+        const error = "Queue service is not available";
+        console.error(`❌ ${error}`);
+        result.success = false;
+        result.errors.push(error);
+        return result;
+      }
+
+      // Find sets that need scraping (linked to products, not retired/retiring, due for scrape)
+      const setsNeeded = await worldBricksRepository.findSetsNeedingScraping();
+      result.itemsFound = setsNeeded.length;
+
+      console.log(
+        `📋 Found ${setsNeeded.length} WorldBricks sets needing scraping`,
+      );
+
+      if (setsNeeded.length === 0) {
+        console.log("✅ No WorldBricks sets need scraping at this time");
+        return result;
+      }
+
+      // Enqueue jobs for each set
+      for (const set of setsNeeded) {
+        try {
+          await queueService.addWorldBricksJob({
+            setNumber: set.setNumber,
+            saveToDb: true,
+            priority: JobPriority.NORMAL,
+          });
+
+          result.jobsEnqueued++;
+          console.log(
+            `✅ Enqueued WorldBricks job for set ${set.setNumber}`,
+          );
+        } catch (error) {
+          const errorMsg =
+            `Failed to enqueue WorldBricks job for ${set.setNumber}: ${error.message}`;
+          console.error(`❌ ${errorMsg}`);
+          result.errors.push(errorMsg);
+        }
+      }
+
+      console.log(
+        `✅ WorldBricks scheduler run complete: ${result.jobsEnqueued}/${result.itemsFound} jobs enqueued`,
+      );
+    } catch (error) {
+      console.error("❌ WorldBricks scheduler run failed:", error);
+      result.success = false;
+      result.errors.push(error.message);
+    }
+
+    return result;
+  }
+
+  /**
+   * Run all schedulers (Bricklink, Reddit, and WorldBricks)
    */
   async runAll(): Promise<{
     bricklink: SchedulerResult;
     reddit: SchedulerResult;
+    worldbricks: SchedulerResult;
   }> {
     console.log("🚀 Running all schedulers...");
 
-    const [bricklink, reddit] = await Promise.all([
+    const [bricklink, reddit, worldbricks] = await Promise.all([
       this.runBricklink(),
       this.runReddit(),
+      this.runWorldBricks(),
     ]);
 
     console.log("✅ All schedulers complete");
-    return { bricklink, reddit };
+    return { bricklink, reddit, worldbricks };
   }
 
   /**

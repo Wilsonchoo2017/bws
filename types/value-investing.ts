@@ -2,8 +2,10 @@ export interface ValueMetrics {
   currentPrice: number;
   targetPrice: number;
   intrinsicValue: number;
+  realizedValue?: number; // After transaction costs
   marginOfSafety: number; // Percentage
-  expectedROI: number; // Percentage
+  expectedROI: number; // Percentage (theoretical)
+  realizedROI?: number; // Percentage (after transaction costs)
   timeHorizon: string;
 }
 
@@ -50,10 +52,29 @@ export interface ValueInvestingFilters {
 }
 
 export interface IntrinsicValueInputs {
+  // FUNDAMENTAL VALUE INPUTS (Replacement cost - TRUE intrinsic value)
+  msrp?: number; // Original manufacturer's suggested retail price
+  currentRetailPrice?: number; // Current retail price if still available
+  // Market prices (for comparison, NOT base value)
   bricklinkAvgPrice?: number;
   bricklinkMaxPrice?: number;
   historicalPriceData?: number[];
+  // Retirement data
   retirementStatus?: "active" | "retiring_soon" | "retired";
+  yearsPostRetirement?: number; // For time-decayed retirement premium
+  yearReleased?: number; // For calculating years since release
+  // Analysis scores
   demandScore?: number;
   qualityScore?: number;
+  // Liquidity metrics for liquidity multiplier
+  salesVelocity?: number; // Transactions per day
+  avgDaysBetweenSales?: number; // Days between sales (liquidity indicator)
+  // Volatility metric for risk-adjusted valuation
+  priceVolatility?: number; // Coefficient of variation (0-1+)
+  // Saturation metrics for market oversupply detection
+  availableQty?: number; // Total units available for sale
+  availableLots?: number; // Number of competing sellers
+  // Set characteristics
+  theme?: string; // LEGO theme (Star Wars, Architecture, etc.)
+  partsCount?: number; // Number of pieces (for PPD calculation)
 }

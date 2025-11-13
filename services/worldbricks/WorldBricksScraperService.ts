@@ -32,6 +32,7 @@ import {
   createCircuitBreaker,
   type RedisCircuitBreaker,
 } from "../../utils/RedisCircuitBreaker.ts";
+import { scraperLogger } from "../../utils/logger.ts";
 
 /**
  * Result of a scraping operation
@@ -84,6 +85,10 @@ export class WorldBricksScraperService {
 
     // Check circuit breaker
     if (await this.circuitBreaker.isCircuitOpen()) {
+      scraperLogger.warn("WorldBricks circuit breaker is open", {
+        setNumber,
+        source: "worldbricks",
+      });
       return {
         success: false,
         error: "Circuit breaker is open. Too many recent failures.",
@@ -99,13 +104,19 @@ export class WorldBricksScraperService {
       try {
         retries = attempt - 1;
 
-        console.log(
-          `🔄 Scraping attempt ${attempt}/${RETRY_CONFIG.MAX_RETRIES}: Set ${setNumber}`,
-        );
+        scraperLogger.info("Starting WorldBricks scraping attempt", {
+          setNumber,
+          attempt,
+          maxRetries: RETRY_CONFIG.MAX_RETRIES,
+          source: "worldbricks",
+        });
 
         // If no explicit URL provided, use search to find it
         if (!targetUrl) {
-          console.log(`🔍 Searching for set ${setNumber} on WorldBricks...`);
+          scraperLogger.info("Searching for set on WorldBricks", {
+            setNumber,
+            source: "worldbricks",
+          });
 
           // Rate limiting for search request
           if (!skipRateLimit) {
@@ -115,7 +126,11 @@ export class WorldBricksScraperService {
           }
 
           const searchUrl = constructSearchUrl(setNumber);
-          console.log(`📥 Fetching search results: ${searchUrl}`);
+          scraperLogger.info("Fetching WorldBricks search results", {
+            setNumber,
+            url: searchUrl,
+            source: "worldbricks",
+          });
 
           const searchResponse = await this.httpClient.fetch({
             url: searchUrl,
@@ -137,7 +152,11 @@ export class WorldBricksScraperService {
             );
           }
 
-          console.log(`✅ Found product page: ${targetUrl}`);
+          scraperLogger.info("Found product page in search results", {
+            setNumber,
+            url: targetUrl,
+            source: "worldbricks",
+          });
         }
 
         // Rate limiting (unless skipped)
@@ -148,7 +167,11 @@ export class WorldBricksScraperService {
         }
 
         // Fetch WorldBricks product page
-        console.log(`📥 Fetching WorldBricks page: ${targetUrl}`);
+        scraperLogger.info("Fetching WorldBricks product page", {
+          setNumber,
+          url: targetUrl,
+          source: "worldbricks",
+        });
         const response = await this.httpClient.fetch({
           url: targetUrl,
           timeout: 30000,
@@ -168,22 +191,31 @@ export class WorldBricksScraperService {
         }
 
         // Parse the HTML
-        console.log(`🔍 Parsing WorldBricks data for set ${setNumber}...`);
+        scraperLogger.info("Parsing WorldBricks data", {
+          setNumber,
+          url: targetUrl,
+          source: "worldbricks",
+        });
         const data = parseWorldBricksHtml(response.html, targetUrl);
 
         // Validate that we got the correct set
         if (data.set_number !== setNumber) {
-          console.warn(
-            `⚠️  Set number mismatch: Expected ${setNumber}, got ${data.set_number}`,
-          );
+          scraperLogger.warn("Set number mismatch detected", {
+            expected: setNumber,
+            actual: data.set_number,
+            url: targetUrl,
+            source: "worldbricks",
+          });
         }
 
-        console.log(
-          `✅ Successfully scraped: ${data.set_number} - ${data.set_name}`,
-        );
-        console.log(`   Year Released: ${data.year_released || "Unknown"}`);
-        console.log(`   Year Retired: ${data.year_retired || "Unknown"}`);
-        console.log(`   Parts Count: ${data.parts_count || "Unknown"}`);
+        scraperLogger.info("Successfully scraped WorldBricks data", {
+          setNumber: data.set_number,
+          setName: data.set_name,
+          yearReleased: data.year_released,
+          yearRetired: data.year_retired,
+          partsCount: data.parts_count,
+          source: "worldbricks",
+        });
 
         // Save to database if requested
         let saved = false;
@@ -203,14 +235,25 @@ export class WorldBricksScraperService {
         };
       } catch (error) {
         lastError = error as Error;
-        console.error(`❌ Scraping attempt ${attempt} failed:`, error.message);
+        scraperLogger.error("WorldBricks scraping attempt failed", {
+          setNumber,
+          attempt,
+          maxRetries: RETRY_CONFIG.MAX_RETRIES,
+          error: error.message,
+          stack: error.stack,
+          source: "worldbricks",
+        });
 
         // If not the last attempt, wait with exponential backoff
         if (attempt < RETRY_CONFIG.MAX_RETRIES) {
           const backoffDelay = calculateBackoff(attempt);
-          console.log(
-            `⏳ Waiting ${backoffDelay / 1000}s before retry...`,
-          );
+          scraperLogger.info("Waiting before retry with exponential backoff", {
+            setNumber,
+            backoffMs: backoffDelay,
+            backoffSeconds: backoffDelay / 1000,
+            nextAttempt: attempt + 1,
+            source: "worldbricks",
+          });
           await this.delay(backoffDelay);
         }
       }
@@ -218,6 +261,13 @@ export class WorldBricksScraperService {
 
     // All retries failed
     await this.circuitBreaker.recordFailure();
+
+    scraperLogger.error("All WorldBricks scraping attempts failed", {
+      setNumber,
+      totalAttempts: RETRY_CONFIG.MAX_RETRIES,
+      finalError: lastError?.message || "Unknown error occurred",
+      source: "worldbricks",
+    });
 
     return {
       success: false,
@@ -236,12 +286,21 @@ export class WorldBricksScraperService {
     const { saveToDb = false, delayBetweenRequests = 2000 } = options;
     const results: ScrapeResult[] = [];
 
+    scraperLogger.info("Starting WorldBricks batch scraping", {
+      totalSets: sets.length,
+      saveToDb,
+      delayBetweenRequests,
+      source: "worldbricks",
+    });
+
     for (let i = 0; i < sets.length; i++) {
       const set = sets[i];
 
-      console.log(
-        `\n📦 Processing set ${i + 1}/${sets.length}: ${set.setNumber}`,
-      );
+      scraperLogger.info("Processing set in batch", {
+        setNumber: set.setNumber,
+        progress: `${i + 1}/${sets.length}`,
+        source: "worldbricks",
+      });
 
       try {
         const result = await this.scrape({
@@ -255,19 +314,33 @@ export class WorldBricksScraperService {
 
         // Add delay between requests (except for last one)
         if (i < sets.length - 1 && result.success) {
-          console.log(
-            `⏳ Waiting ${delayBetweenRequests}ms before next request...`,
-          );
+          scraperLogger.info("Waiting between batch requests", {
+            delayMs: delayBetweenRequests,
+            nextSet: sets[i + 1].setNumber,
+            source: "worldbricks",
+          });
           await this.delay(delayBetweenRequests);
         }
       } catch (error) {
-        console.error(`Failed to scrape set ${set.setNumber}:`, error);
+        scraperLogger.error("Failed to scrape set in batch", {
+          setNumber: set.setNumber,
+          error: (error as Error).message,
+          source: "worldbricks",
+        });
         results.push({
           success: false,
           error: (error as Error).message,
         });
       }
     }
+
+    const successCount = results.filter((r) => r.success).length;
+    scraperLogger.info("Completed WorldBricks batch scraping", {
+      totalSets: sets.length,
+      successCount,
+      failureCount: sets.length - successCount,
+      source: "worldbricks",
+    });
 
     return results;
   }
@@ -280,7 +353,11 @@ export class WorldBricksScraperService {
     sourceUrl: string,
   ): Promise<void> {
     try {
-      console.log(`💾 Saving to database: ${data.set_number}`);
+      scraperLogger.info("Saving WorldBricks data to database", {
+        setNumber: data.set_number,
+        setName: data.set_name,
+        source: "worldbricks",
+      });
 
       await this.repository.upsert(data.set_number, {
         setName: data.set_name,
@@ -296,9 +373,17 @@ export class WorldBricksScraperService {
         scrapeStatus: "success",
       });
 
-      console.log(`✅ Successfully saved to database`);
+      scraperLogger.info("Successfully saved WorldBricks data to database", {
+        setNumber: data.set_number,
+        source: "worldbricks",
+      });
     } catch (error) {
-      console.error(`❌ Failed to save to database:`, error);
+      scraperLogger.error("Failed to save WorldBricks data to database", {
+        setNumber: data.set_number,
+        error: (error as Error).message,
+        stack: (error as Error).stack,
+        source: "worldbricks",
+      });
       throw error;
     }
   }
