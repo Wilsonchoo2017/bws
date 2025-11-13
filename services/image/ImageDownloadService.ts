@@ -18,7 +18,7 @@ export interface DownloadOptions {
   timeoutMs?: number;
   maxRetries?: number;
   retryDelayMs?: number;
-  allowedFormats?: string[];
+  allowedFormats?: readonly string[];
 }
 
 export class ImageDownloadService {
@@ -44,7 +44,11 @@ export class ImageDownloadService {
         if (attempt > 0) {
           // Wait before retry
           await this.delay(opts.retryDelayMs * attempt);
-          console.log(`Retrying image download (attempt ${attempt + 1}/${opts.maxRetries + 1}): ${url}`);
+          console.log(
+            `Retrying image download (attempt ${attempt + 1}/${
+              opts.maxRetries + 1
+            }): ${url}`,
+          );
         }
 
         const imageData = await this.downloadWithTimeout(url, opts.timeoutMs);
@@ -53,12 +57,17 @@ export class ImageDownloadService {
         return imageData;
       } catch (error) {
         lastError = error instanceof Error ? error : new Error(String(error));
-        console.error(`Image download attempt ${attempt + 1} failed for ${url}:`, lastError.message);
+        console.error(
+          `Image download attempt ${attempt + 1} failed for ${url}:`,
+          lastError.message,
+        );
       }
     }
 
     throw new Error(
-      `Failed to download image after ${opts.maxRetries + 1} attempts: ${lastError?.message || "Unknown error"}`,
+      `Failed to download image after ${opts.maxRetries + 1} attempts: ${
+        lastError?.message || "Unknown error"
+      }`,
     );
   }
 
@@ -69,8 +78,12 @@ export class ImageDownloadService {
     urls: string[],
     options: DownloadOptions = {},
     concurrency: number = 5,
-  ): Promise<Array<{ url: string; data: ImageData | null; error: string | null }>> {
-    const results: Array<{ url: string; data: ImageData | null; error: string | null }> = [];
+  ): Promise<
+    Array<{ url: string; data: ImageData | null; error: string | null }>
+  > {
+    const results: Array<
+      { url: string; data: ImageData | null; error: string | null }
+    > = [];
 
     // Process in batches to control concurrency
     for (let i = 0; i < urls.length; i += concurrency) {
@@ -81,7 +94,9 @@ export class ImageDownloadService {
             const data = await this.download(url, options);
             return { url, data, error: null };
           } catch (error) {
-            const errorMessage = error instanceof Error ? error.message : String(error);
+            const errorMessage = error instanceof Error
+              ? error.message
+              : String(error);
             return { url, data: null, error: errorMessage };
           }
         }),
@@ -106,12 +121,15 @@ export class ImageDownloadService {
       const response = await fetch(url, {
         signal: controller.signal,
         headers: {
-          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+          "User-Agent":
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
         },
       });
 
       if (!response.ok) {
-        throw new Error(`HTTP error ${response.status}: ${response.statusText}`);
+        throw new Error(
+          `HTTP error ${response.status}: ${response.statusText}`,
+        );
       }
 
       const contentType = response.headers.get("content-type") || "";
@@ -142,7 +160,7 @@ export class ImageDownloadService {
    */
   private validateImageData(
     imageData: ImageData,
-    allowedFormats: string[],
+    allowedFormats: readonly string[],
   ): void {
     // Check if content type is an image
     if (!imageData.contentType.startsWith("image/")) {
@@ -152,7 +170,9 @@ export class ImageDownloadService {
     // Check if format is allowed
     if (!allowedFormats.includes(imageData.extension)) {
       throw new Error(
-        `Unsupported image format: ${imageData.extension}. Allowed: ${allowedFormats.join(", ")}`,
+        `Unsupported image format: ${imageData.extension}. Allowed: ${
+          allowedFormats.join(", ")
+        }`,
       );
     }
 
