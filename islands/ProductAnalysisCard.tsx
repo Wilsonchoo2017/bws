@@ -7,12 +7,31 @@ import { useSignal } from "@preact/signals";
 import { useEffect } from "preact/hooks";
 import ScoreMeter from "../components/analysis/ScoreMeter.tsx";
 import RecommendationBadge from "../components/analysis/RecommendationBadge.tsx";
+import ScoreBreakdownModal from "./ScoreBreakdownModal.tsx";
+
+interface ScoreComponent {
+  name: string;
+  weight: number;
+  score: number;
+  rawValue?: number | string;
+  calculation: string;
+  reasoning: string;
+}
+
+interface ScoreBreakdown {
+  components: ScoreComponent[];
+  formula: string;
+  totalScore: number;
+  dataPoints: Record<string, unknown>;
+  missingData?: string[];
+}
 
 interface AnalysisScore {
   value: number;
   confidence: number;
   reasoning: string;
   dataPoints: Record<string, unknown>;
+  breakdown?: ScoreBreakdown;
 }
 
 interface DimensionalScores {
@@ -59,6 +78,11 @@ export default function ProductAnalysisCard(
   const strategies = useSignal<Strategy[]>([]);
   const selectedStrategy = useSignal(defaultStrategy);
   const showDetails = useSignal(false);
+
+  // Modal state for score breakdowns
+  const showDemandBreakdown = useSignal(false);
+  const showAvailabilityBreakdown = useSignal(false);
+  const showQualityBreakdown = useSignal(false);
 
   // Fetch available strategies
   useEffect(() => {
@@ -280,6 +304,28 @@ export default function ProductAnalysisCard(
                   <p class="text-xs text-base-content/70 mt-1">
                     {rec.dimensions.demand.reasoning}
                   </p>
+                  {rec.dimensions.demand.breakdown && (
+                    <button
+                      class="btn btn-xs btn-ghost mt-2 w-full"
+                      onClick={() => showDemandBreakdown.value = true}
+                    >
+                      <svg
+                        xmlns="http://www.w3.org/2000/svg"
+                        class="h-3 w-3"
+                        fill="none"
+                        viewBox="0 0 24 24"
+                        stroke="currentColor"
+                      >
+                        <path
+                          stroke-linecap="round"
+                          stroke-linejoin="round"
+                          stroke-width="2"
+                          d="M9 7h6m0 10v-3m-3 3h.01M9 17h.01M9 14h.01M12 14h.01M15 11h.01M12 11h.01M9 11h.01M7 21h10a2 2 0 002-2V5a2 2 0 00-2-2H7a2 2 0 00-2 2v14a2 2 0 002 2z"
+                        />
+                      </svg>
+                      View Calculation
+                    </button>
+                  )}
                 </div>
               )
               : (
@@ -305,6 +351,28 @@ export default function ProductAnalysisCard(
                   <p class="text-xs text-base-content/70 mt-1">
                     {rec.dimensions.availability.reasoning}
                   </p>
+                  {rec.dimensions.availability.breakdown && (
+                    <button
+                      class="btn btn-xs btn-ghost mt-2 w-full"
+                      onClick={() => showAvailabilityBreakdown.value = true}
+                    >
+                      <svg
+                        xmlns="http://www.w3.org/2000/svg"
+                        class="h-3 w-3"
+                        fill="none"
+                        viewBox="0 0 24 24"
+                        stroke="currentColor"
+                      >
+                        <path
+                          stroke-linecap="round"
+                          stroke-linejoin="round"
+                          stroke-width="2"
+                          d="M9 7h6m0 10v-3m-3 3h.01M9 17h.01M9 14h.01M12 14h.01M15 11h.01M12 11h.01M9 11h.01M7 21h10a2 2 0 002-2V5a2 2 0 00-2-2H7a2 2 0 00-2 2v14a2 2 0 002 2z"
+                        />
+                      </svg>
+                      View Calculation
+                    </button>
+                  )}
                 </div>
               )
               : (
@@ -330,6 +398,28 @@ export default function ProductAnalysisCard(
                   <p class="text-xs text-base-content/70 mt-1">
                     {rec.dimensions.quality.reasoning}
                   </p>
+                  {rec.dimensions.quality.breakdown && (
+                    <button
+                      class="btn btn-xs btn-ghost mt-2 w-full"
+                      onClick={() => showQualityBreakdown.value = true}
+                    >
+                      <svg
+                        xmlns="http://www.w3.org/2000/svg"
+                        class="h-3 w-3"
+                        fill="none"
+                        viewBox="0 0 24 24"
+                        stroke="currentColor"
+                      >
+                        <path
+                          stroke-linecap="round"
+                          stroke-linejoin="round"
+                          stroke-width="2"
+                          d="M9 7h6m0 10v-3m-3 3h.01M9 17h.01M9 14h.01M12 14h.01M15 11h.01M12 11h.01M9 11h.01M7 21h10a2 2 0 002-2V5a2 2 0 00-2-2H7a2 2 0 00-2 2v14a2 2 0 002 2z"
+                        />
+                      </svg>
+                      View Calculation
+                    </button>
+                  )}
                 </div>
               )
               : (
@@ -407,6 +497,34 @@ export default function ProductAnalysisCard(
           </p>
         </div>
       </div>
+
+      {/* Score Breakdown Modals */}
+      {rec.dimensions.demand && (
+        <ScoreBreakdownModal
+          isOpen={showDemandBreakdown}
+          dimensionName="Demand"
+          dimensionScore={rec.dimensions.demand}
+          dimensionIcon="📈"
+        />
+      )}
+
+      {rec.dimensions.availability && (
+        <ScoreBreakdownModal
+          isOpen={showAvailabilityBreakdown}
+          dimensionName="Availability"
+          dimensionScore={rec.dimensions.availability}
+          dimensionIcon="📦"
+        />
+      )}
+
+      {rec.dimensions.quality && (
+        <ScoreBreakdownModal
+          isOpen={showQualityBreakdown}
+          dimensionName="Quality"
+          dimensionScore={rec.dimensions.quality}
+          dimensionIcon="⭐"
+        />
+      )}
     </div>
   );
 }

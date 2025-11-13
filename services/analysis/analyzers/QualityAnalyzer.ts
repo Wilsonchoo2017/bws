@@ -4,7 +4,12 @@
  */
 
 import { BaseAnalyzer } from "./BaseAnalyzer.ts";
-import type { AnalysisScore, QualityData } from "../types.ts";
+import type {
+  AnalysisScore,
+  QualityData,
+  ScoreBreakdown,
+  ScoreComponent,
+} from "../types.ts";
 
 export class QualityAnalyzer extends BaseAnalyzer<QualityData> {
   constructor() {
@@ -32,6 +37,8 @@ export class QualityAnalyzer extends BaseAnalyzer<QualityData> {
     const scores: Array<{ score: number; weight: number }> = [];
     const reasons: string[] = [];
     const dataPoints: Record<string, unknown> = {};
+    const components: ScoreComponent[] = [];
+    const missingData: string[] = [];
 
     // 1. Product ratings analysis
     if (
@@ -46,6 +53,21 @@ export class QualityAnalyzer extends BaseAnalyzer<QualityData> {
 
       dataPoints.avgStarRating = data.avgStarRating;
       dataPoints.ratingCount = data.ratingCount;
+
+      let ratingCalc = `${data.avgStarRating.toFixed(1)}/5 stars from ${data.ratingCount} reviews`;
+      let penalty = "";
+
+      if (data.ratingCount < 5) {
+        penalty = " (50% penalty: very few reviews)";
+      } else if (data.ratingCount < 20) {
+        penalty = " (30% penalty: few reviews)";
+      } else if (data.ratingCount < 50) {
+        penalty = " (15% penalty: moderate reviews)";
+      } else if (data.ratingCount < 100) {
+        penalty = " (5% penalty: decent reviews)";
+      }
+
+      ratingCalc += penalty;
 
       if (data.avgStarRating >= 4.5) {
         reasons.push(
@@ -73,6 +95,17 @@ export class QualityAnalyzer extends BaseAnalyzer<QualityData> {
       if (data.ratingCount < 10) {
         reasons.push("Limited reviews available");
       }
+
+      components.push({
+        name: "Product Ratings",
+        weight: 0.4,
+        score: ratingScore,
+        rawValue: `${data.avgStarRating.toFixed(1)}/5 (${data.ratingCount} reviews)`,
+        calculation: ratingCalc,
+        reasoning: "Customer satisfaction indicator. Base score = (avgRating / 5) * 100. Penalties for low review counts to ensure confidence. Realistic rating distribution gets +5% bonus.",
+      });
+    } else {
+      missingData.push("Product ratings data");
     }
 
     // 2. Seller trust signals
@@ -85,21 +118,34 @@ export class QualityAnalyzer extends BaseAnalyzer<QualityData> {
 
     const trustSignals: string[] = [];
     if (data.isPreferredSeller) {
-      trustSignals.push("Preferred Seller");
+      trustSignals.push("Preferred Seller (+20)");
       dataPoints.isPreferredSeller = true;
     }
     if (data.isServiceByShopee) {
-      trustSignals.push("Serviced by Shopee");
+      trustSignals.push("Service by Shopee (+20)");
       dataPoints.isServiceByShopee = true;
     }
     if (data.isMart) {
-      trustSignals.push("Shopee Mall");
+      trustSignals.push("Shopee Mall (+20)");
       dataPoints.isMart = true;
     }
 
+    const trustCalc = trustSignals.length > 0
+      ? `Base 40 + ${trustSignals.join(" + ")}`
+      : "Base score: 40 (no trust badges)";
+
     if (trustSignals.length > 0) {
-      reasons.push(`Trusted seller (${trustSignals.join(", ")})`);
+      reasons.push(`Trusted seller (${trustSignals.map(s => s.split(" (+")[0]).join(", ")})`);
     }
+
+    components.push({
+      name: "Seller Trust Signals",
+      weight: 0.3,
+      score: trustScore,
+      rawValue: trustSignals.length > 0 ? trustSignals.map(s => s.split(" (+")[0]).join(", ") : "No badges",
+      calculation: trustCalc,
+      reasoning: "Seller credibility indicator. Base score: 40. Each badge adds +20 points (Preferred Seller, Service by Shopee, Shopee Mall). Max score: 100.",
+    });
 
     // 3. Brand authenticity (LEGO official)
     if (data.brand) {
@@ -108,9 +154,26 @@ export class QualityAnalyzer extends BaseAnalyzer<QualityData> {
 
       dataPoints.brand = data.brand;
 
+      let brandCalc = "";
       if (data.brand.toLowerCase().includes("lego")) {
         reasons.push("Official LEGO product");
+        brandCalc = "Official LEGO brand (score: 100)";
+      } else if (data.brand.toLowerCase().includes("brick") || data.brand.toLowerCase().includes("block")) {
+        brandCalc = "Third-party brick brand (score: 60)";
+      } else {
+        brandCalc = "Generic/unknown brand (score: 40)";
       }
+
+      components.push({
+        name: "Brand Authenticity",
+        weight: 0.2,
+        score: brandScore,
+        rawValue: data.brand,
+        calculation: brandCalc,
+        reasoning: "Brand verification. Official LEGO = 100, brick/block brands = 60, unknown brands = 40. Authenticity affects collectability and value retention.",
+      });
+    } else {
+      missingData.push("Brand information");
     }
 
     // 4. Set metadata quality
@@ -129,11 +192,26 @@ export class QualityAnalyzer extends BaseAnalyzer<QualityData> {
         "technic",
         "creator expert",
       ];
+
+      let metadataCalc = `Set #${data.legoSetNumber}, Theme: ${data.theme}`;
+
       if (
         premiumThemes.some((t) => data.theme!.toLowerCase().includes(t))
       ) {
         reasons.push(`Popular ${data.theme} theme`);
+        metadataCalc += " (Premium theme)";
       }
+
+      components.push({
+        name: "Set Metadata Quality",
+        weight: 0.1,
+        score: 80,
+        rawValue: `${data.legoSetNumber} (${data.theme})`,
+        calculation: metadataCalc,
+        reasoning: "Complete metadata indicates legitimate LEGO set. Having set number + theme data scores 80. Premium themes (Star Wars, Harry Potter, etc.) noted for collectability.",
+      });
+    } else {
+      missingData.push("LEGO set metadata");
     }
 
     // Calculate final score
@@ -148,6 +226,20 @@ export class QualityAnalyzer extends BaseAnalyzer<QualityData> {
       data.isPreferredSeller,
     ]);
 
+    // Build formula string
+    const formula = components.length > 0
+      ? components.map((c) => `${c.name} (${(c.weight * 100).toFixed(0)}%)`).join(" + ")
+      : "Insufficient data";
+
+    // Build breakdown
+    const breakdown: ScoreBreakdown = {
+      components,
+      formula: `Weighted Average: ${formula}`,
+      totalScore: Math.round(finalScore),
+      dataPoints,
+      missingData: missingData.length > 0 ? missingData : undefined,
+    };
+
     return {
       value: Math.round(finalScore),
       confidence,
@@ -155,6 +247,7 @@ export class QualityAnalyzer extends BaseAnalyzer<QualityData> {
         ? this.formatReasoning(reasons)
         : "Insufficient quality data for analysis.",
       dataPoints,
+      breakdown,
     };
   }
 

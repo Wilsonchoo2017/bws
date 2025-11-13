@@ -4,7 +4,12 @@
  */
 
 import { BaseAnalyzer } from "./BaseAnalyzer.ts";
-import type { AnalysisScore, AvailabilityData } from "../types.ts";
+import type {
+  AnalysisScore,
+  AvailabilityData,
+  ScoreBreakdown,
+  ScoreComponent,
+} from "../types.ts";
 
 export class AvailabilityAnalyzer extends BaseAnalyzer<AvailabilityData> {
   constructor() {
@@ -29,6 +34,8 @@ export class AvailabilityAnalyzer extends BaseAnalyzer<AvailabilityData> {
     const scores: Array<{ score: number; weight: number }> = [];
     const reasons: string[] = [];
     const dataPoints: Record<string, unknown> = {};
+    const components: ScoreComponent[] = [];
+    const missingData: string[] = [];
 
     // 1. Retirement urgency analysis (critical for investment)
     if (data.retiringSoon !== undefined || data.expectedRetirementDate) {
@@ -39,6 +46,9 @@ export class AvailabilityAnalyzer extends BaseAnalyzer<AvailabilityData> {
       );
       scores.push({ score: retirementScore, weight: 0.5 }); // Highest weight for investment
 
+      let retirementCalc = "";
+      let retirementRawValue: string | number = "Not retiring";
+
       if (data.retiringSoon) {
         dataPoints.retiringSoon = true;
 
@@ -47,32 +57,55 @@ export class AvailabilityAnalyzer extends BaseAnalyzer<AvailabilityData> {
           data.daysUntilRetirement > 0
         ) {
           dataPoints.daysUntilRetirement = data.daysUntilRetirement;
+          retirementRawValue = `${data.daysUntilRetirement} days`;
+          retirementCalc = `Retiring in ${data.daysUntilRetirement} days`;
 
           if (data.daysUntilRetirement < 30) {
             reasons.push(
               `URGENT: Retiring in ${data.daysUntilRetirement} days`,
             );
+            retirementCalc += " (CRITICAL WINDOW)";
           } else if (data.daysUntilRetirement < 90) {
             reasons.push(
               `Retiring soon (${
                 Math.round(data.daysUntilRetirement / 30)
               } months)`,
             );
+            retirementCalc += " (HIGH URGENCY)";
           } else if (data.daysUntilRetirement < 180) {
             reasons.push("Expected to retire within 6 months");
+            retirementCalc += " (MODERATE URGENCY)";
+          } else {
+            retirementCalc += " (LOW URGENCY)";
           }
         } else if (data.expectedRetirementDate) {
           const daysUntil = this.daysBetween(
             new Date(),
             new Date(data.expectedRetirementDate),
           );
+          retirementRawValue = `~${Math.round(daysUntil / 30)} months`;
+          retirementCalc = `Expected retirement in ${Math.round(daysUntil / 30)} months`;
           reasons.push(`Retiring in ${Math.round(daysUntil / 30)} months`);
         } else {
+          retirementCalc = "Marked as retiring soon (no specific date)";
+          retirementRawValue = "Soon";
           reasons.push("Marked as retiring soon");
         }
       } else {
+        retirementCalc = "Not expected to retire soon";
         reasons.push("Not expected to retire soon");
       }
+
+      components.push({
+        name: "Retirement Urgency",
+        weight: 0.5,
+        score: retirementScore,
+        rawValue: retirementRawValue,
+        calculation: retirementCalc,
+        reasoning: "HIGHEST priority for investment. Closer to retirement = higher urgency. Score: 0-30d=95-100, 30-90d=80-95, 90-180d=60-80, 180-365d=40-60, >365d=20-40.",
+      });
+    } else {
+      missingData.push("Retirement timing data");
     }
 
     // 2. Stock availability analysis
@@ -82,15 +115,34 @@ export class AvailabilityAnalyzer extends BaseAnalyzer<AvailabilityData> {
 
       dataPoints.currentStock = data.currentStock;
 
+      let stockCalc = `${data.currentStock} units in stock`;
+
       if (data.currentStock === 0) {
         reasons.push("Out of stock");
+        stockCalc += " (OUT OF STOCK - highest scarcity)";
       } else if (data.currentStock < 10) {
         reasons.push(`Limited stock (${data.currentStock} units)`);
+        stockCalc += " (CRITICAL LOW)";
       } else if (data.currentStock < 50) {
         reasons.push(`Low stock (${data.currentStock} units)`);
+        stockCalc += " (LOW STOCK)";
+      } else if (data.currentStock < 100) {
+        stockCalc += " (MODERATE)";
       } else if (data.currentStock > 500) {
         reasons.push("Abundant stock available");
+        stockCalc += " (ABUNDANT)";
       }
+
+      components.push({
+        name: "Stock Availability",
+        weight: 0.3,
+        score: stockScore,
+        rawValue: data.currentStock,
+        calculation: stockCalc,
+        reasoning: "Lower stock = higher scarcity = better for investment. Score inversely proportional to stock level: 0=100, 1-5=90-100, 5-20=70-90, 20-100=40-70, >500=0-20.",
+      });
+    } else {
+      missingData.push("Current stock data");
     }
 
     // 3. Platform availability status
@@ -98,9 +150,27 @@ export class AvailabilityAnalyzer extends BaseAnalyzer<AvailabilityData> {
       scores.push({ score: 100, weight: 0.2 }); // High score if delisted
       dataPoints.isActive = false;
       reasons.push("Already delisted/retired from platform");
+
+      components.push({
+        name: "Platform Status",
+        weight: 0.2,
+        score: 100,
+        rawValue: "Delisted",
+        calculation: "Product already delisted/retired from platform",
+        reasoning: "Delisted products score highest (100) as they're no longer available for purchase, increasing scarcity value.",
+      });
     } else {
       scores.push({ score: 30, weight: 0.2 }); // Lower score if still available
       dataPoints.isActive = true;
+
+      components.push({
+        name: "Platform Status",
+        weight: 0.2,
+        score: 30,
+        rawValue: "Active",
+        calculation: "Product still active on platform",
+        reasoning: "Active products score lower (30) as they're still purchasable, reducing scarcity urgency.",
+      });
     }
 
     // Calculate final score
@@ -114,6 +184,20 @@ export class AvailabilityAnalyzer extends BaseAnalyzer<AvailabilityData> {
       data.isActive,
     ]);
 
+    // Build formula string
+    const formula = components.length > 0
+      ? components.map((c) => `${c.name} (${(c.weight * 100).toFixed(0)}%)`).join(" + ")
+      : "Insufficient data";
+
+    // Build breakdown
+    const breakdown: ScoreBreakdown = {
+      components,
+      formula: `Weighted Average: ${formula}`,
+      totalScore: Math.round(finalScore),
+      dataPoints,
+      missingData: missingData.length > 0 ? missingData : undefined,
+    };
+
     return {
       value: Math.round(finalScore),
       confidence,
@@ -121,6 +205,7 @@ export class AvailabilityAnalyzer extends BaseAnalyzer<AvailabilityData> {
         ? this.formatReasoning(reasons)
         : "Insufficient availability data for analysis.",
       dataPoints,
+      breakdown,
     };
   }
 

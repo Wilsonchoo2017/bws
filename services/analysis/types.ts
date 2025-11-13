@@ -7,11 +7,29 @@
 // Analysis Result Types
 // ============================================================================
 
+export interface ScoreComponent {
+  name: string; // Component name (e.g., "Bricklink Market Pricing")
+  weight: number; // Weight percentage (0-1)
+  score: number; // Component score (0-100)
+  rawValue?: number | string; // Raw input value
+  calculation: string; // How this score was calculated
+  reasoning: string; // Why this score matters
+}
+
+export interface ScoreBreakdown {
+  components: ScoreComponent[]; // Individual calculation components
+  formula: string; // Overall formula used
+  totalScore: number; // Final calculated score
+  dataPoints: Record<string, unknown>; // All raw data used
+  missingData?: string[]; // What data was missing (if any)
+}
+
 export interface AnalysisScore {
   value: number; // 0-100
   confidence: number; // 0-1 (how confident we are in this score)
   reasoning: string; // Human-readable explanation
   dataPoints: Record<string, unknown>; // Raw data used for calculation
+  breakdown?: ScoreBreakdown; // Detailed calculation breakdown
 }
 
 export interface DimensionalScores {

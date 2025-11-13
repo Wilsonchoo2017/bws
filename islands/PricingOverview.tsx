@@ -29,7 +29,7 @@ function formatPrice(price: number, currency: string = "MYR"): string {
     style: "currency",
     currency: currency,
     minimumFractionDigits: 2,
-  }).format(price);
+  }).format(price / 100);
 }
 
 function getPriceComparison(

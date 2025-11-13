@@ -4,7 +4,12 @@
  */
 
 import { BaseAnalyzer } from "./BaseAnalyzer.ts";
-import type { AnalysisScore, DemandData } from "../types.ts";
+import type {
+  AnalysisScore,
+  DemandData,
+  ScoreBreakdown,
+  ScoreComponent,
+} from "../types.ts";
 
 export class DemandAnalyzer extends BaseAnalyzer<DemandData> {
   constructor() {
@@ -44,11 +49,17 @@ export class DemandAnalyzer extends BaseAnalyzer<DemandData> {
     const scores: Array<{ score: number; weight: number }> = [];
     const reasons: string[] = [];
     const dataPoints: Record<string, unknown> = {};
+    const components: ScoreComponent[] = [];
+    const missingData: string[] = [];
 
     // PRIMARY: 1. Bricklink Market Pricing (60% weight) - Direct market indicators
     if (hasBricklinkPricing) {
       const pricingScore = this.analyzeBricklinkPricing(data);
       scores.push({ score: pricingScore, weight: 0.60 });
+
+      // Build calculation breakdown
+      let pricingCalc = "Based on: ";
+      const pricingParts: string[] = [];
 
       // Add reasoning based on market data
       if (data.bricklinkCurrentNewAvg) {
@@ -56,6 +67,7 @@ export class DemandAnalyzer extends BaseAnalyzer<DemandData> {
         reasons.push(
           `Active market (Avg: $${data.bricklinkCurrentNewAvg.toFixed(2)})`,
         );
+        pricingParts.push(`Current avg: $${data.bricklinkCurrentNewAvg.toFixed(2)}`);
       }
 
       // Price trend analysis
@@ -67,6 +79,7 @@ export class DemandAnalyzer extends BaseAnalyzer<DemandData> {
           data.bricklinkSixMonthNewAvg) / data.bricklinkSixMonthNewAvg * 100)
           .toFixed(1);
         reasons.push(`Price trending up (+${increase}% vs 6mo avg)`);
+        pricingParts.push(`+${increase}% vs 6mo`);
       } else if (
         data.bricklinkCurrentNewAvg && data.bricklinkSixMonthNewAvg &&
         data.bricklinkCurrentNewAvg < data.bricklinkSixMonthNewAvg
@@ -75,6 +88,7 @@ export class DemandAnalyzer extends BaseAnalyzer<DemandData> {
           data.bricklinkCurrentNewAvg) / data.bricklinkSixMonthNewAvg * 100)
           .toFixed(1);
         reasons.push(`Price trending down (-${decrease}% vs 6mo avg)`);
+        pricingParts.push(`-${decrease}% vs 6mo`);
       }
 
       // Market activity
@@ -87,6 +101,7 @@ export class DemandAnalyzer extends BaseAnalyzer<DemandData> {
         } else if (data.bricklinkCurrentNewLots < 10) {
           reasons.push(`Limited supply (${data.bricklinkCurrentNewLots} lots)`);
         }
+        pricingParts.push(`${data.bricklinkCurrentNewLots} lots available`);
       }
 
       if (data.bricklinkSixMonthNewTimesSold) {
@@ -97,13 +112,28 @@ export class DemandAnalyzer extends BaseAnalyzer<DemandData> {
             `Strong 6mo sales (${data.bricklinkSixMonthNewTimesSold} transactions)`,
           );
         }
+        pricingParts.push(`${data.bricklinkSixMonthNewTimesSold} sales in 6mo`);
       }
+
+      pricingCalc += pricingParts.join(", ");
+
+      components.push({
+        name: "Bricklink Market Pricing",
+        weight: 0.60,
+        score: pricingScore,
+        calculation: pricingCalc,
+        reasoning: "Primary demand signal. Price trends and market liquidity indicate buying interest. Rising prices + limited lots = strong demand.",
+      });
+    } else {
+      missingData.push("Bricklink market pricing data");
     }
 
     // SECONDARY: 2. Liquidity & Velocity (25% weight) - Like trading volume in stocks
     if (hasPastSalesData) {
       const liquidityScore = this.analyzeLiquidityVelocity(data);
       scores.push({ score: liquidityScore, weight: 0.25 });
+
+      const liquidityParts: string[] = [];
 
       // Add reasoning based on velocity and liquidity
       if (data.bricklinkSalesVelocity !== undefined) {
@@ -123,6 +153,7 @@ export class DemandAnalyzer extends BaseAnalyzer<DemandData> {
         } else {
           reasons.push("Low liquidity");
         }
+        liquidityParts.push(`${data.bricklinkSalesVelocity.toFixed(2)} sales/day`);
       }
 
       if (data.bricklinkRecentSales30d !== undefined) {
@@ -132,7 +163,20 @@ export class DemandAnalyzer extends BaseAnalyzer<DemandData> {
             `Active trading (${data.bricklinkRecentSales30d} sales in 30d)`,
           );
         }
+        liquidityParts.push(`${data.bricklinkRecentSales30d} sales in 30d`);
       }
+
+      if (data.bricklinkAvgDaysBetweenSales !== undefined) {
+        liquidityParts.push(`Avg ${data.bricklinkAvgDaysBetweenSales.toFixed(1)} days between sales`);
+      }
+
+      components.push({
+        name: "Liquidity & Velocity",
+        weight: 0.25,
+        score: liquidityScore,
+        calculation: `Based on: ${liquidityParts.join(", ")}`,
+        reasoning: "Market liquidity indicator. Higher sales velocity = easier to buy/sell = more reliable market. Like trading volume in stocks.",
+      });
     } else if (hasLegacyBricklinkData && !hasBricklinkPricing) {
       // Fallback to legacy Bricklink data ONLY if no pricing data (reduced weight)
       const resaleScore = this.analyzeBricklinkActivity(
@@ -141,6 +185,8 @@ export class DemandAnalyzer extends BaseAnalyzer<DemandData> {
       );
       scores.push({ score: resaleScore, weight: 0.15 });
 
+      const legacyParts: string[] = [];
+
       if (data.bricklinkTimesSold !== undefined) {
         dataPoints.bricklinkTimesSold = data.bricklinkTimesSold;
         if (data.bricklinkTimesSold > 100) {
@@ -148,7 +194,22 @@ export class DemandAnalyzer extends BaseAnalyzer<DemandData> {
             `Active resale market (${data.bricklinkTimesSold} transactions)`,
           );
         }
+        legacyParts.push(`${data.bricklinkTimesSold} transactions`);
       }
+
+      if (data.bricklinkTotalQty !== undefined) {
+        legacyParts.push(`${data.bricklinkTotalQty} units sold`);
+      }
+
+      components.push({
+        name: "Bricklink Activity (Legacy)",
+        weight: 0.15,
+        score: resaleScore,
+        calculation: `Based on: ${legacyParts.join(", ")}`,
+        reasoning: "Fallback resale market activity indicator when detailed pricing data is unavailable.",
+      });
+    } else {
+      missingData.push("Bricklink sales velocity data");
     }
 
     // 3. Momentum & Trends (10% weight) - Like price/volume trends
@@ -156,25 +217,43 @@ export class DemandAnalyzer extends BaseAnalyzer<DemandData> {
       const momentumScore = this.analyzeMomentumTrends(data);
       scores.push({ score: momentumScore, weight: 0.10 });
 
+      const momentumParts: string[] = [];
+
       // Add reasoning based on trends
       if (data.bricklinkPriceTrend === "increasing") {
         reasons.push("Bullish price trend (increasing demand)");
+        momentumParts.push("Bullish price trend");
       } else if (data.bricklinkPriceTrend === "decreasing") {
         reasons.push("Bearish price trend (weakening demand)");
+        momentumParts.push("Bearish price trend");
+      } else if (data.bricklinkPriceTrend) {
+        momentumParts.push(`Price trend: ${data.bricklinkPriceTrend}`);
       }
 
       if (data.bricklinkVolumeTrend === "increasing") {
         reasons.push("Rising transaction volume");
+        momentumParts.push("Rising volume");
+      } else if (data.bricklinkVolumeTrend) {
+        momentumParts.push(`Volume: ${data.bricklinkVolumeTrend}`);
       }
 
       if (data.bricklinkRSI !== undefined) {
         dataPoints.bricklinkRSI = data.bricklinkRSI;
+        momentumParts.push(`RSI: ${data.bricklinkRSI.toFixed(0)}`);
         if (data.bricklinkRSI > 70) {
           reasons.push(`Overbought (RSI: ${data.bricklinkRSI.toFixed(0)})`);
         } else if (data.bricklinkRSI < 30) {
           reasons.push(`Oversold (RSI: ${data.bricklinkRSI.toFixed(0)})`);
         }
       }
+
+      components.push({
+        name: "Momentum & Trends",
+        weight: 0.10,
+        score: momentumScore,
+        calculation: `Based on: ${momentumParts.join(", ")}`,
+        reasoning: "Technical indicators of market momentum. RSI >70 = overbought, <30 = oversold. Bullish trends + rising volume = strong demand signal.",
+      });
     }
 
     // 4. Community Sentiment (3% weight) - Like analyst ratings
@@ -186,12 +265,31 @@ export class DemandAnalyzer extends BaseAnalyzer<DemandData> {
       );
       scores.push({ score: communityScore, weight: 0.03 });
 
+      const communityParts: string[] = [];
+
       if (data.redditPosts !== undefined && data.redditPosts > 0) {
         dataPoints.redditPosts = data.redditPosts;
+        communityParts.push(`${data.redditPosts} Reddit posts`);
         if (data.redditPosts > 20) {
           reasons.push(`Strong community buzz (${data.redditPosts} posts)`);
         }
       }
+
+      if (data.redditAverageScore !== undefined) {
+        communityParts.push(`Avg score: ${data.redditAverageScore.toFixed(1)}`);
+      }
+
+      if (data.redditTotalComments !== undefined) {
+        communityParts.push(`${data.redditTotalComments} comments`);
+      }
+
+      components.push({
+        name: "Community Sentiment",
+        weight: 0.03,
+        score: communityScore,
+        calculation: `Based on: ${communityParts.join(", ")}`,
+        reasoning: "Social validation from Reddit community. More posts + higher engagement = stronger collector interest and awareness.",
+      });
     }
 
     // 5. Retail Activity (2% weight) - Market awareness indicator
@@ -202,12 +300,27 @@ export class DemandAnalyzer extends BaseAnalyzer<DemandData> {
       );
       scores.push({ score: salesScore, weight: 0.02 });
 
-      if (data.unitsSold !== undefined && data.unitsSold > 1000) {
+      const retailParts: string[] = [];
+
+      if (data.unitsSold !== undefined) {
         dataPoints.unitsSold = data.unitsSold;
-        reasons.push(
-          `High retail awareness (${data.unitsSold.toLocaleString()} sold)`,
-        );
+        retailParts.push(`${data.unitsSold.toLocaleString()} units sold`);
+        if (data.unitsSold > 1000) {
+          reasons.push(
+            `High retail awareness (${data.unitsSold.toLocaleString()} sold)`,
+          );
+        }
+      } else if (data.lifetimeSold !== undefined) {
+        retailParts.push(`${data.lifetimeSold.toLocaleString()} lifetime sold`);
       }
+
+      components.push({
+        name: "Retail Activity",
+        weight: 0.02,
+        score: salesScore,
+        calculation: `Based on: ${retailParts.join(", ")}`,
+        reasoning: "Retail platform sales indicate market awareness and mainstream appeal. High volume suggests broad consumer interest.",
+      });
     }
 
     // Calculate final score
@@ -229,6 +342,20 @@ export class DemandAnalyzer extends BaseAnalyzer<DemandData> {
       confidence = Math.min(1.0, confidence + 0.2); // +20% confidence boost
     }
 
+    // Build formula string
+    const formula = components.length > 0
+      ? components.map((c) => `${c.name} (${(c.weight * 100).toFixed(0)}%)`).join(" + ")
+      : "Insufficient data";
+
+    // Build breakdown
+    const breakdown: ScoreBreakdown = {
+      components,
+      formula: `Weighted Average: ${formula}`,
+      totalScore: Math.round(finalScore),
+      dataPoints,
+      missingData: missingData.length > 0 ? missingData : undefined,
+    };
+
     return {
       value: Math.round(finalScore),
       confidence,
@@ -236,6 +363,7 @@ export class DemandAnalyzer extends BaseAnalyzer<DemandData> {
         ? this.formatReasoning(reasons)
         : "Insufficient demand data for analysis.",
       dataPoints,
+      breakdown,
     };
   }
 

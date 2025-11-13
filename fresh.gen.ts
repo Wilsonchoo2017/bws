@@ -47,6 +47,7 @@ import * as $ProductEditModal from "./islands/ProductEditModal.tsx";
 import * as $ProductImageGallery from "./islands/ProductImageGallery.tsx";
 import * as $ProductsList from "./islands/ProductsList.tsx";
 import * as $QueueDiagnosticsDashboard from "./islands/QueueDiagnosticsDashboard.tsx";
+import * as $ScoreBreakdownModal from "./islands/ScoreBreakdownModal.tsx";
 import * as $ShopeeParser from "./islands/ShopeeParser.tsx";
 import * as $Sidebar from "./islands/Sidebar.tsx";
 import * as $TagManager from "./islands/TagManager.tsx";
@@ -109,6 +110,7 @@ const manifest = {
     "./islands/ProductImageGallery.tsx": $ProductImageGallery,
     "./islands/ProductsList.tsx": $ProductsList,
     "./islands/QueueDiagnosticsDashboard.tsx": $QueueDiagnosticsDashboard,
+    "./islands/ScoreBreakdownModal.tsx": $ScoreBreakdownModal,
     "./islands/ShopeeParser.tsx": $ShopeeParser,
     "./islands/Sidebar.tsx": $Sidebar,
     "./islands/TagManager.tsx": $TagManager,
