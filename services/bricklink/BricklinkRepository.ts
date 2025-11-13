@@ -18,6 +18,7 @@ import { db } from "../../db/client.ts";
 import {
   type BricklinkItem,
   bricklinkItems,
+  bricklinkPastSales,
   bricklinkPriceHistory,
   bricklinkVolumeHistory,
   type NewBricklinkItem,
@@ -25,7 +26,11 @@ import {
   type NewBricklinkVolumeHistory,
 } from "../../db/schema.ts";
 import { and, eq, lte, or, sql } from "drizzle-orm";
-import type { PriceData, PricingBox } from "./BricklinkParser.ts";
+import type {
+  PastSaleTransaction,
+  PriceData,
+  PricingBox,
+} from "./BricklinkParser.ts";
 
 /**
  * Interface for update data
@@ -497,6 +502,95 @@ export class BricklinkRepository {
       .from(bricklinkVolumeHistory)
       .where(eq(bricklinkVolumeHistory.itemId, itemId))
       .orderBy(bricklinkVolumeHistory.recordedAt)
+      .limit(options?.limit || 1000);
+
+    return results;
+  }
+
+  /**
+   * Upsert past sales transactions for an item
+   * Uses ON CONFLICT to avoid duplicates based on (itemId, dateSold, condition, price)
+   *
+   * @param itemId - The Bricklink item ID
+   * @param transactions - Array of past sale transactions to store
+   * @returns Number of transactions inserted (may be less than input if duplicates exist)
+   */
+  async upsertPastSales(
+    itemId: string,
+    transactions: PastSaleTransaction[],
+  ): Promise<number> {
+    if (transactions.length === 0) {
+      return 0;
+    }
+
+    const now = new Date();
+
+    // Convert transactions to database format
+    const values = transactions.map((tx) => ({
+      itemId,
+      dateSold: tx.date_sold,
+      condition: tx.condition,
+      price: Math.round(tx.price.amount * 100), // Store as cents
+      currency: tx.price.currency,
+      sellerLocation: tx.seller_location || null,
+      quantity: tx.quantity || null,
+      scrapedAt: now,
+    }));
+
+    // Bulk insert with ON CONFLICT DO NOTHING to skip duplicates
+    const result = await db.insert(bricklinkPastSales)
+      .values(values)
+      .onConflictDoNothing({
+        target: [
+          bricklinkPastSales.itemId,
+          bricklinkPastSales.dateSold,
+          bricklinkPastSales.condition,
+          bricklinkPastSales.price,
+        ],
+      })
+      .returning();
+
+    return result.length;
+  }
+
+  /**
+   * Get past sales transactions for an item
+   *
+   * @param itemId - The Bricklink item ID
+   * @param options - Optional filters for condition, date range, and limit
+   * @returns Array of past sales transactions
+   */
+  async getPastSales(
+    itemId: string,
+    options?: {
+      condition?: "new" | "used";
+      startDate?: Date;
+      endDate?: Date;
+      limit?: number;
+    },
+  ): Promise<typeof bricklinkPastSales.$inferSelect[]> {
+    const conditions = [eq(bricklinkPastSales.itemId, itemId)];
+
+    if (options?.condition) {
+      conditions.push(eq(bricklinkPastSales.condition, options.condition));
+    }
+
+    if (options?.startDate) {
+      conditions.push(
+        sql`${bricklinkPastSales.dateSold} >= ${options.startDate}`,
+      );
+    }
+
+    if (options?.endDate) {
+      conditions.push(
+        sql`${bricklinkPastSales.dateSold} <= ${options.endDate}`,
+      );
+    }
+
+    const results = await db.select()
+      .from(bricklinkPastSales)
+      .where(and(...conditions))
+      .orderBy(bricklinkPastSales.dateSold)
       .limit(options?.limit || 1000);
 
     return results;

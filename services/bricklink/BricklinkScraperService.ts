@@ -25,6 +25,7 @@ import {
   hasAnyPricingChanged,
   parseBricklinkUrl,
   parseItemInfo,
+  parsePastSales,
   parsePriceGuide,
 } from "./BricklinkParser.ts";
 import { calculateBackoff, RETRY_CONFIG } from "../../config/scraper.config.ts";
@@ -159,6 +160,14 @@ export class BricklinkScraperService {
         // Parse price guide
         const pricingData = parsePriceGuide(priceResponse.html);
 
+        // Parse past sales transactions from the item page
+        scraperLogger.info("Parsing past sales", { itemId });
+        const pastSales = parsePastSales(itemResponse.html);
+        scraperLogger.info(
+          `Found ${pastSales.length} past sales transactions`,
+          { itemId, count: pastSales.length },
+        );
+
         // Build complete data object
         const data: BricklinkData = {
           item_id: itemId,
@@ -178,7 +187,7 @@ export class BricklinkScraperService {
         // Save to database if requested
         let saved = false;
         if (saveToDb) {
-          await this.saveToDatabase(data);
+          await this.saveToDatabase(data, pastSales);
           saved = true;
         }
 
@@ -227,8 +236,14 @@ export class BricklinkScraperService {
   /**
    * Save scraped data to database
    * Uses transaction to ensure atomicity of multi-step database operations
+   *
+   * @param data - The Bricklink item data
+   * @param pastSales - Array of past sales transactions (optional)
    */
-  private async saveToDatabase(data: BricklinkData): Promise<void> {
+  private async saveToDatabase(
+    data: BricklinkData,
+    pastSales: import("./BricklinkParser.ts").PastSaleTransaction[] = [],
+  ): Promise<void> {
     try {
       // Download and store image if available (outside transaction - file I/O)
       let localImagePath: string | null = null;
@@ -368,6 +383,23 @@ export class BricklinkScraperService {
               currentUsed: data.current_used,
             });
           }
+        }
+
+        // Save past sales transactions if any were found
+        if (pastSales.length > 0) {
+          const insertedCount = await this.repository.upsertPastSales(
+            data.item_id,
+            pastSales,
+          );
+          scraperLogger.info(
+            `Saved ${insertedCount} past sales transactions for ${data.item_id}`,
+            {
+              itemId: data.item_id,
+              totalParsed: pastSales.length,
+              inserted: insertedCount,
+              duplicatesSkipped: pastSales.length - insertedCount,
+            },
+          );
         }
 
         scraperLogger.info(`Saved to database: ${data.item_id}`, {

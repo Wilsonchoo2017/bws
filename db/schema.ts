@@ -318,6 +318,52 @@ export const bricklinkVolumeHistory = pgTable(
   }),
 );
 
+// Bricklink past sales transactions - individual sale records
+export const bricklinkPastSales = pgTable(
+  "bricklink_past_sales",
+  {
+    id: serial("id").primaryKey(),
+    itemId: varchar("item_id", { length: 50 }).notNull(),
+
+    // Transaction details
+    dateSold: timestamp("date_sold").notNull(),
+    condition: conditionEnum("condition").notNull(),
+
+    // Price (stored as cents/smallest currency unit)
+    price: integer("price").notNull(),
+    currency: varchar("currency", { length: 3 }).notNull().default("USD"),
+
+    // Optional fields
+    sellerLocation: varchar("seller_location", { length: 100 }),
+    quantity: integer("quantity"),
+
+    // Metadata
+    scrapedAt: timestamp("scraped_at").defaultNow().notNull(),
+  },
+  (table) => ({
+    // Composite index for efficient item queries
+    itemDateIdx: index("idx_bricklink_past_sales_item_date").on(
+      table.itemId,
+      table.dateSold,
+    ),
+    // Index for date-based queries
+    dateSoldIdx: index("idx_bricklink_past_sales_date_sold").on(
+      table.dateSold,
+    ),
+    // Index for condition filtering
+    conditionIdx: index("idx_bricklink_past_sales_condition").on(
+      table.condition,
+    ),
+    // Unique constraint to prevent duplicate transactions
+    uniqueTransaction: unique("unique_bricklink_past_sale").on(
+      table.itemId,
+      table.dateSold,
+      table.condition,
+      table.price,
+    ),
+  }),
+);
+
 // Unified scrape sessions for tracking scraping metadata (all platforms)
 export const scrapeSessions = pgTable(
   "scrape_sessions",

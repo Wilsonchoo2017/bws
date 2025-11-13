@@ -40,6 +40,17 @@ export interface PricingBox {
 }
 
 /**
+ * Past sale transaction data
+ */
+export interface PastSaleTransaction {
+  date_sold: Date;
+  condition: "new" | "used";
+  price: PriceData;
+  seller_location?: string;
+  quantity?: number;
+}
+
+/**
  * Complete Bricklink item data
  */
 export interface BricklinkData {
@@ -228,7 +239,8 @@ export function extractImageUrl(doc: HTMLDocument): string | null {
   // Fourth try: look for images in the page that contain "img.bricklink.com"
   const allImages = doc.querySelectorAll("img");
   for (const img of allImages) {
-    const src = (img as unknown as Element).getAttribute("src");
+    // @ts-ignore - deno_dom types don't include getAttribute
+    const src = img.getAttribute("src");
     if (
       src && (src.includes("img.bricklink.com") || src.includes("brickimg"))
     ) {
@@ -372,4 +384,157 @@ export function isValidBricklinkUrl(url: string): boolean {
   } catch {
     return false;
   }
+}
+
+/**
+ * Parse Past Sales transactions from the catalog item page
+ * Pure function - no side effects
+ *
+ * The Past Sales section typically appears in a table with columns:
+ * - Date Sold
+ * - Condition (New/Used)
+ * - Unit Price
+ * - Seller Location (sometimes)
+ *
+ * @param html - HTML content from the catalog item page
+ * @returns Array of past sale transactions
+ */
+export function parsePastSales(html: string): PastSaleTransaction[] {
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(html, "text/html");
+
+  if (!doc) {
+    throw new Error("Failed to parse Past Sales HTML");
+  }
+
+  const transactions: PastSaleTransaction[] = [];
+
+  // Look for the "Past Sales" section
+  // Bricklink uses various table structures, but typically has a table with sales data
+  // The table is often inside a div or under a heading containing "Past Sales" or "Sold Listings"
+
+  // Strategy: Find all tables and look for one that contains sale dates and prices
+  const tables = doc.querySelectorAll("table");
+
+  for (const table of tables) {
+    // @ts-ignore - deno_dom types issue with Node vs Element
+    const rows = table.querySelectorAll("tr");
+
+    // Check if this looks like a sales table (has date and price columns)
+    const headerRow = rows[0];
+    const headerText = headerRow?.textContent?.toLowerCase() || "";
+
+    // Look for indicators this is a sales table
+    const isSalesTable = headerText.includes("date") ||
+      headerText.includes("sold") ||
+      headerText.includes("price");
+
+    if (!isSalesTable) continue;
+
+    // Parse data rows (skip header)
+    for (let i = 1; i < rows.length; i++) {
+      const row = rows[i];
+      // @ts-ignore - deno_dom types issue with Node vs Element
+      const cells = row.querySelectorAll("td");
+
+      if (cells.length < 2) continue;
+
+      try {
+        // Extract data from cells
+        // Format varies, but typically: Date | Condition | Price | Location
+        let dateText = "";
+        let conditionText = "";
+        let priceText = "";
+        let locationText = "";
+
+        // Try to identify columns by content patterns
+        for (const cell of cells) {
+          const text = cell.textContent?.trim() || "";
+
+          // Date pattern: MM/DD/YYYY or similar
+          if (/\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4}/.test(text) && !dateText) {
+            dateText = text;
+          } // Condition: "New" or "Used"
+          else if (
+            /^(new|used)$/i.test(text.toLowerCase()) && !conditionText
+          ) {
+            conditionText = text.toLowerCase();
+          } // Price: Currency + number (USD 12.34, US $12.34, etc.)
+          else if (
+            /[A-Z]{2,3}\s*\$?\s*[\d,\.]+/.test(text) && !priceText
+          ) {
+            priceText = text;
+          } // Location: Country code or name
+          else if (
+            /^[A-Z]{2}$/.test(text) || text.length > 2 && !locationText
+          ) {
+            locationText = text;
+          }
+        }
+
+        // Skip if we don't have minimum required data
+        if (!dateText || !priceText) continue;
+
+        // Parse date
+        const dateParts = dateText.match(
+          /(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})/,
+        );
+        if (!dateParts) continue;
+
+        let month = parseInt(dateParts[1]);
+        let day = parseInt(dateParts[2]);
+        let year = parseInt(dateParts[3]);
+
+        // Handle 2-digit years
+        if (year < 100) {
+          year += year < 50 ? 2000 : 1900;
+        }
+
+        // Check if format is DD/MM/YYYY or MM/DD/YYYY
+        // If month > 12, it must be DD/MM/YYYY
+        if (month > 12) {
+          [month, day] = [day, month];
+        }
+
+        const dateSold = new Date(year, month - 1, day);
+
+        // Parse price
+        const priceMatch = priceText.match(/([A-Z]{2,3})\s*\$?\s*([\d,\.]+)/);
+        if (!priceMatch) continue;
+
+        const currency = priceMatch[1].toUpperCase();
+        const amount = parseFloat(priceMatch[2].replace(/,/g, ""));
+
+        // Parse condition (default to "used" if not specified)
+        const condition = (conditionText === "new" ? "new" : "used") as
+          | "new"
+          | "used";
+
+        // Create transaction object
+        const transaction: PastSaleTransaction = {
+          date_sold: dateSold,
+          condition,
+          price: {
+            currency,
+            amount,
+          },
+        };
+
+        if (locationText) {
+          transaction.seller_location = locationText;
+        }
+
+        transactions.push(transaction);
+      } catch (error) {
+        // Skip malformed rows
+        console.warn(`Failed to parse Past Sales row: ${error.message}`);
+        continue;
+      }
+    }
+
+    // If we found transactions, we've found the right table
+    if (transactions.length > 0) break;
+  }
+
+  return transactions;
 }

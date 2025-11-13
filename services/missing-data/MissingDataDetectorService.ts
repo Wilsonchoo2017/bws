@@ -359,13 +359,17 @@ export class MissingDataDetectorService {
 
   /**
    * Helper function to check if a pricing box has missing volume data
+   *
+   * A null/undefined box means "no sales exist" (legitimate) - NOT missing data
+   * A box with null/undefined total_qty means scraping failed - IS missing data
    */
   private hasBoxMissingVolume(box: unknown): boolean {
-    if (!box) return true; // Box is null/undefined
+    // null/undefined box means "unavailable" (no sales exist) - this is NOT missing data
+    if (!box) return false;
 
     const pricingBox = box as PricingBox;
 
-    // Check if total_qty is missing, null, or undefined
+    // If box exists but total_qty is missing, that's a scraping error - IS missing data
     return pricingBox.total_qty === null ||
       pricingBox.total_qty === undefined;
   }
@@ -412,6 +416,9 @@ export class MissingDataDetectorService {
   > {
     // Use SQL to find items where any pricing box has null total_qty
     // This is much more efficient than fetching all items and checking in JavaScript
+    //
+    // Important: We only flag as missing if the box EXISTS but total_qty is null.
+    // If the box itself is null (no sales exist), that's legitimate, not missing data.
     const itemsWithMissingVolume = await db
       .select({
         itemId: bricklinkItems.itemId,
@@ -424,14 +431,10 @@ export class MissingDataDetectorService {
       .from(bricklinkItems)
       .where(
         sql`${bricklinkItems.watchStatus} = 'active' AND (
-          ${bricklinkItems.sixMonthNew} IS NULL OR
-          ${bricklinkItems.sixMonthNew}->>'total_qty' IS NULL OR
-          ${bricklinkItems.sixMonthUsed} IS NULL OR
-          ${bricklinkItems.sixMonthUsed}->>'total_qty' IS NULL OR
-          ${bricklinkItems.currentNew} IS NULL OR
-          ${bricklinkItems.currentNew}->>'total_qty' IS NULL OR
-          ${bricklinkItems.currentUsed} IS NULL OR
-          ${bricklinkItems.currentUsed}->>'total_qty' IS NULL
+          (${bricklinkItems.sixMonthNew} IS NOT NULL AND ${bricklinkItems.sixMonthNew}->>'total_qty' IS NULL) OR
+          (${bricklinkItems.sixMonthUsed} IS NOT NULL AND ${bricklinkItems.sixMonthUsed}->>'total_qty' IS NULL) OR
+          (${bricklinkItems.currentNew} IS NOT NULL AND ${bricklinkItems.currentNew}->>'total_qty' IS NULL) OR
+          (${bricklinkItems.currentUsed} IS NOT NULL AND ${bricklinkItems.currentUsed}->>'total_qty' IS NULL)
         )`,
       );
 
