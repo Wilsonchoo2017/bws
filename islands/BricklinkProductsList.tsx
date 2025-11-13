@@ -11,7 +11,6 @@ import {
   determineSyncStatus,
   formatRelativeTime,
   getNextScrapeCountdown,
-  type SyncStatus,
 } from "../utils/sync-helpers.ts";
 
 interface PricingBox {
