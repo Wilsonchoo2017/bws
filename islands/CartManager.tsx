@@ -26,6 +26,8 @@ import {
   findOptimalVoucherOrder,
   getDiscountDescription,
 } from "../utils/voucher.ts";
+import { usePriceGuide } from "../hooks/usePriceGuide.ts";
+import { PriceComparison } from "../components/PriceComparison.tsx";
 
 export default function CartManager() {
   const cartItems = useSignal<CartItem[]>([]);
@@ -48,6 +50,10 @@ export default function CartManager() {
   const appliedVouchers = useSignal<VoucherTemplate[]>([]);
   const voucherTemplates = useSignal<VoucherTemplate[]>([]);
   const showVoucherManager = useSignal(false);
+
+  // Price guide data for all cart items
+  const legoIds = cartItems.value.map((item) => item.legoId);
+  const priceGuideMap = usePriceGuide(legoIds);
 
   // Load cart items, vouchers, and total price on mount
   useEffect(() => {
@@ -698,6 +704,7 @@ export default function CartManager() {
                     <th>Qty</th>
                     <th>Discount</th>
                     <th>Savings</th>
+                    <th>Deal Quality</th>
                     <th>Platform</th>
                     <th>Actions</th>
                   </tr>
@@ -761,6 +768,14 @@ export default function CartManager() {
                         </td>
                         <td class="text-success font-medium">
                           {formatPrice(savings)}
+                        </td>
+                        <td>
+                          <PriceComparison
+                            unitPriceCents={item.unitPrice}
+                            recommendedBuyPrice={priceGuideMap.get(item.legoId)?.recommendedBuyPrice}
+                            loading={priceGuideMap.get(item.legoId)?.loading}
+                            error={priceGuideMap.get(item.legoId)?.error}
+                          />
                         </td>
                         <td>
                           {item.platform && (
@@ -890,6 +905,17 @@ export default function CartManager() {
                         <div class="flex justify-between text-success font-medium">
                           <span>Savings:</span>
                           <span>{formatPrice(savings)}</span>
+                        </div>
+                        <div class="flex justify-between items-center border-t pt-2 mt-2">
+                          <span class="text-base-content/70 font-medium">Deal Quality:</span>
+                          <div>
+                            <PriceComparison
+                              unitPriceCents={item.unitPrice}
+                              recommendedBuyPrice={priceGuideMap.get(item.legoId)?.recommendedBuyPrice}
+                              loading={priceGuideMap.get(item.legoId)?.loading}
+                              error={priceGuideMap.get(item.legoId)?.error}
+                            />
+                          </div>
                         </div>
                         {item.platform && (
                           <div class="flex justify-between">

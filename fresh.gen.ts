@@ -17,6 +17,7 @@ import * as $api_parse_toysrus from "./routes/api/parse-toysrus.ts";
 import * as $api_products_id_ from "./routes/api/products/[id].ts";
 import * as $api_products_manual from "./routes/api/products/manual.ts";
 import * as $api_products_validate_and_save from "./routes/api/products/validate-and-save.ts";
+import * as $api_queue_reset from "./routes/api/queue-reset.ts";
 import * as $api_reddit_results from "./routes/api/reddit-results.ts";
 import * as $api_reddit_search from "./routes/api/reddit-search.ts";
 import * as $api_scrape_bricklink from "./routes/api/scrape-bricklink.ts";
@@ -34,6 +35,7 @@ import * as $queue from "./routes/queue.tsx";
 import * as $BricklinkProductsList from "./islands/BricklinkProductsList.tsx";
 import * as $CartManager from "./islands/CartManager.tsx";
 import * as $Counter from "./islands/Counter.tsx";
+import * as $PricingOverview from "./islands/PricingOverview.tsx";
 import * as $ProductAnalysisCard from "./islands/ProductAnalysisCard.tsx";
 import * as $ProductEditModal from "./islands/ProductEditModal.tsx";
 import * as $ProductImageGallery from "./islands/ProductImageGallery.tsx";
@@ -68,6 +70,7 @@ const manifest = {
     "./routes/api/products/manual.ts": $api_products_manual,
     "./routes/api/products/validate-and-save.ts":
       $api_products_validate_and_save,
+    "./routes/api/queue-reset.ts": $api_queue_reset,
     "./routes/api/reddit-results.ts": $api_reddit_results,
     "./routes/api/reddit-search.ts": $api_reddit_search,
     "./routes/api/scrape-bricklink.ts": $api_scrape_bricklink,
@@ -87,6 +90,7 @@ const manifest = {
     "./islands/BricklinkProductsList.tsx": $BricklinkProductsList,
     "./islands/CartManager.tsx": $CartManager,
     "./islands/Counter.tsx": $Counter,
+    "./islands/PricingOverview.tsx": $PricingOverview,
     "./islands/ProductAnalysisCard.tsx": $ProductAnalysisCard,
     "./islands/ProductEditModal.tsx": $ProductEditModal,
     "./islands/ProductImageGallery.tsx": $ProductImageGallery,
