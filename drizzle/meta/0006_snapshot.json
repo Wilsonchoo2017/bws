@@ -1,0 +1,14 @@
+{
+  "id": "0006_add_local_image_storage",
+  "prevId": "0005_add_bricklink_volume_history",
+  "version": "7",
+  "dialect": "postgresql",
+  "tables": {},
+  "enums": {},
+  "schemas": {},
+  "_meta": {
+    "schemas": {},
+    "tables": {},
+    "columns": {}
+  }
+}

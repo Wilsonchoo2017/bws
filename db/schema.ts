@@ -91,6 +91,10 @@ export const products = pgTable(
     // Media (all platforms)
     image: text("image"),
     images: jsonb("images"),
+    localImagePath: text("local_image_path"),
+    localImages: jsonb("local_images"),
+    imageDownloadedAt: timestamp("image_downloaded_at"),
+    imageDownloadStatus: varchar("image_download_status", { length: 20 }),
 
     // LEGO specific (all platforms)
     legoSetNumber: varchar("lego_set_number", { length: 10 }),

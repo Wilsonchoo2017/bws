@@ -1,4 +1,5 @@
 import { useSignal } from "@preact/signals";
+import { useMemo, useCallback } from "preact/hooks";
 import type { ValueInvestingProduct } from "../types/value-investing.ts";
 import { ErrorBoundary } from "./components/ErrorBoundary.tsx";
 import { ValueRatingBadge } from "./components/ValueRatingBadge.tsx";
@@ -22,8 +23,12 @@ export default function ValueInvestingDashboard(
   const maxPrice = useSignal<number>(10000);
   const sortBy = useSignal<string>("marginOfSafety"); // Default: best value first
 
-  // Filter products based on current filters
-  const filteredProducts = () => {
+  /**
+   * Memoized filtered products computation
+   * Only recalculates when dependencies change
+   * Prevents expensive filtering/sorting on every render
+   */
+  const filteredProducts = useMemo(() => {
     let filtered = [...products.value];
 
     // Strategy filter
@@ -69,12 +74,22 @@ export default function ValueInvestingDashboard(
     });
 
     return filtered;
-  };
+  }, [
+    products.value,
+    selectedStrategy.value,
+    minROI.value,
+    minPrice.value,
+    maxPrice.value,
+    sortBy.value,
+  ]);
 
-  // Calculate summary statistics safely
-  const getSummaryStats = () => {
-    const filtered = filteredProducts();
-    const count = filtered.length;
+  /**
+   * Memoized summary statistics computation
+   * Only recalculates when filtered products change
+   * Prevents expensive reduce operations on every render
+   */
+  const stats = useMemo(() => {
+    const count = filteredProducts.length;
 
     if (count === 0) {
       return {
@@ -85,17 +100,17 @@ export default function ValueInvestingDashboard(
       };
     }
 
-    const avgMarginOfSafety = filtered.reduce(
+    const avgMarginOfSafety = filteredProducts.reduce(
         (sum, p) => sum + (p.valueMetrics?.marginOfSafety ?? 0),
         0,
       ) / count;
 
-    const avgExpectedROI = filtered.reduce(
+    const avgExpectedROI = filteredProducts.reduce(
         (sum, p) => sum + (p.valueMetrics?.expectedROI ?? 0),
         0,
       ) / count;
 
-    const totalValueGap = filtered.reduce(
+    const totalValueGap = filteredProducts.reduce(
       (sum, p) =>
         sum +
         ((p.valueMetrics?.intrinsicValue ?? 0) - p.currentPrice),
@@ -108,17 +123,18 @@ export default function ValueInvestingDashboard(
       avgExpectedROI,
       totalValueGap,
     };
-  };
+  }, [filteredProducts]);
 
-  const resetFilters = () => {
+  /**
+   * Memoized reset filters callback
+   * Prevents function recreation on every render
+   */
+  const resetFilters = useCallback(() => {
     selectedStrategy.value = "all";
     minROI.value = 0;
     minPrice.value = 0;
     maxPrice.value = 10000;
-  };
-
-  // Get stats once per render
-  const stats = getSummaryStats();
+  }, [selectedStrategy, minROI, minPrice, maxPrice]);
 
   return (
     <ErrorBoundary>
@@ -280,10 +296,10 @@ export default function ValueInvestingDashboard(
       <div class="card bg-base-100">
         <div class="card-body">
           <h2 class="card-title">
-            Buy List ({filteredProducts().length} opportunities)
+            Buy List ({filteredProducts.length} opportunities)
           </h2>
 
-          {filteredProducts().length === 0
+          {filteredProducts.length === 0
             ? (
               <div class="alert">
                 <svg
@@ -322,7 +338,7 @@ export default function ValueInvestingDashboard(
                     </tr>
                   </thead>
                   <tbody>
-                    {filteredProducts().map((product) => (
+                    {filteredProducts.map((product) => (
                       <tr key={product.id} class="hover">
                         <td>
                           <div class="flex items-center gap-3">
