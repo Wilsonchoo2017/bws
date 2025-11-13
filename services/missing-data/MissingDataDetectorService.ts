@@ -14,9 +14,10 @@
  */
 
 import { db } from "../../db/client.ts";
-import { bricklinkItems, products } from "../../db/schema.ts";
+import { bricklinkItems, products, type BricklinkItem } from "../../db/schema.ts";
 import { eq, isNotNull, notInArray, sql } from "drizzle-orm";
 import { getQueueService } from "../queue/QueueService.ts";
+import type { PricingBox } from "../bricklink/BricklinkParser.ts";
 
 /**
  * Result of a missing data detection run
@@ -25,6 +26,7 @@ export interface MissingDataResult {
   success: boolean;
   productsChecked: number;
   missingBricklinkData: number;
+  missingVolumeData: number;
   jobsEnqueued: number;
   errors: string[];
   timestamp: Date;
@@ -32,6 +34,11 @@ export interface MissingDataResult {
     productId: string;
     legoSetNumber: string;
     name: string | null;
+  }>;
+  itemsWithMissingVolume: Array<{
+    itemId: string;
+    title: string | null;
+    missingBoxes: string[];
   }>;
 }
 
@@ -47,10 +54,12 @@ export class MissingDataDetectorService {
       success: true,
       productsChecked: 0,
       missingBricklinkData: 0,
+      missingVolumeData: 0,
       jobsEnqueued: 0,
       errors: [],
       timestamp: new Date(),
       productsWithMissingData: [],
+      itemsWithMissingVolume: [],
     };
 
     try {
@@ -117,7 +126,54 @@ export class MissingDataDetectorService {
       }
 
       console.log(
-        `✅ Missing data detection complete: ${result.jobsEnqueued}/${result.missingBricklinkData} jobs enqueued`,
+        `✅ Missing Bricklink items: ${result.jobsEnqueued}/${result.missingBricklinkData} jobs enqueued`,
+      );
+
+      // Find items with missing volume data
+      const itemsWithMissingVolume = await this.findItemsMissingVolumeData();
+      result.missingVolumeData = itemsWithMissingVolume.length;
+      result.itemsWithMissingVolume = itemsWithMissingVolume;
+
+      console.log(
+        `📊 Found ${itemsWithMissingVolume.length} active Bricklink items with missing volume data`,
+      );
+
+      if (itemsWithMissingVolume.length > 0) {
+        // Enqueue jobs for items with missing volume (one-time catch-up)
+        for (const item of itemsWithMissingVolume) {
+          try {
+            const url =
+              `https://www.bricklink.com/v2/catalog/catalogitem.page?S=${item.itemId}`;
+
+            await queueService.addScrapeJob({
+              url,
+              itemId: item.itemId,
+              saveToDb: true,
+            });
+
+            result.jobsEnqueued++;
+            console.log(
+              `✅ Enqueued re-scraping job for ${item.itemId} (${item.title}) - missing: ${item.missingBoxes.join(", ")}`,
+            );
+          } catch (error) {
+            const errorMsg =
+              `Failed to enqueue job for ${item.itemId}: ${error.message}`;
+            console.error(`❌ ${errorMsg}`);
+            result.errors.push(errorMsg);
+          }
+        }
+
+        console.log(
+          `✅ Missing volume data: ${itemsWithMissingVolume.length} items enqueued for re-scraping`,
+        );
+      } else {
+        console.log(
+          "✅ All active Bricklink items have complete volume data",
+        );
+      }
+
+      console.log(
+        `✅ Missing data detection complete: ${result.jobsEnqueued} total jobs enqueued`,
       );
     } catch (error) {
       console.error("❌ Missing data detection failed:", error);
@@ -293,6 +349,81 @@ export class MissingDataDetectorService {
         name: p.name,
       })),
     };
+  }
+
+  /**
+   * Helper function to check if a pricing box has missing volume data
+   */
+  private hasBoxMissingVolume(box: unknown): boolean {
+    if (!box) return true; // Box is null/undefined
+
+    const pricingBox = box as PricingBox;
+
+    // Check if total_qty is missing, null, or undefined
+    return pricingBox.total_qty === null ||
+           pricingBox.total_qty === undefined;
+  }
+
+  /**
+   * Helper function to check if a Bricklink item has any missing volume data
+   */
+  private hasAnyMissingVolume(item: BricklinkItem): {
+    hasMissing: boolean;
+    missingBoxes: string[];
+  } {
+    const missingBoxes: string[] = [];
+
+    if (this.hasBoxMissingVolume(item.sixMonthNew)) {
+      missingBoxes.push("six_month_new");
+    }
+    if (this.hasBoxMissingVolume(item.sixMonthUsed)) {
+      missingBoxes.push("six_month_used");
+    }
+    if (this.hasBoxMissingVolume(item.currentNew)) {
+      missingBoxes.push("current_new");
+    }
+    if (this.hasBoxMissingVolume(item.currentUsed)) {
+      missingBoxes.push("current_used");
+    }
+
+    return {
+      hasMissing: missingBoxes.length > 0,
+      missingBoxes,
+    };
+  }
+
+  /**
+   * Find Bricklink items with missing volume data
+   * Only checks items with watch_status = 'active'
+   */
+  private async findItemsMissingVolumeData(): Promise<
+    Array<{
+      itemId: string;
+      title: string | null;
+      missingBoxes: string[];
+    }>
+  > {
+    // Get all active Bricklink items
+    const activeItems = await db.select()
+      .from(bricklinkItems)
+      .where(eq(bricklinkItems.watchStatus, "active"));
+
+    // Filter items with missing volume data
+    const itemsWithMissingVolume = [];
+
+    for (const item of activeItems) {
+      const { hasMissing, missingBoxes } = this.hasAnyMissingVolume(item);
+
+      if (hasMissing) {
+        itemsWithMissingVolume.push({
+          itemId: item.itemId,
+          title: item.title,
+          missingBoxes,
+        });
+      }
+    }
+
+    return itemsWithMissingVolume;
   }
 }
 

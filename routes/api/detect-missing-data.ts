@@ -28,10 +28,12 @@ export const handler: Handlers = {
           result: {
             productsChecked: result.productsChecked,
             missingBricklinkData: result.missingBricklinkData,
+            missingVolumeData: result.missingVolumeData,
             jobsEnqueued: result.jobsEnqueued,
             errors: result.errors,
             timestamp: result.timestamp,
             productsWithMissingData: result.productsWithMissingData,
+            itemsWithMissingVolume: result.itemsWithMissingVolume,
           },
         }),
         {
