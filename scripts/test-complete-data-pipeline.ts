@@ -135,7 +135,7 @@ const availabilityData: AvailabilityData = {
   source: mockProduct.source,
   retiringSoon: mockRetirement.retiringSoon,
   yearReleased: mockWorldBricks.yearReleased, // From WorldBricks
-  yearRetired: mockWorldBricks.yearRetired, // From WorldBricks
+  yearRetired: mockWorldBricks.yearRetired ?? undefined, // From WorldBricks
 };
 
 const qualityData: QualityData = {

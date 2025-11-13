@@ -1,3 +1,5 @@
+import { useSignal } from "@preact/signals";
+import { useEffect } from "preact/hooks";
 import { useProductFilters } from "../hooks/useProductFilters.ts";
 import { useProductList } from "../hooks/useProductList.ts";
 import { useAddProduct } from "../hooks/useAddProduct.ts";
@@ -5,6 +7,13 @@ import { ProductFilters } from "../components/products/ProductFilters.tsx";
 import { ProductTable } from "../components/products/ProductTable.tsx";
 import { PaginationControls } from "../components/products/PaginationControls.tsx";
 import { AddProductModal } from "../components/products/AddProductModal.tsx";
+
+interface ProductTag {
+  id: string;
+  name: string;
+  endDate: string | null;
+  isExpired?: boolean;
+}
 
 /**
  * ProductsList island component.
@@ -44,6 +53,26 @@ export default function ProductsList() {
     refresh,
   );
 
+  // Tag management state
+  const availableTags = useSignal<ProductTag[]>([]);
+
+  // Load tags on mount
+  useEffect(() => {
+    loadTags();
+  }, []);
+
+  const loadTags = async () => {
+    try {
+      const response = await fetch("/api/tags");
+      if (response.ok) {
+        const tags = await response.json();
+        availableTags.value = tags;
+      }
+    } catch (err) {
+      console.error("Failed to load tags:", err);
+    }
+  };
+
   return (
     <div class="card bg-base-100 shadow-xl">
       <div class="card-body">
@@ -77,9 +106,12 @@ export default function ProductsList() {
           searchQuery={filters.searchQuery}
           legoSetFilter={filters.legoSetFilter}
           sourceFilter={filters.sourceFilter}
+          tagFilter={filters.tagFilter}
+          availableTags={availableTags.value}
           onSearchChange={filterActions.setSearchQuery}
           onLegoSetChange={filterActions.setLegoSetFilter}
           onSourceChange={filterActions.setSourceFilter}
+          onTagFilterChange={filterActions.setTagFilter}
         />
 
         {/* Table with loading, error, and empty states */}

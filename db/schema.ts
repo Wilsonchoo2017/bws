@@ -142,6 +142,9 @@ export const products = pgTable(
     // Full data dump for reference (all platforms)
     rawData: jsonb("raw_data"),
 
+    // Time-limited tags for promotions/vouchers
+    tags: jsonb("tags"), // Array of {tagId: string, addedAt: string}
+
     // Metadata
     createdAt: timestamp("created_at").defaultNow().notNull(),
     updatedAt: timestamp("updated_at").defaultNow().notNull(),
@@ -169,6 +172,25 @@ export const products = pgTable(
       table.source,
       table.legoSetNumber,
     ),
+  }),
+);
+
+// Product tags for time-limited promotions/vouchers
+export const productTags = pgTable(
+  "product_tags",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    name: varchar("name", { length: 100 }).notNull().unique(),
+    description: text("description"),
+    endDate: timestamp("end_date"), // Null = no expiry
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+  },
+  (table) => ({
+    // Index for name lookup
+    nameIdx: index("idx_product_tags_name").on(table.name),
+    // Index for finding expired tags
+    endDateIdx: index("idx_product_tags_end_date").on(table.endDate),
   }),
 );
 
@@ -554,6 +576,9 @@ export type NewBricklinkVolumeHistory =
 
 export type Product = typeof products.$inferSelect;
 export type NewProduct = typeof products.$inferInsert;
+
+export type ProductTag = typeof productTags.$inferSelect;
+export type NewProductTag = typeof productTags.$inferInsert;
 
 export type PriceHistory = typeof priceHistory.$inferSelect;
 export type NewPriceHistory = typeof priceHistory.$inferInsert;

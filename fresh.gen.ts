@@ -14,7 +14,10 @@ import * as $api_joke from "./routes/api/joke.ts";
 import * as $api_parse_brickeconomy from "./routes/api/parse-brickeconomy.ts";
 import * as $api_parse_shopee from "./routes/api/parse-shopee.ts";
 import * as $api_parse_toysrus from "./routes/api/parse-toysrus.ts";
+import * as $api_products from "./routes/api/products.ts";
 import * as $api_products_id_ from "./routes/api/products/[id].ts";
+import * as $api_products_id_tags from "./routes/api/products/[id]/tags.ts";
+import * as $api_products_bulk_tag from "./routes/api/products/bulk-tag.ts";
 import * as $api_products_manual from "./routes/api/products/manual.ts";
 import * as $api_products_validate_and_save from "./routes/api/products/validate-and-save.ts";
 import * as $api_queue_reset from "./routes/api/queue-reset.ts";
@@ -24,6 +27,8 @@ import * as $api_scrape_bricklink from "./routes/api/scrape-bricklink.ts";
 import * as $api_scrape_queue_status from "./routes/api/scrape-queue-status.ts";
 import * as $api_scrape_scheduler from "./routes/api/scrape-scheduler.ts";
 import * as $api_shopee_items from "./routes/api/shopee-items.ts";
+import * as $api_tags from "./routes/api/tags.ts";
+import * as $api_tags_cleanup_expired from "./routes/api/tags/cleanup-expired.ts";
 import * as $bricklink_items from "./routes/bricklink-items.tsx";
 import * as $buy from "./routes/buy.tsx";
 import * as $cart from "./routes/cart.tsx";
@@ -32,6 +37,7 @@ import * as $index from "./routes/index.tsx";
 import * as $products from "./routes/products.tsx";
 import * as $products_id_ from "./routes/products/[id].tsx";
 import * as $queue from "./routes/queue.tsx";
+import * as $tags from "./routes/tags.tsx";
 import * as $BricklinkProductsList from "./islands/BricklinkProductsList.tsx";
 import * as $CartManager from "./islands/CartManager.tsx";
 import * as $Counter from "./islands/Counter.tsx";
@@ -43,6 +49,7 @@ import * as $ProductsList from "./islands/ProductsList.tsx";
 import * as $QueueDiagnosticsDashboard from "./islands/QueueDiagnosticsDashboard.tsx";
 import * as $ShopeeParser from "./islands/ShopeeParser.tsx";
 import * as $Sidebar from "./islands/Sidebar.tsx";
+import * as $TagManager from "./islands/TagManager.tsx";
 import * as $UnifiedParser from "./islands/UnifiedParser.tsx";
 import * as $ValueInvestingDashboard from "./islands/ValueInvestingDashboard.tsx";
 import * as $components_ErrorBoundary from "./islands/components/ErrorBoundary.tsx";
@@ -66,7 +73,10 @@ const manifest = {
     "./routes/api/parse-brickeconomy.ts": $api_parse_brickeconomy,
     "./routes/api/parse-shopee.ts": $api_parse_shopee,
     "./routes/api/parse-toysrus.ts": $api_parse_toysrus,
+    "./routes/api/products.ts": $api_products,
     "./routes/api/products/[id].ts": $api_products_id_,
+    "./routes/api/products/[id]/tags.ts": $api_products_id_tags,
+    "./routes/api/products/bulk-tag.ts": $api_products_bulk_tag,
     "./routes/api/products/manual.ts": $api_products_manual,
     "./routes/api/products/validate-and-save.ts":
       $api_products_validate_and_save,
@@ -77,6 +87,8 @@ const manifest = {
     "./routes/api/scrape-queue-status.ts": $api_scrape_queue_status,
     "./routes/api/scrape-scheduler.ts": $api_scrape_scheduler,
     "./routes/api/shopee-items.ts": $api_shopee_items,
+    "./routes/api/tags.ts": $api_tags,
+    "./routes/api/tags/cleanup-expired.ts": $api_tags_cleanup_expired,
     "./routes/bricklink-items.tsx": $bricklink_items,
     "./routes/buy.tsx": $buy,
     "./routes/cart.tsx": $cart,
@@ -85,6 +97,7 @@ const manifest = {
     "./routes/products.tsx": $products,
     "./routes/products/[id].tsx": $products_id_,
     "./routes/queue.tsx": $queue,
+    "./routes/tags.tsx": $tags,
   },
   islands: {
     "./islands/BricklinkProductsList.tsx": $BricklinkProductsList,
@@ -98,6 +111,7 @@ const manifest = {
     "./islands/QueueDiagnosticsDashboard.tsx": $QueueDiagnosticsDashboard,
     "./islands/ShopeeParser.tsx": $ShopeeParser,
     "./islands/Sidebar.tsx": $Sidebar,
+    "./islands/TagManager.tsx": $TagManager,
     "./islands/UnifiedParser.tsx": $UnifiedParser,
     "./islands/ValueInvestingDashboard.tsx": $ValueInvestingDashboard,
     "./islands/components/ErrorBoundary.tsx": $components_ErrorBoundary,

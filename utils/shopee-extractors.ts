@@ -4,7 +4,10 @@
  * Follows Single Responsibility Principle - each function has one clear purpose.
  */
 
-import { DOMParser } from "https://deno.land/x/deno_dom@v0.1.45/deno-dom-wasm.ts";
+import {
+  DOMParser,
+  type Element,
+} from "https://deno.land/x/deno_dom@v0.1.45/deno-dom-wasm.ts";
 import {
   extractLegoSetNumber,
   normalizeSoldUnits,
@@ -44,18 +47,85 @@ export function parseHtmlDocument(htmlContent: string) {
 }
 
 /**
- * Extracts product name from a Shopee item element
- * @param item - DOM element for the product
- * @returns Product name or null if not found
+ * Helper: Removes image elements and extracts clean text
+ */
+function cleanTextFromElement(element: Element): string | null {
+  const clonedDiv = element.cloneNode(true) as Element;
+  const images = clonedDiv.querySelectorAll("img");
+  Array.from(images).forEach((img) => (img as Element).remove());
+  return clonedDiv.textContent?.trim() || null;
+}
+
+/**
+ * Helper: Checks if text is a valid product name
+ */
+function isValidProductName(text: string | null): boolean {
+  if (!text || text.length < 10) return false;
+  // Exclude price/sold/percentage patterns
+  return !text.match(/^(RM|sold|\d+%)/i);
+}
+
+/**
+ * Strategy: Extract name from common class patterns
+ */
+function extractNameFromClassPatterns(item: Element): string | null {
+  const patterns = [
+    'div[class*="title"]',
+    'div[class*="line-clamp-2"]',
+    'div[class*="product-name"]',
+    'div[class*="item-name"]',
+  ];
+
+  for (const pattern of patterns) {
+    const element = item.querySelector(pattern);
+    if (element && element.textContent) {
+      const name = cleanTextFromElement(element);
+      if (name && name.length > 0) return name;
+    }
+  }
+  return null;
+}
+
+/**
+ * Strategy: Extract name from image alt text
+ */
+function extractNameFromImageAlt(item: Element): string | null {
+  const linkElement = item.querySelector("a");
+  if (!linkElement) return null;
+
+  const imgElement = linkElement.querySelector("img[alt]");
+  const altText = imgElement?.getAttribute("alt");
+
+  if (altText && altText.length > 0 && !altText.includes("image")) {
+    return altText;
+  }
+  return null;
+}
+
+/**
+ * Strategy: Extract name from divs with substantial text
+ */
+function extractNameFromSubstantialText(item: Element): string | null {
+  const textDivs = item.querySelectorAll('div[class*="min-h"]');
+
+  for (const div of Array.from(textDivs)) {
+    if (!(div as Element).textContent) continue;
+
+    const text = cleanTextFromElement(div as Element);
+    if (isValidProductName(text)) {
+      return text;
+    }
+  }
+  return null;
+}
+
+/**
+ * Extracts product name using multiple fallback strategies
  */
 export function extractProductName(item: Element): string | null {
-  const nameDiv = item.querySelector('div[class*="title"]');
-  if (!nameDiv || !nameDiv.textContent) return null;
-
-  const nameElement = nameDiv.querySelector("span");
-  const name = nameElement?.textContent?.trim() || nameDiv.textContent.trim();
-
-  return name || null;
+  return extractNameFromClassPatterns(item) ||
+    extractNameFromImageAlt(item) ||
+    extractNameFromSubstantialText(item);
 }
 
 /**
@@ -97,47 +167,174 @@ export function generateProductId(
 }
 
 /**
- * Extracts price information from a Shopee item element
- * @param item - DOM element for the product
- * @returns Object with price in cents and price string
+ * Helper: Checks if text looks like a price
+ */
+function looksLikePrice(text: string): boolean {
+  return text.includes("RM") || /^\d+\.?\d*$/.test(text);
+}
+
+/**
+ * Strategy: Extract price from class patterns
+ */
+function extractPriceFromPatterns(item: Element): {
+  price: number | null;
+  priceString: string;
+} | null {
+  const patterns = [
+    'span[class*="price"]',
+    'div[class*="price"]',
+    'span[class*="truncate"][class*="text-base"]',
+  ];
+
+  for (const pattern of patterns) {
+    const element = item.querySelector(pattern);
+    if (element && element.textContent) {
+      const priceText = element.textContent.trim();
+      if (looksLikePrice(priceText)) {
+        const price = parsePriceToCents(priceText);
+        if (price !== null) {
+          return { price, priceString: priceText };
+        }
+      }
+    }
+  }
+  return null;
+}
+
+/**
+ * Strategy: Extract price by scanning for RM currency
+ */
+function extractPriceFromCurrency(item: Element): {
+  price: number | null;
+  priceString: string;
+} | null {
+  const allSpans = item.querySelectorAll("span");
+
+  for (const span of Array.from(allSpans)) {
+    const text = (span as Element).textContent?.trim();
+    if (!text || !(text.startsWith("RM") || text.match(/^\d+\.\d{2}$/))) {
+      continue;
+    }
+
+    let priceText = text;
+    const parent = (span as Element).parentElement;
+    if (parent && parent.textContent) {
+      const parentText = parent.textContent.trim();
+      if (parentText.includes("RM") && parentText.length < 20) {
+        priceText = parentText;
+      }
+    }
+
+    const price = parsePriceToCents(priceText);
+    if (price !== null) {
+      return { price, priceString: priceText };
+    }
+  }
+  return null;
+}
+
+/**
+ * Extracts price using multiple fallback strategies
  */
 export function extractPrice(
   item: Element,
 ): { price: number | null; priceString: string } {
-  const priceSpan = item.querySelector(
-    'span[class*="price"]',
-  );
-
-  if (!priceSpan || !priceSpan.textContent) {
-    return { price: null, priceString: "" };
-  }
-
-  const priceText = priceSpan.textContent.trim();
-  const price = parsePriceToCents(priceText);
-
-  return { price, priceString: priceText };
+  return extractPriceFromPatterns(item) ||
+    extractPriceFromCurrency(item) ||
+    { price: null, priceString: "" };
 }
 
 /**
- * Extracts sold units from a Shopee item element
- * @param item - DOM element for the product
- * @returns Object with normalized units sold and original string
+ * Helper: Checks if text contains "sold" keyword
+ */
+function containsSoldKeyword(text: string): boolean {
+  return text.toLowerCase().includes("sold");
+}
+
+/**
+ * Strategy: Extract sold units from class patterns
+ */
+function extractSoldFromPatterns(item: Element): {
+  units_sold: number | null;
+  units_sold_string: string;
+} | null {
+  const patterns = [
+    'div[class*="sold"]',
+    'span[class*="sold"]',
+    'div[class*="truncate"][class*="text-shopee-black87"]', // Common Shopee pattern
+  ];
+
+  for (const pattern of patterns) {
+    const element = item.querySelector(pattern);
+    if (element && element.textContent) {
+      const soldText = element.textContent.trim();
+      if (containsSoldKeyword(soldText)) {
+        const units_sold = normalizeSoldUnits(soldText);
+        if (units_sold !== null && units_sold > 0) {
+          return { units_sold, units_sold_string: soldText };
+        }
+      }
+    }
+  }
+  return null;
+}
+
+/**
+ * Strategy: Extract sold units by scanning for "sold" keyword
+ */
+function extractSoldFromKeyword(item: Element): {
+  units_sold: number | null;
+  units_sold_string: string;
+} | null {
+  const allDivs = item.querySelectorAll("div");
+
+  for (const div of Array.from(allDivs)) {
+    const text = (div as Element).textContent?.trim();
+    if (!text || !containsSoldKeyword(text)) continue;
+
+    // Must be short and actually contain sold keyword
+    if (text.length < 30 && text.length > 3) {
+      const units_sold = normalizeSoldUnits(text);
+      if (units_sold !== null && units_sold > 0) {
+        return { units_sold, units_sold_string: text };
+      }
+    }
+  }
+  return null;
+}
+
+/**
+ * Strategy: Extract "k+" pattern followed by "sold"
+ */
+function extractSoldFromPattern(item: Element): {
+  units_sold: number | null;
+  units_sold_string: string;
+} | null {
+  const textContent = item.textContent || "";
+
+  // Look specifically for patterns like "1k+ sold" or "666 sold"
+  const soldMatch = textContent.match(/(\d+\.?\d*k?\+?\s*sold)/i);
+  if (soldMatch) {
+    const soldText = soldMatch[1].trim();
+    const units_sold = normalizeSoldUnits(soldText);
+    if (units_sold !== null && units_sold > 0) {
+      return { units_sold, units_sold_string: soldText };
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Extracts sold units using multiple fallback strategies
  */
 export function extractSoldUnits(
   item: Element,
 ): { units_sold: number | null; units_sold_string: string } {
-  const soldSpan = item.querySelector(
-    'div[class*="sold"]',
-  );
-
-  if (!soldSpan || !soldSpan.textContent) {
-    return { units_sold: null, units_sold_string: "N/A" };
-  }
-
-  const soldText = soldSpan.textContent.trim();
-  const units_sold = normalizeSoldUnits(soldText);
-
-  return { units_sold, units_sold_string: soldText || "N/A" };
+  return extractSoldFromPatterns(item) ||
+    extractSoldFromPattern(item) ||
+    extractSoldFromKeyword(item) ||
+    { units_sold: null, units_sold_string: "N/A" };
 }
 
 /**
@@ -280,11 +477,11 @@ export function parseShopeeHtml(
 
   const products: ParsedShopeeProduct[] = [];
 
-  items.forEach((item, index) => {
+  Array.from(items).forEach((item, index) => {
     // Filter out non-Element nodes
     if (item.nodeType !== 1) return; // 1 = Element node
     const product = parseProductItem(
-      item as unknown as Element,
+      item as Element,
       index,
       shopUsername,
     );

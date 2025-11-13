@@ -9,6 +9,7 @@ export interface ProductFiltersState {
   searchQuery: string;
   legoSetFilter: string;
   sourceFilter: ProductSource | "all";
+  tagFilter: string[];
   sortBy: SortBy;
   sortOrder: SortOrder;
   debouncedSearch: string;
@@ -18,6 +19,7 @@ export interface ProductFiltersActions {
   setSearchQuery: (value: string) => void;
   setLegoSetFilter: (value: string) => void;
   setSourceFilter: (value: ProductSource | "all") => void;
+  setTagFilter: (tagIds: string[]) => void;
   handleSort: (column: SortBy) => void;
   resetFilters: () => void;
 }
@@ -29,13 +31,14 @@ export interface UseProductFiltersReturn {
 
 /**
  * Custom hook for managing product filter state and logic.
- * Handles search, LEGO set filtering, platform filtering, and sorting.
+ * Handles search, LEGO set filtering, platform filtering, tag filtering, and sorting.
  * Includes debounce logic for search input.
  */
 export function useProductFilters(): UseProductFiltersReturn {
   const searchQuery = useSignal("");
   const legoSetFilter = useSignal("");
   const sourceFilter = useSignal<ProductSource | "all">("all");
+  const tagFilter = useSignal<string[]>([]);
   const sortBy = useSignal<SortBy>("updatedAt");
   const sortOrder = useSignal<SortOrder>("desc");
   const debouncedSearch = useSignal("");
@@ -60,6 +63,10 @@ export function useProductFilters(): UseProductFiltersReturn {
     sourceFilter.value = value;
   };
 
+  const setTagFilter = (tagIds: string[]) => {
+    tagFilter.value = tagIds;
+  };
+
   const handleSort = (column: SortBy) => {
     if (sortBy.value === column) {
       // Toggle sort order
@@ -75,6 +82,7 @@ export function useProductFilters(): UseProductFiltersReturn {
     searchQuery.value = "";
     legoSetFilter.value = "";
     sourceFilter.value = "all";
+    tagFilter.value = [];
     sortBy.value = "updatedAt";
     sortOrder.value = "desc";
   };
@@ -84,6 +92,7 @@ export function useProductFilters(): UseProductFiltersReturn {
       searchQuery: searchQuery.value,
       legoSetFilter: legoSetFilter.value,
       sourceFilter: sourceFilter.value,
+      tagFilter: tagFilter.value,
       sortBy: sortBy.value,
       sortOrder: sortOrder.value,
       debouncedSearch: debouncedSearch.value,
@@ -92,6 +101,7 @@ export function useProductFilters(): UseProductFiltersReturn {
       setSearchQuery,
       setLegoSetFilter,
       setSourceFilter,
+      setTagFilter,
       handleSort,
       resetFilters,
     },

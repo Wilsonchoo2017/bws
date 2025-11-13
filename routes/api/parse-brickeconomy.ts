@@ -4,8 +4,8 @@ import { db } from "../../db/client.ts";
 import { priceHistory, products, scrapeSessions } from "../../db/schema.ts";
 import { parseBrickEconomyHtml } from "../../utils/brickeconomy-extractors.ts";
 import { scraperLogger } from "../../utils/logger.ts";
-import { ImageDownloadService } from "../../services/image/ImageDownloadService.ts";
-import { ImageStorageService } from "../../services/image/ImageStorageService.ts";
+import { imageDownloadService } from "../../services/image/ImageDownloadService.ts";
+import { imageStorageService } from "../../services/image/ImageStorageService.ts";
 
 // Re-export type from brickeconomy-extractors for backwards compatibility
 import type { ParsedBrickEconomyProduct } from "../../utils/brickeconomy-extractors.ts";
@@ -198,57 +198,30 @@ export const handler = async (
         });
 
         // Download the image
-        const imageBlob = await ImageDownloadService.downloadImage(
+        const imageData = await imageDownloadService.download(
           parsedProduct.image,
         );
 
-        if (imageBlob) {
-          // Store the image locally
-          const storageResult = await ImageStorageService.saveImage(
-            imageBlob,
-            parsedProduct.product_id,
-            "brickeconomy",
-          );
+        // Store the image locally
+        const storageResult = await imageStorageService.store(
+          imageData.data,
+          imageData.url,
+          imageData.extension,
+          parsedProduct.product_id,
+        );
 
-          if (storageResult.success && storageResult.localPath) {
-            // Update the product with local image path
-            await db.update(products).set({
-              localImagePath: storageResult.localPath,
-              imageUrl: parsedProduct.image,
-              imageDownloadedAt: new Date(),
-              imageDownloadStatus: "completed",
-            }).where(eq(products.productId, parsedProduct.product_id));
+        // Update the product with local image path
+        await db.update(products).set({
+          localImagePath: storageResult.relativePath,
+          imageDownloadedAt: new Date(),
+          imageDownloadStatus: "completed",
+        }).where(eq(products.productId, parsedProduct.product_id));
 
-            scraperLogger.info("Successfully downloaded and stored image", {
-              productId: parsedProduct.product_id,
-              localPath: storageResult.localPath,
-              source: "brickeconomy",
-            });
-          } else {
-            // Mark as failed in database
-            await db.update(products).set({
-              imageUrl: parsedProduct.image,
-              imageDownloadStatus: "failed",
-            }).where(eq(products.productId, parsedProduct.product_id));
-
-            scraperLogger.warn("Failed to store image", {
-              productId: parsedProduct.product_id,
-              error: storageResult.error,
-              source: "brickeconomy",
-            });
-          }
-        } else {
-          // Mark as failed in database
-          await db.update(products).set({
-            imageUrl: parsedProduct.image,
-            imageDownloadStatus: "failed",
-          }).where(eq(products.productId, parsedProduct.product_id));
-
-          scraperLogger.warn("Failed to download image", {
-            productId: parsedProduct.product_id,
-            source: "brickeconomy",
-          });
-        }
+        scraperLogger.info("Successfully downloaded and stored image", {
+          productId: parsedProduct.product_id,
+          localPath: storageResult.relativePath,
+          source: "brickeconomy",
+        });
       } catch (imageError) {
         // Log error but don't fail the entire product save
         scraperLogger.error("Error downloading/storing image", {
@@ -260,7 +233,6 @@ export const handler = async (
         // Mark as failed in database
         try {
           await db.update(products).set({
-            imageUrl: parsedProduct.image,
             imageDownloadStatus: "failed",
           }).where(eq(products.productId, parsedProduct.product_id));
         } catch (_updateError) {

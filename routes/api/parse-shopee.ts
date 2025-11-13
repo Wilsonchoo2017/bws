@@ -5,8 +5,8 @@ import { products, scrapeSessions, shopeeScrapes } from "../../db/schema.ts";
 import { extractShopUsername, findExistingProduct } from "../../db/utils.ts";
 import { parseShopeeHtml } from "../../utils/shopee-extractors.ts";
 import { scraperLogger } from "../../utils/logger.ts";
-import { ImageDownloadService } from "../../services/image/ImageDownloadService.ts";
-import { ImageStorageService } from "../../services/image/ImageStorageService.ts";
+import { imageDownloadService } from "../../services/image/ImageDownloadService.ts";
+import { imageStorageService } from "../../services/image/ImageStorageService.ts";
 
 // Re-export type from shopee-extractors for backwards compatibility
 import type { ParsedShopeeProduct } from "../../utils/shopee-extractors.ts";
@@ -269,57 +269,30 @@ export const handler = async (
             });
 
             // Download the image
-            const imageBlob = await ImageDownloadService.downloadImage(
+            const imageData = await imageDownloadService.download(
               product.image,
             );
 
-            if (imageBlob) {
-              // Store the image locally
-              const storageResult = await ImageStorageService.saveImage(
-                imageBlob,
-                product.product_id,
-                "shopee",
-              );
+            // Store the image locally
+            const storageResult = await imageStorageService.store(
+              imageData.data,
+              imageData.url,
+              imageData.extension,
+              product.product_id,
+            );
 
-              if (storageResult.success && storageResult.localPath) {
-                // Update the product with local image path
-                await db.update(products).set({
-                  localImagePath: storageResult.localPath,
-                  imageUrl: product.image,
-                  imageDownloadedAt: new Date(),
-                  imageDownloadStatus: "completed",
-                }).where(eq(products.productId, product.product_id));
+            // Update the product with local image path
+            await db.update(products).set({
+              localImagePath: storageResult.relativePath,
+              imageDownloadedAt: new Date(),
+              imageDownloadStatus: "completed",
+            }).where(eq(products.productId, product.product_id));
 
-                scraperLogger.info("Successfully downloaded and stored image", {
-                  productId: product.product_id,
-                  localPath: storageResult.localPath,
-                  source: "shopee",
-                });
-              } else {
-                // Mark as failed in database
-                await db.update(products).set({
-                  imageUrl: product.image,
-                  imageDownloadStatus: "failed",
-                }).where(eq(products.productId, product.product_id));
-
-                scraperLogger.warn("Failed to store image", {
-                  productId: product.product_id,
-                  error: storageResult.error,
-                  source: "shopee",
-                });
-              }
-            } else {
-              // Mark as failed in database
-              await db.update(products).set({
-                imageUrl: product.image,
-                imageDownloadStatus: "failed",
-              }).where(eq(products.productId, product.product_id));
-
-              scraperLogger.warn("Failed to download image", {
-                productId: product.product_id,
-                source: "shopee",
-              });
-            }
+            scraperLogger.info("Successfully downloaded and stored image", {
+              productId: product.product_id,
+              localPath: storageResult.relativePath,
+              source: "shopee",
+            });
           } catch (imageError) {
             // Log error but don't fail the entire product save
             scraperLogger.error("Error downloading/storing image", {
@@ -331,7 +304,6 @@ export const handler = async (
             // Mark as failed in database
             try {
               await db.update(products).set({
-                imageUrl: product.image,
                 imageDownloadStatus: "failed",
               }).where(eq(products.productId, product.product_id));
             } catch (_updateError) {
