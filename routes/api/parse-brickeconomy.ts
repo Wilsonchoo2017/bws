@@ -2,12 +2,7 @@ import { FreshContext } from "$fresh/server.ts";
 import { eq, sql } from "drizzle-orm";
 import { db } from "../../db/client.ts";
 import { priceHistory, products, scrapeSessions } from "../../db/schema.ts";
-import {
-  findProductsByBaseSetNumber,
-  normalizeLegoSetNumber,
-} from "../../db/utils.ts";
 import { parseBrickEconomyHtml } from "../../utils/brickeconomy-extractors.ts";
-import { calculateSimilarity } from "../../utils/string-similarity.ts";
 
 // Re-export type from brickeconomy-extractors for backwards compatibility
 import type { ParsedBrickEconomyProduct } from "../../utils/brickeconomy-extractors.ts";
