@@ -217,7 +217,9 @@ export class RedditSearchService {
         updatedAt: now,
       });
 
-      console.log(`💾 Saved Reddit search results for ${setNumber} (next scrape: ${nextScrape.toISOString()})`);
+      console.log(
+        `💾 Saved Reddit search results for ${setNumber} (next scrape: ${nextScrape.toISOString()})`,
+      );
     } catch (error) {
       console.error(`❌ Database save failed:`, error);
       throw new Error(`Database save failed: ${error.message}`);

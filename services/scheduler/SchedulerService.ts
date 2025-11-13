@@ -16,8 +16,6 @@ import { getBricklinkRepository } from "../bricklink/BricklinkRepository.ts";
 import { getRedditRepository } from "../reddit/RedditRepository.ts";
 import { getQueueService, JobPriority } from "../queue/QueueService.ts";
 import { getMissingDataDetector } from "../missing-data/MissingDataDetectorService.ts";
-import type { Product } from "../../db/schema.ts";
-import type { BricklinkItem } from "../../db/schema.ts";
 
 /**
  * Result of a scheduler run
@@ -147,7 +145,9 @@ export class SchedulerService {
       // PRIORITY 3: Regular scheduled scrapes (NORMAL priority)
       console.log("🔍 Checking for regular scheduled scrapes...");
       const scheduledItems = await repository.findItemsNeedingScraping();
-      console.log(`📋 Found ${scheduledItems.length} items for regular scraping`);
+      console.log(
+        `📋 Found ${scheduledItems.length} items for regular scraping`,
+      );
 
       for (const item of scheduledItems) {
         try {
@@ -235,7 +235,9 @@ export class SchedulerService {
         .findSearchesNeedingScraping();
       result.itemsFound = searchesNeeded.length;
 
-      console.log(`📋 Found ${searchesNeeded.length} Reddit searches needing update`);
+      console.log(
+        `📋 Found ${searchesNeeded.length} Reddit searches needing update`,
+      );
 
       if (searchesNeeded.length === 0) {
         console.log("✅ No Reddit searches need updating at this time");
@@ -299,7 +301,7 @@ export class SchedulerService {
    * Delegates to runBricklink()
    */
   async run(): Promise<SchedulerResult> {
-    return this.runBricklink();
+    return await this.runBricklink();
   }
 
   /**
@@ -324,7 +326,7 @@ export class SchedulerService {
     const scheduledItems = await repository.findItemsNeedingScraping();
 
     const items = [
-      ...missingDataResult.productsMissingBricklinkData.map((p) => ({
+      ...missingDataResult.productsWithMissingData.map((p) => ({
         itemId: p.legoSetNumber || "unknown",
         itemType: "S",
         title: p.name,
@@ -333,7 +335,7 @@ export class SchedulerService {
         scrapeIntervalDays: 30,
         priority: "HIGH",
       })),
-      ...missingDataResult.itemsMissingVolumeData.map((item) => ({
+      ...missingDataResult.itemsWithMissingVolume.map((item) => ({
         itemId: item.itemId,
         itemType: "S",
         title: item.title,
@@ -403,7 +405,7 @@ export class SchedulerService {
   }> {
     const bricklinkPreview = await this.previewBricklink();
     return {
-      items: bricklinkPreview.items.map(({ priority, ...item }) => item),
+      items: bricklinkPreview.items.map(({ priority: _, ...item }) => item),
       count: bricklinkPreview.count,
     };
   }

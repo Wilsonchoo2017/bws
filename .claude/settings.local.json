@@ -10,7 +10,8 @@
       "Bash(redis-cli:*)",
       "Bash(curl:*)",
       "WebFetch(domain:www.worldbricks.com)",
-      "Bash(deno run:*)"
+      "Bash(deno run:*)",
+      "Bash(git commit:*)"
     ],
     "deny": [],
     "ask": []

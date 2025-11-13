@@ -71,7 +71,9 @@ export const bricklinkItems = pgTable(
       table.nextScrapeAt,
     ),
     // Index for image download status
-    imageStatusIdx: index("idx_bricklink_image_status").on(table.imageDownloadStatus),
+    imageStatusIdx: index("idx_bricklink_image_status").on(
+      table.imageDownloadStatus,
+    ),
   }),
 );
 
@@ -152,7 +154,9 @@ export const products = pgTable(
     createdAtIdx: index("idx_products_created_at").on(table.createdAt),
     legoSetNumberIdx: index("idx_products_lego_set").on(table.legoSetNumber),
     watchStatusIdx: index("idx_products_watch_status").on(table.watchStatus),
-    imageStatusIdx: index("idx_products_image_status").on(table.imageDownloadStatus),
+    imageStatusIdx: index("idx_products_image_status").on(
+      table.imageDownloadStatus,
+    ),
     // Full-text search index on name
     nameSearchIdx: index("idx_products_name_search").using(
       "gin",
@@ -360,7 +364,9 @@ export const brickrankerRetirementItems = pgTable(
       table.nextScrapeAt,
     ),
     // Index for image download status
-    imageStatusIdx: index("idx_brickranker_image_status").on(table.imageDownloadStatus),
+    imageStatusIdx: index("idx_brickranker_image_status").on(
+      table.imageDownloadStatus,
+    ),
   }),
 );
 
@@ -484,12 +490,18 @@ export const worldbricksSets = pgTable(
     // Index for fast lookups by set number
     setNumberIdx: index("idx_worldbricks_set_number").on(table.setNumber),
     // Index for year filtering
-    yearReleasedIdx: index("idx_worldbricks_year_released").on(table.yearReleased),
+    yearReleasedIdx: index("idx_worldbricks_year_released").on(
+      table.yearReleased,
+    ),
     yearRetiredIdx: index("idx_worldbricks_year_retired").on(table.yearRetired),
     // Index for image download status
-    imageStatusIdx: index("idx_worldbricks_image_status").on(table.imageDownloadStatus),
+    imageStatusIdx: index("idx_worldbricks_image_status").on(
+      table.imageDownloadStatus,
+    ),
     // Index for scrape status
-    scrapeStatusIdx: index("idx_worldbricks_scrape_status").on(table.scrapeStatus),
+    scrapeStatusIdx: index("idx_worldbricks_scrape_status").on(
+      table.scrapeStatus,
+    ),
   }),
 );
 
