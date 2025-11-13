@@ -77,7 +77,7 @@ export class SchedulerService {
       const missingDataResult = await missingDataDetector.run();
 
       // Process products missing Bricklink data entirely (HIGH priority)
-      const missingProducts = missingDataResult.productsMissingBricklinkData;
+      const missingProducts = missingDataResult.productsWithMissingData;
       console.log(
         `📋 Found ${missingProducts.length} products missing Bricklink data`,
       );
@@ -114,7 +114,7 @@ export class SchedulerService {
       }
 
       // Process items with missing volume data (MEDIUM priority)
-      const incompleteItems = missingDataResult.itemsMissingVolumeData;
+      const incompleteItems = missingDataResult.itemsWithMissingVolume;
       console.log(
         `📋 Found ${incompleteItems.length} items with incomplete volume data`,
       );
@@ -320,14 +320,11 @@ export class SchedulerService {
     const repository = getBricklinkRepository();
     const missingDataDetector = getMissingDataDetector();
 
-    const missingProducts = await missingDataDetector
-      .findProductsMissingBricklinkData();
-    const incompleteItems = await missingDataDetector
-      .findItemsMissingVolumeData();
+    const missingDataResult = await missingDataDetector.run();
     const scheduledItems = await repository.findItemsNeedingScraping();
 
     const items = [
-      ...missingProducts.map((p: Product) => ({
+      ...missingDataResult.productsMissingBricklinkData.map((p) => ({
         itemId: p.legoSetNumber || "unknown",
         itemType: "S",
         title: p.name,
@@ -336,16 +333,16 @@ export class SchedulerService {
         scrapeIntervalDays: 30,
         priority: "HIGH",
       })),
-      ...incompleteItems.map((item: BricklinkItem) => ({
+      ...missingDataResult.itemsMissingVolumeData.map((item) => ({
         itemId: item.itemId,
-        itemType: item.itemType,
+        itemType: "S",
         title: item.title,
-        lastScrapedAt: item.lastScrapedAt,
-        nextScrapeAt: item.nextScrapeAt,
-        scrapeIntervalDays: item.scrapeIntervalDays,
+        lastScrapedAt: null,
+        nextScrapeAt: null,
+        scrapeIntervalDays: 30,
         priority: "MEDIUM",
       })),
-      ...scheduledItems.map((item: BricklinkItem) => ({
+      ...scheduledItems.map((item) => ({
         itemId: item.itemId,
         itemType: item.itemType,
         title: item.title,
