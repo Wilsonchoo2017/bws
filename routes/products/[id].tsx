@@ -5,14 +5,41 @@
 
 import { Handlers, PageProps } from "$fresh/server.ts";
 import { Head } from "$fresh/runtime.ts";
-import { eq } from "drizzle-orm";
+import { desc, eq } from "drizzle-orm";
 import { db } from "../../db/client.ts";
-import { type Product, products } from "../../db/schema.ts";
+import {
+  priceHistory,
+  type Product,
+  products,
+  shopeeScrapes,
+} from "../../db/schema.ts";
 import ProductAnalysisCard from "../../islands/ProductAnalysisCard.tsx";
 import ProductEditModal from "../../islands/ProductEditModal.tsx";
+import ProductImageGallery from "../../islands/ProductImageGallery.tsx";
+
+interface ShopeeScrape {
+  id: number;
+  price: number | null;
+  currency: string | null;
+  unitsSold: number | null;
+  shopId: number | null;
+  shopName: string | null;
+  productUrl: string | null;
+  scrapedAt: Date;
+}
+
+interface PriceHistoryRecord {
+  id: number;
+  price: number | null;
+  priceBeforeDiscount: number | null;
+  unitsSoldSnapshot: number | null;
+  recordedAt: Date;
+}
 
 interface ProductDetailData {
   product: Product;
+  shopeeScrapes: ShopeeScrape[];
+  priceHistory: PriceHistoryRecord[];
 }
 
 export const handler: Handlers<ProductDetailData | null> = {
@@ -30,7 +57,32 @@ export const handler: Handlers<ProductDetailData | null> = {
       return ctx.renderNotFound();
     }
 
-    return ctx.render({ product: result[0] });
+    const product = result[0];
+
+    // Fetch historical data for Shopee products
+    let shopeeScrapesData: ShopeeScrape[] = [];
+    if (product.source === "shopee") {
+      shopeeScrapesData = await db
+        .select()
+        .from(shopeeScrapes)
+        .where(eq(shopeeScrapes.productId, product.productId))
+        .orderBy(desc(shopeeScrapes.scrapedAt))
+        .limit(50);
+    }
+
+    // Fetch price history (legacy table for all sources)
+    const priceHistoryData = await db
+      .select()
+      .from(priceHistory)
+      .where(eq(priceHistory.productId, product.productId))
+      .orderBy(desc(priceHistory.recordedAt))
+      .limit(50);
+
+    return ctx.render({
+      product,
+      shopeeScrapes: shopeeScrapesData,
+      priceHistory: priceHistoryData,
+    });
   },
 };
 
@@ -50,18 +102,22 @@ export default function ProductDetailPage(
     );
   }
 
-  const { product } = data;
+  const { product, shopeeScrapes, priceHistory } = data;
 
   // Helper functions
   const formatPrice = (price: number | null, currency: string | null) => {
-    if (!price) return "N/A";
+    if (!price && price !== 0) return "N/A";
     const formatted = (price / 100).toFixed(2);
     return `${currency || "SGD"} ${formatted}`;
   };
 
   const formatNumber = (num: number | null) => {
-    if (!num) return "N/A";
+    if (!num && num !== 0) return "N/A";
     return num.toLocaleString();
+  };
+
+  const formatDate = (date: Date | string) => {
+    return new Date(date).toLocaleString();
   };
 
   const calculateDiscount = () => {
@@ -74,6 +130,14 @@ export default function ProductDetailPage(
   };
 
   const discount = calculateDiscount();
+
+  // Prepare images array for gallery
+  const productImages =
+    product.images && Array.isArray(product.images) && product.images.length > 0
+      ? product.images as string[]
+      : product.image
+      ? [product.image]
+      : [];
 
   return (
     <>
@@ -92,246 +156,554 @@ export default function ProductDetailPage(
             </ul>
           </div>
 
-          {/* Product Metadata Card */}
+          {/* Header with Title and Actions */}
+          <div class="flex items-start justify-between gap-4 flex-wrap">
+            <div>
+              <h1 class="text-3xl lg:text-4xl font-bold mb-2">
+                {product.name || "Unknown Product"}
+              </h1>
+              <div class="flex items-center gap-2 flex-wrap">
+                <div class="badge badge-primary badge-lg">
+                  {product.source.toUpperCase()}
+                </div>
+                {product.brand && (
+                  <div class="badge badge-outline badge-lg">
+                    {product.brand}
+                  </div>
+                )}
+                {product.legoSetNumber && (
+                  <div class="badge badge-secondary badge-lg">
+                    Set #{product.legoSetNumber}
+                  </div>
+                )}
+              </div>
+            </div>
+            <ProductEditModal product={product} />
+          </div>
+
+          {/* Images Section */}
           <div class="card bg-base-100 shadow-xl">
             <div class="card-body">
-              <div class="flex flex-col lg:flex-row gap-6">
-                {/* Product Image */}
-                <div class="flex-shrink-0">
-                  {product.image
-                    ? (
-                      <figure class="w-full lg:w-80 h-80 bg-base-200 rounded-lg overflow-hidden">
-                        <img
-                          src={product.image}
-                          alt={product.name || "Product"}
-                          class="w-full h-full object-contain"
-                        />
-                      </figure>
-                    )
-                    : (
-                      <div class="w-full lg:w-80 h-80 bg-base-200 rounded-lg flex items-center justify-center">
-                        <span class="text-base-content/40">No Image</span>
-                      </div>
-                    )}
+              <h2 class="card-title text-2xl mb-4">Product Images</h2>
+              <div class="max-w-2xl mx-auto">
+                <ProductImageGallery
+                  images={productImages}
+                  productName={product.name || "Product"}
+                />
+              </div>
+            </div>
+          </div>
+
+          {/* Core Product Info Section */}
+          <div class="card bg-base-100 shadow-xl">
+            <div class="card-body">
+              <h2 class="card-title text-2xl mb-4">Core Information</h2>
+              <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                <div class="stat bg-base-200 rounded-lg">
+                  <div class="stat-title">Product ID</div>
+                  <div class="stat-value text-lg break-all">
+                    {product.productId}
+                  </div>
                 </div>
-
-                {/* Product Info */}
-                <div class="flex-1 space-y-4">
-                  {/* Title and Source Badge */}
-                  <div>
-                    <div class="flex items-start gap-3 mb-2">
-                      <h1 class="text-2xl lg:text-3xl font-bold flex-1">
-                        {product.name || "Unknown Product"}
-                      </h1>
-                      <div class="flex items-center gap-2">
-                        <ProductEditModal product={product} />
-                        <div class="badge badge-primary badge-lg">
-                          {product.source.toUpperCase()}
-                        </div>
-                      </div>
-                    </div>
-                    {product.brand && (
-                      <p class="text-base-content/70">
-                        Brand:{" "}
-                        <span class="font-semibold">{product.brand}</span>
-                      </p>
-                    )}
+                <div class="stat bg-base-200 rounded-lg">
+                  <div class="stat-title">Database ID</div>
+                  <div class="stat-value text-lg">{product.id}</div>
+                </div>
+                <div class="stat bg-base-200 rounded-lg">
+                  <div class="stat-title">Source</div>
+                  <div class="stat-value text-lg">{product.source}</div>
+                </div>
+                <div class="stat bg-base-200 rounded-lg">
+                  <div class="stat-title">Brand</div>
+                  <div class="stat-value text-lg">{product.brand || "N/A"}</div>
+                </div>
+                <div class="stat bg-base-200 rounded-lg">
+                  <div class="stat-title">LEGO Set Number</div>
+                  <div class="stat-value text-lg">
+                    {product.legoSetNumber || "N/A"}
                   </div>
-
-                  {/* LEGO Set Number */}
-                  {product.legoSetNumber && (
-                    <div class="badge badge-outline badge-lg">
-                      Set #{product.legoSetNumber}
-                    </div>
-                  )}
-
-                  {/* Pricing */}
-                  <div class="space-y-2">
-                    <div class="flex items-baseline gap-3">
-                      <span class="text-3xl font-bold text-primary">
-                        {formatPrice(product.price, product.currency)}
-                      </span>
-                      {product.priceBeforeDiscount &&
-                        product.priceBeforeDiscount > (product.price || 0) && (
-                        <span class="text-lg line-through text-base-content/50">
-                          {formatPrice(
-                            product.priceBeforeDiscount,
-                            product.currency,
-                          )}
-                        </span>
-                      )}
-                      {discount && (
-                        <div class="badge badge-success badge-lg">
-                          {discount}% OFF
-                        </div>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Stats Grid - Shopee specific */}
-                  {product.source === "shopee" && (
-                    <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
-                      {product.unitsSold !== null && (
-                        <div class="stat bg-base-200 rounded-lg p-3">
-                          <div class="stat-title text-xs">Units Sold</div>
-                          <div class="stat-value text-xl">
-                            {formatNumber(product.unitsSold)}
-                          </div>
-                        </div>
-                      )}
-                      {product.view_count !== null && (
-                        <div class="stat bg-base-200 rounded-lg p-3">
-                          <div class="stat-title text-xs">Views</div>
-                          <div class="stat-value text-xl">
-                            {formatNumber(product.view_count)}
-                          </div>
-                        </div>
-                      )}
-                      {product.liked_count !== null && (
-                        <div class="stat bg-base-200 rounded-lg p-3">
-                          <div class="stat-title text-xs">Likes</div>
-                          <div class="stat-value text-xl">
-                            {formatNumber(product.liked_count)}
-                          </div>
-                        </div>
-                      )}
-                      {product.avgStarRating !== null && (
-                        <div class="stat bg-base-200 rounded-lg p-3">
-                          <div class="stat-title text-xs">Rating</div>
-                          <div class="stat-value text-xl flex items-center gap-1">
-                            {(product.avgStarRating / 10).toFixed(1)}
-                            <span class="text-sm">⭐</span>
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  )}
-
-                  {/* Shop Info - Shopee */}
-                  {product.source === "shopee" && product.shopName && (
-                    <div class="space-y-2">
-                      <div class="flex items-center gap-2">
-                        <span class="text-base-content/70">Seller:</span>
-                        <span class="font-semibold">{product.shopName}</span>
-                        {product.isPreferred && (
-                          <div class="badge badge-success badge-sm">
-                            Preferred
-                          </div>
-                        )}
-                        {product.isMart && (
-                          <div class="badge badge-info badge-sm">Mall</div>
-                        )}
-                      </div>
-                      {product.shopLocation && (
-                        <div class="text-sm text-base-content/70">
-                          Location: {product.shopLocation}
-                        </div>
-                      )}
-                    </div>
-                  )}
-
-                  {/* Stock Info */}
-                  {product.currentStock !== null && (
-                    <div class="flex items-center gap-2">
-                      <span class="text-base-content/70">Stock:</span>
-                      <span
-                        class={`font-semibold ${
-                          product.currentStock === 0
-                            ? "text-error"
-                            : product.currentStock < 10
-                            ? "text-warning"
-                            : "text-success"
-                        }`}
-                      >
-                        {product.currentStock === 0
-                          ? "Out of Stock"
-                          : `${formatNumber(product.currentStock)} available`}
-                      </span>
-                    </div>
-                  )}
-
-                  {/* ToysRUs specific - Age Range & Category */}
-                  {product.source === "toysrus" && (
-                    <div class="flex flex-wrap gap-4">
-                      {product.ageRange && (
-                        <div>
-                          <span class="text-base-content/70">Age:</span>
-                          <span class="font-semibold">{product.ageRange}</span>
-                        </div>
-                      )}
-                      {product.categoryName && (
-                        <div>
-                          <span class="text-base-content/70">Category:</span>
-                          <span class="font-semibold">
-                            {product.categoryName}
-                          </span>
-                        </div>
-                      )}
-                    </div>
-                  )}
-
-                  {/* Action Buttons */}
-                  <div class="flex flex-wrap gap-3 pt-4">
-                    <a
-                      href={`/products?search=${product.productId}`}
-                      class="btn btn-primary"
+                </div>
+                <div class="stat bg-base-200 rounded-lg">
+                  <div class="stat-title">Watch Status</div>
+                  <div class="stat-value text-lg">
+                    <div
+                      class={`badge badge-lg ${
+                        product.watchStatus === "active"
+                          ? "badge-success"
+                          : product.watchStatus === "paused"
+                          ? "badge-warning"
+                          : product.watchStatus === "stopped"
+                          ? "badge-error"
+                          : "badge-ghost"
+                      }`}
                     >
-                      View in List
-                    </a>
-                    {product.legoSetNumber && (
-                      <a
-                        href={`https://www.bricklink.com/v2/catalog/catalogitem.page?S=${product.legoSetNumber}-1`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        class="btn btn-outline"
-                      >
-                        View on Bricklink ↗
-                      </a>
-                    )}
-                  </div>
-
-                  {/* Last Updated */}
-                  <div class="text-xs text-base-content/50">
-                    Last updated: {new Date(product.updatedAt).toLocaleString()}
+                      {product.watchStatus || "N/A"}
+                    </div>
                   </div>
                 </div>
               </div>
             </div>
           </div>
 
-          {/* Investment Analysis Section */}
-          {product.legoSetNumber && (
-            <div>
-              <h2 class="text-2xl font-bold mb-4">Investment Analysis</h2>
-              <ProductAnalysisCard
-                productId={product.productId}
-                defaultStrategy="Investment Focus"
-              />
+          {/* Pricing Section */}
+          <div class="card bg-base-100 shadow-xl">
+            <div class="card-body">
+              <h2 class="card-title text-2xl mb-4">Pricing</h2>
+              <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                <div class="stat bg-base-200 rounded-lg">
+                  <div class="stat-title">Current Price</div>
+                  <div class="stat-value text-2xl text-primary">
+                    {formatPrice(product.price, product.currency)}
+                  </div>
+                </div>
+                <div class="stat bg-base-200 rounded-lg">
+                  <div class="stat-title">Price Before Discount</div>
+                  <div class="stat-value text-xl">
+                    {formatPrice(product.priceBeforeDiscount, product.currency)}
+                  </div>
+                  {discount && (
+                    <div class="stat-desc">
+                      <div class="badge badge-success">{discount}% OFF</div>
+                    </div>
+                  )}
+                </div>
+                <div class="stat bg-base-200 rounded-lg">
+                  <div class="stat-title">Currency</div>
+                  <div class="stat-value text-xl">
+                    {product.currency || "N/A"}
+                  </div>
+                </div>
+                <div class="stat bg-base-200 rounded-lg">
+                  <div class="stat-title">Price Min</div>
+                  <div class="stat-value text-xl">
+                    {formatPrice(product.priceMin, product.currency)}
+                  </div>
+                </div>
+                <div class="stat bg-base-200 rounded-lg">
+                  <div class="stat-title">Price Max</div>
+                  <div class="stat-value text-xl">
+                    {formatPrice(product.priceMax, product.currency)}
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Shopee Section */}
+          {product.source === "shopee" && (
+            <div class="card bg-base-100 shadow-xl">
+              <div class="card-body">
+                <h2 class="card-title text-2xl mb-4">Shopee Data</h2>
+
+                {/* Sales & Engagement Metrics */}
+                <h3 class="text-lg font-semibold mb-3">Sales & Engagement</h3>
+                <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 mb-6">
+                  <div class="stat bg-base-200 rounded-lg">
+                    <div class="stat-title">Units Sold</div>
+                    <div class="stat-value text-xl">
+                      {formatNumber(product.unitsSold)}
+                    </div>
+                  </div>
+                  <div class="stat bg-base-200 rounded-lg">
+                    <div class="stat-title">Lifetime Sold</div>
+                    <div class="stat-value text-xl">
+                      {formatNumber(product.lifetimeSold)}
+                    </div>
+                  </div>
+                  <div class="stat bg-base-200 rounded-lg">
+                    <div class="stat-title">Views</div>
+                    <div class="stat-value text-xl">
+                      {formatNumber(product.view_count)}
+                    </div>
+                  </div>
+                  <div class="stat bg-base-200 rounded-lg">
+                    <div class="stat-title">Likes</div>
+                    <div class="stat-value text-xl">
+                      {formatNumber(product.liked_count)}
+                    </div>
+                  </div>
+                  <div class="stat bg-base-200 rounded-lg">
+                    <div class="stat-title">Comments</div>
+                    <div class="stat-value text-xl">
+                      {formatNumber(product.commentCount)}
+                    </div>
+                  </div>
+                  <div class="stat bg-base-200 rounded-lg">
+                    <div class="stat-title">Avg Star Rating</div>
+                    <div class="stat-value text-xl">
+                      {product.avgStarRating
+                        ? (product.avgStarRating / 10).toFixed(1)
+                        : "N/A"}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Shop Information */}
+                <h3 class="text-lg font-semibold mb-3">Shop Information</h3>
+                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
+                  <div class="stat bg-base-200 rounded-lg">
+                    <div class="stat-title">Shop ID</div>
+                    <div class="stat-value text-lg">
+                      {product.shopId?.toString() || "N/A"}
+                    </div>
+                  </div>
+                  <div class="stat bg-base-200 rounded-lg">
+                    <div class="stat-title">Shop Name</div>
+                    <div class="stat-value text-lg">
+                      {product.shopName || "N/A"}
+                    </div>
+                  </div>
+                  <div class="stat bg-base-200 rounded-lg">
+                    <div class="stat-title">Shop Location</div>
+                    <div class="stat-value text-lg">
+                      {product.shopLocation || "N/A"}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Stock Information */}
+                <h3 class="text-lg font-semibold mb-3">Stock Information</h3>
+                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
+                  <div class="stat bg-base-200 rounded-lg">
+                    <div class="stat-title">Current Stock</div>
+                    <div
+                      class={`stat-value text-xl ${
+                        product.currentStock === 0
+                          ? "text-error"
+                          : (product.currentStock || 0) < 10
+                          ? "text-warning"
+                          : "text-success"
+                      }`}
+                    >
+                      {formatNumber(product.currentStock)}
+                    </div>
+                  </div>
+                  <div class="stat bg-base-200 rounded-lg">
+                    <div class="stat-title">Stock Type</div>
+                    <div class="stat-value text-lg">
+                      {product.stockType?.toString() || "N/A"}
+                    </div>
+                  </div>
+                  <div class="stat bg-base-200 rounded-lg">
+                    <div class="stat-title">Stock Info Summary</div>
+                    <div class="stat-value text-sm">
+                      {product.stockInfoSummary || "N/A"}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Shop Flags & Badges */}
+                <h3 class="text-lg font-semibold mb-3">Shop Badges & Flags</h3>
+                <div class="flex flex-wrap gap-2">
+                  <div
+                    class={`badge badge-lg ${
+                      product.isPreferred ? "badge-success" : "badge-ghost"
+                    }`}
+                  >
+                    {product.isPreferred ? "✓" : "✗"} Preferred Seller
+                  </div>
+                  <div
+                    class={`badge badge-lg ${
+                      product.isMart ? "badge-info" : "badge-ghost"
+                    }`}
+                  >
+                    {product.isMart ? "✓" : "✗"} Shopee Mall
+                  </div>
+                  <div
+                    class={`badge badge-lg ${
+                      product.isServiceByShopee
+                        ? "badge-primary"
+                        : "badge-ghost"
+                    }`}
+                  >
+                    {product.isServiceByShopee ? "✓" : "✗"} Service by Shopee
+                  </div>
+                  <div
+                    class={`badge badge-lg ${
+                      product.isAdult ? "badge-warning" : "badge-ghost"
+                    }`}
+                  >
+                    {product.isAdult ? "✓" : "✗"} Adult Content
+                  </div>
+                </div>
+
+                {/* Rating Distribution */}
+                {product.ratingCount &&
+                  typeof product.ratingCount === "object" && (
+                  <>
+                    <h3 class="text-lg font-semibold mb-3 mt-6">
+                      Rating Distribution
+                    </h3>
+                    <div class="bg-base-200 rounded-lg p-4">
+                      <pre class="text-sm overflow-auto">{JSON.stringify(product.ratingCount, null, 2)}</pre>
+                    </div>
+                  </>
+                )}
+              </div>
             </div>
           )}
 
-          {!product.legoSetNumber && (
-            <div class="alert alert-info">
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                fill="none"
-                viewBox="0 0 24 24"
-                class="stroke-current shrink-0 w-6 h-6"
-              >
-                <path
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  stroke-width="2"
-                  d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
-                >
-                </path>
-              </svg>
-              <span>
-                Investment analysis is only available for products with a valid
-                LEGO set number.
-              </span>
+          {/* ToysRUs Section */}
+          {product.source === "toysrus" && (
+            <div class="card bg-base-100 shadow-xl">
+              <div class="card-body">
+                <h2 class="card-title text-2xl mb-4">ToysRUs Data</h2>
+                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  <div class="stat bg-base-200 rounded-lg">
+                    <div class="stat-title">SKU</div>
+                    <div class="stat-value text-lg">{product.sku || "N/A"}</div>
+                  </div>
+                  <div class="stat bg-base-200 rounded-lg">
+                    <div class="stat-title">Category Number</div>
+                    <div class="stat-value text-lg">
+                      {product.categoryNumber || "N/A"}
+                    </div>
+                  </div>
+                  <div class="stat bg-base-200 rounded-lg">
+                    <div class="stat-title">Category Name</div>
+                    <div class="stat-value text-lg">
+                      {product.categoryName || "N/A"}
+                    </div>
+                  </div>
+                  <div class="stat bg-base-200 rounded-lg">
+                    <div class="stat-title">Age Range</div>
+                    <div class="stat-value text-lg">
+                      {product.ageRange || "N/A"}
+                    </div>
+                  </div>
+                </div>
+              </div>
             </div>
           )}
+
+          {/* Bricklink/Investment Analysis Section */}
+          {product.legoSetNumber && (
+            <div class="card bg-base-100 shadow-xl">
+              <div class="card-body">
+                <h2 class="card-title text-2xl mb-4">
+                  Bricklink Investment Analysis
+                </h2>
+                <ProductAnalysisCard
+                  productId={product.productId}
+                  defaultStrategy="Investment Focus"
+                />
+              </div>
+            </div>
+          )}
+
+          {/* Historical Data Section */}
+          {(shopeeScrapes.length > 0 || priceHistory.length > 0) && (
+            <div class="card bg-base-100 shadow-xl">
+              <div class="card-body">
+                <h2 class="card-title text-2xl mb-4">Historical Data</h2>
+
+                {/* Shopee Scrapes History */}
+                {shopeeScrapes.length > 0 && (
+                  <>
+                    <h3 class="text-lg font-semibold mb-3">
+                      Shopee Scrape History ({shopeeScrapes.length} records)
+                    </h3>
+                    <div class="overflow-x-auto mb-6">
+                      <table class="table table-zebra table-sm">
+                        <thead>
+                          <tr>
+                            <th>Scraped At</th>
+                            <th>Price</th>
+                            <th>Units Sold</th>
+                            <th>Shop Name</th>
+                            <th>Shop ID</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {shopeeScrapes.map((scrape) => (
+                            <tr key={scrape.id}>
+                              <td class="whitespace-nowrap">
+                                {formatDate(scrape.scrapedAt)}
+                              </td>
+                              <td>
+                                {formatPrice(scrape.price, scrape.currency)}
+                              </td>
+                              <td>{formatNumber(scrape.unitsSold)}</td>
+                              <td>{scrape.shopName || "N/A"}</td>
+                              <td>{scrape.shopId?.toString() || "N/A"}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </>
+                )}
+
+                {/* Price History */}
+                {priceHistory.length > 0 && (
+                  <>
+                    <h3 class="text-lg font-semibold mb-3">
+                      Price History ({priceHistory.length} records)
+                    </h3>
+                    <div class="overflow-x-auto">
+                      <table class="table table-zebra table-sm">
+                        <thead>
+                          <tr>
+                            <th>Recorded At</th>
+                            <th>Price</th>
+                            <th>Before Discount</th>
+                            <th>Units Sold</th>
+                            <th>Discount</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {priceHistory.map((record) => {
+                            const recordDiscount =
+                              record.price && record.priceBeforeDiscount &&
+                                record.priceBeforeDiscount > record.price
+                                ? (((record.priceBeforeDiscount -
+                                  record.price) / record.priceBeforeDiscount) *
+                                  100).toFixed(0)
+                                : null;
+                            return (
+                              <tr key={record.id}>
+                                <td class="whitespace-nowrap">
+                                  {formatDate(record.recordedAt)}
+                                </td>
+                                <td>
+                                  {formatPrice(record.price, product.currency)}
+                                </td>
+                                <td>
+                                  {formatPrice(
+                                    record.priceBeforeDiscount,
+                                    product.currency,
+                                  )}
+                                </td>
+                                <td>
+                                  {formatNumber(record.unitsSoldSnapshot)}
+                                </td>
+                                <td>
+                                  {recordDiscount && (
+                                    <div class="badge badge-success badge-sm">
+                                      {recordDiscount}%
+                                    </div>
+                                  )}
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  </>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Metadata Section */}
+          <div class="card bg-base-100 shadow-xl">
+            <div class="card-body">
+              <h2 class="card-title text-2xl mb-4">
+                Metadata & Technical Info
+              </h2>
+
+              {/* Timestamps */}
+              <h3 class="text-lg font-semibold mb-3">Timestamps</h3>
+              <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+                <div class="stat bg-base-200 rounded-lg">
+                  <div class="stat-title">Created At</div>
+                  <div class="stat-value text-sm">
+                    {formatDate(product.createdAt)}
+                  </div>
+                </div>
+                <div class="stat bg-base-200 rounded-lg">
+                  <div class="stat-title">Updated At</div>
+                  <div class="stat-value text-sm">
+                    {formatDate(product.updatedAt)}
+                  </div>
+                </div>
+              </div>
+
+              {/* Image Data */}
+              <h3 class="text-lg font-semibold mb-3">Image Information</h3>
+              <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
+                <div class="stat bg-base-200 rounded-lg">
+                  <div class="stat-title">Main Image URL</div>
+                  <div class="stat-value text-xs break-all">
+                    {product.image || "N/A"}
+                  </div>
+                </div>
+                <div class="stat bg-base-200 rounded-lg">
+                  <div class="stat-title">Local Image Path</div>
+                  <div class="stat-value text-xs break-all">
+                    {product.localImagePath || "N/A"}
+                  </div>
+                </div>
+                <div class="stat bg-base-200 rounded-lg">
+                  <div class="stat-title">Image Download Status</div>
+                  <div class="stat-value text-sm">
+                    <div
+                      class={`badge ${
+                        product.imageDownloadStatus === "completed"
+                          ? "badge-success"
+                          : product.imageDownloadStatus === "failed"
+                          ? "badge-error"
+                          : product.imageDownloadStatus === "pending"
+                          ? "badge-warning"
+                          : "badge-ghost"
+                      }`}
+                    >
+                      {product.imageDownloadStatus || "N/A"}
+                    </div>
+                  </div>
+                </div>
+                <div class="stat bg-base-200 rounded-lg">
+                  <div class="stat-title">Image Downloaded At</div>
+                  <div class="stat-value text-xs">
+                    {product.imageDownloadedAt
+                      ? formatDate(product.imageDownloadedAt)
+                      : "N/A"}
+                  </div>
+                </div>
+                <div class="stat bg-base-200 rounded-lg">
+                  <div class="stat-title">Total Images</div>
+                  <div class="stat-value text-xl">
+                    {product.images && Array.isArray(product.images)
+                      ? product.images.length
+                      : 0}
+                  </div>
+                </div>
+                {product.localImages &&
+                  typeof product.localImages === "object" && (
+                  <div class="stat bg-base-200 rounded-lg">
+                    <div class="stat-title">Local Images</div>
+                    <div class="stat-value text-xs">
+                      {Array.isArray(product.localImages)
+                        ? product.localImages.length
+                        : "N/A"}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Action Buttons */}
+              <h3 class="text-lg font-semibold mb-3">Quick Actions</h3>
+              <div class="flex flex-wrap gap-3">
+                <a
+                  href={`/products?search=${product.productId}`}
+                  class="btn btn-primary"
+                >
+                  View in Product List
+                </a>
+                {product.legoSetNumber && (
+                  <a
+                    href={`https://www.bricklink.com/v2/catalog/catalogitem.page?S=${product.legoSetNumber}-1`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    class="btn btn-outline"
+                  >
+                    View on Bricklink ↗
+                  </a>
+                )}
+              </div>
+            </div>
+          </div>
         </div>
       </div>
     </>
