@@ -379,7 +379,8 @@ export class QueueService {
   }
 
   /**
-   * Add a scrape job to the queue with optional priority
+   * Add a scrape job to the queue with smart pre-checks
+   * Checks if item was recently scraped (BullMQ handles duplicate jobId automatically)
    */
   async addScrapeJob(data: ScrapeJobData): Promise<Job> {
     if (!this.queue) {
@@ -387,9 +388,30 @@ export class QueueService {
     }
 
     const priority = data.priority ?? JobPriority.NORMAL;
+    const jobId = `${JOB_TYPES.SCRAPE_SINGLE}-${data.itemId}`;
+
+    // Check if item was recently scraped (unless HIGH priority)
+    if (priority !== JobPriority.HIGH) {
+      const wasRecent = await this.wasRecentlyScrapped(data.itemId, 12);
+      if (wasRecent) {
+        console.log(
+          `⏭️  Item ${data.itemId} was recently scraped, skipping`,
+        );
+        // Return a mock job to indicate it was skipped
+        // In practice, you might want to throw or return a special status
+        throw new Error(
+          `Item ${data.itemId} was scraped within the last 12 hours`,
+        );
+      }
+    }
+
+    // Add the job with jobId - BullMQ prevents duplicates automatically
+    // If a job with this ID already exists in waiting/active/delayed state, it returns the existing job
     const job = await this.queue.add(JOB_TYPES.SCRAPE_SINGLE, data, {
       priority,
+      jobId,
     });
+
     const priorityLabel = priority === JobPriority.HIGH
       ? "HIGH"
       : priority === JobPriority.MEDIUM
@@ -403,8 +425,8 @@ export class QueueService {
   }
 
   /**
-   * Add multiple scrape jobs to the queue in bulk (optimized for performance)
-   * Uses BullMQ's addBulk method for efficient batch enqueueing
+   * Add multiple scrape jobs to the queue in bulk with smart filtering
+   * Filters out jobs that were recently scraped (BullMQ handles duplicate jobId automatically)
    */
   async addScrapeJobsBulk(jobs: ScrapeJobData[]): Promise<Job[]> {
     if (!this.queue) {
@@ -415,17 +437,48 @@ export class QueueService {
       return [];
     }
 
-    // Use BullMQ's addBulk for efficient batch operations with priority support
-    const bulkJobs = jobs.map((data) => ({
+    console.log(`🔍 Filtering ${jobs.length} jobs before bulk enqueue...`);
+
+    // Filter out jobs that were recently scraped
+    const filteredJobs: ScrapeJobData[] = [];
+
+    for (const job of jobs) {
+      // Check if recently scraped (unless HIGH priority)
+      const priority = job.priority ?? JobPriority.NORMAL;
+      if (priority !== JobPriority.HIGH) {
+        const wasRecent = await this.wasRecentlyScrapped(job.itemId, 12);
+        if (wasRecent) {
+          console.log(`⏭️  Skipping ${job.itemId} - recently scraped`);
+          continue;
+        }
+      }
+
+      filteredJobs.push(job);
+    }
+
+    if (filteredJobs.length === 0) {
+      console.log(`✓ All jobs filtered out - nothing to enqueue`);
+      return [];
+    }
+
+    // Use BullMQ's addBulk for efficient batch operations with jobId
+    // BullMQ automatically handles duplicate jobIds - if a job with the same ID already exists,
+    // it will not add a duplicate
+    const bulkJobs = filteredJobs.map((data) => ({
       name: JOB_TYPES.SCRAPE_SINGLE,
       data,
       opts: {
         priority: data.priority ?? JobPriority.NORMAL,
+        jobId: `${JOB_TYPES.SCRAPE_SINGLE}-${data.itemId}`,
       },
     }));
 
     const addedJobs = await this.queue.addBulk(bulkJobs);
-    console.log(`➕ Added ${addedJobs.length} scrape jobs in bulk`);
+    console.log(
+      `➕ Added ${addedJobs.length} scrape jobs in bulk (filtered ${
+        jobs.length - filteredJobs.length
+      })`,
+    );
 
     return addedJobs;
   }
@@ -447,21 +500,28 @@ export class QueueService {
   }
 
   /**
-   * Add a scheduled scrape job to the queue
+   * Add a scheduled scrape job to the queue with deduplication
    */
   async addScheduledScrapeJob(): Promise<Job> {
     if (!this.queue) {
       throw new Error("Queue not initialized. Call initialize() first.");
     }
 
-    const job = await this.queue.add(JOB_TYPES.SCRAPE_SCHEDULED, {});
+    // Use timestamp-based jobId to allow periodic scheduled scrapes but prevent rapid duplicates
+    const timestamp = new Date().toISOString().split("T")[0]; // Daily granularity
+    const jobId = `${JOB_TYPES.SCRAPE_SCHEDULED}-${timestamp}`;
+
+    const job = await this.queue.add(JOB_TYPES.SCRAPE_SCHEDULED, {}, {
+      jobId,
+    });
     console.log(`➕ Added scheduled scrape job: ${job.id}`);
 
     return job;
   }
 
   /**
-   * Add a Reddit search job to the queue with optional priority
+   * Add a Reddit search job to the queue
+   * BullMQ handles duplicate jobId automatically
    */
   async addRedditSearchJob(data: RedditSearchJobData): Promise<Job> {
     if (!this.queue) {
@@ -469,8 +529,14 @@ export class QueueService {
     }
 
     const priority = data.priority ?? JobPriority.NORMAL;
+    const jobId = `${JOB_TYPES.SEARCH_REDDIT}-${data.setNumber}-${
+      data.subreddit || "lego"
+    }`;
+
+    // Add the job with jobId - BullMQ prevents duplicates automatically
     const job = await this.queue.add(JOB_TYPES.SEARCH_REDDIT, data, {
       priority,
+      jobId,
     });
     console.log(
       `➕ Added Reddit search job: ${job.id} for set ${data.setNumber}`,
@@ -480,7 +546,7 @@ export class QueueService {
   }
 
   /**
-   * Add a BrickRanker retirement tracker scrape job to the queue
+   * Add a BrickRanker retirement tracker scrape job to the queue with deduplication
    */
   async addBrickRankerScrapeJob(
     data: BrickRankerScrapeJobData = { saveToDb: true },
@@ -489,9 +555,16 @@ export class QueueService {
       throw new Error("Queue not initialized. Call initialize() first.");
     }
 
+    // Use timestamp-based jobId to allow periodic scrapes but prevent rapid duplicates
+    const timestamp = new Date().toISOString().split("T")[0]; // Daily granularity
+    const jobId = `${JOB_TYPES.SCRAPE_BRICKRANKER_RETIREMENT}-${timestamp}`;
+
     const job = await this.queue.add(
       JOB_TYPES.SCRAPE_BRICKRANKER_RETIREMENT,
       data,
+      {
+        jobId,
+      },
     );
     console.log(
       `➕ Added BrickRanker retirement tracker scrape job: ${job.id}`,
@@ -509,6 +582,61 @@ export class QueueService {
     }
 
     return await this.queue.getJob(jobId);
+  }
+
+  /**
+   * Check if a job is already queued (waiting or active)
+   * Returns the existing job if found, undefined otherwise
+   */
+  async isJobQueued(jobId: string): Promise<Job | undefined> {
+    if (!this.queue) {
+      return undefined;
+    }
+
+    // Try to get the job by ID
+    const existingJob = await this.queue.getJob(jobId);
+
+    // Check if job exists and is in waiting or active state
+    if (existingJob) {
+      const state = await existingJob.getState();
+      if (state === "waiting" || state === "active" || state === "delayed") {
+        return existingJob;
+      }
+    }
+
+    return undefined;
+  }
+
+  /**
+   * Check if an item was recently scraped
+   * @param itemId - The Bricklink item ID
+   * @param hoursThreshold - Number of hours to consider "recent" (default: 24)
+   * @returns true if item was scraped within the threshold
+   */
+  async wasRecentlyScrapped(
+    itemId: string,
+    hoursThreshold: number = 24,
+  ): Promise<boolean> {
+    try {
+      const repository = getBricklinkRepository();
+      const item = await repository.findByItemId(itemId);
+
+      if (!item || !item.lastScrapedAt) {
+        return false;
+      }
+
+      const hoursSinceLastScrape = (Date.now() - item.lastScrapedAt.getTime()) /
+        (1000 * 60 * 60);
+
+      return hoursSinceLastScrape < hoursThreshold;
+    } catch (error) {
+      // If there's an error checking, assume not recently scraped to be safe
+      console.warn(
+        `Warning: Could not check recent scrape for ${itemId}:`,
+        error.message,
+      );
+      return false;
+    }
   }
 
   /**
