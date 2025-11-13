@@ -73,18 +73,49 @@ export interface PricingData {
 }
 
 export interface DemandData {
-  // Sales metrics
+  // Retail sales metrics (Shopee) - minimal weight for investment analysis
   unitsSold?: number;
   lifetimeSold?: number;
+
+  // Legacy Bricklink aggregated metrics (from pricing boxes)
   bricklinkTimesSold?: number;
   bricklinkTotalQty?: number;
 
-  // Engagement metrics
+  // NEW: Market-driven Bricklink metrics (from past sales data)
+  // Inspired by stock market analysis principles
+
+  // Liquidity & Velocity metrics (like trading volume)
+  bricklinkPastSalesCount?: number; // Total transaction count
+  bricklinkSalesVelocity?: number; // Transactions per day
+  bricklinkAvgDaysBetweenSales?: number; // Liquidity indicator
+  bricklinkRecentSales30d?: number;
+  bricklinkRecentSales60d?: number;
+  bricklinkRecentSales90d?: number;
+
+  // Momentum & Trend metrics (like price/volume trends)
+  bricklinkPriceTrend?: "increasing" | "stable" | "decreasing" | "neutral";
+  bricklinkPriceMomentum?: number; // Linear regression slope
+  bricklinkPriceChangePercent?: number; // % change over period
+  bricklinkVolumeTrend?: "increasing" | "stable" | "decreasing" | "neutral";
+
+  // Volatility metrics (like price stability)
+  bricklinkPriceVolatility?: number; // Coefficient of variation
+  bricklinkAvgPrice?: number; // Volume-weighted average price
+  bricklinkMedianPrice?: number; // Median transaction price
+
+  // Market strength indicators
+  bricklinkRSI?: number; // Relative Strength Index (0-100)
+  // RSI > 70 = overbought (may decrease), RSI < 30 = oversold (may increase)
+
+  // Condition-specific weighting (new items prioritized for investment)
+  bricklinkNewConditionWeight?: number; // 0-1 weight for 'new' vs 'used' data
+
+  // Engagement metrics (Shopee)
   viewCount?: number;
   likedCount?: number;
   commentCount?: number;
 
-  // Community sentiment (Reddit)
+  // Community sentiment (Reddit) - social validation like analyst ratings
   redditPosts?: number;
   redditTotalScore?: number;
   redditTotalComments?: number;

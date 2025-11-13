@@ -595,6 +595,408 @@ export class BricklinkRepository {
 
     return results;
   }
+
+  /**
+   * Get market-driven statistics from past sales data
+   * Inspired by stock market technical analysis:
+   * - Velocity: Sales transactions per day (like trading volume)
+   * - Liquidity: Average time between sales
+   * - Momentum: Price trends over time periods
+   * - Volatility: Price stability (coefficient of variation)
+   * - Market depth: Available lots vs demand
+   *
+   * @param itemId - The Bricklink item ID
+   * @returns Market statistics for investment analysis
+   */
+  async getPastSalesStatistics(itemId: string): Promise<{
+    // Overall metrics
+    totalTransactions: number;
+    dateRangeStart: Date | null;
+    dateRangeEnd: Date | null;
+    totalDays: number;
+
+    // Condition-specific metrics (new items weighted higher for investment)
+    new: {
+      transactionCount: number;
+      totalQuantity: number;
+      salesVelocity: number; // transactions per day
+      avgDaysBetweenSales: number;
+
+      // Price metrics (in cents)
+      avgPrice: number;
+      medianPrice: number;
+      minPrice: number;
+      maxPrice: number;
+      priceStdDev: number;
+      volatilityIndex: number; // coefficient of variation (stdDev / mean)
+
+      // Trend analysis (30d, 90d, 180d, all-time)
+      trends: {
+        last30Days: TrendMetrics;
+        last90Days: TrendMetrics;
+        last180Days: TrendMetrics;
+        allTime: TrendMetrics;
+      };
+
+      // Recent activity
+      recent30d: number;
+      recent60d: number;
+      recent90d: number;
+    };
+
+    used: {
+      transactionCount: number;
+      totalQuantity: number;
+      salesVelocity: number;
+      avgDaysBetweenSales: number;
+      avgPrice: number;
+      medianPrice: number;
+      minPrice: number;
+      maxPrice: number;
+      priceStdDev: number;
+      volatilityIndex: number;
+
+      trends: {
+        last30Days: TrendMetrics;
+        last90Days: TrendMetrics;
+        last180Days: TrendMetrics;
+        allTime: TrendMetrics;
+      };
+
+      recent30d: number;
+      recent60d: number;
+      recent90d: number;
+    };
+
+    // Relative strength index (adapted for LEGO)
+    // Measures if item is overbought (>70) or oversold (<30) based on price history
+    rsi: {
+      new: number | null;
+      used: number | null;
+    };
+  }> {
+    // Fetch all past sales for this item
+    const allSales = await this.getPastSales(itemId);
+
+    if (allSales.length === 0) {
+      return this.getEmptyStatistics();
+    }
+
+    // Separate by condition
+    const newSales = allSales.filter((s) => s.condition === "new");
+    const usedSales = allSales.filter((s) => s.condition === "used");
+
+    // Calculate date range
+    const dates = allSales.map((s) => s.dateSold.getTime());
+    const minDate = new Date(Math.min(...dates));
+    const maxDate = new Date(Math.max(...dates));
+    const totalDays = Math.max(
+      1,
+      Math.ceil(
+        (maxDate.getTime() - minDate.getTime()) / (1000 * 60 * 60 * 24),
+      ),
+    );
+
+    // Calculate metrics for each condition
+    const newMetrics = this.calculateConditionMetrics(newSales, totalDays);
+    const usedMetrics = this.calculateConditionMetrics(usedSales, totalDays);
+
+    // Calculate RSI
+    const newRsi = this.calculateRSI(newSales);
+    const usedRsi = this.calculateRSI(usedSales);
+
+    return {
+      totalTransactions: allSales.length,
+      dateRangeStart: minDate,
+      dateRangeEnd: maxDate,
+      totalDays,
+      new: newMetrics,
+      used: usedMetrics,
+      rsi: {
+        new: newRsi,
+        used: usedRsi,
+      },
+    };
+  }
+
+  /**
+   * Calculate metrics for a specific condition (new or used)
+   */
+  private calculateConditionMetrics(
+    sales: typeof bricklinkPastSales.$inferSelect[],
+    totalDays: number,
+  ) {
+    if (sales.length === 0) {
+      return this.getEmptyConditionMetrics();
+    }
+
+    const now = new Date();
+    const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+    const sixtyDaysAgo = new Date(now.getTime() - 60 * 24 * 60 * 60 * 1000);
+    const ninetyDaysAgo = new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000);
+    const oneEightyDaysAgo = new Date(
+      now.getTime() - 180 * 24 * 60 * 60 * 1000,
+    );
+
+    // Basic counts
+    const transactionCount = sales.length;
+    const totalQuantity = sales.reduce((sum, s) => sum + (s.quantity || 1), 0);
+    const salesVelocity = transactionCount / totalDays;
+    const avgDaysBetweenSales = totalDays / transactionCount;
+
+    // Recent activity counts
+    const recent30d = sales.filter((s) => s.dateSold >= thirtyDaysAgo).length;
+    const recent60d = sales.filter((s) => s.dateSold >= sixtyDaysAgo).length;
+    const recent90d = sales.filter((s) => s.dateSold >= ninetyDaysAgo).length;
+
+    // Price statistics
+    const prices = sales.map((s) => s.price);
+    prices.sort((a, b) => a - b);
+
+    const avgPrice = prices.reduce((sum, p) => sum + p, 0) / prices.length;
+    const medianPrice = prices[Math.floor(prices.length / 2)];
+    const minPrice = prices[0];
+    const maxPrice = prices[prices.length - 1];
+
+    // Standard deviation and volatility
+    const variance = prices.reduce(
+      (sum, p) => sum + Math.pow(p - avgPrice, 2),
+      0,
+    ) / prices.length;
+    const priceStdDev = Math.sqrt(variance);
+    const volatilityIndex = avgPrice > 0 ? priceStdDev / avgPrice : 0;
+
+    // Calculate trends for different time periods
+    const trends = {
+      last30Days: this.calculateTrendMetrics(
+        sales.filter((s) => s.dateSold >= thirtyDaysAgo),
+      ),
+      last90Days: this.calculateTrendMetrics(
+        sales.filter((s) => s.dateSold >= ninetyDaysAgo),
+      ),
+      last180Days: this.calculateTrendMetrics(
+        sales.filter((s) => s.dateSold >= oneEightyDaysAgo),
+      ),
+      allTime: this.calculateTrendMetrics(sales),
+    };
+
+    return {
+      transactionCount,
+      totalQuantity,
+      salesVelocity,
+      avgDaysBetweenSales,
+      avgPrice,
+      medianPrice,
+      minPrice,
+      maxPrice,
+      priceStdDev,
+      volatilityIndex,
+      trends,
+      recent30d,
+      recent60d,
+      recent90d,
+    };
+  }
+
+  /**
+   * Calculate trend metrics for a time period
+   * Returns momentum indicators (bullish/bearish/neutral)
+   */
+  private calculateTrendMetrics(
+    sales: typeof bricklinkPastSales.$inferSelect[],
+  ): TrendMetrics {
+    if (sales.length < 2) {
+      return {
+        direction: "neutral",
+        momentum: 0,
+        percentChange: 0,
+        volumeTrend: "neutral",
+        avgPrice: sales.length > 0 ? sales[0].price : 0,
+      };
+    }
+
+    // Sort by date
+    const sorted = [...sales].sort((a, b) =>
+      a.dateSold.getTime() - b.dateSold.getTime()
+    );
+
+    // Calculate price trend using linear regression slope
+    const n = sorted.length;
+    const avgPrice = sorted.reduce((sum, s) => sum + s.price, 0) / n;
+
+    // Use index as x-axis (time progression)
+    const avgX = (n - 1) / 2;
+    let numerator = 0;
+    let denominator = 0;
+
+    for (let i = 0; i < n; i++) {
+      const xDiff = i - avgX;
+      const yDiff = sorted[i].price - avgPrice;
+      numerator += xDiff * yDiff;
+      denominator += xDiff * xDiff;
+    }
+
+    const slope = denominator !== 0 ? numerator / denominator : 0;
+
+    // Calculate percent change from first to last
+    const firstPrice = sorted[0].price;
+    const lastPrice = sorted[n - 1].price;
+    const percentChange = firstPrice > 0
+      ? ((lastPrice - firstPrice) / firstPrice) * 100
+      : 0;
+
+    // Determine direction based on slope and percent change
+    let direction: "increasing" | "stable" | "decreasing" | "neutral" =
+      "neutral";
+    if (percentChange > 5) direction = "increasing";
+    else if (percentChange < -5) direction = "decreasing";
+    else direction = "stable";
+
+    // Calculate volume trend (comparing first half to second half)
+    const midpoint = Math.floor(n / 2);
+    const firstHalf = sorted.slice(0, midpoint);
+    const secondHalf = sorted.slice(midpoint);
+
+    const firstHalfAvgVolume = firstHalf.length > 0
+      ? firstHalf.reduce((sum, s) => sum + (s.quantity || 1), 0) /
+        firstHalf.length
+      : 0;
+    const secondHalfAvgVolume = secondHalf.length > 0
+      ? secondHalf.reduce((sum, s) => sum + (s.quantity || 1), 0) /
+        secondHalf.length
+      : 0;
+
+    let volumeTrend: "increasing" | "stable" | "decreasing" | "neutral" =
+      "neutral";
+    if (secondHalfAvgVolume > firstHalfAvgVolume * 1.2) {
+      volumeTrend = "increasing";
+    } else if (secondHalfAvgVolume < firstHalfAvgVolume * 0.8) {
+      volumeTrend = "decreasing";
+    } else {
+      volumeTrend = "stable";
+    }
+
+    return {
+      direction,
+      momentum: slope,
+      percentChange,
+      volumeTrend,
+      avgPrice,
+    };
+  }
+
+  /**
+   * Calculate Relative Strength Index (RSI)
+   * Adapted from stock market technical analysis
+   * RSI > 70 = overbought (price may decrease)
+   * RSI < 30 = oversold (price may increase)
+   */
+  private calculateRSI(
+    sales: typeof bricklinkPastSales.$inferSelect[],
+    period: number = 14,
+  ): number | null {
+    if (sales.length < period + 1) {
+      return null;
+    }
+
+    // Sort by date
+    const sorted = [...sales].sort((a, b) =>
+      a.dateSold.getTime() - b.dateSold.getTime()
+    );
+
+    // Calculate price changes
+    const changes: number[] = [];
+    for (let i = 1; i < sorted.length; i++) {
+      changes.push(sorted[i].price - sorted[i - 1].price);
+    }
+
+    // Use last 'period' changes
+    const recentChanges = changes.slice(-period);
+
+    // Separate gains and losses
+    const gains = recentChanges.filter((c) => c > 0);
+    const losses = recentChanges.filter((c) => c < 0).map((c) => Math.abs(c));
+
+    const avgGain = gains.length > 0
+      ? gains.reduce((sum, g) => sum + g, 0) / period
+      : 0;
+    const avgLoss = losses.length > 0
+      ? losses.reduce((sum, l) => sum + l, 0) / period
+      : 0;
+
+    if (avgLoss === 0) {
+      return 100; // All gains, maximum RSI
+    }
+
+    const rs = avgGain / avgLoss;
+    const rsi = 100 - (100 / (1 + rs));
+
+    return Math.round(rsi * 100) / 100;
+  }
+
+  /**
+   * Return empty statistics structure
+   */
+  private getEmptyStatistics() {
+    return {
+      totalTransactions: 0,
+      dateRangeStart: null,
+      dateRangeEnd: null,
+      totalDays: 0,
+      new: this.getEmptyConditionMetrics(),
+      used: this.getEmptyConditionMetrics(),
+      rsi: {
+        new: null,
+        used: null,
+      },
+    };
+  }
+
+  /**
+   * Return empty condition metrics
+   */
+  private getEmptyConditionMetrics() {
+    const emptyTrend: TrendMetrics = {
+      direction: "neutral",
+      momentum: 0,
+      percentChange: 0,
+      volumeTrend: "neutral",
+      avgPrice: 0,
+    };
+
+    return {
+      transactionCount: 0,
+      totalQuantity: 0,
+      salesVelocity: 0,
+      avgDaysBetweenSales: 0,
+      avgPrice: 0,
+      medianPrice: 0,
+      minPrice: 0,
+      maxPrice: 0,
+      priceStdDev: 0,
+      volatilityIndex: 0,
+      trends: {
+        last30Days: emptyTrend,
+        last90Days: emptyTrend,
+        last180Days: emptyTrend,
+        allTime: emptyTrend,
+      },
+      recent30d: 0,
+      recent60d: 0,
+      recent90d: 0,
+    };
+  }
+}
+
+/**
+ * Trend metrics for a time period
+ */
+export interface TrendMetrics {
+  direction: "increasing" | "stable" | "decreasing" | "neutral";
+  momentum: number; // Linear regression slope
+  percentChange: number; // Percent change from start to end
+  volumeTrend: "increasing" | "stable" | "decreasing" | "neutral";
+  avgPrice: number;
 }
 
 /**

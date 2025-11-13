@@ -16,18 +16,23 @@ export class DemandAnalyzer extends BaseAnalyzer<DemandData> {
 
   // deno-lint-ignore require-await
   async analyze(data: DemandData): Promise<AnalysisScore | null> {
-    // Prerequisite check: Need at least one demand signal
+    // Check for new market-driven Bricklink data
+    const hasPastSalesData = data.bricklinkPastSalesCount !== undefined &&
+      data.bricklinkPastSalesCount > 0;
+
+    // Legacy data checks
     const hasSalesData = data.unitsSold !== undefined ||
       data.lifetimeSold !== undefined;
-    const hasBricklinkData = data.bricklinkTimesSold !== undefined ||
+    const hasLegacyBricklinkData = data.bricklinkTimesSold !== undefined ||
       data.bricklinkTotalQty !== undefined;
     const hasRedditData = data.redditPosts !== undefined;
     const hasEngagementData = data.viewCount !== undefined ||
       data.likedCount !== undefined || data.commentCount !== undefined;
 
+    // Require at least one demand signal
     if (
-      !hasSalesData && !hasBricklinkData && !hasRedditData &&
-      !hasEngagementData
+      !hasPastSalesData && !hasSalesData && !hasLegacyBricklinkData &&
+      !hasRedditData && !hasEngagementData
     ) {
       return null; // Skip analysis - insufficient demand data
     }
@@ -36,40 +41,46 @@ export class DemandAnalyzer extends BaseAnalyzer<DemandData> {
     const reasons: string[] = [];
     const dataPoints: Record<string, unknown> = {};
 
-    // 1. Sales velocity analysis (Shopee)
-    if (data.unitsSold !== undefined || data.lifetimeSold !== undefined) {
-      const salesScore = this.analyzeSalesVelocity(
-        data.unitsSold,
-        data.lifetimeSold,
-      );
-      scores.push({ score: salesScore, weight: 0.3 });
+    // NEW: 1. Liquidity & Velocity (35% weight) - Like trading volume in stocks
+    if (hasPastSalesData) {
+      const liquidityScore = this.analyzeLiquidityVelocity(data);
+      scores.push({ score: liquidityScore, weight: 0.35 });
 
-      if (data.unitsSold !== undefined) {
-        dataPoints.unitsSold = data.unitsSold;
-        if (data.unitsSold > 1000) {
+      // Add reasoning based on velocity and liquidity
+      if (data.bricklinkSalesVelocity !== undefined) {
+        dataPoints.bricklinkSalesVelocity = data.bricklinkSalesVelocity;
+        if (data.bricklinkSalesVelocity > 1) {
           reasons.push(
-            `High sales volume (${data.unitsSold.toLocaleString()} units sold)`,
+            `High liquidity (${
+              data.bricklinkSalesVelocity.toFixed(2)
+            } sales/day)`,
           );
-        } else if (data.unitsSold > 100) {
+        } else if (data.bricklinkSalesVelocity > 0.1) {
           reasons.push(
-            `Moderate sales (${data.unitsSold.toLocaleString()} sold)`,
+            `Moderate liquidity (${
+              (data.bricklinkSalesVelocity * 30).toFixed(0)
+            } sales/month)`,
           );
-        } else if (data.unitsSold < 10) {
-          reasons.push("Low sales volume");
+        } else {
+          reasons.push("Low liquidity");
         }
       }
-    }
 
-    // 2. Bricklink resale activity
-    if (
-      data.bricklinkTimesSold !== undefined ||
-      data.bricklinkTotalQty !== undefined
-    ) {
+      if (data.bricklinkRecentSales30d !== undefined) {
+        dataPoints.bricklinkRecentSales30d = data.bricklinkRecentSales30d;
+        if (data.bricklinkRecentSales30d > 30) {
+          reasons.push(
+            `Active trading (${data.bricklinkRecentSales30d} sales in 30d)`,
+          );
+        }
+      }
+    } else if (hasLegacyBricklinkData) {
+      // Fallback to legacy Bricklink data with reduced weight
       const resaleScore = this.analyzeBricklinkActivity(
         data.bricklinkTimesSold,
         data.bricklinkTotalQty,
       );
-      scores.push({ score: resaleScore, weight: 0.25 });
+      scores.push({ score: resaleScore, weight: 0.30 });
 
       if (data.bricklinkTimesSold !== undefined) {
         dataPoints.bricklinkTimesSold = data.bricklinkTimesSold;
@@ -77,91 +88,97 @@ export class DemandAnalyzer extends BaseAnalyzer<DemandData> {
           reasons.push(
             `Active resale market (${data.bricklinkTimesSold} transactions)`,
           );
-        } else if (data.bricklinkTimesSold < 10) {
-          reasons.push("Limited resale activity on Bricklink");
         }
       }
     }
 
-    // 3. Community engagement (Reddit sentiment)
-    if (
-      data.redditPosts !== undefined ||
-      data.redditTotalScore !== undefined
-    ) {
+    // NEW: 2. Momentum & Trends (30% weight) - Like price/volume trends
+    if (hasPastSalesData && data.bricklinkPriceTrend) {
+      const momentumScore = this.analyzeMomentumTrends(data);
+      scores.push({ score: momentumScore, weight: 0.30 });
+
+      // Add reasoning based on trends
+      if (data.bricklinkPriceTrend === "increasing") {
+        reasons.push("Bullish price trend (increasing demand)");
+      } else if (data.bricklinkPriceTrend === "decreasing") {
+        reasons.push("Bearish price trend (weakening demand)");
+      }
+
+      if (data.bricklinkVolumeTrend === "increasing") {
+        reasons.push("Rising transaction volume");
+      }
+
+      if (data.bricklinkRSI !== undefined) {
+        dataPoints.bricklinkRSI = data.bricklinkRSI;
+        if (data.bricklinkRSI > 70) {
+          reasons.push(`Overbought (RSI: ${data.bricklinkRSI.toFixed(0)})`);
+        } else if (data.bricklinkRSI < 30) {
+          reasons.push(`Oversold (RSI: ${data.bricklinkRSI.toFixed(0)})`);
+        }
+      }
+    }
+
+    // 3. Market Depth - Legacy Bricklink activity (20% weight)
+    // Only if not already counted in liquidity section
+    if (!hasPastSalesData && hasLegacyBricklinkData) {
+      const resaleScore = this.analyzeBricklinkActivity(
+        data.bricklinkTimesSold,
+        data.bricklinkTotalQty,
+      );
+      scores.push({ score: resaleScore, weight: 0.30 });
+    }
+
+    // 4. Community Sentiment (10% weight) - Like analyst ratings
+    if (hasRedditData) {
       const communityScore = this.analyzeCommunitySentiment(
         data.redditPosts,
         data.redditAverageScore,
         data.redditTotalComments,
       );
-      scores.push({ score: communityScore, weight: 0.25 });
+      scores.push({ score: communityScore, weight: 0.10 });
 
       if (data.redditPosts !== undefined && data.redditPosts > 0) {
         dataPoints.redditPosts = data.redditPosts;
-        dataPoints.redditAverageScore = data.redditAverageScore;
-
         if (data.redditPosts > 20) {
-          reasons.push(
-            `Strong community interest (${data.redditPosts} Reddit posts)`,
-          );
-        } else if (data.redditPosts > 5) {
-          reasons.push(
-            `Moderate community discussion (${data.redditPosts} posts)`,
-          );
+          reasons.push(`Strong community buzz (${data.redditPosts} posts)`);
         }
-
-        if (
-          data.redditAverageScore !== undefined &&
-          data.redditAverageScore > 100
-        ) {
-          reasons.push(
-            `Positive community sentiment (avg ${
-              Math.round(data.redditAverageScore)
-            } upvotes)`,
-          );
-        }
-      } else {
-        reasons.push("No Reddit community discussion found");
       }
     }
 
-    // 4. Engagement metrics (views, likes, comments)
-    if (
-      data.viewCount !== undefined ||
-      data.likedCount !== undefined ||
-      data.commentCount !== undefined
-    ) {
-      const engagementScore = this.analyzeEngagement(
-        data.viewCount,
-        data.likedCount,
-        data.commentCount,
+    // 5. Retail Activity (5% weight) - Market awareness indicator
+    if (hasSalesData) {
+      const salesScore = this.analyzeSalesVelocity(
+        data.unitsSold,
+        data.lifetimeSold,
       );
-      scores.push({ score: engagementScore, weight: 0.2 });
+      scores.push({ score: salesScore, weight: 0.05 });
 
-      if (data.viewCount !== undefined && data.viewCount > 10000) {
-        dataPoints.viewCount = data.viewCount;
+      if (data.unitsSold !== undefined && data.unitsSold > 1000) {
+        dataPoints.unitsSold = data.unitsSold;
         reasons.push(
-          `High visibility (${(data.viewCount / 1000).toFixed(0)}K views)`,
+          `High retail awareness (${data.unitsSold.toLocaleString()} sold)`,
         );
-      }
-
-      if (data.likedCount !== undefined && data.likedCount > 500) {
-        dataPoints.likedCount = data.likedCount;
-        reasons.push(`Popular listing (${data.likedCount} likes)`);
       }
     }
 
     // Calculate final score
-    const finalScore = scores.length > 0 ? this.weightedAverage(scores) : 50; // Neutral if no data
+    const finalScore = scores.length > 0 ? this.weightedAverage(scores) : 50;
 
-    // Calculate confidence based on data availability
-    const confidence = this.calculateConfidence([
+    // Calculate confidence - boost if we have past sales data
+    const confidenceFactors = [
+      data.bricklinkPastSalesCount,
+      data.bricklinkSalesVelocity,
+      data.bricklinkPriceTrend,
       data.unitsSold,
-      data.lifetimeSold,
       data.bricklinkTimesSold,
       data.redditPosts,
-      data.viewCount,
-      data.likedCount,
-    ]);
+    ];
+    let confidence = this.calculateConfidence(confidenceFactors);
+
+    // Boost confidence significantly if we have rich past sales data
+    if (hasPastSalesData && data.bricklinkPastSalesCount! > 50) {
+      confidence = Math.min(1.0, confidence + 0.2); // +20% confidence boost
+    }
 
     return {
       value: Math.round(finalScore),
@@ -359,6 +376,223 @@ export class DemandAnalyzer extends BaseAnalyzer<DemandData> {
     }
 
     // Return average or neutral if no data
+    return scores.length > 0
+      ? scores.reduce((sum, s) => sum + s, 0) / scores.length
+      : 50;
+  }
+
+  /**
+   * NEW: Analyze liquidity and velocity metrics
+   * Inspired by trading volume analysis in stock markets
+   * Higher velocity = more liquid market = better for investment
+   */
+  private analyzeLiquidityVelocity(data: DemandData): number {
+    const scores: number[] = [];
+
+    // 1. Sales velocity score (transactions per day)
+    if (data.bricklinkSalesVelocity !== undefined) {
+      const velocity = data.bricklinkSalesVelocity;
+
+      // Scoring based on daily transaction rate
+      // >2/day = 90-100 (very high liquidity)
+      // 1-2/day = 80-90 (high liquidity)
+      // 0.5-1/day = 70-80 (good liquidity)
+      // 0.1-0.5/day = 50-70 (moderate)
+      // 0.03-0.1/day (1-3/month) = 30-50 (low)
+      // <0.03/day (<1/month) = 0-30 (very low)
+
+      if (velocity >= 2) {
+        scores.push(Math.min(100, 90 + (velocity - 2) * 5));
+      } else if (velocity >= 1) {
+        scores.push(80 + (velocity - 1) * 10);
+      } else if (velocity >= 0.5) {
+        scores.push(70 + (velocity - 0.5) * 20);
+      } else if (velocity >= 0.1) {
+        scores.push(50 + (velocity - 0.1) * 50);
+      } else if (velocity >= 0.03) {
+        scores.push(30 + (velocity - 0.03) * 285);
+      } else {
+        scores.push(velocity * 1000); // 0-30 range
+      }
+    }
+
+    // 2. Recent activity trend (weighted towards recent)
+    // Compare 30d vs 60d vs 90d to detect acceleration/deceleration
+    if (
+      data.bricklinkRecentSales30d !== undefined &&
+      data.bricklinkRecentSales90d !== undefined
+    ) {
+      const recent30d = data.bricklinkRecentSales30d;
+      const recent90d = data.bricklinkRecentSales90d;
+
+      // Normalize to per-30-day rates
+      const rate30d = recent30d;
+      const rate90d = recent90d / 3;
+
+      // Score based on recent acceleration
+      // Accelerating (30d > 90d avg) = bonus points
+      // Decelerating (30d < 90d avg) = penalty
+
+      const acceleration = rate30d / (rate90d || 1);
+
+      if (acceleration > 1.5) {
+        scores.push(90); // Strong acceleration
+      } else if (acceleration > 1.2) {
+        scores.push(75); // Moderate acceleration
+      } else if (acceleration > 0.8) {
+        scores.push(60); // Stable
+      } else if (acceleration > 0.5) {
+        scores.push(40); // Decelerating
+      } else {
+        scores.push(20); // Strongly decelerating
+      }
+    }
+
+    // 3. Average days between sales (inverse of velocity, but complementary)
+    if (data.bricklinkAvgDaysBetweenSales !== undefined) {
+      const daysBetween = data.bricklinkAvgDaysBetweenSales;
+
+      // Scoring based on time between transactions
+      // <1 day = 95-100 (excellent)
+      // 1-3 days = 80-95 (very good)
+      // 3-7 days = 65-80 (good)
+      // 7-30 days = 40-65 (moderate)
+      // >30 days = 0-40 (poor)
+
+      if (daysBetween < 1) {
+        scores.push(95 + (1 - daysBetween) * 5);
+      } else if (daysBetween < 3) {
+        scores.push(80 + (3 - daysBetween) * 7.5);
+      } else if (daysBetween < 7) {
+        scores.push(65 + (7 - daysBetween) * 3.75);
+      } else if (daysBetween < 30) {
+        scores.push(40 + (30 - daysBetween) * 1.1);
+      } else {
+        scores.push(Math.max(0, 40 - (daysBetween - 30) / 2));
+      }
+    }
+
+    // Return weighted average
+    return scores.length > 0
+      ? scores.reduce((sum, s) => sum + s, 0) / scores.length
+      : 50;
+  }
+
+  /**
+   * NEW: Analyze momentum and trend metrics
+   * Inspired by technical analysis in stock trading
+   * Considers price trends, volume trends, and RSI
+   */
+  private analyzeMomentumTrends(data: DemandData): number {
+    const scores: number[] = [];
+
+    // 1. Price trend direction (bullish/bearish/neutral)
+    if (data.bricklinkPriceTrend !== undefined) {
+      const trend = data.bricklinkPriceTrend;
+      const percentChange = data.bricklinkPriceChangePercent || 0;
+
+      if (trend === "increasing") {
+        // Bullish trend - positive for demand
+        // Higher percent change = stronger signal
+        if (percentChange > 20) {
+          scores.push(90); // Strong bullish
+        } else if (percentChange > 10) {
+          scores.push(75); // Moderate bullish
+        } else {
+          scores.push(60); // Weak bullish
+        }
+      } else if (trend === "stable") {
+        scores.push(50); // Neutral
+      } else {
+        // Bearish trend - negative for demand
+        if (percentChange < -20) {
+          scores.push(10); // Strong bearish
+        } else if (percentChange < -10) {
+          scores.push(25); // Moderate bearish
+        } else {
+          scores.push(40); // Weak bearish
+        }
+      }
+    }
+
+    // 2. Volume trend (increasing volume = stronger demand signal)
+    if (data.bricklinkVolumeTrend !== undefined) {
+      const volumeTrend = data.bricklinkVolumeTrend;
+
+      if (volumeTrend === "increasing") {
+        scores.push(80); // Rising volume confirms trend strength
+      } else if (volumeTrend === "stable") {
+        scores.push(50); // Stable volume
+      } else {
+        scores.push(30); // Declining volume weakens trend
+      }
+    }
+
+    // 3. Relative Strength Index (RSI)
+    // RSI 30-70 is healthy range
+    // >70 = overbought (may correct downward)
+    // <30 = oversold (may bounce upward)
+    if (data.bricklinkRSI !== undefined) {
+      const rsi = data.bricklinkRSI;
+
+      if (rsi >= 50 && rsi <= 70) {
+        scores.push(85); // Strong, not overbought
+      } else if (rsi > 70 && rsi <= 80) {
+        scores.push(70); // Overbought, caution
+      } else if (rsi > 80) {
+        scores.push(50); // Very overbought, high risk
+      } else if (rsi >= 30 && rsi < 50) {
+        scores.push(60); // Weak but not oversold
+      } else if (rsi >= 20 && rsi < 30) {
+        scores.push(55); // Oversold, potential opportunity
+      } else {
+        scores.push(40); // Very oversold
+      }
+    }
+
+    // 4. Price momentum (linear regression slope)
+    if (data.bricklinkPriceMomentum !== undefined) {
+      const momentum = data.bricklinkPriceMomentum;
+
+      // Positive momentum = bullish, negative = bearish
+      // Normalized scoring
+      if (momentum > 100) {
+        scores.push(90); // Strong positive momentum
+      } else if (momentum > 50) {
+        scores.push(75);
+      } else if (momentum > 0) {
+        scores.push(60);
+      } else if (momentum > -50) {
+        scores.push(40);
+      } else if (momentum > -100) {
+        scores.push(25);
+      } else {
+        scores.push(10); // Strong negative momentum
+      }
+    }
+
+    // 5. Price volatility (lower is better for investment)
+    if (data.bricklinkPriceVolatility !== undefined) {
+      const volatility = data.bricklinkPriceVolatility;
+
+      // Coefficient of variation: 0-1+ range
+      // <0.1 = very stable (90-100)
+      // 0.1-0.2 = stable (75-90)
+      // 0.2-0.4 = moderate volatility (50-75)
+      // >0.4 = high volatility (0-50)
+
+      if (volatility < 0.1) {
+        scores.push(90 + (0.1 - volatility) * 100);
+      } else if (volatility < 0.2) {
+        scores.push(75 + (0.2 - volatility) * 150);
+      } else if (volatility < 0.4) {
+        scores.push(50 + (0.4 - volatility) * 125);
+      } else {
+        scores.push(Math.max(0, 50 - (volatility - 0.4) * 100));
+      }
+    }
+
+    // Return weighted average
     return scores.length > 0
       ? scores.reduce((sum, s) => sum + s, 0) / scores.length
       : 50;

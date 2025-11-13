@@ -24,6 +24,7 @@ import type {
   IProductRepository,
   IRedditRepository,
   IRetirementRepository,
+  PastSalesStatistics,
 } from "./repositories/IRepository.ts";
 
 export class DataAggregationService {
@@ -45,24 +46,35 @@ export class DataAggregationService {
     }
 
     // Fetch related data in parallel (only if LEGO set number exists)
-    const [bricklinkData, redditData, retirementData] = await Promise.all([
-      product.legoSetNumber
-        ? this.bricklinkRepo.findByLegoSetNumber(product.legoSetNumber)
-        : Promise.resolve(null),
-      product.legoSetNumber
-        ? this.redditRepo.findByLegoSetNumber(product.legoSetNumber)
-        : Promise.resolve(null),
-      product.legoSetNumber
-        ? this.retirementRepo.findByLegoSetNumber(product.legoSetNumber)
-        : Promise.resolve(null),
-    ]);
+    const [bricklinkData, redditData, retirementData, pastSalesStats] =
+      await Promise.all([
+        product.legoSetNumber
+          ? this.bricklinkRepo.findByLegoSetNumber(product.legoSetNumber)
+          : Promise.resolve(null),
+        product.legoSetNumber
+          ? this.redditRepo.findByLegoSetNumber(product.legoSetNumber)
+          : Promise.resolve(null),
+        product.legoSetNumber
+          ? this.retirementRepo.findByLegoSetNumber(product.legoSetNumber)
+          : Promise.resolve(null),
+        product.legoSetNumber
+          ? this.bricklinkRepo.getPastSalesStatistics(
+            `S-${product.legoSetNumber}`,
+          )
+          : Promise.resolve(null),
+      ]);
 
     // Build analysis input using pure transformation functions
     return {
       productId: product.productId,
       name: product.name || "Unknown Product",
       pricing: this.buildPricingData(product, bricklinkData),
-      demand: this.buildDemandData(product, bricklinkData, redditData),
+      demand: this.buildDemandData(
+        product,
+        bricklinkData,
+        redditData,
+        pastSalesStats,
+      ),
       availability: this.buildAvailabilityData(product, retirementData),
       quality: this.buildQualityData(product, retirementData),
     };
@@ -70,7 +82,7 @@ export class DataAggregationService {
 
   /**
    * Aggregate data for multiple products (BATCH OPERATION)
-   * Solves N+1 query problem by fetching all related data in 3 queries instead of 3*N
+   * Solves N+1 query problem by fetching all related data in 4 queries instead of 4*N
    * @param products - Array of products to aggregate data for
    * @returns Map of productId -> ProductAnalysisInput
    */
@@ -86,12 +98,17 @@ export class DataAggregationService {
 
     const uniqueSetNumbers = Array.from(new Set(legoSetNumbers));
 
-    // Batch fetch all related data in parallel (3 queries instead of 3*N!)
-    const [bricklinkMap, redditMap, retirementMap] = await Promise.all([
-      this.bricklinkRepo.findByLegoSetNumbers(uniqueSetNumbers),
-      this.redditRepo.findByLegoSetNumbers(uniqueSetNumbers),
-      this.retirementRepo.findByLegoSetNumbers(uniqueSetNumbers),
-    ]);
+    // Convert set numbers to Bricklink item IDs for past sales
+    const bricklinkItemIds = uniqueSetNumbers.map((num) => `S-${num}`);
+
+    // Batch fetch all related data in parallel (4 queries instead of 4*N!)
+    const [bricklinkMap, redditMap, retirementMap, pastSalesMap] = await Promise
+      .all([
+        this.bricklinkRepo.findByLegoSetNumbers(uniqueSetNumbers),
+        this.redditRepo.findByLegoSetNumbers(uniqueSetNumbers),
+        this.retirementRepo.findByLegoSetNumbers(uniqueSetNumbers),
+        this.bricklinkRepo.getPastSalesStatisticsBatch(bricklinkItemIds),
+      ]);
 
     console.info(
       `[DataAggregationService] Batch aggregation complete:`,
@@ -101,6 +118,7 @@ export class DataAggregationService {
         bricklinkHits: bricklinkMap.size,
         redditHits: redditMap.size,
         retirementHits: retirementMap.size,
+        pastSalesHits: pastSalesMap.size,
       },
     );
 
@@ -118,12 +136,20 @@ export class DataAggregationService {
       const retirementData = product.legoSetNumber
         ? retirementMap.get(product.legoSetNumber) || null
         : null;
+      const pastSalesStats = product.legoSetNumber
+        ? pastSalesMap.get(`S-${product.legoSetNumber}`) || null
+        : null;
 
       const analysisInput: ProductAnalysisInput = {
         productId: product.productId,
         name: product.name || "Unknown Product",
         pricing: this.buildPricingData(product, bricklinkData),
-        demand: this.buildDemandData(product, bricklinkData, redditData),
+        demand: this.buildDemandData(
+          product,
+          bricklinkData,
+          redditData,
+          pastSalesStats,
+        ),
         availability: this.buildAvailabilityData(product, retirementData),
         quality: this.buildQualityData(product, retirementData),
       };
@@ -163,8 +189,10 @@ export class DataAggregationService {
     product: Product,
     bricklinkData: BricklinkItem | null,
     redditData: RedditSearchResult | null,
+    pastSalesStats: PastSalesStatistics | null,
   ): DemandData {
-    return {
+    // Base data from product and legacy Bricklink
+    const baseData: DemandData = {
       unitsSold: this.safeNumber(product.unitsSold),
       lifetimeSold: this.safeNumber(product.lifetimeSold),
       viewCount: this.safeNumber(product.view_count),
@@ -178,6 +206,76 @@ export class DataAggregationService {
         : undefined,
       ...this.normalizeRedditData(redditData),
     };
+
+    // Add market-driven metrics from past sales statistics
+    if (pastSalesStats && pastSalesStats.totalTransactions > 0) {
+      const newMetrics = pastSalesStats.new;
+      const usedMetrics = pastSalesStats.used;
+
+      // Calculate weighted metrics (70% new, 30% used for investment focus)
+      const totalWeight = newMetrics.transactionCount +
+        usedMetrics.transactionCount;
+      const newWeight = totalWeight > 0
+        ? newMetrics.transactionCount / totalWeight
+        : 0;
+
+      return {
+        ...baseData,
+        // Total metrics
+        bricklinkPastSalesCount: pastSalesStats.totalTransactions,
+
+        // Liquidity & Velocity (weighted average with preference for 'new')
+        bricklinkSalesVelocity: this.weightedAverage(
+          newMetrics.salesVelocity,
+          usedMetrics.salesVelocity,
+          0.7, // 70% weight for new
+        ),
+        bricklinkAvgDaysBetweenSales: this.weightedAverage(
+          newMetrics.avgDaysBetweenSales,
+          usedMetrics.avgDaysBetweenSales,
+          0.7,
+        ),
+
+        // Recent activity (combine new and used)
+        bricklinkRecentSales30d: newMetrics.recent30d + usedMetrics.recent30d,
+        bricklinkRecentSales60d: newMetrics.recent60d + usedMetrics.recent60d,
+        bricklinkRecentSales90d: newMetrics.recent90d + usedMetrics.recent90d,
+
+        // Price metrics (prefer new condition for investment)
+        bricklinkAvgPrice: newMetrics.transactionCount > 0
+          ? newMetrics.avgPrice
+          : usedMetrics.avgPrice,
+        bricklinkMedianPrice: newMetrics.transactionCount > 0
+          ? newMetrics.medianPrice
+          : usedMetrics.medianPrice,
+        bricklinkPriceVolatility: newMetrics.transactionCount > 0
+          ? newMetrics.volatilityIndex
+          : usedMetrics.volatilityIndex,
+
+        // Trend analysis (prefer new condition trends)
+        bricklinkPriceTrend: newMetrics.transactionCount > 5
+          ? newMetrics.trends.last90Days.direction
+          : usedMetrics.trends.last90Days.direction,
+        bricklinkPriceMomentum: newMetrics.transactionCount > 5
+          ? newMetrics.trends.last90Days.momentum
+          : usedMetrics.trends.last90Days.momentum,
+        bricklinkPriceChangePercent: newMetrics.transactionCount > 5
+          ? newMetrics.trends.last90Days.percentChange
+          : usedMetrics.trends.last90Days.percentChange,
+        bricklinkVolumeTrend: newMetrics.transactionCount > 5
+          ? newMetrics.trends.last90Days.volumeTrend
+          : usedMetrics.trends.last90Days.volumeTrend,
+
+        // Market strength indicators (prefer new condition)
+        bricklinkRSI: pastSalesStats.rsi.new ?? pastSalesStats.rsi.used ??
+          undefined,
+
+        // Condition weighting
+        bricklinkNewConditionWeight: newWeight,
+      };
+    }
+
+    return baseData;
   }
 
   /**
@@ -380,5 +478,20 @@ export class DataAggregationService {
     const days = Math.floor(diff / (1000 * 60 * 60 * 24));
 
     return days > 0 ? days : undefined;
+  }
+
+  /**
+   * Calculate weighted average of two values
+   * @param value1 - First value
+   * @param value2 - Second value
+   * @param weight1 - Weight for first value (0-1), weight2 will be (1 - weight1)
+   */
+  private weightedAverage(
+    value1: number,
+    value2: number,
+    weight1: number,
+  ): number {
+    const weight2 = 1 - weight1;
+    return value1 * weight1 + value2 * weight2;
   }
 }

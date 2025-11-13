@@ -7,7 +7,11 @@
 import { eq, inArray } from "drizzle-orm";
 import { db } from "../../../db/client.ts";
 import { type BricklinkItem, bricklinkItems } from "../../../db/schema.ts";
-import type { IBricklinkRepository } from "./IRepository.ts";
+import type {
+  IBricklinkRepository,
+  PastSalesStatistics,
+} from "./IRepository.ts";
+import { getBricklinkRepository } from "../../../services/bricklink/BricklinkRepository.ts";
 
 export class BricklinkRepository implements IBricklinkRepository {
   /**
@@ -75,6 +79,66 @@ export class BricklinkRepository implements IBricklinkRepository {
         error instanceof Error ? error.message : error,
       );
       return new Map(); // Return empty map on error
+    }
+  }
+
+  /**
+   * Get past sales statistics for an item
+   * Delegates to BricklinkRepository for actual data access
+   */
+  async getPastSalesStatistics(
+    itemId: string,
+  ): Promise<PastSalesStatistics | null> {
+    try {
+      const repo = getBricklinkRepository();
+      const stats = await repo.getPastSalesStatistics(itemId);
+      return stats;
+    } catch (error) {
+      console.warn(
+        `[BricklinkRepository] Failed to fetch past sales statistics for ${itemId}:`,
+        error instanceof Error ? error.message : error,
+      );
+      return null;
+    }
+  }
+
+  /**
+   * Get past sales statistics for multiple items (batch operation)
+   * Returns a map of itemId -> PastSalesStatistics for O(1) lookup
+   * Solves N+1 query problem for past sales data
+   */
+  async getPastSalesStatisticsBatch(
+    itemIds: string[],
+  ): Promise<Map<string, PastSalesStatistics>> {
+    if (itemIds.length === 0) return new Map();
+
+    try {
+      const repo = getBricklinkRepository();
+      const resultMap = new Map<string, PastSalesStatistics>();
+
+      // Fetch statistics for each item
+      // Note: This is parallelized but could be optimized further with a true batch query
+      const results = await Promise.allSettled(
+        itemIds.map(async (itemId) => {
+          const stats = await repo.getPastSalesStatistics(itemId);
+          return { itemId, stats };
+        }),
+      );
+
+      // Build result map from successful fetches
+      for (const result of results) {
+        if (result.status === "fulfilled" && result.value.stats) {
+          resultMap.set(result.value.itemId, result.value.stats);
+        }
+      }
+
+      return resultMap;
+    } catch (error) {
+      console.warn(
+        `[BricklinkRepository] Failed to batch fetch past sales statistics (count: ${itemIds.length}):`,
+        error instanceof Error ? error.message : error,
+      );
+      return new Map();
     }
   }
 }
