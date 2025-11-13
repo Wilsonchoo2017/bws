@@ -285,6 +285,16 @@ export const redditSearchResults = pgTable(
     totalPosts: integer("total_posts").notNull().default(0),
     posts: jsonb("posts"), // Array of post objects with title, url, score, num_comments, etc.
     searchedAt: timestamp("searched_at").defaultNow().notNull(),
+
+    // Scheduling fields (similar to bricklink_items)
+    watchStatus: watchStatusEnum("watch_status").default("active").notNull(),
+    scrapeIntervalDays: integer("scrape_interval_days").default(30).notNull(),
+    lastScrapedAt: timestamp("last_scraped_at"),
+    nextScrapeAt: timestamp("next_scrape_at"),
+
+    // Metadata
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
   },
   (table) => ({
     // Index for looking up by LEGO set number
@@ -293,6 +303,12 @@ export const redditSearchResults = pgTable(
     ),
     // Index for time-based queries
     searchedAtIdx: index("idx_reddit_searched_at").on(table.searchedAt),
+    // Index for filtering by watch status
+    watchStatusIdx: index("idx_reddit_watch_status").on(table.watchStatus),
+    // Index for efficient scraping queue queries
+    nextScrapeAtIdx: index("idx_reddit_next_scrape_at").on(
+      table.nextScrapeAt,
+    ),
   }),
 );
 
