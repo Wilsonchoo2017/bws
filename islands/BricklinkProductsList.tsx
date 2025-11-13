@@ -6,7 +6,6 @@
 import { useEffect, useState } from "preact/hooks";
 import { useSignal } from "@preact/signals";
 import SyncStatusBadge from "./components/SyncStatusBadge.tsx";
-import QueueHealthBanner from "./components/QueueHealthBanner.tsx";
 import {
   buildBricklinkUrl,
   determineSyncStatus,
@@ -43,47 +42,9 @@ interface BricklinkItem {
   updatedAt: string;
 }
 
-interface QueueJob {
-  id: string;
-  name: string;
-  data: {
-    itemId?: string;
-    url?: string;
-  };
-  state?: string;
-  failedReason?: string;
-  finishedOn?: number;
-}
-
-interface QueueStats {
-  queue: {
-    name: string;
-    counts: {
-      waiting: number;
-      active: number;
-      completed: number;
-      failed: number;
-      delayed: number;
-    };
-  };
-  jobs: {
-    waiting: QueueJob[];
-    active: QueueJob[];
-    completed: QueueJob[];
-    failed: QueueJob[];
-  };
-  workerStatus?: {
-    isAlive: boolean;
-    isPaused: boolean;
-    isRunning: boolean;
-  };
-}
-
 export default function BricklinkProductsList() {
   const [items, setItems] = useState<BricklinkItem[]>([]);
-  const [queueStats, setQueueStats] = useState<QueueStats | null>(null);
   const [isLoadingItems, setIsLoadingItems] = useState(true);
-  const [isLoadingQueue, setIsLoadingQueue] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   // Filters and search
@@ -126,34 +87,9 @@ export default function BricklinkProductsList() {
     }
   };
 
-  // Fetch queue status
-  const fetchQueueStats = async () => {
-    setIsLoadingQueue(true);
-
-    try {
-      const response = await fetch("/api/scrape-queue-status");
-      if (response.ok) {
-        const data = await response.json();
-        setQueueStats(data);
-      } else {
-        setQueueStats(null);
-      }
-    } catch (err) {
-      console.error("Queue stats fetch error:", err);
-      setQueueStats(null);
-    } finally {
-      setIsLoadingQueue(false);
-    }
-  };
-
   // Initial load
   useEffect(() => {
     fetchItems();
-    fetchQueueStats();
-
-    // Auto-refresh queue stats every 30 seconds
-    const interval = setInterval(fetchQueueStats, 30000);
-    return () => clearInterval(interval);
   }, []);
 
   // Refetch when filters change
@@ -181,9 +117,6 @@ export default function BricklinkProductsList() {
       setToastMessage(
         `✓ Scraping job enqueued for ${item.itemId} (Job ID: ${result.job.id})`,
       );
-
-      // Refresh queue stats immediately
-      await fetchQueueStats();
 
       // Clear toast after 5 seconds
       setTimeout(() => setToastMessage(null), 5000);
@@ -225,9 +158,6 @@ export default function BricklinkProductsList() {
         `✓ Reddit search enqueued for ${item.itemId} (Job ID: ${result.job.id})`,
       );
 
-      // Refresh queue stats immediately
-      await fetchQueueStats();
-
       // Clear toast after 5 seconds
       setTimeout(() => setToastMessage(null), 5000);
     } catch (err) {
@@ -258,11 +188,11 @@ export default function BricklinkProductsList() {
       }
 
       // Sync status filter
-      if (syncStatusFilter.value !== "all" && queueStats) {
+      if (syncStatusFilter.value !== "all") {
         const status = determineSyncStatus(item, {
-          active: queueStats.jobs.active,
-          waiting: queueStats.jobs.waiting,
-          failed: queueStats.jobs.failed,
+          active: [],
+          waiting: [],
+          failed: [],
         });
         if (status !== syncStatusFilter.value) return false;
       }
@@ -333,13 +263,6 @@ export default function BricklinkProductsList() {
           </div>
         </div>
       )}
-
-      {/* Queue Health Banner */}
-      <QueueHealthBanner
-        stats={queueStats}
-        isLoading={isLoadingQueue}
-        onRefresh={fetchQueueStats}
-      />
 
       {/* Filters and Search */}
       <div class="card bg-base-100 shadow-xl mb-6">
@@ -495,13 +418,11 @@ export default function BricklinkProductsList() {
             </thead>
             <tbody>
               {paginatedItems.map((item) => {
-                const syncStatus = queueStats
-                  ? determineSyncStatus(item, {
-                    active: queueStats.jobs.active,
-                    waiting: queueStats.jobs.waiting,
-                    failed: queueStats.jobs.failed,
-                  })
-                  : "up_to_date" as SyncStatus;
+                const syncStatus = determineSyncStatus(item, {
+                  active: [],
+                  waiting: [],
+                  failed: [],
+                });
 
                 const isSyncing = syncingItems.has(item.itemId);
                 const isInQueue = syncStatus === "scraping" ||

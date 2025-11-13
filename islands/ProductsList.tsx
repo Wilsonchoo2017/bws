@@ -3,7 +3,6 @@ import { useEffect, useState } from "preact/hooks";
 import { formatDate, formatNumber, formatPrice } from "../utils/formatters.ts";
 import { PAGINATION } from "../constants/app-config.ts";
 import type { ProductSource } from "../db/schema.ts";
-import QueueHealthBanner from "./components/QueueHealthBanner.tsx";
 
 interface Product {
   id: number;
@@ -65,40 +64,6 @@ interface ApiResponse {
   pagination: Pagination;
 }
 
-interface JobInfo {
-  id: string;
-  data?: {
-    url?: string;
-    itemId?: string;
-    itemType?: string;
-  };
-  finishedOn?: number;
-}
-
-interface QueueStats {
-  queue: {
-    name: string;
-    counts: {
-      waiting: number;
-      active: number;
-      completed: number;
-      failed: number;
-      delayed: number;
-    };
-  };
-  jobs: {
-    waiting: JobInfo[];
-    active: JobInfo[];
-    completed: JobInfo[];
-    failed: JobInfo[];
-  };
-  workerStatus?: {
-    isAlive: boolean;
-    isPaused: boolean;
-    isRunning: boolean;
-  };
-}
-
 type SortBy = "price" | "sold" | "createdAt" | "updatedAt";
 type SortOrder = "asc" | "desc";
 
@@ -107,10 +72,6 @@ export default function ProductsList() {
   const pagination = useSignal<Pagination | null>(null);
   const isLoading = useSignal(false);
   const error = useSignal<string | null>(null);
-
-  // Queue stats state
-  const [queueStats, setQueueStats] = useState<QueueStats | null>(null);
-  const [isLoadingQueue, setIsLoadingQueue] = useState(true);
 
   // Filter and sort state
   const searchQuery = useSignal("");
@@ -182,26 +143,6 @@ export default function ProductsList() {
     }
   };
 
-  // Fetch queue status
-  const fetchQueueStats = async () => {
-    setIsLoadingQueue(true);
-
-    try {
-      const response = await fetch("/api/scrape-queue-status");
-      if (response.ok) {
-        const data = await response.json();
-        setQueueStats(data);
-      } else {
-        setQueueStats(null);
-      }
-    } catch (err) {
-      console.error("Queue stats fetch error:", err);
-      setQueueStats(null);
-    } finally {
-      setIsLoadingQueue(false);
-    }
-  };
-
   // Handle manual product add
   const handleAddProduct = async () => {
     const setNumber = addLegoSetNumber.value.trim();
@@ -241,15 +182,13 @@ export default function ProductsList() {
 
       // Show success message with job info
       addSuccess.value = data.message ||
-        "Scraping job enqueued! Data will appear once scraping completes.";
+        "Product added successfully! Data will appear once scraping completes.";
       addLegoSetNumber.value = "";
 
       // Close modal and refresh after showing success
       setTimeout(() => {
         showAddModal.value = false;
         addSuccess.value = null;
-        // Refresh queue stats to show the new job
-        fetchQueueStats();
       }, 3000);
     } catch (err) {
       addError.value = err instanceof Error
@@ -280,13 +219,6 @@ export default function ProductsList() {
     sortOrder.value,
     currentPage.value,
   ]);
-
-  // Fetch queue stats on mount and auto-refresh every 30 seconds
-  useEffect(() => {
-    fetchQueueStats();
-    const interval = setInterval(fetchQueueStats, 30000);
-    return () => clearInterval(interval);
-  }, []);
 
   // Get badge color based on sold volume
   const getSoldBadgeColor = (unitsSold: number | null): string => {
@@ -375,13 +307,6 @@ export default function ProductsList() {
   return (
     <div class="card bg-base-100 shadow-xl">
       <div class="card-body">
-        {/* Queue Health Banner */}
-        <QueueHealthBanner
-          stats={queueStats}
-          isLoading={isLoadingQueue}
-          onRefresh={fetchQueueStats}
-        />
-
         {/* Header with Add Button */}
         <div class="flex justify-between items-center mb-4">
           <h2 class="text-xl font-semibold">Products</h2>
