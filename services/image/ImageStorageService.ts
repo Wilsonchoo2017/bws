@@ -1,15 +1,21 @@
 /**
  * ImageStorageService
  *
- * Responsible for storing images to local filesystem.
+ * Responsible for storing images to local filesystem with distributed file locking.
  * Generates unique filenames and manages directory structure.
  *
  * Single Responsibility Principle: Only handles storage, not downloading.
  * Dependency Inversion Principle: Could be swapped with cloud storage implementation.
+ *
+ * Features:
+ * - Distributed file locking to prevent concurrent writes across workers
+ * - Content-based filename generation for automatic deduplication
+ * - Atomic file operations with Redis coordination
  */
 
 import { ensureDir } from "https://deno.land/std@0.208.0/fs/ensure_dir.ts";
 import { join } from "https://deno.land/std@0.208.0/path/join.ts";
+import { getFileLockManager } from "../../utils/FileLockManager.ts";
 
 export interface StorageResult {
   relativePath: string; // Path relative to static directory (for DB storage)
@@ -28,12 +34,13 @@ export class ImageStorageService {
   private readonly publicPath: string;
 
   constructor(options: StorageOptions = {}) {
-    this.baseDir = options.baseDir || join(Deno.cwd(), "static", "images", "products");
+    this.baseDir = options.baseDir ||
+      join(Deno.cwd(), "static", "images", "products");
     this.publicPath = options.publicPath || "/images/products";
   }
 
   /**
-   * Stores an image to the filesystem
+   * Stores an image to the filesystem with distributed file locking
    * @param imageData - Raw image data
    * @param originalUrl - Original URL (used for generating hash-based filename)
    * @param productId - Optional product ID for directory organization
@@ -48,27 +55,47 @@ export class ImageStorageService {
     const filename = await this.generateFilename(originalUrl, extension);
 
     // Determine storage directory
-    const storageDir = productId
-      ? join(this.baseDir, productId)
-      : this.baseDir;
-
-    // Ensure directory exists
-    await ensureDir(storageDir);
+    const storageDir = productId ? join(this.baseDir, productId) : this.baseDir;
 
     // Full file path
     const absolutePath = join(storageDir, filename);
 
-    // Check if file already exists (deduplication)
-    if (await this.fileExists(absolutePath)) {
-      console.log(`Image already exists, skipping: ${filename}`);
-      return this.createStorageResult(absolutePath, storageDir, filename, productId);
-    }
+    // Use file lock to prevent concurrent writes of the same file
+    const lockManager = getFileLockManager();
+    return await lockManager.withLock(
+      absolutePath,
+      async () => {
+        // Check if file already exists (deduplication)
+        // Note: Double-check inside lock to handle race condition
+        if (await this.fileExists(absolutePath)) {
+          console.log(`Image already exists, skipping: ${filename}`);
+          return this.createStorageResult(
+            absolutePath,
+            storageDir,
+            filename,
+            productId,
+          );
+        }
 
-    // Write file to disk
-    await Deno.writeFile(absolutePath, imageData);
-    console.log(`Image stored: ${absolutePath}`);
+        // Ensure directory exists
+        await ensureDir(storageDir);
 
-    return this.createStorageResult(absolutePath, storageDir, filename, productId);
+        // Write file to disk
+        await Deno.writeFile(absolutePath, imageData);
+        console.log(`Image stored: ${absolutePath}`);
+
+        return this.createStorageResult(
+          absolutePath,
+          storageDir,
+          filename,
+          productId,
+        );
+      },
+      {
+        timeoutMs: 10000, // Wait up to 10 seconds for lock
+        expiryMs: 30000, // Lock expires after 30 seconds
+      },
+    );
   }
 
   /**
@@ -102,7 +129,11 @@ export class ImageStorageService {
    * Deletes an image from the filesystem
    */
   async delete(relativePath: string): Promise<void> {
-    const absolutePath = join(this.baseDir, "..", relativePath.replace(this.publicPath, ""));
+    const absolutePath = join(
+      this.baseDir,
+      "..",
+      relativePath.replace(this.publicPath, ""),
+    );
 
     try {
       await Deno.remove(absolutePath);
@@ -144,7 +175,9 @@ export class ImageStorageService {
     const data = encoder.encode(url);
     const hashBuffer = await crypto.subtle.digest("SHA-256", data);
     const hashArray = Array.from(new Uint8Array(hashBuffer));
-    const hashHex = hashArray.map((b) => b.toString(16).padStart(2, "0")).join("");
+    const hashHex = hashArray.map((b) => b.toString(16).padStart(2, "0")).join(
+      "",
+    );
 
     // Use first 16 characters of hash for filename
     const shortHash = hashHex.substring(0, 16);
@@ -213,7 +246,9 @@ export class ImageStorageService {
   /**
    * Recursively walks a directory
    */
-  private async *walkDir(dir: string): AsyncGenerator<{ path: string; isFile: boolean }> {
+  private async *walkDir(
+    dir: string,
+  ): AsyncGenerator<{ path: string; isFile: boolean }> {
     try {
       for await (const entry of Deno.readDir(dir)) {
         const path = join(dir, entry.name);

@@ -82,16 +82,54 @@ export class BricklinkRepository {
   }
 
   /**
-   * Update an existing item
+   * Update an existing item with optimistic locking
+   * @param itemId - The item ID to update
+   * @param data - The data to update
+   * @param expectedUpdatedAt - Optional timestamp for optimistic locking
+   * @returns Updated item or undefined if update failed due to conflict
+   * @throws Error if item not found or concurrent update detected
    */
   async update(
     itemId: string,
     data: UpdateBricklinkItemData,
+    expectedUpdatedAt?: Date,
   ): Promise<BricklinkItem | undefined> {
+    const now = new Date();
+
+    // If optimistic locking is requested, check updatedAt timestamp
+    if (expectedUpdatedAt) {
+      const [updated] = await db.update(bricklinkItems)
+        .set({
+          ...data,
+          updatedAt: now,
+        })
+        .where(
+          and(
+            eq(bricklinkItems.itemId, itemId),
+            eq(bricklinkItems.updatedAt, expectedUpdatedAt),
+          ),
+        )
+        .returning();
+
+      if (!updated) {
+        // Either item doesn't exist or updatedAt doesn't match (concurrent update)
+        const existing = await this.findByItemId(itemId);
+        if (!existing) {
+          throw new Error(`Item ${itemId} not found`);
+        }
+        throw new Error(
+          `Concurrent update detected for item ${itemId}. Expected updatedAt: ${expectedUpdatedAt.toISOString()}, actual: ${existing.updatedAt.toISOString()}`,
+        );
+      }
+
+      return updated;
+    }
+
+    // No optimistic locking - standard update
     const [updated] = await db.update(bricklinkItems)
       .set({
         ...data,
-        updatedAt: new Date(),
+        updatedAt: now,
       })
       .where(eq(bricklinkItems.itemId, itemId))
       .returning();
