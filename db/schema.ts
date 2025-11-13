@@ -9,6 +9,7 @@ import {
   serial,
   text,
   timestamp,
+  unique,
   varchar,
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
@@ -312,6 +313,11 @@ export const redditSearchResults = pgTable(
     // Index for efficient scraping queue queries
     nextScrapeAtIdx: index("idx_reddit_next_scrape_at").on(
       table.nextScrapeAt,
+    ),
+    // Unique constraint to prevent duplicate search results for same set/subreddit
+    uniqueSetSubreddit: unique("unique_lego_set_subreddit").on(
+      table.legoSetNumber,
+      table.subreddit,
     ),
   }),
 );

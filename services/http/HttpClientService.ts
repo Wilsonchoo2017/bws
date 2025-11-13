@@ -48,27 +48,41 @@ export class HttpClientService {
   private browser: Browser | null = null;
   private page: Page | null = null;
   private isInitialized = false;
+  private initPromise: Promise<void> | null = null;
 
   /**
    * Initialize the browser instance
+   * Thread-safe: Multiple concurrent calls will wait for the same initialization
    */
   async initialize(): Promise<void> {
+    // If already initialized, return immediately
     if (this.isInitialized) {
       return;
     }
 
-    try {
-      this.browser = await puppeteer.launch({
-        headless: BROWSER_CONFIG.HEADLESS,
-        args: [...BROWSER_CONFIG.ARGS],
-      });
-
-      this.isInitialized = true;
-      console.log("✅ HttpClientService initialized successfully");
-    } catch (error) {
-      console.error("❌ Failed to initialize HttpClientService:", error);
-      throw new Error(`Browser initialization failed: ${error.message}`);
+    // If initialization is in progress, wait for it
+    if (this.initPromise) {
+      return this.initPromise;
     }
+
+    // Start initialization and store the promise
+    this.initPromise = (async () => {
+      try {
+        this.browser = await puppeteer.launch({
+          headless: BROWSER_CONFIG.HEADLESS,
+          args: [...BROWSER_CONFIG.ARGS],
+        });
+
+        this.isInitialized = true;
+        console.log("✅ HttpClientService initialized successfully");
+      } catch (error) {
+        console.error("❌ Failed to initialize HttpClientService:", error);
+        this.initPromise = null; // Reset so initialization can be retried
+        throw new Error(`Browser initialization failed: ${error.message}`);
+      }
+    })();
+
+    return this.initPromise;
   }
 
   /**

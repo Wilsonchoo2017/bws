@@ -15,13 +15,13 @@ export const REDIS_CONFIG = {
 } as const;
 
 /**
- * Rate limiting configuration - Conservative approach (2-5 minutes per item)
+ * Rate limiting configuration - Balanced approach (10-30 seconds per item)
  */
 export const RATE_LIMIT_CONFIG = {
-  /** Minimum delay between requests in milliseconds (2 minutes) */
-  MIN_DELAY_MS: 2 * 60 * 1000,
-  /** Maximum delay between requests in milliseconds (5 minutes) */
-  MAX_DELAY_MS: 5 * 60 * 1000,
+  /** Minimum delay between requests in milliseconds (10 seconds) */
+  MIN_DELAY_MS: 10 * 1000,
+  /** Maximum delay between requests in milliseconds (30 seconds) */
+  MAX_DELAY_MS: 30 * 1000,
   /** Maximum concurrent scraping jobs */
   MAX_CONCURRENT_JOBS: 1,
   /** Maximum requests per hour (conservative) */
@@ -193,10 +193,10 @@ export const QUEUE_CONFIG = {
       age: 604800, // Keep failed jobs for 7 days
     },
   },
-  /** Worker concurrency */
-  WORKER_CONCURRENCY: 1, // Process one job at a time
+  /** Worker concurrency - Allow multiple jobs for different domains to run in parallel */
+  WORKER_CONCURRENCY: 3, // Process up to 3 jobs concurrently (rate limiter enforces per-domain limits)
   /** Lock duration for jobs (must be longer than expected job duration) */
-  LOCK_DURATION: 900000, // 15 minutes (BrickLink scraping takes 5-12 min with rate limiting: 2-5 min × 2 requests + processing)
+  LOCK_DURATION: 300000, // 5 minutes (BrickLink scraping takes ~20-60s with rate limiting: 10-30s × 2 requests + processing)
   /** Lock renewal interval (renew lock every 30s to prevent stalling) */
   LOCK_RENEW_TIME: 30000, // 30 seconds
 } as const;

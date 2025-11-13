@@ -231,7 +231,8 @@ export class BrickRankerRepository {
   }
 
   /**
-   * Create or update item (upsert logic)
+   * Create or update item (atomic upsert using ON CONFLICT)
+   * This prevents race conditions in concurrent environments
    */
   async upsert(
     setNumber: string,
@@ -247,46 +248,45 @@ export class BrickRankerRepository {
       scrapeIntervalDays?: number;
     },
   ): Promise<{ item: BrickrankerRetirementItem; isNew: boolean }> {
-    const existing = await this.findBySetNumber(setNumber);
+    const now = new Date();
+    const intervalDays = data.scrapeIntervalDays || 30;
+    const nextScrape = new Date(
+      now.getTime() + intervalDays * 24 * 60 * 60 * 1000,
+    );
 
-    if (existing) {
-      // Update existing
-      const updateData: any = {
-        setName: data.setName,
-        yearReleased: data.yearReleased,
-        retiringSoon: data.retiringSoon,
-        expectedRetirementDate: data.expectedRetirementDate,
-        theme: data.theme,
-        isActive: true, // Mark as active since it's still on the page
-      };
+    // Try to find matching product (note: this is a read operation, safe to do before upsert)
+    const productId = await this.findProductBySetNumber(setNumber);
 
-      // Update image fields if provided
-      if (data.imageUrl !== undefined) {
-        updateData.imageUrl = data.imageUrl;
-      }
-      if (data.localImagePath !== undefined) {
-        updateData.localImagePath = data.localImagePath;
-        updateData.imageDownloadedAt = new Date();
-      }
-      if (data.imageDownloadStatus !== undefined) {
-        updateData.imageDownloadStatus = data.imageDownloadStatus;
-      }
+    // Prepare update fields
+    const updateFields: Partial<typeof brickrankerRetirementItems.$inferInsert> = {
+      setName: data.setName,
+      yearReleased: data.yearReleased,
+      retiringSoon: data.retiringSoon,
+      expectedRetirementDate: data.expectedRetirementDate,
+      theme: data.theme,
+      isActive: true, // Mark as active since it's still on the page
+      lastScrapedAt: now,
+      nextScrapeAt: nextScrape,
+      scrapedAt: now,
+      updatedAt: now,
+    };
 
-      const updated = await this.update(setNumber, updateData);
+    // Conditionally add image fields if provided
+    if (data.imageUrl !== undefined) {
+      updateFields.imageUrl = data.imageUrl;
+    }
+    if (data.localImagePath !== undefined) {
+      updateFields.localImagePath = data.localImagePath;
+      updateFields.imageDownloadedAt = now;
+    }
+    if (data.imageDownloadStatus !== undefined) {
+      updateFields.imageDownloadStatus = data.imageDownloadStatus;
+    }
 
-      return { item: updated!, isNew: false };
-    } else {
-      // Create new
-      const now = new Date();
-      const intervalDays = data.scrapeIntervalDays || 30;
-      const nextScrape = new Date(
-        now.getTime() + intervalDays * 24 * 60 * 60 * 1000,
-      );
-
-      // Try to find matching product
-      const productId = await this.findProductBySetNumber(setNumber);
-
-      const created = await this.create({
+    // Atomic upsert using PostgreSQL ON CONFLICT
+    const [result] = await db
+      .insert(brickrankerRetirementItems)
+      .values({
         setNumber,
         setName: data.setName,
         yearReleased: data.yearReleased,
@@ -303,10 +303,17 @@ export class BrickRankerRepository {
         lastScrapedAt: now,
         nextScrapeAt: nextScrape,
         scrapedAt: now,
-      });
+      })
+      .onConflictDoUpdate({
+        target: brickrankerRetirementItems.setNumber,
+        set: updateFields,
+      })
+      .returning();
 
-      return { item: created, isNew: true };
-    }
+    // Determine if this was a new insert by checking timestamps
+    const isNew = result.createdAt.getTime() === result.updatedAt.getTime();
+
+    return { item: result, isNew };
   }
 
   /**

@@ -88,6 +88,64 @@ export class RedditRepository {
   }
 
   /**
+   * Create or update search result (atomic upsert using ON CONFLICT)
+   * This prevents race conditions in concurrent environments
+   *
+   * Once the unique constraint on (legoSetNumber, subreddit) is added,
+   * this will use that for conflict resolution. Until then, it will
+   * insert duplicates (which we'll clean up with the migration).
+   */
+  async upsert(data: {
+    legoSetNumber: string;
+    subreddit: string;
+    totalPosts: number;
+    posts: unknown; // JSONB array of post objects
+    scrapeIntervalDays?: number;
+  }): Promise<{ result: RedditSearchResult; isNew: boolean }> {
+    const now = new Date();
+    const intervalDays = data.scrapeIntervalDays || 30;
+    const nextScrape = new Date(
+      now.getTime() + intervalDays * 24 * 60 * 60 * 1000,
+    );
+
+    const insertData: NewRedditSearchResult = {
+      legoSetNumber: data.legoSetNumber,
+      subreddit: data.subreddit,
+      totalPosts: data.totalPosts,
+      posts: data.posts,
+      searchedAt: now,
+      scrapeIntervalDays: intervalDays,
+      lastScrapedAt: now,
+      nextScrapeAt: nextScrape,
+    };
+
+    // Note: This will work properly once we add the unique constraint on (legoSetNumber, subreddit)
+    // Until then, this may create duplicates, but the migration will clean them up
+    const [result] = await db
+      .insert(redditSearchResults)
+      .values(insertData)
+      .onConflictDoUpdate({
+        // TODO: This will be updated to use composite key once migration is applied
+        // For now, this won't trigger because there's no unique constraint yet
+        target: [redditSearchResults.legoSetNumber, redditSearchResults.subreddit],
+        set: {
+          totalPosts: data.totalPosts,
+          posts: data.posts,
+          searchedAt: now,
+          lastScrapedAt: now,
+          nextScrapeAt: nextScrape,
+          updatedAt: now,
+        },
+      })
+      .returning();
+
+    // Determine if this was a new insert by checking timestamps
+    const isNew = result.createdAt.getTime() === result.updatedAt.getTime();
+
+    return { result, isNew };
+  }
+
+  /**
    * Delete a search result by ID
    */
   async delete(id: number): Promise<boolean> {

@@ -237,7 +237,8 @@ export class BricklinkRepository {
   }
 
   /**
-   * Create or update item (upsert logic)
+   * Create or update item (atomic upsert using ON CONFLICT)
+   * This prevents race conditions in concurrent environments
    */
   async upsert(
     itemId: string,
@@ -255,43 +256,41 @@ export class BricklinkRepository {
       scrapeIntervalDays?: number;
     },
   ): Promise<{ item: BricklinkItem; isNew: boolean }> {
-    const existing = await this.findByItemId(itemId);
+    const now = new Date();
+    const intervalDays = data.scrapeIntervalDays || 30;
+    const nextScrape = new Date(
+      now.getTime() + intervalDays * 24 * 60 * 60 * 1000,
+    );
 
-    if (existing) {
-      // Update existing
-      const updateData: UpdateBricklinkItemData = {
-        title: data.title,
-        weight: data.weight,
-        sixMonthNew: data.sixMonthNew,
-        sixMonthUsed: data.sixMonthUsed,
-        currentNew: data.currentNew,
-        currentUsed: data.currentUsed,
-      };
+    // Prepare update fields (only update what's provided)
+    const updateFields: Partial<typeof bricklinkItems.$inferInsert> = {
+      title: data.title,
+      weight: data.weight,
+      sixMonthNew: data.sixMonthNew,
+      sixMonthUsed: data.sixMonthUsed,
+      currentNew: data.currentNew,
+      currentUsed: data.currentUsed,
+      lastScrapedAt: now,
+      nextScrapeAt: nextScrape,
+      updatedAt: now,
+    };
 
-      // Update image fields if provided
-      if (data.imageUrl !== undefined) {
-        updateData.imageUrl = data.imageUrl;
-      }
-      if (data.localImagePath !== undefined) {
-        updateData.localImagePath = data.localImagePath;
-        updateData.imageDownloadedAt = new Date();
-      }
-      if (data.imageDownloadStatus !== undefined) {
-        updateData.imageDownloadStatus = data.imageDownloadStatus;
-      }
+    // Conditionally add image fields if provided
+    if (data.imageUrl !== undefined) {
+      updateFields.imageUrl = data.imageUrl;
+    }
+    if (data.localImagePath !== undefined) {
+      updateFields.localImagePath = data.localImagePath;
+      updateFields.imageDownloadedAt = now;
+    }
+    if (data.imageDownloadStatus !== undefined) {
+      updateFields.imageDownloadStatus = data.imageDownloadStatus;
+    }
 
-      const updated = await this.update(itemId, updateData);
-
-      return { item: updated!, isNew: false };
-    } else {
-      // Create new
-      const now = new Date();
-      const intervalDays = data.scrapeIntervalDays || 30;
-      const nextScrape = new Date(
-        now.getTime() + intervalDays * 24 * 60 * 60 * 1000,
-      );
-
-      const newItemData: NewBricklinkItem = {
+    // Atomic upsert using PostgreSQL ON CONFLICT
+    const [result] = await db
+      .insert(bricklinkItems)
+      .values({
         itemId,
         itemType: data.itemType,
         title: data.title,
@@ -307,12 +306,18 @@ export class BricklinkRepository {
         scrapeIntervalDays: intervalDays,
         lastScrapedAt: now,
         nextScrapeAt: nextScrape,
-      };
+      })
+      .onConflictDoUpdate({
+        target: bricklinkItems.itemId,
+        set: updateFields,
+      })
+      .returning();
 
-      const created = await this.create(newItemData);
+    // Determine if this was a new insert by checking if lastScrapedAt was null before this operation
+    // Since we always set lastScrapedAt, we use createdAt = updatedAt as proxy for new records
+    const isNew = result.createdAt.getTime() === result.updatedAt.getTime();
 
-      return { item: created, isNew: true };
-    }
+    return { item: result, isNew };
   }
 
   /**

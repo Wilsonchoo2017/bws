@@ -108,29 +108,35 @@ export class WorldBricksRepository {
   }
 
   /**
-   * Upsert (insert or update) a set
-   * If set exists, update it; otherwise, create it
+   * Upsert (insert or update) a set using atomic ON CONFLICT
+   * This prevents race conditions in concurrent environments
    */
   async upsert(
     setNumber: string,
     data: Omit<NewWorldbricksSet, "setNumber">,
   ): Promise<WorldbricksSet> {
-    const existing = await this.findBySetNumber(setNumber);
+    const now = new Date();
 
-    if (existing) {
-      // Update existing record
-      const updated = await this.update(setNumber, data);
-      if (!updated) {
-        throw new Error(`Failed to update set ${setNumber}`);
-      }
-      return updated;
-    } else {
-      // Create new record
-      return await this.create({
+    // Prepare update fields
+    const updateFields: Partial<typeof worldbricksSets.$inferInsert> = {
+      ...data,
+      updatedAt: now,
+    };
+
+    // Atomic upsert using PostgreSQL ON CONFLICT
+    const [result] = await db
+      .insert(worldbricksSets)
+      .values({
         setNumber,
         ...data,
-      });
-    }
+      })
+      .onConflictDoUpdate({
+        target: worldbricksSets.setNumber,
+        set: updateFields,
+      })
+      .returning();
+
+    return result;
   }
 
   /**
