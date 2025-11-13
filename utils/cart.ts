@@ -1,4 +1,11 @@
 import type { VoucherTemplate } from "../types/voucher.ts";
+import {
+  safeLoadFromStorage,
+  safeLoadNumber,
+  safeSaveNumber,
+  safeSaveToStorage,
+  StorageKeys,
+} from "./storage.ts";
 
 export interface CartItem {
   id: string; // UUID for cart item
@@ -12,38 +19,26 @@ export interface CartItem {
   addedAt: string; // ISO timestamp
 }
 
-const CART_STORAGE_KEY = "lego-cart-items";
-const CART_TOTAL_PRICE_KEY = "lego-cart-total-price"; // In cents
-const CART_VOUCHERS_KEY = "lego-cart-vouchers"; // Applied vouchers
-const CART_VOUCHER_TEMPLATES_KEY = "lego-cart-voucher-templates"; // User-saved voucher templates
-
 /**
  * Load total cart price from localStorage
  */
 export function loadTotalCartPrice(): number {
-  if (typeof window === "undefined") return 0;
-
-  try {
-    const stored = localStorage.getItem(CART_TOTAL_PRICE_KEY);
-    if (!stored) return 0;
-    return parseFloat(stored);
-  } catch (error) {
-    console.error("Failed to load total cart price:", error);
-    return 0;
-  }
+  return safeLoadNumber(
+    StorageKeys.CART_TOTAL_PRICE,
+    0,
+    "load total cart price",
+  );
 }
 
 /**
  * Save total cart price to localStorage
  */
 export function saveTotalCartPrice(priceInCents: number): void {
-  if (typeof window === "undefined") return;
-
-  try {
-    localStorage.setItem(CART_TOTAL_PRICE_KEY, priceInCents.toString());
-  } catch (error) {
-    console.error("Failed to save total cart price:", error);
-  }
+  safeSaveNumber(
+    StorageKeys.CART_TOTAL_PRICE,
+    priceInCents,
+    "save total cart price",
+  );
 }
 
 /**
@@ -137,29 +132,18 @@ export function calculateCartDiscountPercentage(items: CartItem[]): number {
  * Load cart items from localStorage
  */
 export function loadCartItems(): CartItem[] {
-  if (typeof window === "undefined") return [];
-
-  try {
-    const stored = localStorage.getItem(CART_STORAGE_KEY);
-    if (!stored) return [];
-    return JSON.parse(stored);
-  } catch (error) {
-    console.error("Failed to load cart items:", error);
-    return [];
-  }
+  return safeLoadFromStorage<CartItem[]>(
+    StorageKeys.CART_ITEMS,
+    [],
+    "load cart items",
+  );
 }
 
 /**
  * Save cart items to localStorage
  */
 export function saveCartItems(items: CartItem[]): void {
-  if (typeof window === "undefined") return;
-
-  try {
-    localStorage.setItem(CART_STORAGE_KEY, JSON.stringify(items));
-  } catch (error) {
-    console.error("Failed to save cart items:", error);
-  }
+  safeSaveToStorage(StorageKeys.CART_ITEMS, items, "save cart items");
 }
 
 /**
@@ -228,56 +212,42 @@ export function clearCart(): void {
  * Load applied vouchers from localStorage
  */
 export function loadAppliedVouchers(): VoucherTemplate[] {
-  if (typeof window === "undefined") return [];
-
-  try {
-    const stored = localStorage.getItem(CART_VOUCHERS_KEY);
-    if (!stored) return [];
-    return JSON.parse(stored);
-  } catch (error) {
-    console.error("Failed to load applied vouchers:", error);
-    return [];
-  }
+  return safeLoadFromStorage<VoucherTemplate[]>(
+    StorageKeys.CART_VOUCHERS,
+    [],
+    "load applied vouchers",
+  );
 }
 
 /**
  * Save applied vouchers to localStorage
  */
 export function saveAppliedVouchers(vouchers: VoucherTemplate[]): void {
-  if (typeof window === "undefined") return;
-
-  try {
-    localStorage.setItem(CART_VOUCHERS_KEY, JSON.stringify(vouchers));
-  } catch (error) {
-    console.error("Failed to save applied vouchers:", error);
-  }
+  safeSaveToStorage(
+    StorageKeys.CART_VOUCHERS,
+    vouchers,
+    "save applied vouchers",
+  );
 }
 
 /**
  * Load user-saved voucher templates from localStorage
  */
 export function loadVoucherTemplates(): VoucherTemplate[] {
-  if (typeof window === "undefined") return [];
-
-  try {
-    const stored = localStorage.getItem(CART_VOUCHER_TEMPLATES_KEY);
-    if (!stored) return [];
-    return JSON.parse(stored);
-  } catch (error) {
-    console.error("Failed to load voucher templates:", error);
-    return [];
-  }
+  return safeLoadFromStorage<VoucherTemplate[]>(
+    StorageKeys.VOUCHER_TEMPLATES,
+    [],
+    "load voucher templates",
+  );
 }
 
 /**
  * Save user voucher templates to localStorage
  */
 export function saveVoucherTemplates(templates: VoucherTemplate[]): void {
-  if (typeof window === "undefined") return;
-
-  try {
-    localStorage.setItem(CART_VOUCHER_TEMPLATES_KEY, JSON.stringify(templates));
-  } catch (error) {
-    console.error("Failed to save voucher templates:", error);
-  }
+  safeSaveToStorage(
+    StorageKeys.VOUCHER_TEMPLATES,
+    templates,
+    "save voucher templates",
+  );
 }

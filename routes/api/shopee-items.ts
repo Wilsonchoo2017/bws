@@ -1,6 +1,6 @@
 import { Handlers } from "$fresh/server.ts";
 import { db } from "../../db/client.ts";
-import { products } from "../../db/schema.ts";
+import { bricklinkItems, products } from "../../db/schema.ts";
 import { and, asc, desc, eq, sql } from "drizzle-orm";
 import {
   createErrorResponse,
@@ -116,11 +116,15 @@ export const handler: Handlers = {
 
       const totalCount = countResult?.count || 0;
 
-      // Get paginated results
+      // Get paginated results with Bricklink data indicator
       const offset = (query.page! - 1) * query.limit!;
       const items = await db
-        .select()
+        .select({
+          ...products,
+          hasBricklinkData: sql<boolean>`${bricklinkItems.itemId} IS NOT NULL`,
+        })
         .from(products)
+        .leftJoin(bricklinkItems, eq(products.legoSetNumber, bricklinkItems.itemId))
         .where(whereClause)
         .orderBy(orderByClause)
         .limit(query.limit!)

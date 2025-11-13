@@ -48,6 +48,7 @@ interface Product {
   rawData: unknown | null;
   createdAt: Date | null;
   updatedAt: Date | null;
+  hasBricklinkData: boolean;
 }
 
 interface Pagination {
@@ -505,6 +506,7 @@ export default function ProductsList() {
                   <th class="w-20">Image</th>
                   <th>Name</th>
                   <th class="w-24">LEGO Set</th>
+                  <th class="w-24">BL Data</th>
                   <th
                     class="cursor-pointer hover:bg-base-200 w-28"
                     onClick={() => handleSort("price")}
