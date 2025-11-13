@@ -9,27 +9,28 @@ import type {
   DimensionalScores,
   IAnalyzer,
   IStrategy,
-  PricingData,
   ProductAnalysisInput,
   ProductRecommendation,
   QualityData,
 } from "./types.ts";
+import {
+  type StrategyType,
+  ValueCalculator,
+} from "../value-investing/ValueCalculator.ts";
+import type { IntrinsicValueInputs } from "../../types/value-investing.ts";
 
 export class RecommendationEngine {
-  private pricingAnalyzer: IAnalyzer<PricingData>;
   private demandAnalyzer: IAnalyzer<DemandData>;
   private availabilityAnalyzer: IAnalyzer<AvailabilityData>;
   private qualityAnalyzer: IAnalyzer<QualityData>;
   private strategies: Map<string, IStrategy>;
 
   constructor(
-    pricingAnalyzer: IAnalyzer<PricingData>,
     demandAnalyzer: IAnalyzer<DemandData>,
     availabilityAnalyzer: IAnalyzer<AvailabilityData>,
     qualityAnalyzer: IAnalyzer<QualityData>,
     strategies: IStrategy[],
   ) {
-    this.pricingAnalyzer = pricingAnalyzer;
     this.demandAnalyzer = demandAnalyzer;
     this.availabilityAnalyzer = availabilityAnalyzer;
     this.qualityAnalyzer = qualityAnalyzer;
@@ -55,9 +56,8 @@ export class RecommendationEngine {
     }
 
     // Run all analyzers in parallel
-    const [pricingScore, demandScore, availabilityScore, qualityScore] =
+    const [demandScore, availabilityScore, qualityScore] =
       await Promise.all([
-        this.pricingAnalyzer.analyze(input.pricing),
         this.demandAnalyzer.analyze(input.demand),
         this.availabilityAnalyzer.analyze(input.availability),
         this.qualityAnalyzer.analyze(input.quality),
@@ -65,7 +65,6 @@ export class RecommendationEngine {
 
     // Build dimensional scores
     const scores: DimensionalScores = {
-      pricing: pricingScore,
       demand: demandScore,
       availability: availabilityScore,
       quality: qualityScore,
@@ -74,7 +73,47 @@ export class RecommendationEngine {
     // Use strategy to interpret scores and generate recommendation
     const recommendation = strategy.interpret(scores);
 
+    // Calculate recommended buy price using ValueCalculator
+    const recommendedBuyPrice = this.calculateRecommendedBuyPrice(
+      input,
+      strategyName as StrategyType,
+      demandScore,
+      availabilityScore,
+    );
+
+    if (recommendedBuyPrice) {
+      recommendation.recommendedBuyPrice = recommendedBuyPrice;
+    }
+
     return recommendation;
+  }
+
+  /**
+   * Calculate recommended buy price using ValueCalculator
+   */
+  private calculateRecommendedBuyPrice(
+    input: ProductAnalysisInput,
+    strategy: StrategyType,
+    demandScore: { value: number } | null,
+    availabilityScore: { value: number } | null,
+  ): { price: number; reasoning: string; confidence: number } | null {
+    // Prepare inputs for ValueCalculator
+    const valueInputs: IntrinsicValueInputs = {
+      bricklinkAvgPrice: input.pricing.bricklink?.current.newAvg,
+      bricklinkMaxPrice: input.pricing.bricklink?.current.newMax,
+      retirementStatus: input.availability.retiringSoon
+        ? "retiring_soon"
+        : undefined,
+      demandScore: demandScore?.value,
+      qualityScore: undefined, // Not used in intrinsic value calculation currently
+    };
+
+    // Calculate recommended buy price
+    return ValueCalculator.calculateRecommendedBuyPrice(valueInputs, {
+      strategy,
+      availabilityScore: availabilityScore?.value,
+      demandScore: demandScore?.value,
+    });
   }
 
   /**
@@ -106,10 +145,6 @@ export class RecommendationEngine {
    */
   getAnalyzerInfo(): Array<{ name: string; description: string }> {
     return [
-      {
-        name: this.pricingAnalyzer.getName(),
-        description: this.pricingAnalyzer.getDescription(),
-      },
       {
         name: this.demandAnalyzer.getName(),
         description: this.demandAnalyzer.getDescription(),

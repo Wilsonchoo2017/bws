@@ -15,7 +15,6 @@ export interface AnalysisScore {
 }
 
 export interface DimensionalScores {
-  pricing: AnalysisScore | null; // null = insufficient data to analyze
   demand: AnalysisScore | null;
   availability: AnalysisScore | null;
   quality: AnalysisScore | null;
@@ -24,12 +23,17 @@ export interface DimensionalScores {
 export interface ProductRecommendation {
   overall: AnalysisScore;
   dimensions: DimensionalScores;
-  availableDimensions: number; // How many dimensions had sufficient data (0-4)
+  availableDimensions: number; // How many dimensions had sufficient data (0-3)
   action: "strong_buy" | "buy" | "hold" | "pass" | "insufficient_data";
   strategy: string;
   urgency: "urgent" | "moderate" | "low" | "no_rush";
   estimatedROI?: number; // Percentage
   timeHorizon?: string; // e.g., "6-12 months"
+  recommendedBuyPrice?: {
+    price: number;
+    reasoning: string;
+    confidence: number;
+  };
   risks: string[];
   opportunities: string[];
   analyzedAt: Date;
@@ -192,7 +196,6 @@ export interface IStrategy {
 }
 
 export interface DimensionWeights {
-  pricing: number; // 0-1
   demand: number; // 0-1
   availability: number; // 0-1
   quality: number; // 0-1
@@ -214,7 +217,7 @@ export interface AnalysisConfig {
 // Helper Types
 // ============================================================================
 
-export type AnalyzerType = "pricing" | "demand" | "availability" | "quality";
+export type AnalyzerType = "demand" | "availability" | "quality";
 
 export interface AnalyzerRegistry {
   [key: string]: IAnalyzer<unknown>;

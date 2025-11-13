@@ -14,15 +14,14 @@ import type {
 export class QuickFlipStrategy extends BaseStrategy {
   constructor() {
     const weights: DimensionWeights = {
-      demand: 0.40, // Highest priority - need active buyers
-      pricing: 0.35, // Very important - current margins matter most
-      availability: 0.20, // Important - low stock creates urgency
-      quality: 0.05, // Lower priority - speed over perfection
+      demand: 0.55, // Highest priority - need active buyers (40% + 15%)
+      availability: 0.35, // Important - low stock creates urgency (20% + 15%)
+      quality: 0.10, // Moderate priority - reputation matters (5% + 5%)
     };
 
     super(
       "Quick Flip",
-      "Identifies sets with immediate resale potential based on high current demand, good margins, and low stock. Best for fast turnover and quick profits.",
+      "Identifies sets with immediate resale potential based on high current demand and low stock. Buy prices set aggressively for fast turnover.",
       weights,
     );
   }
@@ -31,27 +30,8 @@ export class QuickFlipStrategy extends BaseStrategy {
   override interpret(scores: DimensionalScores): ProductRecommendation {
     const recommendation = super.interpret(scores);
 
-    // For quick flips, focus on current margins
-    if (scores.pricing) {
-      const pricingData = scores.pricing.dataPoints as Record<string, number>;
-      if (pricingData.currentMargin !== undefined) {
-        recommendation.estimatedROI = pricingData.currentMargin;
-        recommendation.timeHorizon = "Immediate - 1 month";
-      } else {
-        recommendation.timeHorizon = "1-3 months";
-      }
-
-      if (
-        pricingData.currentMargin !== undefined &&
-        pricingData.currentMargin < 15
-      ) {
-        recommendation.risks.push(
-          "Thin margins reduce profit potential for quick flips",
-        );
-      }
-    } else {
-      recommendation.timeHorizon = "1-3 months";
-    }
+    // For quick flips, time horizon is immediate
+    recommendation.timeHorizon = "Immediate - 1 month";
 
     // Add quick flip specific opportunities
     if (scores.demand) {

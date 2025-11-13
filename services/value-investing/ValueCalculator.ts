@@ -7,6 +7,15 @@ import {
   VALUE_INVESTING_CONFIG as CONFIG,
 } from "./ValueInvestingConfig.ts";
 
+// Strategy-specific margin of safety configurations
+export const STRATEGY_MARGINS = {
+  "Investment Focus": { margin: 0.25, description: "Conservative long-term" },
+  "Quick Flip": { margin: 0.10, description: "Aggressive near-market" },
+  "Bargain Hunter": { margin: 0.35, description: "Very conservative" },
+} as const;
+
+export type StrategyType = keyof typeof STRATEGY_MARGINS;
+
 /**
  * ValueCalculator implements value investing principles inspired by
  * Warren Buffett and Mohnish Pabrai - finding quality assets trading
@@ -167,10 +176,17 @@ export class ValueCalculator {
   /**
    * Calculate target buy price (price at which you should buy)
    * Using margin of safety principle - buy at a discount to intrinsic value
+   *
+   * Enhanced with strategy-specific margins and availability/demand adjustments
    */
   static calculateTargetPrice(
     intrinsicValue: number,
-    desiredMarginOfSafety: number = CONFIG.MARGIN_OF_SAFETY.DEFAULT,
+    options: {
+      strategy?: StrategyType;
+      availabilityScore?: number;
+      demandScore?: number;
+      desiredMarginOfSafety?: number;
+    } = {},
   ): number {
     // Validate inputs
     if (
@@ -180,20 +196,41 @@ export class ValueCalculator {
       return 0;
     }
 
-    if (
-      typeof desiredMarginOfSafety !== "number" ||
-      isNaN(desiredMarginOfSafety) ||
-      desiredMarginOfSafety < 0 ||
-      desiredMarginOfSafety >= 1
+    let marginOfSafety: number;
+
+    // Use strategy-specific margin if provided
+    if (options.strategy && STRATEGY_MARGINS[options.strategy]) {
+      marginOfSafety = STRATEGY_MARGINS[options.strategy].margin;
+    } else if (
+      typeof options.desiredMarginOfSafety === "number" &&
+      !isNaN(options.desiredMarginOfSafety) &&
+      options.desiredMarginOfSafety >= 0 &&
+      options.desiredMarginOfSafety < 1
     ) {
-      console.warn(
-        "[ValueCalculator] Invalid margin of safety, using default:",
-        desiredMarginOfSafety,
-      );
-      desiredMarginOfSafety = CONFIG.MARGIN_OF_SAFETY.DEFAULT;
+      marginOfSafety = options.desiredMarginOfSafety;
+    } else {
+      marginOfSafety = CONFIG.MARGIN_OF_SAFETY.DEFAULT;
     }
 
-    const targetPrice = intrinsicValue * (1 - desiredMarginOfSafety);
+    // Adjust margin based on availability (retiring soon = higher acceptable price)
+    if (typeof options.availabilityScore === "number" && options.availabilityScore > 80) {
+      // High availability score means urgent/retiring soon - reduce margin by up to 5%
+      const urgencyAdjustment = ((options.availabilityScore - 80) / 20) * 0.05;
+      marginOfSafety = Math.max(0.05, marginOfSafety - urgencyAdjustment);
+    }
+
+    // Adjust margin based on demand (high liquidity = can afford smaller margin)
+    if (typeof options.demandScore === "number" && options.demandScore > 70) {
+      // High demand means easier to resell - can reduce margin slightly
+      const demandAdjustment = ((options.demandScore - 70) / 30) * 0.03;
+      marginOfSafety = Math.max(0.05, marginOfSafety - demandAdjustment);
+    } else if (typeof options.demandScore === "number" && options.demandScore < 40) {
+      // Low demand means harder to resell - increase margin for safety
+      const demandAdjustment = ((40 - options.demandScore) / 40) * 0.05;
+      marginOfSafety = Math.min(0.50, marginOfSafety + demandAdjustment);
+    }
+
+    const targetPrice = intrinsicValue * (1 - marginOfSafety);
     return Math.round(targetPrice * Math.pow(10, CONFIG.PRECISION.PRICE)) /
       Math.pow(10, CONFIG.PRECISION.PRICE);
   }
@@ -341,6 +378,88 @@ export class ValueCalculator {
     return {
       rating: config.rating,
       color: config.color,
+    };
+  }
+
+  /**
+   * Calculate recommended buy price with detailed reasoning
+   * Integrates strategy, demand, and availability factors
+   */
+  static calculateRecommendedBuyPrice(
+    inputs: IntrinsicValueInputs,
+    options: {
+      strategy?: StrategyType;
+      availabilityScore?: number;
+      demandScore?: number;
+    } = {},
+  ): {
+    price: number;
+    reasoning: string;
+    confidence: number;
+  } | null {
+    const intrinsicValue = this.calculateIntrinsicValue(inputs);
+
+    if (intrinsicValue === 0) {
+      return null; // Insufficient data
+    }
+
+    const targetPrice = this.calculateTargetPrice(intrinsicValue, options);
+
+    // Calculate confidence based on data availability
+    let dataPoints = 0;
+    let availablePoints = 0;
+
+    // Check pricing data availability
+    availablePoints += 2;
+    if (inputs.bricklinkAvgPrice) dataPoints++;
+    if (inputs.bricklinkMaxPrice) dataPoints++;
+
+    // Check quality/demand scores
+    availablePoints += 2;
+    if (inputs.demandScore !== undefined) dataPoints++;
+    if (inputs.qualityScore !== undefined) dataPoints++;
+
+    const confidence = Math.round((dataPoints / availablePoints) * 100) / 100;
+
+    // Build reasoning
+    const reasoningParts: string[] = [];
+    const strategy = options.strategy || "Investment Focus";
+    const strategyConfig = STRATEGY_MARGINS[strategy];
+
+    reasoningParts.push(
+      `${strategy} strategy (${strategyConfig.description}, ${Math.round(strategyConfig.margin * 100)}% margin base)`,
+    );
+
+    if (inputs.bricklinkAvgPrice) {
+      reasoningParts.push(
+        `Based on Bricklink resale value of $${inputs.bricklinkAvgPrice.toFixed(2)}`,
+      );
+    }
+
+    if (inputs.retirementStatus === "retiring_soon") {
+      reasoningParts.push("Adjusted for retirement urgency");
+    } else if (inputs.retirementStatus === "retired") {
+      reasoningParts.push("Premium for retired set");
+    }
+
+    if (options.demandScore !== undefined) {
+      if (options.demandScore > 70) {
+        reasoningParts.push("High liquidity increases acceptable price");
+      } else if (options.demandScore < 40) {
+        reasoningParts.push("Low demand requires safety margin");
+      }
+    }
+
+    if (options.availabilityScore !== undefined && options.availabilityScore > 80) {
+      reasoningParts.push("Urgent window justifies higher entry price");
+    }
+
+    const reasoning = reasoningParts.join(". ") + ".";
+
+    return {
+      price: targetPrice,
+      reasoning,
+      confidence,
     };
   }
 }

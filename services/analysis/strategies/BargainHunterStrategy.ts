@@ -10,15 +10,14 @@ import type { DimensionWeights } from "../types.ts";
 export class BargainHunterStrategy extends BaseStrategy {
   constructor() {
     const weights: DimensionWeights = {
-      pricing: 0.50, // Highest priority - looking for discounts
-      quality: 0.25, // Important - want quality products
-      demand: 0.15, // Medium priority - want popular items
-      availability: 0.10, // Lower priority - not urgency focused
+      quality: 0.50, // Highest priority - want quality products (25% + 25%)
+      demand: 0.40, // Important - want popular items (15% + 25%)
+      availability: 0.10, // Lower priority - not urgency focused (unchanged)
     };
 
     super(
       "Bargain Hunter",
-      "Finds deep discounts on quality products with good ratings. Best for getting great deals on popular sets.",
+      "Finds quality products with good ratings and demand. Buy prices set conservatively with large margin of safety.",
       weights,
     );
   }

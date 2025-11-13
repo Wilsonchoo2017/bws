@@ -14,15 +14,14 @@ import type {
 export class InvestmentFocusStrategy extends BaseStrategy {
   constructor() {
     const weights: DimensionWeights = {
-      availability: 0.40, // Highest priority - retirement timing is critical
-      pricing: 0.35, // Very important - margins and appreciation
-      demand: 0.20, // Important - resale market activity
-      quality: 0.05, // Lower priority - assumes LEGO quality
+      availability: 0.55, // Highest priority - retirement timing is critical (40% + 15%)
+      demand: 0.35, // Very important - resale market activity (20% + 15%)
+      quality: 0.10, // Moderate priority - LEGO quality and ratings (5% + 5%)
     };
 
     super(
       "Investment Focus",
-      "Identifies sets with best investment potential based on retirement timing, price appreciation, and profit margins. Ideal for building a resale portfolio.",
+      "Identifies sets with best investment potential based on retirement timing and resale market activity. Buy prices calculated using value investing principles.",
       weights,
     );
   }
@@ -30,26 +29,6 @@ export class InvestmentFocusStrategy extends BaseStrategy {
   // Override interpret to add investment-specific metrics
   override interpret(scores: DimensionalScores): ProductRecommendation {
     const recommendation = super.interpret(scores);
-
-    // Calculate estimated ROI based on pricing data
-    if (scores.pricing) {
-      const pricingData = scores.pricing.dataPoints as Record<string, number>;
-      if (pricingData.currentMargin !== undefined) {
-        recommendation.estimatedROI = pricingData.currentMargin;
-      } else if (pricingData.sixMonthAppreciation !== undefined) {
-        // Extrapolate to 12 months
-        recommendation.estimatedROI = pricingData.sixMonthAppreciation * 2;
-      }
-
-      if (
-        pricingData.sixMonthAppreciation !== undefined &&
-        pricingData.sixMonthAppreciation > 15
-      ) {
-        recommendation.opportunities.push(
-          "Strong price momentum suggests continued appreciation",
-        );
-      }
-    }
 
     // Estimate time horizon based on availability
     if (scores.availability) {
@@ -91,12 +70,12 @@ export class InvestmentFocusStrategy extends BaseStrategy {
     // Add investment-specific opportunities
     if (
       scores.availability &&
-      scores.pricing &&
+      scores.demand &&
       scores.availability.value >= 70 &&
-      scores.pricing.value >= 70
+      scores.demand.value >= 60
     ) {
       recommendation.opportunities.push(
-        "Optimal investment window - retiring soon with good margins",
+        "Optimal investment window - retiring soon with strong resale market",
       );
     }
 

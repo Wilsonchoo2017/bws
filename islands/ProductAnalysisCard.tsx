@@ -16,7 +16,6 @@ interface AnalysisScore {
 }
 
 interface DimensionalScores {
-  pricing: AnalysisScore | null;
   demand: AnalysisScore | null;
   availability: AnalysisScore | null;
   quality: AnalysisScore | null;
@@ -31,6 +30,11 @@ interface ProductRecommendation {
   urgency: "urgent" | "moderate" | "low" | "no_rush";
   estimatedROI?: number;
   timeHorizon?: string;
+  recommendedBuyPrice?: {
+    price: number;
+    reasoning: string;
+    confidence: number;
+  };
   risks: string[];
   opportunities: string[];
   analyzedAt: string;
@@ -160,7 +164,7 @@ export default function ProductAnalysisCard(
         </div>
 
         {/* Overall Score and Recommendation */}
-        {rec.availableDimensions === 4
+        {rec.availableDimensions === 3
           ? (
             <div class="flex items-center gap-6 p-4 bg-base-200 rounded-lg">
               <div class="flex-1">
@@ -204,7 +208,7 @@ export default function ProductAnalysisCard(
                     Not Enough Data Yet
                   </h4>
                   <p class="text-sm text-base-content/80">
-                    We need {4 - rec.availableDimensions} more dimension{4 -
+                    We need {3 - rec.availableDimensions} more dimension{3 -
                           rec.availableDimensions !== 1
                       ? "s"
                       : ""}{" "}
@@ -213,7 +217,7 @@ export default function ProductAnalysisCard(
                   </p>
                   <p class="text-xs text-base-content/60 mt-2">
                     Currently analyzed: {rec.availableDimensions}{" "}
-                    of 4 dimensions
+                    of 3 dimensions
                   </p>
                 </div>
               </div>
@@ -221,22 +225,29 @@ export default function ProductAnalysisCard(
           )}
 
         {/* Investment Metrics */}
-        {rec.availableDimensions === 4 &&
-          (rec.estimatedROI !== undefined || rec.timeHorizon) && (
-          <div class="grid grid-cols-2 gap-4 p-4 bg-primary/10 rounded-lg">
-            {rec.estimatedROI !== undefined && (
-              <div>
-                <p class="text-xs text-primary font-medium mb-1">
-                  Estimated ROI
+        {rec.availableDimensions === 3 &&
+          (rec.recommendedBuyPrice || rec.timeHorizon) && (
+          <div class="space-y-4">
+            {rec.recommendedBuyPrice && (
+              <div class="p-4 bg-success/10 border-2 border-success rounded-lg">
+                <div class="flex items-center justify-between mb-2">
+                  <p class="text-sm font-semibold text-success">
+                    💰 Recommended Buy Price
+                  </p>
+                  <p class="text-xs text-success/70">
+                    {Math.round(rec.recommendedBuyPrice.confidence * 100)}% confidence
+                  </p>
+                </div>
+                <p class="text-3xl font-bold text-success mb-2">
+                  ${rec.recommendedBuyPrice.price.toFixed(2)} or below
                 </p>
-                <p class="text-2xl font-bold text-primary">
-                  {rec.estimatedROI > 0 ? "+" : ""}
-                  {rec.estimatedROI.toFixed(0)}%
+                <p class="text-xs text-base-content/70">
+                  {rec.recommendedBuyPrice.reasoning}
                 </p>
               </div>
             )}
             {rec.timeHorizon && (
-              <div>
+              <div class="p-4 bg-primary/10 rounded-lg">
                 <p class="text-xs text-primary font-medium mb-1">
                   Time Horizon
                 </p>
@@ -253,35 +264,10 @@ export default function ProductAnalysisCard(
           <div class="flex items-center justify-between">
             <h4 class="font-semibold">Dimensional Analysis</h4>
             <p class="text-xs text-base-content/50">
-              {rec.availableDimensions} of 4 dimensions analyzed
+              {rec.availableDimensions} of 3 dimensions analyzed
             </p>
           </div>
-          <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {rec.dimensions.pricing
-              ? (
-                <div>
-                  <ScoreMeter
-                    score={rec.dimensions.pricing.value}
-                    label="💰 Pricing"
-                    size="md"
-                  />
-                  <p class="text-xs text-base-content/70 mt-1">
-                    {rec.dimensions.pricing.reasoning}
-                  </p>
-                </div>
-              )
-              : (
-                <div class="opacity-50">
-                  <div class="p-4 bg-base-200 rounded-lg">
-                    <p class="text-sm font-medium text-base-content/50">
-                      💰 Pricing
-                    </p>
-                    <p class="text-xs text-base-content/40 mt-1">
-                      Insufficient data
-                    </p>
-                  </div>
-                </div>
-              )}
+          <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
             {rec.dimensions.demand
               ? (
                 <div>

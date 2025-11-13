@@ -43,9 +43,6 @@ export abstract class BaseStrategy implements IStrategy {
    */
   protected calculateOverallScore(scores: DimensionalScores): number {
     const weightedScores = [
-      scores.pricing
-        ? { score: scores.pricing.value, weight: this.weights.pricing }
-        : null,
       scores.demand
         ? { score: scores.demand.value, weight: this.weights.demand }
         : null,
@@ -79,7 +76,6 @@ export abstract class BaseStrategy implements IStrategy {
    */
   protected calculateOverallConfidence(scores: DimensionalScores): number {
     const confidences = [
-      scores.pricing?.confidence,
       scores.demand?.confidence,
       scores.availability?.confidence,
       scores.quality?.confidence,
@@ -127,13 +123,6 @@ export abstract class BaseStrategy implements IStrategy {
 
     // Add top contributing factors (filter out nulls)
     const dimensions = [
-      scores.pricing
-        ? {
-          name: "Pricing",
-          score: scores.pricing.value,
-          weight: this.weights.pricing,
-        }
-        : null,
       scores.demand
         ? {
           name: "Demand",
@@ -193,9 +182,6 @@ export abstract class BaseStrategy implements IStrategy {
   protected identifyRisks(scores: DimensionalScores): string[] {
     const risks: string[] = [];
 
-    if (scores.pricing && scores.pricing.value < 40) {
-      risks.push("Poor pricing or negative margins");
-    }
     if (scores.demand && scores.demand.value < 30) {
       risks.push("Low market demand or limited resale activity");
     }
@@ -210,9 +196,6 @@ export abstract class BaseStrategy implements IStrategy {
     }
 
     // Confidence warnings
-    if (scores.pricing && scores.pricing.confidence < 0.5) {
-      risks.push("Limited pricing data for accurate analysis");
-    }
     if (scores.demand && scores.demand.confidence < 0.5) {
       risks.push("Insufficient demand data");
     }
@@ -227,9 +210,6 @@ export abstract class BaseStrategy implements IStrategy {
   protected identifyOpportunities(scores: DimensionalScores): string[] {
     const opportunities: string[] = [];
 
-    if (scores.pricing && scores.pricing.value >= 75) {
-      opportunities.push("Excellent profit margin potential");
-    }
     if (scores.demand && scores.demand.value >= 75) {
       opportunities.push("Strong market demand and community interest");
     }
@@ -241,12 +221,6 @@ export abstract class BaseStrategy implements IStrategy {
     }
 
     // Combo opportunities
-    if (
-      scores.pricing && scores.availability &&
-      scores.pricing.value >= 70 && scores.availability.value >= 70
-    ) {
-      opportunities.push("Good margin with upcoming scarcity");
-    }
     if (
       scores.demand && scores.availability &&
       scores.demand.value >= 70 && scores.availability.value >= 70
@@ -262,7 +236,6 @@ export abstract class BaseStrategy implements IStrategy {
    */
   protected countAvailableDimensions(scores: DimensionalScores): number {
     let count = 0;
-    if (scores.pricing !== null) count++;
     if (scores.demand !== null) count++;
     if (scores.availability !== null) count++;
     if (scores.quality !== null) count++;

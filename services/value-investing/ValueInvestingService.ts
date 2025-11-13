@@ -181,73 +181,49 @@ export class ValueInvestingService {
       return null;
     }
 
-    // Build intrinsic value inputs
-    const availabilityDataPoints =
-      analysis.dimensions?.availability?.dataPoints || {};
-    const pricingDataPoints = analysis.dimensions?.pricing?.dataPoints || {};
-    const retirementStatus = availabilityDataPoints.retirementStatus as
-      | string
-      | undefined;
-    const intrinsicValueInputs: IntrinsicValueInputs = {
-      bricklinkAvgPrice: pricingDataPoints.bricklinkAvgPrice as
-        | number
-        | undefined,
-      bricklinkMaxPrice: pricingDataPoints.bricklinkMaxPrice as
-        | number
-        | undefined,
-      demandScore: analysis.dimensions?.demand?.value ?? 50,
-      qualityScore: analysis.dimensions?.quality?.value ?? 50,
-      retirementStatus: isRetirementStatus(retirementStatus)
-        ? retirementStatus
-        : undefined,
-    };
+    // If recommendation already has a buy price, use it directly
+    if (analysis.recommendedBuyPrice) {
+      const valueMetrics = {
+        currentPrice: product.price!,
+        targetPrice: analysis.recommendedBuyPrice.price,
+        intrinsicValue: analysis.recommendedBuyPrice.price / (1 - 0.25), // Estimate intrinsic value assuming 25% margin
+        marginOfSafety: ((analysis.recommendedBuyPrice.price - product.price!) / analysis.recommendedBuyPrice.price) * 100,
+        expectedROI: ((analysis.recommendedBuyPrice.price - product.price!) / product.price!) * 100,
+        timeHorizon: analysis.timeHorizon || "Unknown",
+      };
 
-    // Calculate value metrics
-    let valueMetrics;
-    try {
-      valueMetrics = ValueCalculator.calculateValueMetrics(
-        product.price!,
-        intrinsicValueInputs,
-        analysis.urgency,
-      );
-    } catch (error) {
-      stats.skipped.calculationError++;
-      console.warn(
-        `[ValueInvestingService] Failed to calculate metrics for ${product.productId}:`,
-        error instanceof Error ? error.message : error,
-      );
-      return null;
+      return {
+        id: product.id,
+        productId: product.productId,
+        name: product.name!,
+        image: product.image!,
+        legoSetNumber: product.legoSetNumber,
+        source: product.source,
+        brand: product.brand!,
+        currentPrice: product.price!,
+        currency: product.currency || "MYR",
+        valueMetrics,
+        strategy: analysis.strategy || "Unknown",
+        action: analysis.action,
+        urgency: analysis.urgency,
+        overallScore: analysis.overall.value || 0,
+        risks: analysis.risks || [],
+        opportunities: analysis.opportunities || [],
+        unitsSold: product.unitsSold ?? undefined,
+        lifetimeSold: product.lifetimeSold ?? undefined,
+        currentStock: product.currentStock ?? undefined,
+        avgStarRating: product.avgStarRating ?? undefined,
+      };
     }
 
-    // Only include products with positive margin of safety
-    if (valueMetrics.marginOfSafety <= 0) {
-      stats.skipped.noMarginOfSafety++;
-      return null;
-    }
-
-    // Build value investing product
-    return {
-      id: product.id,
-      productId: product.productId,
-      name: product.name!, // Safe: validated by isValidProduct
-      image: product.image!, // Safe: validated by isValidProduct
-      legoSetNumber: product.legoSetNumber,
-      source: product.source,
-      brand: product.brand!, // Safe: validated by isValidProduct
-      currentPrice: product.price!, // Safe: validated by isValidProduct
-      currency: product.currency || "MYR",
-      valueMetrics,
-      strategy: analysis.strategy || "Unknown",
-      action: analysis.action,
-      urgency: analysis.urgency,
-      overallScore: analysis.overall.value || 0,
-      risks: analysis.risks || [],
-      opportunities: analysis.opportunities || [],
-      unitsSold: product.unitsSold ?? undefined,
-      lifetimeSold: product.lifetimeSold ?? undefined,
-      currentStock: product.currentStock ?? undefined,
-      avgStarRating: product.avgStarRating ?? undefined,
-    };
+    // Fallback: try to calculate from Bricklink data if available
+    // This requires fetching Bricklink data separately, so we'll skip for now
+    // TODO: Implement fetching Bricklink data for products without recommendedBuyPrice
+    stats.skipped.calculationError++;
+    console.warn(
+      `[ValueInvestingService] No recommended buy price for ${product.productId}`,
+    );
+    return null;
   }
 
   /**

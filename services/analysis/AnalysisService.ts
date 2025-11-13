@@ -6,7 +6,6 @@
  * - Open/Closed: Easy to extend without modification
  */
 
-import { PricingAnalyzer } from "./analyzers/PricingAnalyzer.ts";
 import { DemandAnalyzer } from "./analyzers/DemandAnalyzer.ts";
 import { AvailabilityAnalyzer } from "./analyzers/AvailabilityAnalyzer.ts";
 import { QualityAnalyzer } from "./analyzers/QualityAnalyzer.ts";
@@ -48,7 +47,6 @@ export class AnalysisService {
     );
 
     // Initialize analyzers
-    const pricingAnalyzer = new PricingAnalyzer();
     const demandAnalyzer = new DemandAnalyzer();
     const availabilityAnalyzer = new AvailabilityAnalyzer();
     const qualityAnalyzer = new QualityAnalyzer();
@@ -62,7 +60,6 @@ export class AnalysisService {
 
     // Initialize recommendation engine
     this.recommendationEngine = new RecommendationEngine(
-      pricingAnalyzer,
       demandAnalyzer,
       availabilityAnalyzer,
       qualityAnalyzer,
