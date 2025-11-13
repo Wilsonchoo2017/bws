@@ -30,9 +30,16 @@ import {
 import { calculateBackoff, RETRY_CONFIG } from "../../config/scraper.config.ts";
 import { imageDownloadService } from "../image/ImageDownloadService.ts";
 import { imageStorageService } from "../image/ImageStorageService.ts";
-import { IMAGE_CONFIG, ImageDownloadStatus } from "../../config/image.config.ts";
+import {
+  IMAGE_CONFIG,
+  ImageDownloadStatus,
+} from "../../config/image.config.ts";
 import { scraperLogger } from "../../utils/logger.ts";
-import { createCircuitBreaker, type RedisCircuitBreaker } from "../../utils/RedisCircuitBreaker.ts";
+import {
+  createCircuitBreaker,
+  type RedisCircuitBreaker,
+} from "../../utils/RedisCircuitBreaker.ts";
+import { db } from "../../db/client.ts";
 
 /**
  * Result of a scraping operation
@@ -186,12 +193,15 @@ export class BricklinkScraperService {
         };
       } catch (error) {
         lastError = error as Error;
-        scraperLogger.error(`Scraping attempt ${attempt} failed: ${error.message}`, {
-          attempt,
-          error: error.message,
-          stack: error.stack,
-          url,
-        });
+        scraperLogger.error(
+          `Scraping attempt ${attempt} failed: ${error.message}`,
+          {
+            attempt,
+            error: error.message,
+            stack: error.stack,
+            url,
+          },
+        );
 
         // If not the last attempt, wait with exponential backoff
         if (attempt < RETRY_CONFIG.MAX_RETRIES) {
@@ -216,10 +226,11 @@ export class BricklinkScraperService {
 
   /**
    * Save scraped data to database
+   * Uses transaction to ensure atomicity of multi-step database operations
    */
   private async saveToDatabase(data: BricklinkData): Promise<void> {
     try {
-      // Download and store image if available
+      // Download and store image if available (outside transaction - file I/O)
       let localImagePath: string | null = null;
       let imageDownloadStatus = ImageDownloadStatus.SKIPPED;
 
@@ -231,12 +242,15 @@ export class BricklinkScraperService {
           });
           imageDownloadStatus = ImageDownloadStatus.DOWNLOADING;
 
-          const imageData = await imageDownloadService.download(data.image_url, {
-            timeoutMs: IMAGE_CONFIG.DOWNLOAD.TIMEOUT_MS,
-            maxRetries: IMAGE_CONFIG.DOWNLOAD.MAX_RETRIES,
-            retryDelayMs: IMAGE_CONFIG.DOWNLOAD.RETRY_DELAY_MS,
-            allowedFormats: IMAGE_CONFIG.VALIDATION.ALLOWED_FORMATS,
-          });
+          const imageData = await imageDownloadService.download(
+            data.image_url,
+            {
+              timeoutMs: IMAGE_CONFIG.DOWNLOAD.TIMEOUT_MS,
+              maxRetries: IMAGE_CONFIG.DOWNLOAD.MAX_RETRIES,
+              retryDelayMs: IMAGE_CONFIG.DOWNLOAD.RETRY_DELAY_MS,
+              allowedFormats: IMAGE_CONFIG.VALIDATION.ALLOWED_FORMATS,
+            },
+          );
 
           const storageResult = await imageStorageService.store(
             imageData.data,
@@ -265,85 +279,44 @@ export class BricklinkScraperService {
         }
       }
 
-      // Upsert the item
-      const { item, isNew } = await this.repository.upsert(
-        data.item_id,
-        {
-          itemType: data.item_type,
-          title: data.title,
-          weight: data.weight,
-          imageUrl: data.image_url,
-          localImagePath,
-          imageDownloadStatus,
-          sixMonthNew: data.six_month_new,
-          sixMonthUsed: data.six_month_used,
-          currentNew: data.current_new,
-          currentUsed: data.current_used,
-        },
-      );
+      // Wrap all database operations in a transaction for atomicity
+      await db.transaction(async (tx) => {
+        // Upsert the item
+        const { item, isNew } = await this.repository.upsert(
+          data.item_id,
+          {
+            itemType: data.item_type,
+            title: data.title,
+            weight: data.weight,
+            imageUrl: data.image_url,
+            localImagePath,
+            imageDownloadStatus,
+            sixMonthNew: data.six_month_new,
+            sixMonthUsed: data.six_month_used,
+            currentNew: data.current_new,
+            currentUsed: data.current_used,
+          },
+        );
 
-      // Update scraping timestamps
-      await this.repository.updateScrapingTimestamps(
-        data.item_id,
-        item.scrapeIntervalDays,
-      );
+        // Update scraping timestamps
+        await this.repository.updateScrapingTimestamps(
+          data.item_id,
+          item.scrapeIntervalDays,
+        );
 
-      if (isNew) {
-        // New item - always create initial price history
-        scraperLogger.info(`Created new item: ${data.item_id}`, {
-          itemId: data.item_id,
-        });
-        await this.repository.createPriceHistory({
-          itemId: data.item_id,
-          sixMonthNew: data.six_month_new,
-          sixMonthUsed: data.six_month_used,
-          currentNew: data.current_new,
-          currentUsed: data.current_used,
-        });
-        // Also create normalized volume history
-        await this.repository.createVolumeHistory({
-          itemId: data.item_id,
-          sixMonthNew: data.six_month_new,
-          sixMonthUsed: data.six_month_used,
-          currentNew: data.current_new,
-          currentUsed: data.current_used,
-        });
-      } else {
-        // Existing item - check if prices changed
-        if (item.watchStatus === "active") {
-          const hasChanged = hasAnyPricingChanged(
-            {
-              six_month_new: item
-                .sixMonthNew as unknown as BricklinkData["six_month_new"],
-              six_month_used: item
-                .sixMonthUsed as unknown as BricklinkData["six_month_used"],
-              current_new: item
-                .currentNew as unknown as BricklinkData["current_new"],
-              current_used: item
-                .currentUsed as unknown as BricklinkData["current_used"],
-            },
-            data,
-          );
-
-          if (hasChanged) {
-            scraperLogger.info(`Price changed for: ${data.item_id}`, {
-              itemId: data.item_id,
-            });
-            await this.repository.createPriceHistory({
-              itemId: data.item_id,
-              sixMonthNew: data.six_month_new,
-              sixMonthUsed: data.six_month_used,
-              currentNew: data.current_new,
-              currentUsed: data.current_used,
-            });
-          } else {
-            scraperLogger.info(`No price change for: ${data.item_id}`, {
-              itemId: data.item_id,
-            });
-          }
-
-          // Always record volume history on every scrape (regardless of price change)
-          // This allows tracking volume trends over time
+        if (isNew) {
+          // New item - always create initial price history
+          scraperLogger.info(`Created new item: ${data.item_id}`, {
+            itemId: data.item_id,
+          });
+          await this.repository.createPriceHistory({
+            itemId: data.item_id,
+            sixMonthNew: data.six_month_new,
+            sixMonthUsed: data.six_month_used,
+            currentNew: data.current_new,
+            currentUsed: data.current_used,
+          });
+          // Also create normalized volume history
           await this.repository.createVolumeHistory({
             itemId: data.item_id,
             sixMonthNew: data.six_month_new,
@@ -351,12 +324,56 @@ export class BricklinkScraperService {
             currentNew: data.current_new,
             currentUsed: data.current_used,
           });
-        }
-      }
+        } else {
+          // Existing item - check if prices changed
+          if (item.watchStatus === "active") {
+            const hasChanged = hasAnyPricingChanged(
+              {
+                six_month_new: item
+                  .sixMonthNew as unknown as BricklinkData["six_month_new"],
+                six_month_used: item
+                  .sixMonthUsed as unknown as BricklinkData["six_month_used"],
+                current_new: item
+                  .currentNew as unknown as BricklinkData["current_new"],
+                current_used: item
+                  .currentUsed as unknown as BricklinkData["current_used"],
+              },
+              data,
+            );
 
-      scraperLogger.info(`Saved to database: ${data.item_id}`, {
-        itemId: data.item_id,
-        isNew,
+            if (hasChanged) {
+              scraperLogger.info(`Price changed for: ${data.item_id}`, {
+                itemId: data.item_id,
+              });
+              await this.repository.createPriceHistory({
+                itemId: data.item_id,
+                sixMonthNew: data.six_month_new,
+                sixMonthUsed: data.six_month_used,
+                currentNew: data.current_new,
+                currentUsed: data.current_used,
+              });
+            } else {
+              scraperLogger.info(`No price change for: ${data.item_id}`, {
+                itemId: data.item_id,
+              });
+            }
+
+            // Always record volume history on every scrape (regardless of price change)
+            // This allows tracking volume trends over time
+            await this.repository.createVolumeHistory({
+              itemId: data.item_id,
+              sixMonthNew: data.six_month_new,
+              sixMonthUsed: data.six_month_used,
+              currentNew: data.current_new,
+              currentUsed: data.current_used,
+            });
+          }
+        }
+
+        scraperLogger.info(`Saved to database: ${data.item_id}`, {
+          itemId: data.item_id,
+          isNew,
+        });
       });
     } catch (error) {
       scraperLogger.error("Database save failed", {

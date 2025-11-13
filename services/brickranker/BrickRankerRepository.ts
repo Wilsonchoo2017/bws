@@ -258,7 +258,9 @@ export class BrickRankerRepository {
     const productId = await this.findProductBySetNumber(setNumber);
 
     // Prepare update fields
-    const updateFields: Partial<typeof brickrankerRetirementItems.$inferInsert> = {
+    const updateFields: Partial<
+      typeof brickrankerRetirementItems.$inferInsert
+    > = {
       setName: data.setName,
       yearReleased: data.yearReleased,
       retiringSoon: data.retiringSoon,
@@ -318,6 +320,7 @@ export class BrickRankerRepository {
 
   /**
    * Batch upsert items (for full page scrape)
+   * Uses transaction to ensure atomicity of batch operations
    */
   async batchUpsert(
     items: {
@@ -336,28 +339,31 @@ export class BrickRankerRepository {
     updated: number;
     total: number;
   }> {
-    let created = 0;
-    let updated = 0;
+    // Wrap all operations in a transaction for atomicity
+    return await db.transaction(async (tx) => {
+      let created = 0;
+      let updated = 0;
 
-    // Process each item
-    for (const item of items) {
-      const result = await this.upsert(item.setNumber, item);
-      if (result.isNew) {
-        created++;
-      } else {
-        updated++;
+      // Process each item
+      for (const item of items) {
+        const result = await this.upsert(item.setNumber, item);
+        if (result.isNew) {
+          created++;
+        } else {
+          updated++;
+        }
       }
-    }
 
-    // Mark items not in the list as inactive
-    const activeSetNumbers = items.map((item) => item.setNumber);
-    await this.markAllAsInactiveExcept(activeSetNumbers);
+      // Mark items not in the list as inactive
+      const activeSetNumbers = items.map((item) => item.setNumber);
+      await this.markAllAsInactiveExcept(activeSetNumbers);
 
-    return {
-      created,
-      updated,
-      total: items.length,
-    };
+      return {
+        created,
+        updated,
+        total: items.length,
+      };
+    });
   }
 
   /**
