@@ -32,6 +32,7 @@ import { imageDownloadService } from "../image/ImageDownloadService.ts";
 import { imageStorageService } from "../image/ImageStorageService.ts";
 import { IMAGE_CONFIG, ImageDownloadStatus } from "../../config/image.config.ts";
 import { scraperLogger } from "../../utils/logger.ts";
+import { createCircuitBreaker, type RedisCircuitBreaker } from "../../utils/RedisCircuitBreaker.ts";
 
 /**
  * Result of a scraping operation
@@ -54,29 +55,19 @@ export interface ScrapeOptions {
 }
 
 /**
- * Circuit breaker state
- */
-interface CircuitBreakerState {
-  failures: number;
-  lastFailureTime: number;
-  isOpen: boolean;
-}
-
-/**
  * BricklinkScraperService - Orchestrates the entire scraping workflow
  */
 export class BricklinkScraperService {
-  private circuitBreaker: CircuitBreakerState = {
-    failures: 0,
-    lastFailureTime: 0,
-    isOpen: false,
-  };
+  private circuitBreaker: RedisCircuitBreaker;
 
   constructor(
     private httpClient: HttpClientService,
     private rateLimiter: RateLimiterService,
     private repository: BricklinkRepository,
-  ) {}
+  ) {
+    // Initialize Redis-based circuit breaker for distributed state
+    this.circuitBreaker = createCircuitBreaker("bricklink");
+  }
 
   /**
    * Scrape a Bricklink item
@@ -85,7 +76,7 @@ export class BricklinkScraperService {
     const { url, saveToDb = false, skipRateLimit = false } = options;
 
     // Check circuit breaker
-    if (this.isCircuitOpen()) {
+    if (await this.circuitBreaker.isCircuitOpen()) {
       return {
         success: false,
         error: "Circuit breaker is open. Too many recent failures.",
@@ -185,7 +176,7 @@ export class BricklinkScraperService {
         }
 
         // Reset circuit breaker on success
-        this.resetCircuitBreaker();
+        await this.circuitBreaker.recordSuccess();
 
         return {
           success: true,
@@ -214,7 +205,7 @@ export class BricklinkScraperService {
     }
 
     // All retries failed
-    this.recordFailure();
+    await this.circuitBreaker.recordFailure();
 
     return {
       success: false,
@@ -378,67 +369,10 @@ export class BricklinkScraperService {
   }
 
   /**
-   * Check if circuit breaker is open
+   * Get circuit breaker status (for monitoring/debugging)
    */
-  private isCircuitOpen(): boolean {
-    if (!this.circuitBreaker.isOpen) {
-      return false;
-    }
-
-    // Check if timeout has passed
-    const now = Date.now();
-    const timeSinceLastFailure = now - this.circuitBreaker.lastFailureTime;
-
-    if (timeSinceLastFailure >= RETRY_CONFIG.CIRCUIT_BREAKER_TIMEOUT) {
-      // Reset circuit breaker
-      scraperLogger.info("Circuit breaker timeout passed. Resetting...");
-      this.resetCircuitBreaker();
-      return false;
-    }
-
-    return true;
-  }
-
-  /**
-   * Record a failure for circuit breaker
-   */
-  private recordFailure(): void {
-    this.circuitBreaker.failures++;
-    this.circuitBreaker.lastFailureTime = Date.now();
-
-    if (
-      this.circuitBreaker.failures >= RETRY_CONFIG.CIRCUIT_BREAKER_THRESHOLD
-    ) {
-      this.circuitBreaker.isOpen = true;
-      scraperLogger.warn(
-        `Circuit breaker opened after ${this.circuitBreaker.failures} failures`,
-        {
-          failures: this.circuitBreaker.failures,
-          threshold: RETRY_CONFIG.CIRCUIT_BREAKER_THRESHOLD,
-        },
-      );
-    }
-  }
-
-  /**
-   * Reset circuit breaker
-   */
-  private resetCircuitBreaker(): void {
-    if (this.circuitBreaker.failures > 0 || this.circuitBreaker.isOpen) {
-      scraperLogger.info("Circuit breaker reset");
-    }
-    this.circuitBreaker = {
-      failures: 0,
-      lastFailureTime: 0,
-      isOpen: false,
-    };
-  }
-
-  /**
-   * Get circuit breaker status
-   */
-  getCircuitBreakerStatus(): CircuitBreakerState {
-    return { ...this.circuitBreaker };
+  async getCircuitBreakerStatus() {
+    return await this.circuitBreaker.getState();
   }
 
   /**
