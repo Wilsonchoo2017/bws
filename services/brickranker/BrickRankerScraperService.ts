@@ -28,12 +28,19 @@ import {
 } from "./BrickRankerParser.ts";
 import { imageDownloadService } from "../image/ImageDownloadService.ts";
 import { imageStorageService } from "../image/ImageStorageService.ts";
-import { IMAGE_CONFIG, ImageDownloadStatus } from "../../config/image.config.ts";
+import {
+  IMAGE_CONFIG,
+  ImageDownloadStatus,
+} from "../../config/image.config.ts";
 import {
   BRICKRANKER_CONFIG,
   calculateBackoff,
   RETRY_CONFIG,
 } from "../../config/scraper.config.ts";
+import {
+  createCircuitBreaker,
+  type RedisCircuitBreaker,
+} from "../../utils/RedisCircuitBreaker.ts";
 
 /**
  * Result of a scraping operation
@@ -61,29 +68,19 @@ export interface ScrapeOptions {
 }
 
 /**
- * Circuit breaker state
- */
-interface CircuitBreakerState {
-  failures: number;
-  lastFailureTime: number;
-  isOpen: boolean;
-}
-
-/**
  * BrickRankerScraperService - Orchestrates the entire scraping workflow
  */
 export class BrickRankerScraperService {
-  private circuitBreaker: CircuitBreakerState = {
-    failures: 0,
-    lastFailureTime: 0,
-    isOpen: false,
-  };
+  private circuitBreaker: RedisCircuitBreaker;
 
   constructor(
     private httpClient: HttpClientService,
     private rateLimiter: RateLimiterService,
     private repository: BrickRankerRepository,
-  ) {}
+  ) {
+    // Initialize Redis-based circuit breaker for distributed state
+    this.circuitBreaker = createCircuitBreaker("brickranker");
+  }
 
   /**
    * Scrape the BrickRanker retirement tracker page
@@ -104,7 +101,7 @@ export class BrickRankerScraperService {
     }
 
     // Check circuit breaker
-    if (this.isCircuitOpen()) {
+    if (await this.circuitBreaker.isCircuitOpen()) {
       return {
         success: false,
         error: "Circuit breaker is open. Too many recent failures.",
@@ -161,7 +158,7 @@ export class BrickRankerScraperService {
         }
 
         // Reset circuit breaker on success
-        this.resetCircuitBreaker();
+        await this.circuitBreaker.recordSuccess();
 
         return {
           success: true,
@@ -189,7 +186,7 @@ export class BrickRankerScraperService {
     }
 
     // All retries failed
-    this.recordFailure();
+    await this.circuitBreaker.recordFailure();
 
     return {
       success: false,
@@ -229,18 +226,35 @@ export class BrickRankerScraperService {
    */
   private async downloadImagesForItems(
     items: RetirementItemData[],
-  ): Promise<Array<RetirementItemData & { localImagePath?: string; imageDownloadStatus?: string }>> {
-    const results: Array<RetirementItemData & { localImagePath?: string; imageDownloadStatus?: string }> = [];
+  ): Promise<
+    Array<
+      RetirementItemData & {
+        localImagePath?: string;
+        imageDownloadStatus?: string;
+      }
+    >
+  > {
+    const results: Array<
+      RetirementItemData & {
+        localImagePath?: string;
+        imageDownloadStatus?: string;
+      }
+    > = [];
 
     for (const item of items) {
       if (!item.imageUrl || !IMAGE_CONFIG.FEATURES.ENABLE_DEDUPLICATION) {
         // No image URL or feature disabled
-        results.push({ ...item, imageDownloadStatus: ImageDownloadStatus.SKIPPED });
+        results.push({
+          ...item,
+          imageDownloadStatus: ImageDownloadStatus.SKIPPED,
+        });
         continue;
       }
 
       try {
-        console.log(`📸 Downloading image for ${item.setNumber}: ${item.imageUrl}`);
+        console.log(
+          `📸 Downloading image for ${item.setNumber}: ${item.imageUrl}`,
+        );
 
         const imageData = await imageDownloadService.download(item.imageUrl, {
           timeoutMs: IMAGE_CONFIG.DOWNLOAD.TIMEOUT_MS,
@@ -262,9 +276,14 @@ export class BrickRankerScraperService {
           imageDownloadStatus: ImageDownloadStatus.COMPLETED,
         });
 
-        console.log(`✅ Image stored for ${item.setNumber}: ${storageResult.relativePath}`);
+        console.log(
+          `✅ Image stored for ${item.setNumber}: ${storageResult.relativePath}`,
+        );
       } catch (error) {
-        console.error(`❌ Image download failed for ${item.setNumber}:`, error.message);
+        console.error(
+          `❌ Image download failed for ${item.setNumber}:`,
+          error.message,
+        );
         results.push({
           ...item,
           imageDownloadStatus: ImageDownloadStatus.FAILED,
@@ -290,63 +309,10 @@ export class BrickRankerScraperService {
   }
 
   /**
-   * Check if circuit breaker is open
+   * Get circuit breaker status (for monitoring/debugging)
    */
-  private isCircuitOpen(): boolean {
-    if (!this.circuitBreaker.isOpen) {
-      return false;
-    }
-
-    // Check if timeout has passed
-    const now = Date.now();
-    const timeSinceLastFailure = now - this.circuitBreaker.lastFailureTime;
-
-    if (timeSinceLastFailure >= RETRY_CONFIG.CIRCUIT_BREAKER_TIMEOUT) {
-      // Reset circuit breaker
-      console.log("🔄 Circuit breaker timeout passed. Resetting...");
-      this.resetCircuitBreaker();
-      return false;
-    }
-
-    return true;
-  }
-
-  /**
-   * Record a failure for circuit breaker
-   */
-  private recordFailure(): void {
-    this.circuitBreaker.failures++;
-    this.circuitBreaker.lastFailureTime = Date.now();
-
-    if (
-      this.circuitBreaker.failures >= RETRY_CONFIG.CIRCUIT_BREAKER_THRESHOLD
-    ) {
-      this.circuitBreaker.isOpen = true;
-      console.error(
-        `⚠️ Circuit breaker opened after ${this.circuitBreaker.failures} failures`,
-      );
-    }
-  }
-
-  /**
-   * Reset circuit breaker
-   */
-  private resetCircuitBreaker(): void {
-    if (this.circuitBreaker.failures > 0 || this.circuitBreaker.isOpen) {
-      console.log("✅ Circuit breaker reset");
-    }
-    this.circuitBreaker = {
-      failures: 0,
-      lastFailureTime: 0,
-      isOpen: false,
-    };
-  }
-
-  /**
-   * Get circuit breaker status
-   */
-  getCircuitBreakerStatus(): CircuitBreakerState {
-    return { ...this.circuitBreaker };
+  async getCircuitBreakerStatus() {
+    return await this.circuitBreaker.getState();
   }
 
   /**

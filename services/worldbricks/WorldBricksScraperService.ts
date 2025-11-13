@@ -21,14 +21,18 @@ import type { HttpClientService } from "../http/HttpClientService.ts";
 import type { RateLimiterService } from "../rate-limiter/RateLimiterService.ts";
 import type { WorldBricksRepository } from "./WorldBricksRepository.ts";
 import {
-  type WorldBricksData,
-  parseWorldBricksHtml,
-  constructWorldBricksUrl,
   constructSearchUrl,
-  parseSearchResults,
+  constructWorldBricksUrl,
   isValidWorldBricksPage,
+  parseSearchResults,
+  parseWorldBricksHtml,
+  type WorldBricksData,
 } from "./WorldBricksParser.ts";
 import { calculateBackoff, RETRY_CONFIG } from "../../config/scraper.config.ts";
+import {
+  createCircuitBreaker,
+  type RedisCircuitBreaker,
+} from "../../utils/RedisCircuitBreaker.ts";
 
 /**
  * Result of a scraping operation
@@ -53,41 +57,29 @@ export interface ScrapeOptions {
 }
 
 /**
- * Circuit breaker state
- */
-interface CircuitBreakerState {
-  failures: number;
-  lastFailureTime: number;
-  isOpen: boolean;
-}
-
-const CIRCUIT_BREAKER_THRESHOLD = 5; // Open after 5 consecutive failures
-const CIRCUIT_BREAKER_TIMEOUT = 5 * 60 * 1000; // Reset after 5 minutes
-
-/**
  * WorldBricksScraperService - Orchestrates the entire WorldBricks scraping workflow
  */
 export class WorldBricksScraperService {
-  private circuitBreaker: CircuitBreakerState = {
-    failures: 0,
-    lastFailureTime: 0,
-    isOpen: false,
-  };
+  private circuitBreaker: RedisCircuitBreaker;
 
   constructor(
     private httpClient: HttpClientService,
     private rateLimiter: RateLimiterService,
     private repository: WorldBricksRepository,
-  ) {}
+  ) {
+    // Initialize Redis-based circuit breaker for distributed state
+    this.circuitBreaker = createCircuitBreaker("worldbricks");
+  }
 
   /**
    * Scrape a LEGO set from WorldBricks
    */
   async scrape(options: ScrapeOptions): Promise<ScrapeResult> {
-    const { setNumber, setName, url, saveToDb = false, skipRateLimit = false } = options;
+    const { setNumber, setName, url, saveToDb = false, skipRateLimit = false } =
+      options;
 
     // Check circuit breaker
-    if (this.isCircuitOpen()) {
+    if (await this.circuitBreaker.isCircuitOpen()) {
       return {
         success: false,
         error: "Circuit breaker is open. Too many recent failures.",
@@ -166,7 +158,9 @@ export class WorldBricksScraperService {
 
         // Validate that it's a valid WorldBricks product page
         if (!isValidWorldBricksPage(response.html)) {
-          throw new Error("Page does not appear to be a valid WorldBricks product page");
+          throw new Error(
+            "Page does not appear to be a valid WorldBricks product page",
+          );
         }
 
         // Parse the HTML
@@ -180,7 +174,9 @@ export class WorldBricksScraperService {
           );
         }
 
-        console.log(`✅ Successfully scraped: ${data.set_number} - ${data.set_name}`);
+        console.log(
+          `✅ Successfully scraped: ${data.set_number} - ${data.set_name}`,
+        );
         console.log(`   Year Released: ${data.year_released || "Unknown"}`);
         console.log(`   Year Retired: ${data.year_retired || "Unknown"}`);
         console.log(`   Parts Count: ${data.parts_count || "Unknown"}`);
@@ -193,7 +189,7 @@ export class WorldBricksScraperService {
         }
 
         // Reset circuit breaker on success
-        this.resetCircuitBreaker();
+        await this.circuitBreaker.recordSuccess();
 
         return {
           success: true,
@@ -217,7 +213,7 @@ export class WorldBricksScraperService {
     }
 
     // All retries failed
-    this.recordFailure();
+    await this.circuitBreaker.recordFailure();
 
     return {
       success: false,
@@ -239,7 +235,9 @@ export class WorldBricksScraperService {
     for (let i = 0; i < sets.length; i++) {
       const set = sets[i];
 
-      console.log(`\n📦 Processing set ${i + 1}/${sets.length}: ${set.setNumber}`);
+      console.log(
+        `\n📦 Processing set ${i + 1}/${sets.length}: ${set.setNumber}`,
+      );
 
       try {
         const result = await this.scrape({
@@ -253,7 +251,9 @@ export class WorldBricksScraperService {
 
         // Add delay between requests (except for last one)
         if (i < sets.length - 1 && result.success) {
-          console.log(`⏳ Waiting ${delayBetweenRequests}ms before next request...`);
+          console.log(
+            `⏳ Waiting ${delayBetweenRequests}ms before next request...`,
+          );
           await this.delay(delayBetweenRequests);
         }
       } catch (error) {
@@ -300,54 +300,6 @@ export class WorldBricksScraperService {
   }
 
   /**
-   * Check if circuit breaker is open
-   */
-  private isCircuitOpen(): boolean {
-    if (!this.circuitBreaker.isOpen) {
-      return false;
-    }
-
-    // Check if timeout has passed
-    const now = Date.now();
-    const timeSinceLastFailure = now - this.circuitBreaker.lastFailureTime;
-
-    if (timeSinceLastFailure > CIRCUIT_BREAKER_TIMEOUT) {
-      // Reset circuit breaker after timeout
-      this.resetCircuitBreaker();
-      return false;
-    }
-
-    return true;
-  }
-
-  /**
-   * Record a failure and potentially open circuit breaker
-   */
-  private recordFailure(): void {
-    this.circuitBreaker.failures++;
-    this.circuitBreaker.lastFailureTime = Date.now();
-
-    if (this.circuitBreaker.failures >= CIRCUIT_BREAKER_THRESHOLD) {
-      console.warn(
-        `⚠️  Circuit breaker opened after ${this.circuitBreaker.failures} failures`,
-      );
-      this.circuitBreaker.isOpen = true;
-    }
-  }
-
-  /**
-   * Reset circuit breaker after successful request
-   */
-  private resetCircuitBreaker(): void {
-    if (this.circuitBreaker.failures > 0 || this.circuitBreaker.isOpen) {
-      console.log(`✅ Circuit breaker reset`);
-    }
-
-    this.circuitBreaker.failures = 0;
-    this.circuitBreaker.isOpen = false;
-  }
-
-  /**
    * Delay helper function
    */
   private delay(ms: number): Promise<void> {
@@ -355,9 +307,9 @@ export class WorldBricksScraperService {
   }
 
   /**
-   * Get circuit breaker status (for monitoring)
+   * Get circuit breaker status (for monitoring/debugging)
    */
-  getCircuitBreakerStatus(): CircuitBreakerState {
-    return { ...this.circuitBreaker };
+  async getCircuitBreakerStatus() {
+    return await this.circuitBreaker.getState();
   }
 }
