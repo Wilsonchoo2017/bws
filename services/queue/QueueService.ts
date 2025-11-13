@@ -35,6 +35,8 @@ import {
   createBrickRankerScraperService,
   type ScrapeResult as BrickRankerScrapeResult,
 } from "../brickranker/BrickRankerScraperService.ts";
+import { getWorldBricksRepository } from "../worldbricks/WorldBricksRepository.ts";
+import { WorldBricksScraperService } from "../worldbricks/WorldBricksScraperService.ts";
 import { queueLogger } from "../../utils/logger.ts";
 
 /**
@@ -77,6 +79,12 @@ export interface BrickRankerScrapeJobData {
   saveToDb?: boolean;
 }
 
+export interface WorldBricksJobData {
+  setNumber: string;
+  saveToDb?: boolean;
+  priority?: JobPriority;
+}
+
 /**
  * Job type names
  */
@@ -86,6 +94,7 @@ export const JOB_TYPES = {
   SCRAPE_SCHEDULED: "scrape-scheduled-items",
   SEARCH_REDDIT: "search-reddit",
   SCRAPE_BRICKRANKER_RETIREMENT: "scrape-brickranker-retirement",
+  SCRAPE_WORLDBRICKS: "scrape-worldbricks",
 } as const;
 
 /**
@@ -210,6 +219,11 @@ export class QueueService {
         case JOB_TYPES.SCRAPE_BRICKRANKER_RETIREMENT:
           return await this.processBrickRankerScrapeJob(
             job.data as BrickRankerScrapeJobData,
+          );
+
+        case JOB_TYPES.SCRAPE_WORLDBRICKS:
+          return await this.processWorldBricksJob(
+            job.data as WorldBricksJobData,
           );
 
         default:
@@ -376,6 +390,50 @@ export class QueueService {
     return await scraper.scrapeAndSave({
       skipRateLimit: false,
     });
+  }
+
+  /**
+   * Process WorldBricks scrape job
+   */
+  private async processWorldBricksJob(
+    data: WorldBricksJobData,
+  ): Promise<{ success: boolean; setNumber: string }> {
+    const httpClient = getHttpClient();
+    const rateLimiter = getRateLimiter();
+    const repository = getWorldBricksRepository();
+
+    const scraper = new WorldBricksScraperService(
+      httpClient,
+      rateLimiter,
+      repository,
+    );
+
+    try {
+      const result = await scraper.scrape({
+        setNumber: data.setNumber,
+        saveToDb: data.saveToDb ?? true,
+        skipRateLimit: false,
+      });
+
+      if (!result.success) {
+        throw new Error(result.error || "Unknown scraping error");
+      }
+
+      // Update next_scrape_at after successful scrape
+      await repository.updateNextScrapeAt(data.setNumber);
+
+      return { success: true, setNumber: data.setNumber };
+    } catch (error) {
+      queueLogger.error(
+        `Failed to scrape WorldBricks set ${data.setNumber}`,
+        {
+          setNumber: data.setNumber,
+          error: error.message,
+          stack: error.stack,
+        },
+      );
+      throw error;
+    }
   }
 
   /**
@@ -574,6 +632,29 @@ export class QueueService {
   }
 
   /**
+   * Add a WorldBricks scrape job to the queue with deduplication
+   */
+  async addWorldBricksJob(data: WorldBricksJobData): Promise<Job> {
+    if (!this.queue) {
+      throw new Error("Queue not initialized. Call initialize() first.");
+    }
+
+    const priority = data.priority ?? JobPriority.NORMAL;
+    const jobId = `${JOB_TYPES.SCRAPE_WORLDBRICKS}-${data.setNumber}`;
+
+    // Add the job with jobId - BullMQ prevents duplicates automatically
+    const job = await this.queue.add(JOB_TYPES.SCRAPE_WORLDBRICKS, data, {
+      priority,
+      jobId,
+    });
+    console.log(
+      `➕ Added WorldBricks scrape job: ${job.id} for set ${data.setNumber}`,
+    );
+
+    return job;
+  }
+
+  /**
    * Get job by ID
    */
   async getJob(jobId: string): Promise<Job | undefined> {
@@ -722,6 +803,112 @@ export class QueueService {
     await this.queue.clean(604800000, 1000, "failed");
 
     console.log("🧹 Cleaned old jobs from queue");
+  }
+
+  /**
+   * Wait for all active jobs to complete
+   * @param timeoutMs - Maximum time to wait in milliseconds (default: 5 minutes)
+   * @returns Promise that resolves when all active jobs complete or timeout is reached
+   */
+  async waitForActiveJobs(timeoutMs: number = 300000): Promise<void> {
+    if (!this.queue) {
+      throw new Error("Queue not initialized");
+    }
+
+    const startTime = Date.now();
+    queueLogger.info("⏳ Waiting for active jobs to complete...");
+
+    while (Date.now() - startTime < timeoutMs) {
+      const activeJobs = await this.queue.getActive(0, -1);
+
+      if (activeJobs.length === 0) {
+        queueLogger.info("✅ All active jobs completed");
+        return;
+      }
+
+      queueLogger.info(`⏳ ${activeJobs.length} jobs still active, waiting...`);
+      // Wait 2 seconds before checking again
+      await new Promise((resolve) => setTimeout(resolve, 2000));
+    }
+
+    queueLogger.warn(
+      `⚠️ Timeout reached, ${await this.queue
+        .getActiveCount()} jobs still active`,
+    );
+  }
+
+  /**
+   * Clean all jobs from the queue (waiting, completed, failed)
+   * Active jobs are NOT removed - call waitForActiveJobs() first if needed
+   */
+  async cleanAllJobs(): Promise<{
+    waiting: number;
+    completed: number;
+    failed: number;
+  }> {
+    if (!this.queue) {
+      throw new Error("Queue not initialized");
+    }
+
+    queueLogger.info("🧹 Cleaning all jobs from queue...");
+
+    // Get counts before cleaning
+    const counts = await this.getJobCounts();
+
+    // Clean completed and failed jobs (age 0 = all)
+    await this.queue.clean(0, 0, "completed");
+    await this.queue.clean(0, 0, "failed");
+
+    // Drain waiting and delayed jobs
+    await this.queue.drain();
+
+    queueLogger.info("✅ All jobs cleaned from queue", {
+      waiting: counts.waiting,
+      completed: counts.completed,
+      failed: counts.failed,
+    });
+
+    return {
+      waiting: counts.waiting,
+      completed: counts.completed,
+      failed: counts.failed,
+    };
+  }
+
+  /**
+   * Reset the queue - wait for active jobs, clean all jobs
+   * @returns Summary of cleaned jobs
+   */
+  async resetQueue(): Promise<{
+    waiting: number;
+    completed: number;
+    failed: number;
+    active: number;
+  }> {
+    if (!this.queue) {
+      throw new Error("Queue not initialized");
+    }
+
+    queueLogger.info("🔄 Starting queue reset...");
+
+    // Get initial counts
+    const initialCounts = await this.getJobCounts();
+
+    // Wait for active jobs to complete
+    await this.waitForActiveJobs();
+
+    // Clean all other jobs
+    const cleaned = await this.cleanAllJobs();
+
+    queueLogger.info("✅ Queue reset complete", {
+      active: initialCounts.active,
+      ...cleaned,
+    });
+
+    return {
+      active: initialCounts.active,
+      ...cleaned,
+    };
   }
 
   /**

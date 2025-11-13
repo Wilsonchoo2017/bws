@@ -62,6 +62,9 @@ export default function QueueDiagnosticsDashboard() {
   const [health, setHealth] = useState<QueueHealthAssessment | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [isResetting, setIsResetting] = useState(false);
+  const [showResetConfirm, setShowResetConfirm] = useState(false);
+  const [resetSuccess, setResetSuccess] = useState<string | null>(null);
 
   // Fetch queue status
   const fetchQueueStats = async () => {
@@ -90,6 +93,37 @@ export default function QueueDiagnosticsDashboard() {
       setHealth(healthAssessment);
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  // Reset queue handler
+  const handleResetQueue = async () => {
+    setIsResetting(true);
+    setError(null);
+    setResetSuccess(null);
+    setShowResetConfirm(false);
+
+    try {
+      const response = await fetch("/api/queue-reset", {
+        method: "POST",
+      });
+
+      if (response.ok) {
+        const result = await response.json();
+        setResetSuccess(
+          `Queue reset complete! Cleared ${result.cleared.total} jobs, added ${result.repopulated.total} new jobs.`,
+        );
+        // Refresh stats after reset
+        await fetchQueueStats();
+      } else {
+        const errorData = await response.json();
+        setError(errorData.message || "Failed to reset queue");
+      }
+    } catch (err) {
+      console.error("Queue reset error:", err);
+      setError(err instanceof Error ? err.message : "Failed to reset queue");
+    } finally {
+      setIsResetting(false);
     }
   };
 
@@ -133,30 +167,56 @@ export default function QueueDiagnosticsDashboard() {
                   )}
                 </div>
               </div>
-              <button
-                class="btn btn-outline"
-                onClick={fetchQueueStats}
-                disabled={isLoading}
-              >
-                {isLoading && <span class="loading loading-spinner" />}
-                {!isLoading && (
-                  <svg
-                    xmlns="http://www.w3.org/2000/svg"
-                    class="h-5 w-5"
-                    fill="none"
-                    viewBox="0 0 24 24"
-                    stroke="currentColor"
-                  >
-                    <path
-                      stroke-linecap="round"
-                      stroke-linejoin="round"
-                      stroke-width="2"
-                      d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
-                    />
-                  </svg>
-                )}
-                Refresh
-              </button>
+              <div class="flex gap-2">
+                <button
+                  class="btn btn-outline"
+                  onClick={fetchQueueStats}
+                  disabled={isLoading || isResetting}
+                >
+                  {isLoading && <span class="loading loading-spinner" />}
+                  {!isLoading && (
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      class="h-5 w-5"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                      stroke="currentColor"
+                    >
+                      <path
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        stroke-width="2"
+                        d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+                      />
+                    </svg>
+                  )}
+                  Refresh
+                </button>
+                <button
+                  class="btn btn-error btn-outline"
+                  onClick={() => setShowResetConfirm(true)}
+                  disabled={isLoading || isResetting}
+                >
+                  {isResetting && <span class="loading loading-spinner" />}
+                  {!isResetting && (
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      class="h-5 w-5"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                      stroke="currentColor"
+                    >
+                      <path
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        stroke-width="2"
+                        d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
+                      />
+                    </svg>
+                  )}
+                  Reset Queue
+                </button>
+              </div>
             </div>
 
             {/* Issues List */}
@@ -297,6 +357,32 @@ export default function QueueDiagnosticsDashboard() {
         />
       )}
 
+      {/* Success Message */}
+      {resetSuccess && (
+        <div class="alert alert-success">
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            class="stroke-current shrink-0 h-6 w-6"
+            fill="none"
+            viewBox="0 0 24 24"
+          >
+            <path
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              stroke-width="2"
+              d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"
+            />
+          </svg>
+          <span>{resetSuccess}</span>
+          <button
+            class="btn btn-sm btn-ghost"
+            onClick={() => setResetSuccess(null)}
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
+
       {/* Error State */}
       {error && (
         <div class="alert alert-error">
@@ -315,6 +401,41 @@ export default function QueueDiagnosticsDashboard() {
           </svg>
           <span>Error: {error}</span>
         </div>
+      )}
+
+      {/* Reset Confirmation Dialog */}
+      {showResetConfirm && (
+        <dialog class="modal modal-open">
+          <div class="modal-box">
+            <h3 class="font-bold text-lg">Reset Queue?</h3>
+            <p class="py-4">
+              This will clear all current queue jobs and repopulate based on
+              current data state. Active jobs will complete first before the
+              reset.
+            </p>
+            <div class="modal-action">
+              <button
+                class="btn btn-ghost"
+                onClick={() => setShowResetConfirm(false)}
+                disabled={isResetting}
+              >
+                Cancel
+              </button>
+              <button
+                class="btn btn-error"
+                onClick={handleResetQueue}
+                disabled={isResetting}
+              >
+                {isResetting && <span class="loading loading-spinner" />}
+                Reset Queue
+              </button>
+            </div>
+          </div>
+          <div
+            class="modal-backdrop"
+            onClick={() => !isResetting && setShowResetConfirm(false)}
+          />
+        </dialog>
       )}
     </div>
   );
