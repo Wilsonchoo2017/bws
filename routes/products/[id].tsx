@@ -9,6 +9,7 @@ import { eq } from "drizzle-orm";
 import { db } from "../../db/client.ts";
 import { type Product, products } from "../../db/schema.ts";
 import ProductAnalysisCard from "../../islands/ProductAnalysisCard.tsx";
+import ProductEditModal from "../../islands/ProductEditModal.tsx";
 
 interface ProductDetailData {
   product: Product;
@@ -122,8 +123,11 @@ export default function ProductDetailPage(
                       <h1 class="text-2xl lg:text-3xl font-bold flex-1">
                         {product.name || "Unknown Product"}
                       </h1>
-                      <div class="badge badge-primary badge-lg">
-                        {product.source.toUpperCase()}
+                      <div class="flex items-center gap-2">
+                        <ProductEditModal product={product} />
+                        <div class="badge badge-primary badge-lg">
+                          {product.source.toUpperCase()}
+                        </div>
                       </div>
                     </div>
                     {product.brand && (

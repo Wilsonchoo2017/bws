@@ -9,10 +9,14 @@ import * as $api_analysis_productId_ from "./routes/api/analysis/[productId].ts"
 import * as $api_analysis_batch from "./routes/api/analysis/batch.ts";
 import * as $api_analysis_strategies from "./routes/api/analysis/strategies.ts";
 import * as $api_bricklink_items from "./routes/api/bricklink-items.ts";
+import * as $api_detect_missing_data from "./routes/api/detect-missing-data.ts";
 import * as $api_joke from "./routes/api/joke.ts";
+import * as $api_parse_brickeconomy from "./routes/api/parse-brickeconomy.ts";
 import * as $api_parse_shopee from "./routes/api/parse-shopee.ts";
 import * as $api_parse_toysrus from "./routes/api/parse-toysrus.ts";
+import * as $api_products_id_ from "./routes/api/products/[id].ts";
 import * as $api_products_manual from "./routes/api/products/manual.ts";
+import * as $api_products_validate_and_save from "./routes/api/products/validate-and-save.ts";
 import * as $api_reddit_results from "./routes/api/reddit-results.ts";
 import * as $api_reddit_search from "./routes/api/reddit-search.ts";
 import * as $api_scrape_bricklink from "./routes/api/scrape-bricklink.ts";
@@ -23,16 +27,20 @@ import * as $bricklink_items from "./routes/bricklink-items.tsx";
 import * as $cart from "./routes/cart.tsx";
 import * as $greet_name_ from "./routes/greet/[name].tsx";
 import * as $index from "./routes/index.tsx";
-import * as $product_id_ from "./routes/product/[id].tsx";
 import * as $products from "./routes/products.tsx";
+import * as $products_id_ from "./routes/products/[id].tsx";
+import * as $queue from "./routes/queue.tsx";
 import * as $BricklinkProductsList from "./islands/BricklinkProductsList.tsx";
 import * as $CartManager from "./islands/CartManager.tsx";
 import * as $Counter from "./islands/Counter.tsx";
 import * as $ProductAnalysisCard from "./islands/ProductAnalysisCard.tsx";
+import * as $ProductEditModal from "./islands/ProductEditModal.tsx";
 import * as $ProductsList from "./islands/ProductsList.tsx";
+import * as $QueueDiagnosticsDashboard from "./islands/QueueDiagnosticsDashboard.tsx";
 import * as $ShopeeParser from "./islands/ShopeeParser.tsx";
 import * as $Sidebar from "./islands/Sidebar.tsx";
 import * as $UnifiedParser from "./islands/UnifiedParser.tsx";
+import * as $components_QueueHealthBanner from "./islands/components/QueueHealthBanner.tsx";
 import * as $components_QueueStatsBanner from "./islands/components/QueueStatsBanner.tsx";
 import * as $components_SyncStatusBadge from "./islands/components/SyncStatusBadge.tsx";
 import type { Manifest } from "$fresh/server.ts";
@@ -46,10 +54,15 @@ const manifest = {
     "./routes/api/analysis/batch.ts": $api_analysis_batch,
     "./routes/api/analysis/strategies.ts": $api_analysis_strategies,
     "./routes/api/bricklink-items.ts": $api_bricklink_items,
+    "./routes/api/detect-missing-data.ts": $api_detect_missing_data,
     "./routes/api/joke.ts": $api_joke,
+    "./routes/api/parse-brickeconomy.ts": $api_parse_brickeconomy,
     "./routes/api/parse-shopee.ts": $api_parse_shopee,
     "./routes/api/parse-toysrus.ts": $api_parse_toysrus,
+    "./routes/api/products/[id].ts": $api_products_id_,
     "./routes/api/products/manual.ts": $api_products_manual,
+    "./routes/api/products/validate-and-save.ts":
+      $api_products_validate_and_save,
     "./routes/api/reddit-results.ts": $api_reddit_results,
     "./routes/api/reddit-search.ts": $api_reddit_search,
     "./routes/api/scrape-bricklink.ts": $api_scrape_bricklink,
@@ -60,18 +73,22 @@ const manifest = {
     "./routes/cart.tsx": $cart,
     "./routes/greet/[name].tsx": $greet_name_,
     "./routes/index.tsx": $index,
-    "./routes/product/[id].tsx": $product_id_,
     "./routes/products.tsx": $products,
+    "./routes/products/[id].tsx": $products_id_,
+    "./routes/queue.tsx": $queue,
   },
   islands: {
     "./islands/BricklinkProductsList.tsx": $BricklinkProductsList,
     "./islands/CartManager.tsx": $CartManager,
     "./islands/Counter.tsx": $Counter,
     "./islands/ProductAnalysisCard.tsx": $ProductAnalysisCard,
+    "./islands/ProductEditModal.tsx": $ProductEditModal,
     "./islands/ProductsList.tsx": $ProductsList,
+    "./islands/QueueDiagnosticsDashboard.tsx": $QueueDiagnosticsDashboard,
     "./islands/ShopeeParser.tsx": $ShopeeParser,
     "./islands/Sidebar.tsx": $Sidebar,
     "./islands/UnifiedParser.tsx": $UnifiedParser,
+    "./islands/components/QueueHealthBanner.tsx": $components_QueueHealthBanner,
     "./islands/components/QueueStatsBanner.tsx": $components_QueueStatsBanner,
     "./islands/components/SyncStatusBadge.tsx": $components_SyncStatusBadge,
   },

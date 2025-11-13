@@ -3,10 +3,10 @@
  * This module initializes the BullMQ worker when the application starts
  */
 
-import { getQueueService } from "./QueueService.ts";
+import { closeQueueService, getQueueService } from "./QueueService.ts";
 
-// Re-export getQueueService for convenience
-export { getQueueService } from "./QueueService.ts";
+// Re-export for convenience
+export { closeQueueService, getQueueService } from "./QueueService.ts";
 
 /**
  * Initialize the queue service
@@ -15,6 +15,9 @@ export { getQueueService } from "./QueueService.ts";
 export async function initializeQueue(): Promise<void> {
   try {
     console.log("🚀 Initializing BullMQ queue service...");
+
+    // Close any existing instance first (important for hot reload)
+    await closeQueueService();
 
     const queueService = getQueueService();
     await queueService.initialize();

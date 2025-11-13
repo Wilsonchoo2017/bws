@@ -115,9 +115,7 @@ export default function QueueDiagnosticsDashboard() {
             <div class="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
               <div class="flex items-center gap-4">
                 <span
-                  class={`badge badge-lg ${
-                    getHealthBadgeClass(health.status)
-                  }`}
+                  class={`badge badge-lg ${getHealthBadgeClass(health.status)}`}
                 >
                   {getHealthIcon(health.status)} {getHealthLabel(health.status)}
                 </span>

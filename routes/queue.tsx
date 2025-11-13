@@ -13,7 +13,9 @@ export default function QueuePage() {
           <div class="mb-6">
             <div class="text-sm breadcrumbs">
               <ul>
-                <li><a href="/">Home</a></li>
+                <li>
+                  <a href="/">Home</a>
+                </li>
                 <li>Queue Diagnostics</li>
               </ul>
             </div>

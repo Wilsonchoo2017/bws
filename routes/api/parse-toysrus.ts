@@ -2,6 +2,7 @@ import { FreshContext } from "$fresh/server.ts";
 import { eq, sql } from "drizzle-orm";
 import { db } from "../../db/client.ts";
 import { priceHistory, products, scrapeSessions } from "../../db/schema.ts";
+import { findExistingProduct } from "../../db/utils.ts";
 import { parseToysRUsHtml } from "../../utils/toysrus-extractors.ts";
 
 export const handler = async (
@@ -60,11 +61,51 @@ export const handler = async (
     // Parse HTML to extract products
     const parsedProducts = parseToysRUsHtml(htmlContent);
 
+    // Check database for existing products and populate LEGO IDs
+    const productsWithLegoIdResolution = await Promise.all(
+      parsedProducts.map(async (product) => {
+        // Check if product exists in database
+        const existingProduct = await findExistingProduct(
+          db,
+          product.productId,
+          product.name,
+        );
+
+        // If product exists with LEGO ID, use it
+        if (existingProduct?.legoSetNumber) {
+          return {
+            ...product,
+            legoSetNumber: existingProduct.legoSetNumber,
+            _existingLegoId: existingProduct.legoSetNumber,
+            _hasExistingProduct: true,
+          };
+        }
+
+        // Product is new or has no LEGO ID
+        return {
+          ...product,
+          _existingLegoId: null,
+          _hasExistingProduct: !!existingProduct,
+        };
+      }),
+    );
+
+    // Split products into those with and without LEGO IDs
+    const productsWithLegoId = productsWithLegoIdResolution.filter((p) =>
+      p.legoSetNumber
+    );
+    const productsWithoutLegoId = productsWithLegoIdResolution.filter((p) =>
+      !p.legoSetNumber
+    );
+
+    // Two-phase save: Save products with LEGO IDs first
+    const finalProducts = productsWithLegoId;
+
     // Create scrape session
     const [session] = await db.insert(scrapeSessions).values({
       source: "toysrus",
       sourceUrl: sourceUrl || null,
-      productsFound: parsedProducts.length,
+      productsFound: finalProducts.length,
       productsStored: 0,
       status: "success",
     }).returning();
@@ -75,7 +116,7 @@ export const handler = async (
     let productsStored = 0;
     const insertedProducts = [];
 
-    for (const product of parsedProducts) {
+    for (const product of finalProducts) {
       try {
         // Check if product already exists to get previous data
         const existingProduct = await db.query.products.findFirst({
@@ -175,20 +216,51 @@ export const handler = async (
     // Update session with actual stored count
     await db.update(scrapeSessions).set({
       productsStored,
-      status: productsStored === parsedProducts.length ? "success" : "partial",
+      status: productsStored === finalProducts.length ? "success" : "partial",
     }).where(eq(scrapeSessions.id, sessionId));
 
-    sessionStatus = productsStored === parsedProducts.length
+    sessionStatus = productsStored === finalProducts.length
       ? "success"
       : "partial";
 
+    // If there are products without LEGO IDs, return them for manual validation
+    // along with the session info and already-saved products
+    if (productsWithoutLegoId.length > 0) {
+      return new Response(
+        JSON.stringify({
+          success: false,
+          requiresValidation: true,
+          session_id: sessionId,
+          alreadySaved: insertedProducts,
+          productsNeedingValidation: productsWithoutLegoId.map((p) => ({
+            productName: p.name,
+            price: p.price,
+            priceBeforeDiscount: p.priceBeforeDiscount,
+            image: p.image,
+            productUrl: p.productUrl,
+            brand: p.brand,
+            sku: p.sku,
+            // Include original product data for saving later
+            _originalData: p,
+          })),
+          message:
+            `${productsStored} product(s) saved. ${productsWithoutLegoId.length} product(s) need LEGO ID validation.`,
+        }),
+        {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        },
+      );
+    }
+
+    // All products saved successfully
     return new Response(
       JSON.stringify(
         {
           success: true,
           session_id: sessionId,
           status: sessionStatus,
-          products_found: parsedProducts.length,
+          products_found: finalProducts.length,
           products_stored: productsStored,
           products: insertedProducts,
         },

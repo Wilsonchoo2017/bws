@@ -76,14 +76,71 @@ export function extractShopeeProductId(url: string): string | null {
 
 /**
  * Extracts LEGO set number from product name
+ * Supports formats: 12345, 12345-1, 12345-2, set-12345, SET12345
  * @param productName - Product name string
- * @returns LEGO set number (5 digits) or null if not found
+ * @returns LEGO set number (with variant suffix if present) or null if not found
  */
 export function extractLegoSetNumber(productName: string): string | null {
   if (!productName) return null;
 
-  const match = productName.match(/\b(\d{5})\b/);
+  // Match 5-digit number optionally followed by -1, -2, etc.
+  // Also handle 'set-' or 'SET' prefixes
+  const match = productName.match(/\b(?:set[- ]?)?(\d{5}(?:-\d+)?)\b/i);
   return match ? match[1] : null;
+}
+
+/**
+ * Normalizes LEGO set number to base number for comparison
+ * Strips variant suffixes (-1, -2, etc.) and prefixes (SET-, set-)
+ * @param setNumber - LEGO set number string
+ * @returns Normalized base set number (5 digits only)
+ * @example
+ * normalizeLegoSetNumber("76917-1") // Returns "76917"
+ * normalizeLegoSetNumber("SET-76917") // Returns "76917"
+ * normalizeLegoSetNumber("76917") // Returns "76917"
+ */
+export function normalizeLegoSetNumber(setNumber: string): string {
+  if (!setNumber) return "";
+
+  return setNumber
+    .toUpperCase()
+    .replace(/^SET[- ]?/i, "") // Remove 'SET-' or 'set-' prefix
+    .replace(/-\d+$/, "") // Remove '-1', '-2', etc. suffixes
+    .trim();
+}
+
+/**
+ * Finds products in the database by base LEGO set number
+ * Matches against normalized set numbers (ignoring variant suffixes)
+ * @param db - Database instance
+ * @param baseSetNumber - Base LEGO set number (e.g., "76917")
+ * @returns Array of products with matching base set number
+ */
+export async function findProductsByBaseSetNumber(
+  db: any,
+  baseSetNumber: string,
+): Promise<Array<{ id: number; name: string; legoSetNumber: string | null; source: string }>> {
+  const { products } = await import("./schema.ts");
+
+  // Query all products with non-null LEGO set numbers
+  const allProducts = await db.query.products.findMany({
+    where: (products: any, { isNotNull }: any) => isNotNull(products.legoSetNumber),
+    columns: {
+      id: true,
+      name: true,
+      legoSetNumber: true,
+      source: true,
+    },
+  });
+
+  // Filter by normalized base set number
+  const normalizedBase = normalizeLegoSetNumber(baseSetNumber);
+
+  return allProducts.filter((product: any) => {
+    if (!product.legoSetNumber) return false;
+    const productBase = normalizeLegoSetNumber(product.legoSetNumber);
+    return productBase === normalizedBase;
+  });
 }
 
 /**
@@ -136,4 +193,45 @@ export function extractShopUsername(url: string): string | null {
   }
 
   return null;
+}
+
+/**
+ * Finds an existing product in the database by Product ID or similar name
+ * @param db - Database instance
+ * @param productId - Product ID to search for
+ * @param productName - Product name for fuzzy matching fallback
+ * @returns Existing product with LEGO set number, or null if not found
+ */
+export async function findExistingProduct(
+  db: any,
+  productId: string,
+  productName: string,
+): Promise<{ id: number; legoSetNumber: string | null } | null> {
+  // First, try exact product ID match
+  const exactMatch = await db.query.products.findFirst({
+    where: (products: any, { eq }: any) => eq(products.productId, productId),
+    columns: {
+      id: true,
+      legoSetNumber: true,
+    },
+  });
+
+  if (exactMatch) {
+    return exactMatch;
+  }
+
+  // Fallback: Try to find by similar name (fuzzy match)
+  // Using ILIKE for case-insensitive matching
+  const { ilike } = await import("drizzle-orm");
+  const { products } = await import("./schema.ts");
+
+  const similarMatch = await db.query.products.findFirst({
+    where: ilike(products.name, `%${productName}%`),
+    columns: {
+      id: true,
+      legoSetNumber: true,
+    },
+  });
+
+  return similarMatch || null;
 }

@@ -2,15 +2,18 @@ import { useSignal } from "@preact/signals";
 import { useEffect } from "preact/hooks";
 import {
   addCartItem,
+  calculateCartDiscountPercentage,
   calculateCartSubtotal,
   calculateCartTotal,
-  calculateDiscountPercentage,
+  calculateItemFinalPrice,
   calculateItemSavings,
   calculateTotalSavings,
   type CartItem,
   clearCart,
   loadCartItems,
+  loadTotalCartPrice,
   removeCartItem,
+  saveTotalCartPrice,
   updateCartItem,
 } from "../utils/cart.ts";
 import { formatPrice } from "../utils/formatters.ts";
@@ -23,21 +26,26 @@ export default function CartManager() {
   // Form state
   const formLegoId = useSignal("");
   const formUnitPrice = useSignal("");
-  const formFinalPrice = useSignal("");
   const formQuantity = useSignal("1");
   const formPurchaseDate = useSignal("");
   const formPlatform = useSignal("");
   const formNotes = useSignal("");
 
-  // Load cart items on mount
+  // Cart-level total price (applies to all items)
+  const totalCartPriceInput = useSignal("");
+
+  // Load cart items and total price on mount
   useEffect(() => {
     cartItems.value = loadCartItems();
+    const savedTotal = loadTotalCartPrice();
+    if (savedTotal > 0) {
+      totalCartPriceInput.value = (savedTotal / 100).toFixed(2);
+    }
   }, []);
 
   const resetForm = () => {
     formLegoId.value = "";
     formUnitPrice.value = "";
-    formFinalPrice.value = "";
     formQuantity.value = "1";
     formPurchaseDate.value = "";
     formPlatform.value = "";
@@ -50,11 +58,9 @@ export default function CartManager() {
     e.preventDefault();
 
     const unitPrice = Math.round(parseFloat(formUnitPrice.value) * 100);
-    const finalPrice = Math.round(parseFloat(formFinalPrice.value) * 100);
 
     if (
-      !formLegoId.value || isNaN(unitPrice) || isNaN(finalPrice) ||
-      unitPrice <= 0 || finalPrice <= 0
+      !formLegoId.value || isNaN(unitPrice) || unitPrice <= 0
     ) {
       alert("Please fill in all required fields with valid values");
       return;
@@ -63,7 +69,6 @@ export default function CartManager() {
     const newItem = addCartItem({
       legoId: formLegoId.value,
       unitPrice,
-      finalPrice,
       quantity: formQuantity.value ? parseInt(formQuantity.value) : 1,
       purchaseDate: formPurchaseDate.value || undefined,
       platform: formPlatform.value || undefined,
@@ -80,11 +85,9 @@ export default function CartManager() {
     if (!editingId.value) return;
 
     const unitPrice = Math.round(parseFloat(formUnitPrice.value) * 100);
-    const finalPrice = Math.round(parseFloat(formFinalPrice.value) * 100);
 
     if (
-      !formLegoId.value || isNaN(unitPrice) || isNaN(finalPrice) ||
-      unitPrice <= 0 || finalPrice <= 0
+      !formLegoId.value || isNaN(unitPrice) || unitPrice <= 0
     ) {
       alert("Please fill in all required fields with valid values");
       return;
@@ -93,7 +96,6 @@ export default function CartManager() {
     const success = updateCartItem(editingId.value, {
       legoId: formLegoId.value,
       unitPrice,
-      finalPrice,
       quantity: formQuantity.value ? parseInt(formQuantity.value) : undefined,
       purchaseDate: formPurchaseDate.value || undefined,
       platform: formPlatform.value || undefined,
@@ -110,7 +112,6 @@ export default function CartManager() {
     editingId.value = item.id;
     formLegoId.value = item.legoId;
     formUnitPrice.value = (item.unitPrice / 100).toFixed(2);
-    formFinalPrice.value = (item.finalPrice / 100).toFixed(2);
     formQuantity.value = String(item.quantity || 1);
     formPurchaseDate.value = item.purchaseDate || "";
     formPlatform.value = item.platform || "";
@@ -134,13 +135,28 @@ export default function CartManager() {
       )
     ) {
       clearCart();
+      saveTotalCartPrice(0);
       cartItems.value = [];
+      totalCartPriceInput.value = "";
+    }
+  };
+
+  const handleTotalCartPriceChange = (e: Event) => {
+    const input = (e.target as HTMLInputElement).value;
+    totalCartPriceInput.value = input;
+
+    const priceInCents = Math.round(parseFloat(input) * 100);
+    if (!isNaN(priceInCents) && priceInCents > 0) {
+      saveTotalCartPrice(priceInCents);
+    } else {
+      saveTotalCartPrice(0);
     }
   };
 
   const subtotal = calculateCartSubtotal(cartItems.value);
   const total = calculateCartTotal(cartItems.value);
   const totalSavings = calculateTotalSavings(cartItems.value);
+  const cartDiscountPct = calculateCartDiscountPercentage(cartItems.value);
 
   return (
     <div class="space-y-6">
@@ -218,27 +234,11 @@ export default function CartManager() {
                         (e.target as HTMLInputElement).value}
                     required
                   />
-                </div>
-
-                {/* Final Price */}
-                <div class="form-control">
                   <label class="label">
-                    <span class="label-text">
-                      Final Price (RM) <span class="text-error">*</span>
+                    <span class="label-text-alt text-info">
+                      Per item price (already discounted at item level)
                     </span>
                   </label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    min="0.01"
-                    placeholder="149.90"
-                    class="input input-bordered"
-                    value={formFinalPrice.value}
-                    onInput={(e) =>
-                      formFinalPrice.value =
-                        (e.target as HTMLInputElement).value}
-                    required
-                  />
                 </div>
 
                 {/* Quantity */}
@@ -321,6 +321,60 @@ export default function CartManager() {
         </div>
       )}
 
+      {/* Total Cart Price Input (Cart-Level Discount) */}
+      {cartItems.value.length > 0 && (
+        <div class="card bg-gradient-to-br from-accent/10 to-accent/5 border-2 border-accent/30 shadow-lg">
+          <div class="card-body">
+            <h3 class="card-title text-accent flex items-center gap-2">
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                class="h-5 w-5"
+                viewBox="0 0 20 20"
+                fill="currentColor"
+              >
+                <path d="M8.433 7.418c.155-.103.346-.196.567-.267v1.698a2.305 2.305 0 01-.567-.267C8.07 8.34 8 8.114 8 8c0-.114.07-.34.433-.582zM11 12.849v-1.698c.22.071.412.164.567.267.364.243.433.468.433.582 0 .114-.07.34-.433.582a2.305 2.305 0 01-.567.267z" />
+                <path
+                  fill-rule="evenodd"
+                  d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-13a1 1 0 10-2 0v.092a4.535 4.535 0 00-1.676.662C6.602 6.234 6 7.009 6 8c0 .99.602 1.765 1.324 2.246.48.32 1.054.545 1.676.662v1.941c-.391-.127-.68-.317-.843-.504a1 1 0 10-1.51 1.31c.562.649 1.413 1.076 2.353 1.253V15a1 1 0 102 0v-.092a4.535 4.535 0 001.676-.662C13.398 13.766 14 12.991 14 12c0-.99-.602-1.765-1.324-2.246A4.535 4.535 0 0011 9.092V7.151c.391.127.68.317.843.504a1 1 0 101.511-1.31c-.563-.649-1.413-1.076-2.354-1.253V5z"
+                  clip-rule="evenodd"
+                />
+              </svg>
+              Final Cart Price (After All Discounts)
+            </h3>
+            <div class="form-control">
+              <label class="label">
+                <span class="label-text">
+                  Enter the total price you'll pay after cart-level vouchers,
+                  platform discounts, etc.
+                </span>
+              </label>
+              <div class="join">
+                <span class="join-item btn btn-accent btn-disabled">RM</span>
+                <input
+                  type="number"
+                  step="0.01"
+                  min="0.01"
+                  placeholder="Enter final cart total..."
+                  class="input input-bordered input-accent join-item flex-1"
+                  value={totalCartPriceInput.value}
+                  onInput={handleTotalCartPriceChange}
+                />
+              </div>
+              <label class="label">
+                <span class="label-text-alt">
+                  {totalCartPriceInput.value &&
+                      !isNaN(parseFloat(totalCartPriceInput.value))
+                    ? `Cart Discount: ${
+                      cartDiscountPct.toFixed(1)
+                    }% • Savings: ${formatPrice(totalSavings)}`
+                    : "Leave empty if no cart-level discounts"}
+                </span>
+              </label>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Cart Items */}
       {cartItems.value.length === 0
         ? (
@@ -358,7 +412,7 @@ export default function CartManager() {
                 <thead>
                   <tr>
                     <th>LEGO Set</th>
-                    <th>Unit Price</th>
+                    <th>Item Total</th>
                     <th>Final Price</th>
                     <th>Qty</th>
                     <th>Discount</th>
@@ -369,11 +423,21 @@ export default function CartManager() {
                 </thead>
                 <tbody>
                   {cartItems.value.map((item) => {
-                    const discountPct = calculateDiscountPercentage(
-                      item.unitPrice,
-                      item.finalPrice,
+                    const totalCartPrice = loadTotalCartPrice();
+                    const itemFinalPrice = calculateItemFinalPrice(
+                      item,
+                      subtotal,
+                      totalCartPrice > 0 ? totalCartPrice : subtotal,
                     );
-                    const savings = calculateItemSavings(item);
+                    const savings = calculateItemSavings(
+                      item,
+                      subtotal,
+                      totalCartPrice > 0 ? totalCartPrice : subtotal,
+                    );
+                    const itemSubtotal = item.unitPrice * (item.quantity || 1);
+                    const discountPct = itemSubtotal > 0
+                      ? ((itemSubtotal - itemFinalPrice) / itemSubtotal) * 100
+                      : 0;
 
                     return (
                       <tr key={item.id}>
@@ -390,9 +454,11 @@ export default function CartManager() {
                             </div>
                           )}
                         </td>
-                        <td>{formatPrice(item.unitPrice)}</td>
+                        <td>
+                          {formatPrice(item.unitPrice * (item.quantity || 1))}
+                        </td>
                         <td class="font-semibold">
-                          {formatPrice(item.finalPrice)}
+                          {formatPrice(itemFinalPrice)}
                         </td>
                         <td>{item.quantity || 1}</td>
                         <td>
@@ -456,11 +522,21 @@ export default function CartManager() {
             {/* Mobile Card View */}
             <div class="lg:hidden space-y-4">
               {cartItems.value.map((item) => {
-                const discountPct = calculateDiscountPercentage(
-                  item.unitPrice,
-                  item.finalPrice,
+                const totalCartPrice = loadTotalCartPrice();
+                const itemFinalPrice = calculateItemFinalPrice(
+                  item,
+                  subtotal,
+                  totalCartPrice > 0 ? totalCartPrice : subtotal,
                 );
-                const savings = calculateItemSavings(item);
+                const savings = calculateItemSavings(
+                  item,
+                  subtotal,
+                  totalCartPrice > 0 ? totalCartPrice : subtotal,
+                );
+                const itemSubtotal = item.unitPrice * (item.quantity || 1);
+                const discountPct = itemSubtotal > 0
+                  ? ((itemSubtotal - itemFinalPrice) / itemSubtotal) * 100
+                  : 0;
 
                 return (
                   <div key={item.id} class="card bg-base-100 shadow-lg">
@@ -485,12 +561,14 @@ export default function CartManager() {
 
                       <div class="space-y-2 text-sm">
                         <div class="flex justify-between">
-                          <span class="text-base-content/70">Unit Price:</span>
-                          <span>{formatPrice(item.unitPrice)}</span>
+                          <span class="text-base-content/70">
+                            Unit Price (Total):
+                          </span>
+                          <span>{formatPrice(itemSubtotal)}</span>
                         </div>
                         <div class="flex justify-between font-semibold">
                           <span>Final Price:</span>
-                          <span>{formatPrice(item.finalPrice)}</span>
+                          <span>{formatPrice(itemFinalPrice)}</span>
                         </div>
                         <div class="flex justify-between">
                           <span class="text-base-content/70">Quantity:</span>

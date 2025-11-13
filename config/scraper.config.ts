@@ -11,7 +11,7 @@ export const REDIS_CONFIG = {
   PORT: parseInt(Deno.env.get("REDIS_PORT") || "6379"),
   PASSWORD: Deno.env.get("REDIS_PASSWORD") || undefined,
   DB: parseInt(Deno.env.get("REDIS_DB") || "0"),
-  MAX_RETRIES_PER_REQUEST: 3,
+  MAX_RETRIES_PER_REQUEST: null, // Must be null for BullMQ blocking operations
 } as const;
 
 /**

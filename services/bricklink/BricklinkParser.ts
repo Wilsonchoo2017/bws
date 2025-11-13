@@ -206,8 +206,9 @@ export function parsePriceGuide(html: string): {
   }
 
   // Extract pricing boxes (4 boxes: 6mo new, 6mo used, current new, current used)
+  // The boxes are in the row with bgcolor="#C0C0C0" which contains the summary statistics
   const priceBoxes = doc.querySelectorAll(
-    "#id-main-legacy-table > tr table > tr:nth-of-type(3) > td > table > tr > td",
+    'tr[bgcolor="#C0C0C0"] > td',
   );
 
   const pricingData = {

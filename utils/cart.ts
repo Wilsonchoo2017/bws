@@ -1,8 +1,7 @@
 export interface CartItem {
   id: string; // UUID for cart item
   legoId: string; // LEGO set number
-  unitPrice: number; // In cents
-  finalPrice: number; // In cents (after all discounts)
+  unitPrice: number; // In cents (already discounted at item level)
   quantity?: number;
   purchaseDate?: string; // ISO date string
   platform?: string; // e.g., "Shopee", "ToysRUs"
@@ -11,51 +10,122 @@ export interface CartItem {
 }
 
 const CART_STORAGE_KEY = "lego-cart-items";
+const CART_TOTAL_PRICE_KEY = "lego-cart-total-price"; // In cents
 
 /**
- * Calculate discount percentage for a cart item
+ * Load total cart price from localStorage
  */
-export function calculateDiscountPercentage(
-  unitPrice: number,
-  finalPrice: number,
-): number {
-  if (unitPrice <= 0) return 0;
-  return ((unitPrice - finalPrice) / unitPrice) * 100;
+export function loadTotalCartPrice(): number {
+  if (typeof window === "undefined") return 0;
+
+  try {
+    const stored = localStorage.getItem(CART_TOTAL_PRICE_KEY);
+    if (!stored) return 0;
+    return parseFloat(stored);
+  } catch (error) {
+    console.error("Failed to load total cart price:", error);
+    return 0;
+  }
 }
 
 /**
- * Calculate total savings (unit price - final price) * quantity
+ * Save total cart price to localStorage
  */
-export function calculateItemSavings(item: CartItem): number {
-  const quantity = item.quantity || 1;
-  return (item.unitPrice - item.finalPrice) * quantity;
+export function saveTotalCartPrice(priceInCents: number): void {
+  if (typeof window === "undefined") return;
+
+  try {
+    localStorage.setItem(CART_TOTAL_PRICE_KEY, priceInCents.toString());
+  } catch (error) {
+    console.error("Failed to save total cart price:", error);
+  }
 }
 
 /**
- * Calculate total savings across all cart items
- */
-export function calculateTotalSavings(items: CartItem[]): number {
-  return items.reduce((total, item) => total + calculateItemSavings(item), 0);
-}
-
-/**
- * Calculate total final price across all cart items
- */
-export function calculateCartTotal(items: CartItem[]): number {
-  return items.reduce((total, item) => {
-    const quantity = item.quantity || 1;
-    return total + item.finalPrice * quantity;
-  }, 0);
-}
-
-/**
- * Calculate total unit price (before discounts) across all cart items
+ * Calculate total unit price (before cart-level discounts) across all cart items
  */
 export function calculateCartSubtotal(items: CartItem[]): number {
   return items.reduce((total, item) => {
     const quantity = item.quantity || 1;
     return total + item.unitPrice * quantity;
   }, 0);
+}
+
+/**
+ * Calculate final price for a single item based on proportional distribution of cart discount
+ */
+export function calculateItemFinalPrice(
+  item: CartItem,
+  cartSubtotal: number,
+  totalCartPrice: number,
+): number {
+  if (cartSubtotal <= 0) return item.unitPrice * (item.quantity || 1);
+
+  const quantity = item.quantity || 1;
+  const itemSubtotal = item.unitPrice * quantity;
+
+  // Proportionally distribute the total cart price
+  const proportion = itemSubtotal / cartSubtotal;
+  return Math.round(totalCartPrice * proportion);
+}
+
+/**
+ * Calculate total final price across all cart items (uses stored totalCartPrice or falls back to subtotal)
+ */
+export function calculateCartTotal(items: CartItem[]): number {
+  const totalCartPrice = loadTotalCartPrice();
+
+  // If no total cart price is set, return subtotal (no cart-level discount)
+  if (totalCartPrice <= 0) {
+    return calculateCartSubtotal(items);
+  }
+
+  return totalCartPrice;
+}
+
+/**
+ * Calculate total savings (subtotal - total cart price)
+ */
+export function calculateTotalSavings(items: CartItem[]): number {
+  const subtotal = calculateCartSubtotal(items);
+  const totalCartPrice = loadTotalCartPrice();
+
+  // If no total cart price is set, no savings
+  if (totalCartPrice <= 0) return 0;
+
+  return subtotal - totalCartPrice;
+}
+
+/**
+ * Calculate savings for a single item based on proportional distribution
+ */
+export function calculateItemSavings(
+  item: CartItem,
+  cartSubtotal: number,
+  totalCartPrice: number,
+): number {
+  const quantity = item.quantity || 1;
+  const itemSubtotal = item.unitPrice * quantity;
+  const itemFinalPrice = calculateItemFinalPrice(
+    item,
+    cartSubtotal,
+    totalCartPrice,
+  );
+
+  return itemSubtotal - itemFinalPrice;
+}
+
+/**
+ * Calculate discount percentage for entire cart
+ */
+export function calculateCartDiscountPercentage(items: CartItem[]): number {
+  const subtotal = calculateCartSubtotal(items);
+  if (subtotal <= 0) return 0;
+
+  const totalCartPrice = loadTotalCartPrice();
+  if (totalCartPrice <= 0) return 0;
+
+  return ((subtotal - totalCartPrice) / subtotal) * 100;
 }
 
 /**
@@ -95,7 +165,7 @@ export function generateCartItemId(): string {
 }
 
 /**
- * Add item to cart
+ * Add item to cart (finalPrice is calculated, not stored)
  */
 export function addCartItem(item: Omit<CartItem, "id" | "addedAt">): CartItem {
   const newItem: CartItem = {

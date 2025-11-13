@@ -235,8 +235,9 @@ function checkForErrors(
     hasErrors = true;
     issues.push({
       severity: "error",
-      message:
-        `High failure rate: ${metrics.failureRate.toFixed(1)}% of recent jobs have failed. This indicates a systemic problem.`,
+      message: `High failure rate: ${
+        metrics.failureRate.toFixed(1)
+      }% of recent jobs have failed. This indicates a systemic problem.`,
     });
   }
 

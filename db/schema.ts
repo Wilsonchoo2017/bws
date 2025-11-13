@@ -25,6 +25,7 @@ export const watchStatusEnum = pgEnum("watch_status", [
 export const productSourceEnum = pgEnum("product_source", [
   "shopee",
   "toysrus",
+  "brickeconomy",
   "self",
 ]);
 

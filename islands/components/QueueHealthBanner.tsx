@@ -227,7 +227,9 @@ export default function QueueHealthBanner(
                 onClick={onRefresh}
                 disabled={isLoading}
               >
-                {isLoading && <span class="loading loading-spinner loading-xs" />}
+                {isLoading && (
+                  <span class="loading loading-spinner loading-xs" />
+                )}
                 {!isLoading && (
                   <svg
                     xmlns="http://www.w3.org/2000/svg"

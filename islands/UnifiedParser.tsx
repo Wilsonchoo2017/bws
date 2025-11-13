@@ -2,7 +2,7 @@ import { useSignal } from "@preact/signals";
 import { formatDelta, formatPrice, formatSold } from "../utils/formatters.ts";
 import { getSoldStyle } from "../constants/app-config.ts";
 
-type Platform = "shopee" | "toysrus";
+type Platform = "shopee" | "toysrus" | "brickeconomy";
 
 interface Product {
   id: number;
@@ -34,6 +34,30 @@ interface ParseResult {
   error?: string;
 }
 
+interface ProductNeedingValidation {
+  productName: string;
+  price: number | null;
+  priceString?: string;
+  unitsSold?: number | null;
+  unitsSoldString?: string;
+  priceBeforeDiscount?: number | null;
+  image?: string | null;
+  productUrl?: string | null;
+  shopName?: string | null;
+  brand?: string | null;
+  sku?: string | null;
+  _originalData: any;
+}
+
+interface ValidationResponse {
+  success: boolean;
+  requiresValidation: boolean;
+  session_id: number;
+  alreadySaved: Product[];
+  productsNeedingValidation: ProductNeedingValidation[];
+  message: string;
+}
+
 const PLATFORM_CONFIG = {
   shopee: {
     name: "Shopee",
@@ -55,6 +79,16 @@ const PLATFORM_CONFIG = {
     description:
       'Paste the HTML content from a Toys"R"Us product listing page to extract and store product data',
   },
+  brickeconomy: {
+    name: "BrickEconomy",
+    apiEndpoint: "/api/parse-brickeconomy",
+    urlLabel: "BrickEconomy Page URL",
+    urlPlaceholder: "https://www.brickeconomy.com/set/76917-1/...",
+    urlRequired: false,
+    urlHelp: "Optional - for reference",
+    description:
+      "Paste the HTML content from a BrickEconomy product detail page to extract comprehensive LEGO set data including pricing, investment metrics, and predictions",
+  },
 };
 
 export default function UnifiedParser() {
@@ -64,6 +98,16 @@ export default function UnifiedParser() {
   const isLoading = useSignal(false);
   const result = useSignal<ParseResult | null>(null);
   const error = useSignal<string | null>(null);
+
+  // Validation state
+  const showValidationModal = useSignal(false);
+  const productsNeedingValidation = useSignal<ProductNeedingValidation[]>([]);
+  const currentValidationIndex = useSignal(0);
+  const manualLegoId = useSignal("");
+  const isSaving = useSignal(false);
+  const sessionId = useSignal<number | null>(null);
+  const alreadySavedProducts = useSignal<Product[]>([]);
+  const validatedProducts = useSignal<Product[]>([]);
 
   const config = PLATFORM_CONFIG[platform.value];
 
@@ -104,7 +148,18 @@ export default function UnifiedParser() {
         throw new Error(data.error || `Server error: ${response.status}`);
       }
 
-      result.value = data;
+      // Check if validation is required
+      if (data.requiresValidation && data.productsNeedingValidation) {
+        sessionId.value = data.session_id;
+        alreadySavedProducts.value = data.alreadySaved || [];
+        validatedProducts.value = []; // Reset validated products array
+        productsNeedingValidation.value = data.productsNeedingValidation;
+        currentValidationIndex.value = 0;
+        showValidationModal.value = true;
+        error.value = data.message || "Some products need LEGO ID validation";
+      } else {
+        result.value = data;
+      }
     } catch (err) {
       error.value = err instanceof Error
         ? err.message
@@ -127,6 +182,146 @@ export default function UnifiedParser() {
     result.value = null;
     error.value = null;
   };
+
+  const handleCancelValidation = () => {
+    showValidationModal.value = false;
+    productsNeedingValidation.value = [];
+    currentValidationIndex.value = 0;
+    manualLegoId.value = "";
+    error.value = null; // Clear error instead of showing cancellation message
+  };
+
+  const handleSkipProduct = () => {
+    // Move to next product or close modal if done
+    if (
+      currentValidationIndex.value < productsNeedingValidation.value.length - 1
+    ) {
+      currentValidationIndex.value++;
+      manualLegoId.value = "";
+    } else {
+      handleCancelValidation();
+    }
+  };
+
+  const handleSaveWithLegoId = async () => {
+    const legoId = manualLegoId.value.trim();
+
+    // Validate LEGO ID format
+    if (!/^\d{5}$/.test(legoId)) {
+      error.value = "LEGO ID must be exactly 5 digits";
+      return;
+    }
+
+    const currentProduct =
+      productsNeedingValidation.value[currentValidationIndex.value];
+    if (!currentProduct) return;
+
+    isSaving.value = true;
+    error.value = null;
+
+    try {
+      // Prepare product data based on platform
+      const productData = platform.value === "shopee"
+        ? {
+          source: "shopee",
+          productId: currentProduct._originalData.product_id,
+          name: currentProduct._originalData.product_name,
+          currency: "MYR",
+          price: currentProduct._originalData.price,
+          unitsSold: currentProduct._originalData.units_sold,
+          legoSetNumber: legoId,
+          shopId: currentProduct._originalData.shop_id,
+          shopName: currentProduct._originalData.shop_name,
+          image: currentProduct._originalData.image,
+          rawData: {
+            product_url: currentProduct._originalData.product_url,
+            price_string: currentProduct._originalData.price_string,
+            units_sold_string: currentProduct._originalData.units_sold_string,
+          },
+        }
+        : {
+          source: "toysrus",
+          productId: currentProduct._originalData.productId,
+          name: currentProduct._originalData.name,
+          brand: currentProduct._originalData.brand,
+          currency: "MYR",
+          price: currentProduct._originalData.price,
+          priceBeforeDiscount: currentProduct._originalData.priceBeforeDiscount,
+          image: currentProduct._originalData.image,
+          legoSetNumber: legoId,
+          sku: currentProduct._originalData.sku,
+          categoryNumber: currentProduct._originalData.categoryNumber,
+          categoryName: currentProduct._originalData.categoryName,
+          ageRange: currentProduct._originalData.ageRange,
+          rawData: {
+            product_url: currentProduct._originalData.productUrl,
+            ...currentProduct._originalData.rawData,
+          },
+        };
+
+      const response = await fetch("/api/products/validate-and-save", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(productData),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok || !data.success) {
+        throw new Error(data.error || "Failed to save product");
+      }
+
+      // Add validated product to accumulator
+      validatedProducts.value = [...validatedProducts.value, data.product];
+
+      // Move to next product or close modal if done
+      if (
+        currentValidationIndex.value <
+          productsNeedingValidation.value.length - 1
+      ) {
+        currentValidationIndex.value++;
+        manualLegoId.value = "";
+      } else {
+        // All products validated, close modal and show complete summary
+        showValidationModal.value = false;
+        productsNeedingValidation.value = [];
+        currentValidationIndex.value = 0;
+        manualLegoId.value = "";
+        error.value = null;
+
+        // Combine already saved products with validated products
+        const allProducts = [
+          ...alreadySavedProducts.value,
+          ...validatedProducts.value,
+        ];
+
+        result.value = {
+          success: true,
+          session_id: sessionId.value || -1,
+          status: "success",
+          products_found: allProducts.length,
+          products_stored: allProducts.length,
+          products: allProducts,
+        };
+
+        // Clear validation state
+        sessionId.value = null;
+        alreadySavedProducts.value = [];
+        validatedProducts.value = [];
+      }
+    } catch (err) {
+      error.value = err instanceof Error
+        ? err.message
+        : "Failed to save product";
+    } finally {
+      isSaving.value = false;
+    }
+  };
+
+  const currentProduct =
+    productsNeedingValidation.value[currentValidationIndex.value];
 
   return (
     <div class="w-full max-w-6xl mx-auto space-y-6">
@@ -525,6 +720,107 @@ export default function UnifiedParser() {
             </div>
           )}
         </>
+      )}
+
+      {/* LEGO ID Validation Modal */}
+      {showValidationModal.value && currentProduct && (
+        <div class="modal modal-open">
+          <div class="modal-box max-w-2xl">
+            <h3 class="font-bold text-lg mb-4">
+              LEGO ID Required ({currentValidationIndex.value + 1} of{" "}
+              {productsNeedingValidation.value.length})
+            </h3>
+
+            <div class="space-y-4">
+              {/* Product Info */}
+              <div class="flex gap-4 p-4 bg-base-200 rounded-lg">
+                {currentProduct.image && (
+                  <div class="avatar">
+                    <div class="w-24 h-24 rounded-lg">
+                      <img
+                        src={currentProduct.image}
+                        alt={currentProduct.productName}
+                        class="object-cover"
+                      />
+                    </div>
+                  </div>
+                )}
+                <div class="flex-1">
+                  <div class="font-medium text-sm mb-2">
+                    {currentProduct.productName}
+                  </div>
+                  <div class="text-sm text-base-content/60">
+                    Price: {formatPrice(currentProduct.price)}
+                  </div>
+                  {currentProduct.shopName && (
+                    <div class="text-sm text-base-content/60">
+                      Shop: {currentProduct.shopName}
+                    </div>
+                  )}
+                  {currentProduct.brand && (
+                    <div class="text-sm text-base-content/60">
+                      Brand: {currentProduct.brand}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* LEGO ID Input */}
+              <div class="form-control">
+                <label class="label">
+                  <span class="label-text font-medium">
+                    Enter 5-digit LEGO Set Number *
+                  </span>
+                </label>
+                <input
+                  type="text"
+                  class="input input-bordered"
+                  placeholder="e.g., 10295"
+                  value={manualLegoId.value}
+                  onInput={(e) => manualLegoId.value = e.currentTarget.value}
+                  maxLength={5}
+                  disabled={isSaving.value}
+                  autoFocus
+                />
+                <label class="label">
+                  <span class="label-text-alt text-warning">
+                    LEGO ID not found in product name. Please enter manually or
+                    cancel to skip.
+                  </span>
+                </label>
+              </div>
+
+              {/* Action Buttons */}
+              <div class="modal-action">
+                <button
+                  type="button"
+                  class="btn btn-ghost"
+                  onClick={handleCancelValidation}
+                  disabled={isSaving.value}
+                >
+                  Cancel All
+                </button>
+                <button
+                  type="button"
+                  class="btn btn-primary"
+                  onClick={handleSaveWithLegoId}
+                  disabled={isSaving.value || !manualLegoId.value.trim()}
+                >
+                  {isSaving.value
+                    ? (
+                      <>
+                        <span class="loading loading-spinner loading-sm"></span>
+                        Saving...
+                      </>
+                    )
+                    : (
+                      "Save Product"
+                    )}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

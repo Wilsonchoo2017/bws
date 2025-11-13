@@ -78,8 +78,6 @@ export default function Sidebar({ currentPath }: SidebarProps) {
       {/* Footer */}
       <div class="p-4 border-t border-base-300">
         <div class="text-xs text-base-content/50 text-center">
-          <p>LEGO Price Tracker v1.0</p>
-          <p class="mt-1">Built with Fresh & Deno</p>
         </div>
       </div>
     </div>
