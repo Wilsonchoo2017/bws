@@ -12,6 +12,7 @@ import config from "./fresh.config.ts";
 import { initializeQueue } from "./services/queue/init.ts";
 import { getScheduler } from "./services/scheduler/SchedulerService.ts";
 import { getMissingDataDetector } from "./services/missing-data/MissingDataDetectorService.ts";
+import { logger } from "./utils/logger.ts";
 
 // Initialize BullMQ queue service for background scraping jobs
 await initializeQueue();
@@ -51,51 +52,71 @@ let lastSchedulerRun: Date | null = null;
 let lastMissingDataRun: Date | null = null;
 
 // Run the missing data detector immediately on startup
-console.log("🔍 Running initial missing data detection...");
+logger.info("Running initial missing data detection...");
 getMissingDataDetector().run().then((result) => {
-  console.log(
-    `✅ Initial missing data detection: ${result.jobsEnqueued} jobs enqueued`,
+  logger.info(
+    `Initial missing data detection: ${result.jobsEnqueued} jobs enqueued`,
+    {
+      jobsEnqueued: result.jobsEnqueued,
+    },
   );
   lastMissingDataRun = new Date();
 }).catch((error) => {
-  console.error("❌ Initial missing data detection failed:", error);
+  logger.error("Initial missing data detection failed", {
+    error: error.message,
+    stack: error.stack,
+  });
 });
 
 // Set up periodic checks (every hour)
 setInterval(async () => {
   // Check if daily scheduler should run (at 2 AM)
   if (shouldRunDailyScheduler(lastSchedulerRun)) {
-    console.log("🕐 Running daily Bricklink scheduler...");
+    logger.info("Running daily Bricklink scheduler...");
     try {
       const scheduler = getScheduler();
       const result = await scheduler.run();
-      console.log(
-        `✅ Scheduler completed: ${result.jobsEnqueued} jobs enqueued, ${result.errors.length} errors`,
+      logger.info(
+        `Scheduler completed: ${result.jobsEnqueued} jobs enqueued, ${result.errors.length} errors`,
+        {
+          jobsEnqueued: result.jobsEnqueued,
+          errorCount: result.errors.length,
+        },
       );
       lastSchedulerRun = new Date();
     } catch (error) {
-      console.error("❌ Scheduler failed:", error);
+      logger.error("Scheduler failed", {
+        error: error.message,
+        stack: error.stack,
+      });
     }
   }
 
   // Check if missing data detector should run (every 6 hours)
   if (shouldRunMissingDataDetector(lastMissingDataRun)) {
-    console.log("🔍 Running missing data detector...");
+    logger.info("Running missing data detector...");
     try {
       const detector = getMissingDataDetector();
       const result = await detector.run();
-      console.log(
-        `✅ Missing data detection completed: ${result.jobsEnqueued} jobs enqueued, ${result.errors.length} errors`,
+      logger.info(
+        `Missing data detection completed: ${result.jobsEnqueued} jobs enqueued, ${result.errors.length} errors`,
+        {
+          jobsEnqueued: result.jobsEnqueued,
+          errorCount: result.errors.length,
+        },
       );
       lastMissingDataRun = new Date();
     } catch (error) {
-      console.error("❌ Missing data detection failed:", error);
+      logger.error("Missing data detection failed", {
+        error: error.message,
+        stack: error.stack,
+      });
     }
   }
 }, 60 * 60 * 1000); // Check every hour
 
-console.log("✅ Automatic schedulers configured:");
-console.log("   - Bricklink scheduler: Daily at 2 AM");
-console.log("   - Missing data detector: Every 6 hours");
+logger.info("Automatic schedulers configured:");
+logger.info("   - Bricklink scheduler: Daily at 2 AM");
+logger.info("   - Missing data detector: Every 6 hours");
 
 await start(manifest, config);

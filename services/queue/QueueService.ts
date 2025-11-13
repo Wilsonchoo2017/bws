@@ -35,6 +35,17 @@ import {
   createBrickRankerScraperService,
   type ScrapeResult as BrickRankerScrapeResult,
 } from "../brickranker/BrickRankerScraperService.ts";
+import { queueLogger } from "../../utils/logger.ts";
+
+/**
+ * Job priority levels
+ * Lower number = higher priority (BullMQ convention)
+ */
+export enum JobPriority {
+  HIGH = 1, // Missing data - scrape immediately
+  MEDIUM = 5, // Incomplete data - re-scrape soon
+  NORMAL = 10, // Regular scheduled scrapes
+}
 
 /**
  * Job data types
@@ -43,11 +54,13 @@ export interface ScrapeJobData {
   url: string;
   itemId: string;
   saveToDb?: boolean;
+  priority?: JobPriority;
 }
 
 export interface BulkScrapeJobData {
   urls: string[];
   saveToDb?: boolean;
+  priority?: JobPriority;
 }
 
 // Scheduled scrapes don't need additional data, so we use an empty object type
@@ -57,6 +70,7 @@ export interface RedditSearchJobData {
   setNumber: string;
   subreddit?: string;
   saveToDb?: boolean;
+  priority?: JobPriority;
 }
 
 export interface BrickRankerScrapeJobData {
@@ -103,7 +117,7 @@ export class QueueService {
 
       // Test connection
       await this.connection.ping();
-      console.log("✅ Redis connection established");
+      queueLogger.info("Redis connection established");
 
       // Create queue
       this.queue = new Queue(QUEUE_CONFIG.QUEUE_NAME, {
@@ -125,21 +139,35 @@ export class QueueService {
 
       // Worker event listeners
       this.worker.on("completed", (job: Job) => {
-        console.log(`✅ Job ${job.id} completed successfully`);
+        queueLogger.info(`Job ${job.id} completed successfully`, {
+          jobId: job.id,
+          jobType: job.name,
+        });
       });
 
       this.worker.on("failed", (job: Job | undefined, error: Error) => {
-        console.error(`❌ Job ${job?.id} failed:`, error.message);
+        queueLogger.error(`Job ${job?.id} failed: ${error.message}`, {
+          jobId: job?.id,
+          jobType: job?.name,
+          error: error.message,
+          stack: error.stack,
+        });
       });
 
       this.worker.on("active", (job: Job) => {
-        console.log(`🔄 Job ${job.id} is now active`);
+        queueLogger.info(`Job ${job.id} is now active`, {
+          jobId: job.id,
+          jobType: job.name,
+        });
       });
 
       this.isInitialized = true;
-      console.log("✅ QueueService initialized successfully");
+      queueLogger.info("QueueService initialized successfully");
     } catch (error) {
-      console.error("❌ Failed to initialize QueueService:", error);
+      queueLogger.error("Failed to initialize QueueService", {
+        error: error.message,
+        stack: error.stack,
+      });
       throw new Error(`Queue initialization failed: ${error.message}`);
     }
   }
@@ -155,7 +183,11 @@ export class QueueService {
     | SearchResult
     | BrickRankerScrapeResult
   > {
-    console.log(`🔄 Processing job ${job.id} of type: ${job.name}`);
+    queueLogger.info(`Processing job ${job.id} of type: ${job.name}`, {
+      jobId: job.id,
+      jobType: job.name,
+      jobData: job.data,
+    });
 
     try {
       switch (job.name) {
@@ -184,7 +216,12 @@ export class QueueService {
           throw new Error(`Unknown job type: ${job.name}`);
       }
     } catch (error) {
-      console.error(`❌ Job processing error:`, error);
+      queueLogger.error(`Job processing error for ${job.id}`, {
+        jobId: job.id,
+        jobType: job.name,
+        error: error.message,
+        stack: error.stack,
+      });
       throw error;
     }
   }
@@ -246,7 +283,11 @@ export class QueueService {
         saved: false,
       }));
     } catch (error) {
-      console.error(`❌ Failed to enqueue bulk scrape jobs:`, error);
+      queueLogger.error("Failed to enqueue bulk scrape jobs", {
+        error: error.message,
+        stack: error.stack,
+        urlCount: data.urls.length,
+      });
       // Return failure results
       return jobsToEnqueue.map(() => ({
         success: false,
@@ -338,15 +379,25 @@ export class QueueService {
   }
 
   /**
-   * Add a scrape job to the queue
+   * Add a scrape job to the queue with optional priority
    */
   async addScrapeJob(data: ScrapeJobData): Promise<Job> {
     if (!this.queue) {
       throw new Error("Queue not initialized. Call initialize() first.");
     }
 
-    const job = await this.queue.add(JOB_TYPES.SCRAPE_SINGLE, data);
-    console.log(`➕ Added scrape job: ${job.id} for ${data.itemId}`);
+    const priority = data.priority ?? JobPriority.NORMAL;
+    const job = await this.queue.add(JOB_TYPES.SCRAPE_SINGLE, data, {
+      priority,
+    });
+    const priorityLabel = priority === JobPriority.HIGH
+      ? "HIGH"
+      : priority === JobPriority.MEDIUM
+      ? "MEDIUM"
+      : "NORMAL";
+    console.log(
+      `➕ Added scrape job: ${job.id} for ${data.itemId} (priority: ${priorityLabel})`,
+    );
 
     return job;
   }
@@ -364,10 +415,13 @@ export class QueueService {
       return [];
     }
 
-    // Use BullMQ's addBulk for efficient batch operations
+    // Use BullMQ's addBulk for efficient batch operations with priority support
     const bulkJobs = jobs.map((data) => ({
       name: JOB_TYPES.SCRAPE_SINGLE,
       data,
+      opts: {
+        priority: data.priority ?? JobPriority.NORMAL,
+      },
     }));
 
     const addedJobs = await this.queue.addBulk(bulkJobs);
@@ -407,14 +461,17 @@ export class QueueService {
   }
 
   /**
-   * Add a Reddit search job to the queue
+   * Add a Reddit search job to the queue with optional priority
    */
   async addRedditSearchJob(data: RedditSearchJobData): Promise<Job> {
     if (!this.queue) {
       throw new Error("Queue not initialized. Call initialize() first.");
     }
 
-    const job = await this.queue.add(JOB_TYPES.SEARCH_REDDIT, data);
+    const priority = data.priority ?? JobPriority.NORMAL;
+    const job = await this.queue.add(JOB_TYPES.SEARCH_REDDIT, data, {
+      priority,
+    });
     console.log(
       `➕ Added Reddit search job: ${job.id} for set ${data.setNumber}`,
     );

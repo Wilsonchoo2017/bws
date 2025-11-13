@@ -19,7 +19,7 @@ import {
   type RedditSearchResult,
   redditSearchResults,
 } from "../../db/schema.ts";
-import { desc, eq } from "drizzle-orm";
+import { and, desc, eq, lte, or, sql } from "drizzle-orm";
 
 export interface RedditPost {
   id: string;
@@ -175,6 +175,89 @@ export class RedditRepository {
       .orderBy(desc(redditSearchResults.searchedAt))
       .limit(limit)
       .offset(offset);
+  }
+
+  /**
+   * Find searches that need scraping based on schedule
+   * Returns searches where:
+   * - watch_status = 'active'
+   * - next_scrape_at IS NULL OR next_scrape_at <= now
+   */
+  async findSearchesNeedingScraping(): Promise<RedditSearchResult[]> {
+    const now = new Date();
+
+    return await db.select()
+      .from(redditSearchResults)
+      .where(
+        and(
+          eq(redditSearchResults.watchStatus, "active"),
+          or(
+            sql`${redditSearchResults.nextScrapeAt} IS NULL`,
+            lte(redditSearchResults.nextScrapeAt, now),
+          ),
+        ),
+      );
+  }
+
+  /**
+   * Update scheduling timestamps after a successful scrape
+   */
+  async updateNextScrapeTime(
+    id: number,
+    intervalDays: number,
+  ): Promise<RedditSearchResult> {
+    const now = new Date();
+    const nextScrape = new Date(
+      now.getTime() + intervalDays * 24 * 60 * 60 * 1000,
+    );
+
+    const [updated] = await db.update(redditSearchResults)
+      .set({
+        lastScrapedAt: now,
+        nextScrapeAt: nextScrape,
+        searchedAt: now,
+        updatedAt: now,
+      })
+      .where(eq(redditSearchResults.id, id))
+      .returning();
+
+    return updated;
+  }
+
+  /**
+   * Update watch status for a search result
+   */
+  async updateWatchStatus(
+    id: number,
+    watchStatus: "active" | "paused" | "stopped" | "archived",
+  ): Promise<RedditSearchResult> {
+    const [updated] = await db.update(redditSearchResults)
+      .set({
+        watchStatus,
+        updatedAt: new Date(),
+      })
+      .where(eq(redditSearchResults.id, id))
+      .returning();
+
+    return updated;
+  }
+
+  /**
+   * Update scrape interval for a search result
+   */
+  async updateScrapeInterval(
+    id: number,
+    intervalDays: number,
+  ): Promise<RedditSearchResult> {
+    const [updated] = await db.update(redditSearchResults)
+      .set({
+        scrapeIntervalDays: intervalDays,
+        updatedAt: new Date(),
+      })
+      .where(eq(redditSearchResults.id, id))
+      .returning();
+
+    return updated;
   }
 }
 

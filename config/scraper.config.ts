@@ -196,7 +196,7 @@ export const QUEUE_CONFIG = {
   /** Worker concurrency */
   WORKER_CONCURRENCY: 1, // Process one job at a time
   /** Lock duration for jobs (must be longer than expected job duration) */
-  LOCK_DURATION: 180000, // 3 minutes (BrickLink scraping takes ~60-90s with rate limiting)
+  LOCK_DURATION: 900000, // 15 minutes (BrickLink scraping takes 5-12 min with rate limiting: 2-5 min × 2 requests + processing)
   /** Lock renewal interval (renew lock every 30s to prevent stalling) */
   LOCK_RENEW_TIME: 30000, // 30 seconds
 } as const;
@@ -225,7 +225,19 @@ export const REDDIT_CONFIG = {
 } as const;
 
 /**
- * Scraping intervals configuration
+ * Reddit scraping intervals configuration
+ */
+export const REDDIT_INTERVALS = {
+  /** Default scrape interval in days (monthly) */
+  DEFAULT_INTERVAL_DAYS: 30,
+  /** Minimum allowed interval in days */
+  MIN_INTERVAL_DAYS: 1,
+  /** Maximum allowed interval in days */
+  MAX_INTERVAL_DAYS: 365,
+} as const;
+
+/**
+ * Scraping intervals configuration (Bricklink)
  */
 export const SCRAPE_INTERVALS = {
   /** Default scrape interval in days */

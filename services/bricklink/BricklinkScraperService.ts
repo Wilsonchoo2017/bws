@@ -31,6 +31,7 @@ import { calculateBackoff, RETRY_CONFIG } from "../../config/scraper.config.ts";
 import { imageDownloadService } from "../image/ImageDownloadService.ts";
 import { imageStorageService } from "../image/ImageStorageService.ts";
 import { IMAGE_CONFIG, ImageDownloadStatus } from "../../config/image.config.ts";
+import { scraperLogger } from "../../utils/logger.ts";
 
 /**
  * Result of a scraping operation
@@ -99,8 +100,13 @@ export class BricklinkScraperService {
       try {
         retries = attempt - 1;
 
-        console.log(
-          `🔄 Scraping attempt ${attempt}/${RETRY_CONFIG.MAX_RETRIES}: ${url}`,
+        scraperLogger.info(
+          `Scraping attempt ${attempt}/${RETRY_CONFIG.MAX_RETRIES}: ${url}`,
+          {
+            attempt,
+            maxRetries: RETRY_CONFIG.MAX_RETRIES,
+            url,
+          },
         );
 
         // Rate limiting (unless skipped)
@@ -114,7 +120,7 @@ export class BricklinkScraperService {
         const { itemType, itemId } = parseBricklinkUrl(url);
 
         // Fetch item page
-        console.log(`📥 Fetching item page...`);
+        scraperLogger.info("Fetching item page", { itemId, itemType });
         const itemResponse = await this.httpClient.fetch({
           url,
           waitForSelector: "h1#item-name-title",
@@ -140,7 +146,7 @@ export class BricklinkScraperService {
         }
 
         // Fetch price guide page
-        console.log(`📥 Fetching price guide...`);
+        scraperLogger.info("Fetching price guide", { itemId, priceGuideUrl });
         const priceResponse = await this.httpClient.fetch({
           url: priceGuideUrl,
           waitForSelector: "#id-main-legacy-table",
@@ -165,7 +171,11 @@ export class BricklinkScraperService {
           ...pricingData,
         };
 
-        console.log(`✅ Successfully scraped: ${itemId} - ${title}`);
+        scraperLogger.info(`Successfully scraped: ${itemId} - ${title}`, {
+          itemId,
+          title,
+          hasImage: !!image_url,
+        });
 
         // Save to database if requested
         let saved = false;
@@ -185,12 +195,17 @@ export class BricklinkScraperService {
         };
       } catch (error) {
         lastError = error as Error;
-        console.error(`❌ Scraping attempt ${attempt} failed:`, error.message);
+        scraperLogger.error(`Scraping attempt ${attempt} failed: ${error.message}`, {
+          attempt,
+          error: error.message,
+          stack: error.stack,
+          url,
+        });
 
         // If not the last attempt, wait with exponential backoff
         if (attempt < RETRY_CONFIG.MAX_RETRIES) {
           const backoffDelay = calculateBackoff(attempt);
-          console.log(
+          scraperLogger.info(
             `⏳ Waiting ${backoffDelay / 1000}s before retry...`,
           );
           await this.delay(backoffDelay);
@@ -219,7 +234,10 @@ export class BricklinkScraperService {
 
       if (data.image_url && IMAGE_CONFIG.FEATURES.ENABLE_DEDUPLICATION) {
         try {
-          console.log(`📸 Downloading image: ${data.image_url}`);
+          scraperLogger.info(`Downloading image: ${data.image_url}`, {
+            itemId: data.item_id,
+            imageUrl: data.image_url,
+          });
           imageDownloadStatus = ImageDownloadStatus.DOWNLOADING;
 
           const imageData = await imageDownloadService.download(data.image_url, {
@@ -238,9 +256,16 @@ export class BricklinkScraperService {
 
           localImagePath = storageResult.relativePath;
           imageDownloadStatus = ImageDownloadStatus.COMPLETED;
-          console.log(`✅ Image stored: ${localImagePath}`);
+          scraperLogger.info(`Image stored: ${localImagePath}`, {
+            itemId: data.item_id,
+            localImagePath,
+          });
         } catch (error) {
-          console.error(`❌ Image download failed: ${error.message}`);
+          scraperLogger.error(`Image download failed: ${error.message}`, {
+            itemId: data.item_id,
+            imageUrl: data.image_url,
+            error: error.message,
+          });
           imageDownloadStatus = ImageDownloadStatus.FAILED;
           // Continue with scraping even if image download fails
           if (!IMAGE_CONFIG.FEATURES.FALLBACK_TO_EXTERNAL) {
@@ -274,7 +299,9 @@ export class BricklinkScraperService {
 
       if (isNew) {
         // New item - always create initial price history
-        console.log(`💾 Created new item: ${data.item_id}`);
+        scraperLogger.info(`Created new item: ${data.item_id}`, {
+          itemId: data.item_id,
+        });
         await this.repository.createPriceHistory({
           itemId: data.item_id,
           sixMonthNew: data.six_month_new,
@@ -308,7 +335,9 @@ export class BricklinkScraperService {
           );
 
           if (hasChanged) {
-            console.log(`📊 Price changed for: ${data.item_id}`);
+            scraperLogger.info(`Price changed for: ${data.item_id}`, {
+              itemId: data.item_id,
+            });
             await this.repository.createPriceHistory({
               itemId: data.item_id,
               sixMonthNew: data.six_month_new,
@@ -317,7 +346,9 @@ export class BricklinkScraperService {
               currentUsed: data.current_used,
             });
           } else {
-            console.log(`📊 No price change for: ${data.item_id}`);
+            scraperLogger.info(`No price change for: ${data.item_id}`, {
+              itemId: data.item_id,
+            });
           }
 
           // Always record volume history on every scrape (regardless of price change)
@@ -332,9 +363,16 @@ export class BricklinkScraperService {
         }
       }
 
-      console.log(`✅ Saved to database: ${data.item_id}`);
+      scraperLogger.info(`Saved to database: ${data.item_id}`, {
+        itemId: data.item_id,
+        isNew,
+      });
     } catch (error) {
-      console.error(`❌ Database save failed:`, error);
+      scraperLogger.error("Database save failed", {
+        itemId: data.item_id,
+        error: error.message,
+        stack: error.stack,
+      });
       throw new Error(`Database save failed: ${error.message}`);
     }
   }
@@ -353,7 +391,7 @@ export class BricklinkScraperService {
 
     if (timeSinceLastFailure >= RETRY_CONFIG.CIRCUIT_BREAKER_TIMEOUT) {
       // Reset circuit breaker
-      console.log("🔄 Circuit breaker timeout passed. Resetting...");
+      scraperLogger.info("Circuit breaker timeout passed. Resetting...");
       this.resetCircuitBreaker();
       return false;
     }
@@ -372,8 +410,12 @@ export class BricklinkScraperService {
       this.circuitBreaker.failures >= RETRY_CONFIG.CIRCUIT_BREAKER_THRESHOLD
     ) {
       this.circuitBreaker.isOpen = true;
-      console.error(
-        `⚠️ Circuit breaker opened after ${this.circuitBreaker.failures} failures`,
+      scraperLogger.warn(
+        `Circuit breaker opened after ${this.circuitBreaker.failures} failures`,
+        {
+          failures: this.circuitBreaker.failures,
+          threshold: RETRY_CONFIG.CIRCUIT_BREAKER_THRESHOLD,
+        },
       );
     }
   }
@@ -383,7 +425,7 @@ export class BricklinkScraperService {
    */
   private resetCircuitBreaker(): void {
     if (this.circuitBreaker.failures > 0 || this.circuitBreaker.isOpen) {
-      console.log("✅ Circuit breaker reset");
+      scraperLogger.info("Circuit breaker reset");
     }
     this.circuitBreaker = {
       failures: 0,

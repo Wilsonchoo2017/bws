@@ -1,17 +1,23 @@
 /**
- * SchedulerService - Automated scraping scheduler
+ * SchedulerService - Automated scraping scheduler with priority support
  *
  * Responsibilities (Single Responsibility Principle):
  * - Check for items needing scraping
- * - Enqueue scraping jobs for items
+ * - Prioritize missing/incomplete data
+ * - Enqueue scraping jobs with appropriate priorities
  * - Manage scheduling intervals
+ * - Schedule Reddit searches automatically
  *
  * This service should be called periodically (via cron or timer)
  * to automatically scrape items based on their scrape_interval_days
  */
 
 import { getBricklinkRepository } from "../bricklink/BricklinkRepository.ts";
-import { getQueueService } from "../queue/QueueService.ts";
+import { getRedditRepository } from "../reddit/RedditRepository.ts";
+import { getQueueService, JobPriority } from "../queue/QueueService.ts";
+import { getMissingDataDetector } from "../missing-data/MissingDataDetectorService.ts";
+import type { Product } from "../../db/schema.ts";
+import type { BricklinkItem } from "../../db/schema.ts";
 
 /**
  * Result of a scheduler run
@@ -22,16 +28,185 @@ export interface SchedulerResult {
   jobsEnqueued: number;
   errors: string[];
   timestamp: Date;
+  breakdown?: {
+    highPriority: number;
+    mediumPriority: number;
+    normalPriority: number;
+  };
 }
 
 /**
- * SchedulerService - Manages automated scraping based on intervals
+ * SchedulerService - Manages automated scraping based on intervals and priorities
  */
 export class SchedulerService {
   /**
-   * Run the scheduler - check for items needing scraping and enqueue jobs
+   * Run the Bricklink scheduler with priority-based logic
    */
-  async run(): Promise<SchedulerResult> {
+  async runBricklink(): Promise<SchedulerResult> {
+    const result: SchedulerResult = {
+      success: true,
+      itemsFound: 0,
+      jobsEnqueued: 0,
+      errors: [],
+      timestamp: new Date(),
+      breakdown: {
+        highPriority: 0,
+        mediumPriority: 0,
+        normalPriority: 0,
+      },
+    };
+
+    try {
+      console.log("🕐 Running Bricklink scheduled scraping check...");
+
+      const repository = getBricklinkRepository();
+      const queueService = getQueueService();
+      const missingDataDetector = getMissingDataDetector();
+
+      // Check if queue is ready
+      if (!queueService.isReady()) {
+        const error = "Queue service is not available";
+        console.error(`❌ ${error}`);
+        result.success = false;
+        result.errors.push(error);
+        return result;
+      }
+
+      // PRIORITY 1 & 2: Check for missing/incomplete data using the detector service
+      console.log("🔍 Running missing data detection...");
+      const missingDataResult = await missingDataDetector.run();
+
+      // Process products missing Bricklink data entirely (HIGH priority)
+      const missingProducts = missingDataResult.productsMissingBricklinkData;
+      console.log(
+        `📋 Found ${missingProducts.length} products missing Bricklink data`,
+      );
+
+      for (const product of missingProducts) {
+        try {
+          const setNumber = product.legoSetNumber;
+          if (!setNumber) {
+            console.warn(
+              `⚠️ Skipping product ${product.productId} - no set number`,
+            );
+            continue;
+          }
+
+          const url =
+            `https://www.bricklink.com/v2/catalog/catalogitem.page?S=${setNumber}`;
+
+          await queueService.addScrapeJob({
+            url,
+            itemId: setNumber,
+            saveToDb: true,
+            priority: JobPriority.HIGH,
+          });
+
+          result.jobsEnqueued++;
+          result.breakdown!.highPriority++;
+          console.log(`✅ Enqueued HIGH priority job for ${setNumber}`);
+        } catch (error) {
+          const errorMsg =
+            `Failed to enqueue HIGH priority job: ${error.message}`;
+          console.error(`❌ ${errorMsg}`);
+          result.errors.push(errorMsg);
+        }
+      }
+
+      // Process items with missing volume data (MEDIUM priority)
+      const incompleteItems = missingDataResult.itemsMissingVolumeData;
+      console.log(
+        `📋 Found ${incompleteItems.length} items with incomplete volume data`,
+      );
+
+      for (const item of incompleteItems) {
+        try {
+          // Missing data result includes itemId and missingBoxes but not itemType
+          // Default to 'S' for LEGO sets
+          const url =
+            `https://www.bricklink.com/v2/catalog/catalogitem.page?S=${item.itemId}`;
+
+          await queueService.addScrapeJob({
+            url,
+            itemId: item.itemId,
+            saveToDb: true,
+            priority: JobPriority.MEDIUM,
+          });
+
+          result.jobsEnqueued++;
+          result.breakdown!.mediumPriority++;
+          console.log(`✅ Enqueued MEDIUM priority job for ${item.itemId}`);
+        } catch (error) {
+          const errorMsg =
+            `Failed to enqueue MEDIUM priority job for ${item.itemId}: ${error.message}`;
+          console.error(`❌ ${errorMsg}`);
+          result.errors.push(errorMsg);
+        }
+      }
+
+      // PRIORITY 3: Regular scheduled scrapes (NORMAL priority)
+      console.log("🔍 Checking for regular scheduled scrapes...");
+      const scheduledItems = await repository.findItemsNeedingScraping();
+      console.log(`📋 Found ${scheduledItems.length} items for regular scraping`);
+
+      for (const item of scheduledItems) {
+        try {
+          const url =
+            `https://www.bricklink.com/v2/catalog/catalogitem.page?${item.itemType}=${item.itemId}`;
+
+          await queueService.addScrapeJob({
+            url,
+            itemId: item.itemId,
+            saveToDb: true,
+            priority: JobPriority.NORMAL,
+          });
+
+          result.jobsEnqueued++;
+          result.breakdown!.normalPriority++;
+          console.log(`✅ Enqueued NORMAL priority job for ${item.itemId}`);
+        } catch (error) {
+          const errorMsg =
+            `Failed to enqueue NORMAL priority job for ${item.itemId}: ${error.message}`;
+          console.error(`❌ ${errorMsg}`);
+          result.errors.push(errorMsg);
+        }
+      }
+
+      result.itemsFound = missingProducts.length + incompleteItems.length +
+        scheduledItems.length;
+
+      // Clean old completed jobs from the queue
+      try {
+        await queueService.cleanOldJobs();
+      } catch (error) {
+        console.warn("⚠️ Failed to clean old jobs:", error.message);
+      }
+
+      console.log(
+        `✅ Bricklink scheduler run complete: ${result.jobsEnqueued}/${result.itemsFound} jobs enqueued`,
+      );
+      console.log(
+        `   - HIGH priority: ${result.breakdown!.highPriority}`,
+      );
+      console.log(
+        `   - MEDIUM priority: ${result.breakdown!.mediumPriority}`,
+      );
+      console.log(
+        `   - NORMAL priority: ${result.breakdown!.normalPriority}`,
+      );
+    } catch (error) {
+      console.error("❌ Bricklink scheduler run failed:", error);
+      result.success = false;
+      result.errors.push(error.message);
+    }
+
+    return result;
+  }
+
+  /**
+   * Run the Reddit scheduler for automated searches
+   */
+  async runReddit(): Promise<SchedulerResult> {
     const result: SchedulerResult = {
       success: true,
       itemsFound: 0,
@@ -41,9 +216,9 @@ export class SchedulerService {
     };
 
     try {
-      console.log("🕐 Running scheduled scraping check...");
+      console.log("🕐 Running Reddit scheduled search check...");
 
-      const repository = getBricklinkRepository();
+      const redditRepository = getRedditRepository();
       const queueService = getQueueService();
 
       // Check if queue is ready
@@ -55,51 +230,45 @@ export class SchedulerService {
         return result;
       }
 
-      // Find items that need scraping
-      const items = await repository.findItemsNeedingScraping();
-      result.itemsFound = items.length;
+      // Find searches that need to be updated
+      const searchesNeeded = await redditRepository
+        .findSearchesNeedingScraping();
+      result.itemsFound = searchesNeeded.length;
 
-      console.log(`📋 Found ${items.length} items needing scraping`);
+      console.log(`📋 Found ${searchesNeeded.length} Reddit searches needing update`);
 
-      if (items.length === 0) {
-        console.log("✅ No items need scraping at this time");
+      if (searchesNeeded.length === 0) {
+        console.log("✅ No Reddit searches need updating at this time");
         return result;
       }
 
-      // Enqueue jobs for each item
-      for (const item of items) {
+      // Enqueue jobs for each search
+      for (const search of searchesNeeded) {
         try {
-          const url =
-            `https://www.bricklink.com/v2/catalog/catalogitem.page?${item.itemType}=${item.itemId}`;
-
-          await queueService.addScrapeJob({
-            url,
-            itemId: item.itemId,
+          await queueService.addRedditSearchJob({
+            setNumber: search.legoSetNumber,
+            subreddit: search.subreddit,
             saveToDb: true,
+            priority: JobPriority.NORMAL,
           });
 
           result.jobsEnqueued++;
-          console.log(`✅ Enqueued job for ${item.itemId}`);
+          console.log(
+            `✅ Enqueued Reddit search job for ${search.legoSetNumber}`,
+          );
         } catch (error) {
           const errorMsg =
-            `Failed to enqueue job for ${item.itemId}: ${error.message}`;
+            `Failed to enqueue Reddit search for ${search.legoSetNumber}: ${error.message}`;
           console.error(`❌ ${errorMsg}`);
           result.errors.push(errorMsg);
         }
       }
 
-      // Clean old completed jobs from the queue
-      try {
-        await queueService.cleanOldJobs();
-      } catch (error) {
-        console.warn("⚠️ Failed to clean old jobs:", error.message);
-      }
-
       console.log(
-        `✅ Scheduler run complete: ${result.jobsEnqueued}/${result.itemsFound} jobs enqueued`,
+        `✅ Reddit scheduler run complete: ${result.jobsEnqueued}/${result.itemsFound} jobs enqueued`,
       );
     } catch (error) {
-      console.error("❌ Scheduler run failed:", error);
+      console.error("❌ Reddit scheduler run failed:", error);
       result.success = false;
       result.errors.push(error.message);
     }
@@ -108,7 +277,121 @@ export class SchedulerService {
   }
 
   /**
-   * Get items that will be scraped in the next run (preview)
+   * Run both schedulers (Bricklink and Reddit)
+   */
+  async runAll(): Promise<{
+    bricklink: SchedulerResult;
+    reddit: SchedulerResult;
+  }> {
+    console.log("🚀 Running all schedulers...");
+
+    const [bricklink, reddit] = await Promise.all([
+      this.runBricklink(),
+      this.runReddit(),
+    ]);
+
+    console.log("✅ All schedulers complete");
+    return { bricklink, reddit };
+  }
+
+  /**
+   * Legacy method for backwards compatibility
+   * Delegates to runBricklink()
+   */
+  async run(): Promise<SchedulerResult> {
+    return this.runBricklink();
+  }
+
+  /**
+   * Get items that will be scraped in the next Bricklink run (preview)
+   */
+  async previewBricklink(): Promise<{
+    items: Array<{
+      itemId: string;
+      itemType: string;
+      title: string | null;
+      lastScrapedAt: Date | null;
+      nextScrapeAt: Date | null;
+      scrapeIntervalDays: number;
+      priority: string;
+    }>;
+    count: number;
+  }> {
+    const repository = getBricklinkRepository();
+    const missingDataDetector = getMissingDataDetector();
+
+    const missingProducts = await missingDataDetector
+      .findProductsMissingBricklinkData();
+    const incompleteItems = await missingDataDetector
+      .findItemsMissingVolumeData();
+    const scheduledItems = await repository.findItemsNeedingScraping();
+
+    const items = [
+      ...missingProducts.map((p: Product) => ({
+        itemId: p.legoSetNumber || "unknown",
+        itemType: "S",
+        title: p.name,
+        lastScrapedAt: null,
+        nextScrapeAt: null,
+        scrapeIntervalDays: 30,
+        priority: "HIGH",
+      })),
+      ...incompleteItems.map((item: BricklinkItem) => ({
+        itemId: item.itemId,
+        itemType: item.itemType,
+        title: item.title,
+        lastScrapedAt: item.lastScrapedAt,
+        nextScrapeAt: item.nextScrapeAt,
+        scrapeIntervalDays: item.scrapeIntervalDays,
+        priority: "MEDIUM",
+      })),
+      ...scheduledItems.map((item: BricklinkItem) => ({
+        itemId: item.itemId,
+        itemType: item.itemType,
+        title: item.title,
+        lastScrapedAt: item.lastScrapedAt,
+        nextScrapeAt: item.nextScrapeAt,
+        scrapeIntervalDays: item.scrapeIntervalDays,
+        priority: "NORMAL",
+      })),
+    ];
+
+    return {
+      items,
+      count: items.length,
+    };
+  }
+
+  /**
+   * Get searches that will be updated in the next Reddit run (preview)
+   */
+  async previewReddit(): Promise<{
+    searches: Array<{
+      legoSetNumber: string;
+      subreddit: string;
+      lastScrapedAt: Date | null;
+      nextScrapeAt: Date | null;
+      totalPosts: number;
+    }>;
+    count: number;
+  }> {
+    const redditRepository = getRedditRepository();
+    const searches = await redditRepository.findSearchesNeedingScraping();
+
+    return {
+      searches: searches.map((search) => ({
+        legoSetNumber: search.legoSetNumber,
+        subreddit: search.subreddit,
+        lastScrapedAt: search.lastScrapedAt ?? null,
+        nextScrapeAt: search.nextScrapeAt ?? null,
+        totalPosts: search.totalPosts,
+      })),
+      count: searches.length,
+    };
+  }
+
+  /**
+   * Legacy preview method for backwards compatibility
    */
   async preview(): Promise<{
     items: Array<{
@@ -121,19 +404,10 @@ export class SchedulerService {
     }>;
     count: number;
   }> {
-    const repository = getBricklinkRepository();
-    const items = await repository.findItemsNeedingScraping();
-
+    const bricklinkPreview = await this.previewBricklink();
     return {
-      items: items.map((item) => ({
-        itemId: item.itemId,
-        itemType: item.itemType,
-        title: item.title,
-        lastScrapedAt: item.lastScrapedAt,
-        nextScrapeAt: item.nextScrapeAt,
-        scrapeIntervalDays: item.scrapeIntervalDays,
-      })),
-      count: items.length,
+      items: bricklinkPreview.items.map(({ priority, ...item }) => item),
+      count: bricklinkPreview.count,
     };
   }
 }

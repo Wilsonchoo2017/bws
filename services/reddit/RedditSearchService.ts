@@ -17,7 +17,11 @@
 
 import type { RateLimiterService } from "../rate-limiter/RateLimiterService.ts";
 import type { RedditRepository } from "./RedditRepository.ts";
-import { calculateBackoff, RETRY_CONFIG } from "../../config/scraper.config.ts";
+import {
+  calculateBackoff,
+  REDDIT_INTERVALS,
+  RETRY_CONFIG,
+} from "../../config/scraper.config.ts";
 
 /**
  * Reddit post interface
@@ -185,7 +189,7 @@ export class RedditSearchService {
   }
 
   /**
-   * Save search results to database
+   * Save search results to database with scheduling timestamps
    */
   private async saveToDatabase(
     setNumber: string,
@@ -193,14 +197,27 @@ export class RedditSearchService {
     posts: RedditPost[],
   ): Promise<void> {
     try {
+      const now = new Date();
+      const nextScrape = new Date(
+        now.getTime() +
+          REDDIT_INTERVALS.DEFAULT_INTERVAL_DAYS * 24 * 60 * 60 * 1000,
+      );
+
       await this.repository.create({
         legoSetNumber: setNumber,
         subreddit,
         totalPosts: posts.length,
         posts: posts as unknown as Record<string, unknown>,
+        watchStatus: "active",
+        scrapeIntervalDays: REDDIT_INTERVALS.DEFAULT_INTERVAL_DAYS,
+        lastScrapedAt: now,
+        nextScrapeAt: nextScrape,
+        searchedAt: now,
+        createdAt: now,
+        updatedAt: now,
       });
 
-      console.log(`💾 Saved Reddit search results for ${setNumber}`);
+      console.log(`💾 Saved Reddit search results for ${setNumber} (next scrape: ${nextScrape.toISOString()})`);
     } catch (error) {
       console.error(`❌ Database save failed:`, error);
       throw new Error(`Database save failed: ${error.message}`);
