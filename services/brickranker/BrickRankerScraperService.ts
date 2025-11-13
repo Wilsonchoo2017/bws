@@ -26,6 +26,9 @@ import {
   parseRetirementTrackerPage,
   type RetirementItemData,
 } from "./BrickRankerParser.ts";
+import { imageDownloadService } from "../image/ImageDownloadService.ts";
+import { imageStorageService } from "../image/ImageStorageService.ts";
+import { IMAGE_CONFIG, ImageDownloadStatus } from "../../config/image.config.ts";
 import {
   BRICKRANKER_CONFIG,
   calculateBackoff,
@@ -204,8 +207,11 @@ export class BrickRankerScraperService {
     try {
       console.log(`💾 Saving ${items.length} items to database...`);
 
+      // Download images for all items with imageUrl
+      const itemsWithImages = await this.downloadImagesForItems(items);
+
       // Batch upsert all items
-      const stats = await this.repository.batchUpsert(items);
+      const stats = await this.repository.batchUpsert(itemsWithImages);
 
       console.log(
         `✅ Database save complete: ${stats.created} created, ${stats.updated} updated, ${stats.total} total`,
@@ -216,6 +222,62 @@ export class BrickRankerScraperService {
       console.error(`❌ Database save failed:`, error);
       throw new Error(`Database save failed: ${error.message}`);
     }
+  }
+
+  /**
+   * Download images for items that have imageUrl
+   */
+  private async downloadImagesForItems(
+    items: RetirementItemData[],
+  ): Promise<Array<RetirementItemData & { localImagePath?: string; imageDownloadStatus?: string }>> {
+    const results: Array<RetirementItemData & { localImagePath?: string; imageDownloadStatus?: string }> = [];
+
+    for (const item of items) {
+      if (!item.imageUrl || !IMAGE_CONFIG.FEATURES.ENABLE_DEDUPLICATION) {
+        // No image URL or feature disabled
+        results.push({ ...item, imageDownloadStatus: ImageDownloadStatus.SKIPPED });
+        continue;
+      }
+
+      try {
+        console.log(`📸 Downloading image for ${item.setNumber}: ${item.imageUrl}`);
+
+        const imageData = await imageDownloadService.download(item.imageUrl, {
+          timeoutMs: IMAGE_CONFIG.DOWNLOAD.TIMEOUT_MS,
+          maxRetries: IMAGE_CONFIG.DOWNLOAD.MAX_RETRIES,
+          retryDelayMs: IMAGE_CONFIG.DOWNLOAD.RETRY_DELAY_MS,
+          allowedFormats: IMAGE_CONFIG.VALIDATION.ALLOWED_FORMATS,
+        });
+
+        const storageResult = await imageStorageService.store(
+          imageData.data,
+          item.imageUrl,
+          imageData.extension,
+          item.setNumber,
+        );
+
+        results.push({
+          ...item,
+          localImagePath: storageResult.relativePath,
+          imageDownloadStatus: ImageDownloadStatus.COMPLETED,
+        });
+
+        console.log(`✅ Image stored for ${item.setNumber}: ${storageResult.relativePath}`);
+      } catch (error) {
+        console.error(`❌ Image download failed for ${item.setNumber}:`, error.message);
+        results.push({
+          ...item,
+          imageDownloadStatus: ImageDownloadStatus.FAILED,
+        });
+
+        // Continue with other images even if one fails
+        if (!IMAGE_CONFIG.FEATURES.FALLBACK_TO_EXTERNAL) {
+          throw error;
+        }
+      }
+    }
+
+    return results;
   }
 
   /**

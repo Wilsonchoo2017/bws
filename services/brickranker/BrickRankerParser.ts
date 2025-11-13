@@ -28,6 +28,7 @@ export interface RetirementItemData {
   retiringSoon: boolean;
   expectedRetirementDate: string | null;
   theme: string;
+  imageUrl: string | null;
 }
 
 /**
@@ -166,6 +167,9 @@ function parseTableRow(
     // Check for "Retiring Soon!" tag anywhere in the row
     const retiringSoon = checkRetiringSoonTag(row);
 
+    // Extract image URL from name cell
+    const imageUrl = extractImageUrl(nameCell);
+
     return {
       setNumber,
       setName,
@@ -173,6 +177,7 @@ function parseTableRow(
       retiringSoon,
       expectedRetirementDate,
       theme,
+      imageUrl,
     };
   } catch (error) {
     console.error("Error parsing table row:", error);
@@ -310,6 +315,63 @@ function extractRetirementDate(retirementDateCell: Element): string | null {
 function checkRetiringSoonTag(row: Element): boolean {
   const text = row.textContent || "";
   return text.toLowerCase().includes("retiring soon");
+}
+
+/**
+ * Extract image URL from name cell
+ * Pure function - no side effects
+ *
+ * @param nameCell - Cell containing product image and name
+ * @returns Image URL or null
+ */
+function extractImageUrl(nameCell: Element): string | null {
+  // Look for img tags in the name cell
+  const imgElement = nameCell.querySelector("img");
+
+  if (!imgElement) {
+    return null;
+  }
+
+  // Try src attribute
+  const src = imgElement.getAttribute("src");
+  if (src) {
+    return normalizeImageUrl(src);
+  }
+
+  // Try data-src (lazy loading)
+  const dataSrc = imgElement.getAttribute("data-src");
+  if (dataSrc) {
+    return normalizeImageUrl(dataSrc);
+  }
+
+  return null;
+}
+
+/**
+ * Normalize image URL to absolute URL
+ * Pure function - no side effects
+ *
+ * @param url - Relative or absolute URL
+ * @returns Absolute URL
+ */
+function normalizeImageUrl(url: string): string {
+  // Already absolute
+  if (url.startsWith("http://") || url.startsWith("https://")) {
+    return url;
+  }
+
+  // Protocol-relative
+  if (url.startsWith("//")) {
+    return `https:${url}`;
+  }
+
+  // Relative to domain
+  if (url.startsWith("/")) {
+    return `https://brickranker.com${url}`;
+  }
+
+  // Relative to current path
+  return `https://brickranker.com/${url}`;
 }
 
 /**

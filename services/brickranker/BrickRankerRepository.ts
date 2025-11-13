@@ -241,6 +241,9 @@ export class BrickRankerRepository {
       retiringSoon: boolean;
       expectedRetirementDate: string | null;
       theme: string;
+      imageUrl?: string | null;
+      localImagePath?: string | null;
+      imageDownloadStatus?: string;
       scrapeIntervalDays?: number;
     },
   ): Promise<{ item: BrickrankerRetirementItem; isNew: boolean }> {
@@ -248,14 +251,28 @@ export class BrickRankerRepository {
 
     if (existing) {
       // Update existing
-      const updated = await this.update(setNumber, {
+      const updateData: any = {
         setName: data.setName,
         yearReleased: data.yearReleased,
         retiringSoon: data.retiringSoon,
         expectedRetirementDate: data.expectedRetirementDate,
         theme: data.theme,
         isActive: true, // Mark as active since it's still on the page
-      });
+      };
+
+      // Update image fields if provided
+      if (data.imageUrl !== undefined) {
+        updateData.imageUrl = data.imageUrl;
+      }
+      if (data.localImagePath !== undefined) {
+        updateData.localImagePath = data.localImagePath;
+        updateData.imageDownloadedAt = new Date();
+      }
+      if (data.imageDownloadStatus !== undefined) {
+        updateData.imageDownloadStatus = data.imageDownloadStatus;
+      }
+
+      const updated = await this.update(setNumber, updateData);
 
       return { item: updated!, isNew: false };
     } else {
@@ -276,6 +293,10 @@ export class BrickRankerRepository {
         retiringSoon: data.retiringSoon,
         expectedRetirementDate: data.expectedRetirementDate,
         theme: data.theme,
+        imageUrl: data.imageUrl || null,
+        localImagePath: data.localImagePath || null,
+        imageDownloadedAt: data.localImagePath ? now : null,
+        imageDownloadStatus: data.imageDownloadStatus || null,
         productId,
         isActive: true,
         scrapeIntervalDays: intervalDays,
@@ -299,6 +320,9 @@ export class BrickRankerRepository {
       retiringSoon: boolean;
       expectedRetirementDate: string | null;
       theme: string;
+      imageUrl?: string | null;
+      localImagePath?: string | null;
+      imageDownloadStatus?: string;
     }[],
   ): Promise<{
     created: number;
