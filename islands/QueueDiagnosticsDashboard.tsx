@@ -13,6 +13,7 @@ import {
   type QueueHealthAssessment,
 } from "../utils/queue-health.ts";
 import QueueHealthBanner from "./components/QueueHealthBanner.tsx";
+import QueueDashboardSkeleton from "../components/skeletons/QueueDashboardSkeleton.tsx";
 
 interface JobInfo {
   id: string;
@@ -100,17 +101,17 @@ export default function QueueDiagnosticsDashboard() {
   }, []);
 
   if (isLoading && !stats) {
-    return (
-      <div class="flex justify-center items-center py-12">
-        <span class="loading loading-spinner loading-lg"></span>
-      </div>
-    );
+    return <QueueDashboardSkeleton />;
   }
 
   return (
     <div class="space-y-6">
       {/* Queue Health Banner */}
-      <QueueHealthBanner stats={stats} />
+      <QueueHealthBanner
+        stats={stats}
+        isLoading={isLoading}
+        onRefresh={fetchQueueStats}
+      />
 
       {/* Health Status Card */}
       {health && (

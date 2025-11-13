@@ -11,7 +11,8 @@
       "Bash(curl:*)",
       "WebFetch(domain:www.worldbricks.com)",
       "Bash(deno run:*)",
-      "Bash(git commit:*)"
+      "Bash(git commit:*)",
+      "Bash(git rm:*)"
     ],
     "deny": [],
     "ask": []

@@ -12,7 +12,6 @@ import { getHttpClient, closeHttpClient } from "../services/http/HttpClientServi
 import { RateLimiterService } from "../services/rate-limiter/RateLimiterService.ts";
 import { getWorldBricksRepository } from "../services/worldbricks/WorldBricksRepository.ts";
 import { WorldBricksScraperService } from "../services/worldbricks/WorldBricksScraperService.ts";
-import { WORLDBRICKS_CONFIG } from "../config/scraper.config.ts";
 
 /**
  * Test sets to scrape

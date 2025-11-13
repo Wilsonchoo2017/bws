@@ -117,19 +117,19 @@ export function normalizeLegoSetNumber(setNumber: string): string {
  * @returns Array of products with matching base set number
  */
 export async function findProductsByBaseSetNumber(
-  db: any,
+  db: typeof import("./client.ts").db,
   baseSetNumber: string,
 ): Promise<
   Array<
-    { id: number; name: string; legoSetNumber: string | null; source: string }
+    { id: number; name: string | null; legoSetNumber: string | null; source: string }
   >
 > {
   const { products } = await import("./schema.ts");
+  const { isNotNull } = await import("drizzle-orm");
 
   // Query all products with non-null LEGO set numbers
   const allProducts = await db.query.products.findMany({
-    where: (products: any, { isNotNull }: any) =>
-      isNotNull(products.legoSetNumber),
+    where: isNotNull(products.legoSetNumber),
     columns: {
       id: true,
       name: true,
@@ -141,7 +141,7 @@ export async function findProductsByBaseSetNumber(
   // Filter by normalized base set number
   const normalizedBase = normalizeLegoSetNumber(baseSetNumber);
 
-  return allProducts.filter((product: any) => {
+  return allProducts.filter((product) => {
     if (!product.legoSetNumber) return false;
     const productBase = normalizeLegoSetNumber(product.legoSetNumber);
     return productBase === normalizedBase;
@@ -208,13 +208,16 @@ export function extractShopUsername(url: string): string | null {
  * @returns Existing product with LEGO set number, or null if not found
  */
 export async function findExistingProduct(
-  db: any,
+  db: typeof import("./client.ts").db,
   productId: string,
   productName: string,
 ): Promise<{ id: number; legoSetNumber: string | null } | null> {
+  const { eq, ilike } = await import("drizzle-orm");
+  const { products } = await import("./schema.ts");
+
   // First, try exact product ID match
   const exactMatch = await db.query.products.findFirst({
-    where: (products: any, { eq }: any) => eq(products.productId, productId),
+    where: eq(products.productId, productId),
     columns: {
       id: true,
       legoSetNumber: true,
@@ -227,9 +230,6 @@ export async function findExistingProduct(
 
   // Fallback: Try to find by similar name (fuzzy match)
   // Using ILIKE for case-insensitive matching
-  const { ilike } = await import("drizzle-orm");
-  const { products } = await import("./schema.ts");
-
   const similarMatch = await db.query.products.findFirst({
     where: ilike(products.name, `%${productName}%`),
     columns: {

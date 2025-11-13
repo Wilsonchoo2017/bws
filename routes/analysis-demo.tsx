@@ -11,13 +11,15 @@ import ProductAnalysisCard from "../islands/ProductAnalysisCard.tsx";
 interface AnalysisDemoData {
   sampleProducts: Array<{
     productId: string;
-    name: string;
+    name: string | null;
     source: string;
   }>;
 }
 
 export const handler: Handlers<AnalysisDemoData> = {
   async GET(_req, ctx) {
+    const { isNotNull } = await import("drizzle-orm");
+
     // Fetch some sample products with LEGO set numbers
     const sampleProducts = await db
       .select({
@@ -26,7 +28,7 @@ export const handler: Handlers<AnalysisDemoData> = {
         source: products.source,
       })
       .from(products)
-      .where(products.legoSetNumber !== null)
+      .where(isNotNull(products.legoSetNumber))
       .limit(10);
 
     return ctx.render({ sampleProducts });

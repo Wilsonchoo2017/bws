@@ -159,7 +159,7 @@ async function backfillBricklinkImages(
               imageDownloadStatus: ImageDownloadStatus.FAILED,
             })
             .where(eq(bricklinkItems.itemId, item.itemId));
-        } catch (dbError) {
+        } catch (_dbError) {
           console.error(`  ⚠️ Failed to update database for ${item.itemId}`);
         }
       }
@@ -198,7 +198,7 @@ async function backfillProductImages(
   ];
 
   if (options.source) {
-    conditions.push(eq(products.source, options.source as any));
+    conditions.push(eq(products.source, options.source));
   }
 
   // Query products that have image URLs but no local paths
@@ -257,7 +257,7 @@ async function backfillProductImages(
         );
 
         // Handle multiple images if they exist
-        let localImagesArray: string[] = [storageResult.relativePath];
+        const localImagesArray: string[] = [storageResult.relativePath];
 
         if (item.images && Array.isArray(item.images)) {
           console.log(`  📸 Downloading ${item.images.length} additional images...`);
@@ -314,7 +314,7 @@ async function backfillProductImages(
               imageDownloadStatus: ImageDownloadStatus.FAILED,
             })
             .where(eq(products.productId, item.productId));
-        } catch (dbError) {
+        } catch (_dbError) {
           console.error(`  ⚠️ Failed to update database for ${item.productId}`);
         }
       }

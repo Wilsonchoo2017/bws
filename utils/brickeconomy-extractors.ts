@@ -4,7 +4,7 @@
  * Follows Single Responsibility Principle - each function has one clear purpose.
  */
 
-import { DOMParser } from "https://deno.land/x/deno_dom@v0.1.45/deno-dom-wasm.ts";
+import { DOMParser, HTMLDocument } from "https://deno.land/x/deno_dom@v0.1.45/deno-dom-wasm.ts";
 import { extractLegoSetNumber, parsePriceToCents } from "../db/utils.ts";
 
 /**
@@ -56,7 +56,7 @@ export interface ParsedBrickEconomyProduct {
   ean: string | null;
 
   // Raw data for complete storage
-  raw_data: Record<string, any>;
+  raw_data: Record<string, unknown>;
 }
 
 /**
@@ -79,7 +79,7 @@ export function parseHtmlDocument(htmlContent: string) {
  * @returns Object with set number and name
  */
 export function extractSetInfo(
-  doc: Document,
+  doc: HTMLDocument,
 ): { setNumber: string | null; name: string | null } {
   const header = doc.querySelector("h1.setheader");
   if (!header || !header.textContent) {
@@ -103,7 +103,7 @@ export function extractSetInfo(
  * @param labelText - Text to search for in the row label
  * @returns Value text or null
  */
-function extractRowValue(doc: Document, labelText: string): string | null {
+function extractRowValue(doc: HTMLDocument, labelText: string): string | null {
   const rows = doc.querySelectorAll(".row.rowlist");
 
   for (const row of rows) {
@@ -152,7 +152,7 @@ function extractPercentage(percentStr: string | null): string | null {
  * @param doc - Parsed document
  * @returns Retail price in cents or null
  */
-export function extractRetailPrice(doc: Document): number | null {
+export function extractRetailPrice(doc: HTMLDocument): number | null {
   const retailPriceStr = extractRowValue(doc, "Retail price");
   return extractNumericPrice(retailPriceStr);
 }
@@ -162,7 +162,7 @@ export function extractRetailPrice(doc: Document): number | null {
  * @param doc - Parsed document
  * @returns Market value in cents or null
  */
-export function extractMarketValue(doc: Document): number | null {
+export function extractMarketValue(doc: HTMLDocument): number | null {
   // Look for "Value" under "New/Sealed" section
   const valueStr = extractRowValue(doc, "Value");
   return extractNumericPrice(valueStr);
@@ -173,7 +173,7 @@ export function extractMarketValue(doc: Document): number | null {
  * @param doc - Parsed document
  * @returns Used value in cents or null
  */
-export function extractUsedValue(doc: Document): number | null {
+export function extractUsedValue(doc: HTMLDocument): number | null {
   // Find all "Value" rows and check which one is for used (without <b> tag)
   const rows = doc.querySelectorAll(".row.rowlist");
   const valueRows: Array<{ row: Element; value: string }> = [];
@@ -208,7 +208,7 @@ export function extractUsedValue(doc: Document): number | null {
  * @param doc - Parsed document
  * @returns Growth percentage string or null
  */
-export function extractGrowth(doc: Document): string | null {
+export function extractGrowth(doc: HTMLDocument): string | null {
   const growthStr = extractRowValue(doc, "Growth");
   return extractPercentage(growthStr);
 }
@@ -218,7 +218,7 @@ export function extractGrowth(doc: Document): string | null {
  * @param doc - Parsed document
  * @returns Annual growth percentage string or null
  */
-export function extractAnnualGrowth(doc: Document): string | null {
+export function extractAnnualGrowth(doc: HTMLDocument): string | null {
   const annualGrowthStr = extractRowValue(doc, "Annual growth");
   return extractPercentage(annualGrowthStr);
 }
@@ -228,7 +228,7 @@ export function extractAnnualGrowth(doc: Document): string | null {
  * @param doc - Parsed document
  * @returns 90-day change percentage string or null
  */
-export function extract90DayChange(doc: Document): string | null {
+export function extract90DayChange(doc: HTMLDocument): string | null {
   const change90Str = extractRowValue(doc, "90-day change");
   return extractPercentage(change90Str);
 }
@@ -238,7 +238,7 @@ export function extract90DayChange(doc: Document): string | null {
  * @param doc - Parsed document
  * @returns Number of pieces or null
  */
-export function extractPieces(doc: Document): number | null {
+export function extractPieces(doc: HTMLDocument): number | null {
   const piecesStr = extractRowValue(doc, "Pieces");
   if (!piecesStr) return null;
 
@@ -253,7 +253,7 @@ export function extractPieces(doc: Document): number | null {
  * @returns Object with count and value
  */
 export function extractMinifigs(
-  doc: Document,
+  doc: HTMLDocument,
 ): { count: number | null; value: number | null } {
   const minifigsStr = extractRowValue(doc, "Minifigs");
   if (!minifigsStr) return { count: null, value: null };
@@ -274,7 +274,7 @@ export function extractMinifigs(
  * @param doc - Parsed document
  * @returns PPP in cents or null
  */
-export function extractPPP(doc: Document): number | null {
+export function extractPPP(doc: HTMLDocument): number | null {
   const piecesStr = extractRowValue(doc, "Pieces");
   if (!piecesStr) return null;
 
@@ -289,7 +289,7 @@ export function extractPPP(doc: Document): number | null {
  * @returns Object with theme info
  */
 export function extractThemeInfo(
-  doc: Document,
+  doc: HTMLDocument,
 ): { theme: string | null; subtheme: string | null; year: string | null } {
   const theme = extractRowValue(doc, "Theme");
   const subtheme = extractRowValue(doc, "Subtheme");
@@ -304,7 +304,7 @@ export function extractThemeInfo(
  * @returns Object with dates
  */
 export function extractDates(
-  doc: Document,
+  doc: HTMLDocument,
 ): { released: string | null; retired: string | null } {
   const released = extractRowValue(doc, "Released");
   const retired = extractRowValue(doc, "Retired");
@@ -317,7 +317,7 @@ export function extractDates(
  * @param doc - Parsed document
  * @returns Availability status string or null
  */
-export function extractAvailability(doc: Document): string | null {
+export function extractAvailability(doc: HTMLDocument): string | null {
   return extractRowValue(doc, "Availability");
 }
 
@@ -326,7 +326,7 @@ export function extractAvailability(doc: Document): string | null {
  * @param doc - Parsed document
  * @returns Object with marketplace prices
  */
-export function extractQuickBuyPrices(doc: Document): {
+export function extractQuickBuyPrices(doc: HTMLDocument): {
   ebay_lowest: number | null;
   ebay_highest: number | null;
   amazon_average: number | null;
@@ -398,7 +398,7 @@ export function extractQuickBuyPrices(doc: Document): {
  * @returns Object with forecast prices in cents
  */
 export function extractForecasts(
-  doc: Document,
+  doc: HTMLDocument,
 ): { oneYear: number | null; fiveYear: number | null } {
   // Find Set Predictions panel
   const predictionsPanel = doc.querySelector(
@@ -438,7 +438,7 @@ export function extractForecasts(
  * @param doc - Parsed document
  * @returns Image URL or null
  */
-export function extractImage(doc: Document): string | null {
+export function extractImage(doc: HTMLDocument): string | null {
   // Look for main product image
   const imgElement = doc.querySelector("img.set-image-main") ||
     doc.querySelector("img[alt*='LEGO']");
@@ -461,7 +461,7 @@ export function extractImage(doc: Document): string | null {
  * @returns Object with barcodes
  */
 export function extractBarcodes(
-  doc: Document,
+  doc: HTMLDocument,
 ): { upc: string | null; ean: string | null } {
   const upc = extractRowValue(doc, "UPC");
   const ean = extractRowValue(doc, "EAN");

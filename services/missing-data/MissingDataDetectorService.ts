@@ -20,7 +20,7 @@ import {
   products,
 } from "../../db/schema.ts";
 import { eq, isNotNull, sql } from "drizzle-orm";
-import { getQueueService } from "../queue/QueueService.ts";
+import { getQueueService, JobPriority } from "../queue/QueueService.ts";
 import type { PricingBox } from "../bricklink/BricklinkParser.ts";
 
 /**
@@ -102,7 +102,7 @@ export class MissingDataDetectorService {
         return result;
       }
 
-      // Prepare all jobs for bulk enqueueing (optimized)
+      // Prepare all jobs for bulk enqueueing (optimized) with HIGH priority
       const bricklinkJobsToEnqueue = productsWithMissingData.map((product) => {
         const legoSetNumber = product.legoSetNumber!;
         // BrickLink requires -1 suffix for LEGO sets
@@ -114,6 +114,7 @@ export class MissingDataDetectorService {
           url,
           itemId: bricklinkItemId,
           saveToDb: true,
+          priority: JobPriority.HIGH,
         };
       });
 
@@ -149,12 +150,13 @@ export class MissingDataDetectorService {
       );
 
       if (itemsWithMissingVolume.length > 0) {
-        // Prepare all volume re-scrape jobs for bulk enqueueing (optimized)
+        // Prepare all volume re-scrape jobs for bulk enqueueing (optimized) with MEDIUM priority
         const volumeJobsToEnqueue = itemsWithMissingVolume.map((item) => ({
           url:
             `https://www.bricklink.com/v2/catalog/catalogitem.page?S=${item.itemId}`,
           itemId: item.itemId,
           saveToDb: true,
+          priority: JobPriority.MEDIUM,
         }));
 
         // Enqueue all jobs at once using bulk operation
@@ -262,6 +264,7 @@ export class MissingDataDetectorService {
         url,
         itemId: bricklinkItemId,
         saveToDb: true,
+        priority: JobPriority.HIGH,
       });
 
       console.log(

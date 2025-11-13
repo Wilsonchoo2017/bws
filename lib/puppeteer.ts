@@ -17,7 +17,7 @@ NodeWebSocketTransport.create = function create(url: string) {
   return new Promise((resolve, reject) => {
     const ws = new WebSocket(url, []);
     ws.addEventListener("open", () => {
-      return resolve(new NodeWebSocketTransport(ws as any));
+      return resolve(new NodeWebSocketTransport(ws as unknown as WebSocket));
     });
     ws.addEventListener("error", reject);
   });

@@ -120,7 +120,23 @@ export const handler: Handlers = {
       const offset = (query.page! - 1) * query.limit!;
       const items = await db
         .select({
-          ...products,
+          id: products.id,
+          productId: products.productId,
+          name: products.name,
+          price: products.price,
+          priceMin: products.priceMin,
+          priceMax: products.priceMax,
+          priceBeforeDiscount: products.priceBeforeDiscount,
+          image: products.image,
+          images: products.images,
+          localImagePath: products.localImagePath,
+          localImages: products.localImages,
+          imageDownloadStatus: products.imageDownloadStatus,
+          unitsSold: products.unitsSold,
+          source: products.source,
+          legoSetNumber: products.legoSetNumber,
+          createdAt: products.createdAt,
+          updatedAt: products.updatedAt,
           hasBricklinkData: sql<boolean>`${bricklinkItems.itemId} IS NOT NULL`,
         })
         .from(products)

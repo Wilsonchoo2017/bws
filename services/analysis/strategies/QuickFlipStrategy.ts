@@ -32,73 +32,82 @@ export class QuickFlipStrategy extends BaseStrategy {
     const recommendation = super.interpret(scores);
 
     // For quick flips, focus on current margins
-    const pricingData = scores.pricing.dataPoints as Record<string, number>;
-    if (pricingData.currentMargin !== undefined) {
-      recommendation.estimatedROI = pricingData.currentMargin;
-      recommendation.timeHorizon = "Immediate - 1 month";
+    if (scores.pricing) {
+      const pricingData = scores.pricing.dataPoints as Record<string, number>;
+      if (pricingData.currentMargin !== undefined) {
+        recommendation.estimatedROI = pricingData.currentMargin;
+        recommendation.timeHorizon = "Immediate - 1 month";
+      } else {
+        recommendation.timeHorizon = "1-3 months";
+      }
+
+      if (
+        pricingData.currentMargin !== undefined &&
+        pricingData.currentMargin < 15
+      ) {
+        recommendation.risks.push(
+          "Thin margins reduce profit potential for quick flips",
+        );
+      }
     } else {
       recommendation.timeHorizon = "1-3 months";
     }
 
     // Add quick flip specific opportunities
-    const demandData = scores.demand.dataPoints as Record<string, number>;
-    const availabilityData = scores.availability.dataPoints as Record<
-      string,
-      number | boolean
-    >;
+    if (scores.demand) {
+      const demandData = scores.demand.dataPoints as Record<string, number>;
 
-    if (
-      demandData.unitsSold !== undefined &&
-      demandData.unitsSold > 500
-    ) {
-      recommendation.opportunities.push(
-        "High sales velocity indicates strong immediate demand",
-      );
+      if (
+        demandData.unitsSold !== undefined &&
+        demandData.unitsSold > 500
+      ) {
+        recommendation.opportunities.push(
+          "High sales velocity indicates strong immediate demand",
+        );
+      }
+
+      if (
+        demandData.bricklinkTimesSold !== undefined &&
+        demandData.bricklinkTimesSold > 50
+      ) {
+        recommendation.opportunities.push(
+          "Active resale market with proven buyer demand",
+        );
+      }
+
+      // Add quick flip specific risks
+      if (scores.demand.value < 50) {
+        recommendation.risks.push(
+          "Lower demand may slow resale velocity",
+        );
+      }
     }
 
-    if (
-      availabilityData.currentStock !== undefined &&
-      typeof availabilityData.currentStock === "number" &&
-      availabilityData.currentStock < 20
-    ) {
-      recommendation.opportunities.push(
-        "Low stock creates buying urgency for customers",
-      );
-    }
+    if (scores.availability) {
+      const availabilityData = scores.availability.dataPoints as Record<
+        string,
+        number | boolean
+      >;
 
-    if (
-      demandData.bricklinkTimesSold !== undefined &&
-      demandData.bricklinkTimesSold > 50
-    ) {
-      recommendation.opportunities.push(
-        "Active resale market with proven buyer demand",
-      );
-    }
+      if (
+        availabilityData.currentStock !== undefined &&
+        typeof availabilityData.currentStock === "number" &&
+        availabilityData.currentStock < 20
+      ) {
+        recommendation.opportunities.push(
+          "Low stock creates buying urgency for customers",
+        );
+      }
 
-    // Add quick flip specific risks
-    if (scores.demand.value < 50) {
-      recommendation.risks.push(
-        "Lower demand may slow resale velocity",
-      );
-    }
-
-    if (
-      pricingData.currentMargin !== undefined &&
-      pricingData.currentMargin < 15
-    ) {
-      recommendation.risks.push(
-        "Thin margins reduce profit potential for quick flips",
-      );
-    }
-
-    if (
-      availabilityData.currentStock !== undefined &&
-      typeof availabilityData.currentStock === "number" &&
-      availabilityData.currentStock > 200
-    ) {
-      recommendation.risks.push(
-        "High stock availability may limit price appreciation",
-      );
+      if (
+        availabilityData.currentStock !== undefined &&
+        typeof availabilityData.currentStock === "number" &&
+        availabilityData.currentStock > 200
+      ) {
+        recommendation.risks.push(
+          "High stock availability may limit price appreciation",
+        );
+      }
     }
 
     return recommendation;

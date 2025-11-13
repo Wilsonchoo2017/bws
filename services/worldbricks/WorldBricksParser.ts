@@ -14,7 +14,7 @@
  * - Pure functions: No side effects, easy to test
  */
 
-import { DOMParser, Element } from "https://deno.land/x/deno_dom@v0.1.38/deno-dom-wasm.ts";
+import { DOMParser, Element, HTMLDocument } from "https://deno.land/x/deno_dom@v0.1.38/deno-dom-wasm.ts";
 
 /**
  * Complete WorldBricks LEGO set data
@@ -122,7 +122,7 @@ function extractSetNumber(doc: any, sourceUrl: string): string | null {
  * Extract set name from page
  * Checks: Meta tags, title, JSON-LD
  */
-function extractSetName(doc: any): string | null {
+function extractSetName(doc: HTMLDocument): string | null {
   // Try meta description
   const metaDesc = doc.querySelector('meta[name="twitter:description"]')?.getAttribute("content");
   if (metaDesc) {
@@ -150,7 +150,7 @@ function extractSetName(doc: any): string | null {
  * Extract product description
  * Looks for .tab-value div containing description text
  */
-function extractDescription(doc: any): string | null {
+function extractDescription(doc: HTMLDocument): string | null {
   // Look for description in tab content
   const descDiv = doc.querySelector('.tab-value');
   if (descDiv) {
@@ -166,7 +166,7 @@ function extractDescription(doc: any): string | null {
  * Extract LEGO year field which contains release and/or retirement year
  * Located in: <h3>LEGO year:</h3> followed by <div class="tab-value">
  */
-function extractLegoYearField(doc: any): string | null {
+function extractLegoYearField(doc: HTMLDocument): string | null {
   // Find all h3 elements with "LEGO year:" text
   const headings = doc.querySelectorAll('h3.body_title');
 
@@ -194,7 +194,7 @@ function extractLegoYearField(doc: any): string | null {
  * 2. LEGO year field: "YYYY" (single year)
  * 3. Description: "Released in YYYY"
  */
-function extractYearReleased(doc: any): number | null {
+function extractYearReleased(doc: HTMLDocument): number | null {
   // First check LEGO year field
   const legoYear = extractLegoYearField(doc);
   if (legoYear) {
@@ -229,7 +229,7 @@ function extractYearReleased(doc: any): number | null {
  * Checks LEGO year field for "YYYY - Retired YYYY" pattern
  * Returns null if not found (many sets don't have retirement year)
  */
-function extractYearRetired(doc: any): number | null {
+function extractYearRetired(doc: HTMLDocument): number | null {
   // Check LEGO year field
   const legoYear = extractLegoYearField(doc);
   if (legoYear) {
@@ -247,7 +247,7 @@ function extractYearRetired(doc: any): number | null {
  * Extract designer/creator information
  * Currently not available on WorldBricks - returns null
  */
-function extractDesigner(doc: any): string | null {
+function extractDesigner(doc: HTMLDocument): string | null {
   // WorldBricks doesn't appear to have designer information
   // This would need to come from Brickset or official LEGO data
   return null;
@@ -257,7 +257,7 @@ function extractDesigner(doc: any): string | null {
  * Extract parts count
  * Parses description for "XXX pieces" pattern
  */
-function extractPartsCount(doc: any): number | null {
+function extractPartsCount(doc: HTMLDocument): number | null {
   const description = extractDescription(doc);
 
   if (description) {
@@ -275,7 +275,7 @@ function extractPartsCount(doc: any): number | null {
  * Extract dimensions from JSON-LD Product schema
  * Returns formatted string: "WxDxH cm"
  */
-function extractDimensions(doc: any): string | null {
+function extractDimensions(doc: HTMLDocument): string | null {
   const jsonLd = extractJsonLdProduct(doc);
 
   if (jsonLd && jsonLd.width && jsonLd.height && jsonLd.depth) {
@@ -294,7 +294,7 @@ function extractDimensions(doc: any): string | null {
  * Extract image URL
  * Checks: Meta tags (Open Graph), JSON-LD
  */
-function extractImageUrl(doc: any): string | null {
+function extractImageUrl(doc: HTMLDocument): string | null {
   // Try Open Graph secure URL first
   const ogImage = doc.querySelector('meta[property="og:image:secure_url"]')?.getAttribute("content");
   if (ogImage) {
@@ -324,7 +324,7 @@ function extractImageUrl(doc: any): string | null {
  * Extract and parse JSON-LD Product schema
  * Returns parsed Product schema or null
  */
-function extractJsonLdProduct(doc: any): ProductSchema | null {
+function extractJsonLdProduct(doc: HTMLDocument): ProductSchema | null {
   try {
     const scripts = doc.querySelectorAll('script[type="application/ld+json"]');
 
