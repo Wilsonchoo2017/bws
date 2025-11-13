@@ -58,10 +58,16 @@ async function clearFailedJobs() {
       if (activeJobs.length > 0) {
         console.log("\n   Active jobs:");
         for (const job of activeJobs) {
-          console.log(`   - Job ${job.id}: ${job.name} (item: ${job.data.itemId || 'N/A'})`);
+          console.log(
+            `   - Job ${job.id}: ${job.name} (item: ${
+              job.data.itemId || "N/A"
+            })`,
+          );
         }
         console.log("\n   Note: These jobs may be legitimately processing.");
-        console.log("   If they're stuck, they'll be marked as stalled by the worker.\n");
+        console.log(
+          "   If they're stuck, they'll be marked as stalled by the worker.\n",
+        );
       }
     }
 
@@ -79,9 +85,15 @@ async function clearFailedJobs() {
 
     console.log("✅ Queue cleanup completed!");
     console.log("\n💡 Next steps:");
-    console.log("   1. Restart your application to apply the new LOCK_DURATION");
-    console.log("   2. Monitor the /queue page to ensure jobs complete successfully");
-    console.log("   3. Check logs in ./logs/ directory for detailed job execution info\n");
+    console.log(
+      "   1. Restart your application to apply the new LOCK_DURATION",
+    );
+    console.log(
+      "   2. Monitor the /queue page to ensure jobs complete successfully",
+    );
+    console.log(
+      "   3. Check logs in ./logs/ directory for detailed job execution info\n",
+    );
 
     await queue.close();
     await connection.quit();

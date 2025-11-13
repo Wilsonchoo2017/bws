@@ -30,7 +30,9 @@ export function validateMinimumPurchase(
     const needed = minPurchase - eligibleSubtotal;
     return {
       isValid: false,
-      message: `Minimum purchase not met. Add RM${formatRMFromCents(needed)} more.`,
+      message: `Minimum purchase not met. Add RM${
+        formatRMFromCents(needed)
+      } more.`,
     };
   }
 

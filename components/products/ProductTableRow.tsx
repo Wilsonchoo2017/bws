@@ -1,4 +1,8 @@
-import { formatDate, formatNumber, formatPrice } from "../../utils/formatters.ts";
+import {
+  formatDate,
+  formatNumber,
+  formatPrice,
+} from "../../utils/formatters.ts";
 import {
   getProductPlatformBadgeClass,
   getProductPlatformLabel,
@@ -17,13 +21,17 @@ interface ProductTableRowProps {
  * Displays product information including platform, image, name, pricing, and metadata.
  * Follows Single Responsibility Principle - only handles rendering a single product row.
  */
-export function ProductTableRow({ product, sourceFilter }: ProductTableRowProps) {
+export function ProductTableRow(
+  { product, sourceFilter }: ProductTableRowProps,
+) {
   return (
     <tr key={product.id}>
       {/* Platform Badge */}
       <td>
         <span
-          class={`badge badge-sm ${getProductPlatformBadgeClass(product.source)}`}
+          class={`badge badge-sm ${
+            getProductPlatformBadgeClass(product.source)
+          }`}
         >
           {getProductPlatformLabel(product.source)}
         </span>

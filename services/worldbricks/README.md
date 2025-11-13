@@ -1,10 +1,13 @@
 # WorldBricks Scraper
 
-A comprehensive scraping system for extracting LEGO set information from WorldBricks.com, focusing on year released, year retired, parts count, and other set details.
+A comprehensive scraping system for extracting LEGO set information from
+WorldBricks.com, focusing on year released, year retired, parts count, and other
+set details.
 
 ## Overview
 
-The WorldBricks scraper supplements missing LEGO set data that isn't available from other sources like Bricklink or BrickRanker. It extracts:
+The WorldBricks scraper supplements missing LEGO set data that isn't available
+from other sources like Bricklink or BrickRanker. It extracts:
 
 - **Year Released** (HIGH PRIORITY) ✅
 - **Year Retired** (HIGH PRIORITY) ✅ (Available for many sets)
@@ -34,7 +37,8 @@ The scraper follows SOLID principles with clear separation of concerns:
    - Query methods for missing data detection
    - Statistics and reporting
 
-3. **WorldBricksScraperService** (`services/worldbricks/WorldBricksScraperService.ts`)
+3. **WorldBricksScraperService**
+   (`services/worldbricks/WorldBricksScraperService.ts`)
    - Orchestrates scraping workflow
    - Integrates HttpClient, RateLimiter, Repository
    - Circuit breaker pattern
@@ -59,7 +63,11 @@ import { WorldBricksScraperService } from "./services/worldbricks/WorldBricksScr
 const httpClient = getHttpClient();
 const rateLimiter = new RateLimiterService();
 const repository = getWorldBricksRepository();
-const scraper = new WorldBricksScraperService(httpClient, rateLimiter, repository);
+const scraper = new WorldBricksScraperService(
+  httpClient,
+  rateLimiter,
+  repository,
+);
 
 // Scrape a single set
 const result = await scraper.scrape({
@@ -89,7 +97,9 @@ const results = await scraper.scrapeBatch(sets, {
   delayBetweenRequests: 60000, // 1 minute
 });
 
-console.log(`Scraped ${results.filter(r => r.success).length}/${results.length} sets`);
+console.log(
+  `Scraped ${results.filter((r) => r.success).length}/${results.length} sets`,
+);
 ```
 
 ### Query Repository
@@ -133,13 +143,15 @@ CREATE TABLE worldbricks_sets (
 
 ## URL Discovery
 
-WorldBricks URLs include set names which aren't consistent, so the scraper uses **search-based URL discovery**:
+WorldBricks URLs include set names which aren't consistent, so the scraper uses
+**search-based URL discovery**:
 
 1. **Search URL**: `https://www.worldbricks.com/en/all.html?search={setNumber}`
 2. **Parse Results**: Extract the product page URL from search results
 3. **Fetch Product**: Get the actual product page
 
 Example:
+
 ```
 Search: https://www.worldbricks.com/en/all.html?search=7834
 Result: https://www.worldbricks.com/en/lego-instructions-year/1980/1980/lego-set/7834-Level-Crossing.html
@@ -154,9 +166,9 @@ Configuration is in `config/scraper.config.ts`:
 ```typescript
 export const WORLDBRICKS_CONFIG = {
   BASE_URL: "https://www.worldbricks.com",
-  RATE_LIMIT_MIN_DELAY_MS: 60000,     // 1 minute
-  RATE_LIMIT_MAX_DELAY_MS: 180000,    // 3 minutes
-  SCHEDULE_INTERVAL_DAYS: 90,         // Quarterly updates
+  RATE_LIMIT_MIN_DELAY_MS: 60000, // 1 minute
+  RATE_LIMIT_MAX_DELAY_MS: 180000, // 3 minutes
+  SCHEDULE_INTERVAL_DAYS: 90, // Quarterly updates
   MAX_REQUESTS_PER_HOUR: 30,
   LANGUAGE: "en",
 };
@@ -171,6 +183,7 @@ deno run --allow-all scripts/test-worldbricks-scraper.ts
 ```
 
 This will:
+
 1. Scrape a test set without saving
 2. Scrape and save to database
 3. Verify database entry
@@ -179,7 +192,8 @@ This will:
 
 ## Integration with Existing System
 
-The WorldBricks scraper integrates seamlessly with your existing scraper infrastructure:
+The WorldBricks scraper integrates seamlessly with your existing scraper
+infrastructure:
 
 - Uses the same `HttpClientService` (Puppeteer-based)
 - Uses the same `RateLimiterService`
@@ -221,6 +235,7 @@ The WorldBricks scraper integrates seamlessly with your existing scraper infrast
 ## Test Results
 
 ### Set 7834 (Level Crossing - Vintage)
+
 ```
 ✅ Successfully scraped via search-based URL discovery
 ✅ Year Released: 1980
@@ -230,6 +245,7 @@ The WorldBricks scraper integrates seamlessly with your existing scraper infrast
 ```
 
 ### Set 31009 (Small Cottage - Modern)
+
 ```
 ✅ Successfully scraped via search-based URL discovery
 ✅ Year Released: 2013
@@ -240,6 +256,7 @@ The WorldBricks scraper integrates seamlessly with your existing scraper infrast
 ```
 
 ### System Tests
+
 ```
 ✅ Search-based URL discovery working
 ✅ Retirement year extraction working
@@ -262,6 +279,7 @@ The WorldBricks scraper integrates seamlessly with your existing scraper infrast
 ## Summary
 
 The WorldBricks scraper is production-ready and successfully:
+
 - ✅ Scrapes LEGO set data from WorldBricks.com
 - ✅ Extracts year released (HIGH PRIORITY field)
 - ✅ Extracts parts count, dimensions, description

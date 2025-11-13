@@ -13,10 +13,7 @@
  */
 
 import { Redis } from "ioredis";
-import {
-  REDIS_CONFIG,
-  RETRY_CONFIG,
-} from "../config/scraper.config.ts";
+import { REDIS_CONFIG, RETRY_CONFIG } from "../config/scraper.config.ts";
 
 /**
  * Circuit breaker state interface

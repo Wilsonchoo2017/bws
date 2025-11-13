@@ -13,7 +13,7 @@
  */
 
 import { db } from "../db/client.ts";
-import { products, priceHistory, shopeeScrapes } from "../db/schema.ts";
+import { priceHistory, products, shopeeScrapes } from "../db/schema.ts";
 import { eq } from "drizzle-orm";
 
 interface MigrationStats {
@@ -127,10 +127,14 @@ async function migrateShopeeData(
         });
 
         stats.scrapeRecordsCreated++;
-        console.log(`  ✅ Created initial scrape record for ${product.productId}`);
+        console.log(
+          `  ✅ Created initial scrape record for ${product.productId}`,
+        );
       }
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
+      const errorMessage = error instanceof Error
+        ? error.message
+        : String(error);
       stats.errors.push({ id: product.productId!, error: errorMessage });
       console.error(`  ❌ ${product.productId}: ${errorMessage}`);
     }
@@ -150,7 +154,9 @@ function printStats(stats: MigrationStats): void {
   console.log(`History Records Migrated: ${stats.historyRecordsMigrated}`);
   console.log(`New Scrape Records: ${stats.scrapeRecordsCreated}`);
   console.log(
-    `Total Records Created: ${stats.historyRecordsMigrated + stats.scrapeRecordsCreated}`,
+    `Total Records Created: ${
+      stats.historyRecordsMigrated + stats.scrapeRecordsCreated
+    }`,
   );
 
   if (stats.errors.length > 0) {

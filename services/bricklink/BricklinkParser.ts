@@ -229,9 +229,14 @@ export function extractImageUrl(doc: HTMLDocument): string | null {
   const allImages = doc.querySelectorAll("img");
   for (const img of allImages) {
     const src = (img as unknown as Element).getAttribute("src");
-    if (src && (src.includes("img.bricklink.com") || src.includes("brickimg"))) {
+    if (
+      src && (src.includes("img.bricklink.com") || src.includes("brickimg"))
+    ) {
       // Avoid small icons and thumbnails
-      if (!src.includes("/icon/") && !src.includes("_thumb") && !src.includes("small")) {
+      if (
+        !src.includes("/icon/") && !src.includes("_thumb") &&
+        !src.includes("small")
+      ) {
         return normalizeImageUrl(src);
       }
     }

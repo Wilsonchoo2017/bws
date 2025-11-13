@@ -4,7 +4,10 @@
  * Follows Single Responsibility Principle - each function has one clear purpose.
  */
 
-import { DOMParser, HTMLDocument } from "https://deno.land/x/deno_dom@v0.1.45/deno-dom-wasm.ts";
+import {
+  DOMParser,
+  HTMLDocument,
+} from "https://deno.land/x/deno_dom@v0.1.45/deno-dom-wasm.ts";
 import { extractLegoSetNumber, parsePriceToCents } from "../db/utils.ts";
 
 /**
@@ -179,7 +182,9 @@ export function extractUsedValue(doc: HTMLDocument): number | null {
   const valueRows: Array<{ row: Element; value: string }> = [];
 
   for (const row of rows) {
-    const label = (row as unknown as Element).querySelector(".col-xs-5.text-muted");
+    const label = (row as unknown as Element).querySelector(
+      ".col-xs-5.text-muted",
+    );
     if (label && label.textContent?.trim().toLowerCase() === "value") {
       const valueCol = (row as unknown as Element).querySelector(".col-xs-7");
       if (valueCol) {

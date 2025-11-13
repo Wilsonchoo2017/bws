@@ -14,7 +14,11 @@
  * - Pure functions: No side effects, easy to test
  */
 
-import { DOMParser, Element, HTMLDocument } from "https://deno.land/x/deno_dom@v0.1.38/deno-dom-wasm.ts";
+import {
+  DOMParser,
+  Element,
+  HTMLDocument,
+} from "https://deno.land/x/deno_dom@v0.1.38/deno-dom-wasm.ts";
 
 /**
  * Complete WorldBricks LEGO set data
@@ -62,7 +66,10 @@ interface ProductSchema {
  * @param sourceUrl - Original URL (for debugging)
  * @returns Parsed LEGO set data
  */
-export function parseWorldBricksHtml(html: string, sourceUrl: string): WorldBricksData {
+export function parseWorldBricksHtml(
+  html: string,
+  sourceUrl: string,
+): WorldBricksData {
   const doc = new DOMParser().parseFromString(html, "text/html");
 
   if (!doc) {
@@ -101,7 +108,8 @@ function extractSetNumber(doc: HTMLDocument, sourceUrl: string): string | null {
   }
 
   // Try meta tags
-  const twitterTitle = doc.querySelector('meta[name="twitter:title"]')?.getAttribute("content");
+  const twitterTitle = doc.querySelector('meta[name="twitter:title"]')
+    ?.getAttribute("content");
   if (twitterTitle) {
     const match = twitterTitle.match(/\b(\d{4,5})\b/);
     if (match) {
@@ -124,7 +132,8 @@ function extractSetNumber(doc: HTMLDocument, sourceUrl: string): string | null {
  */
 function extractSetName(doc: HTMLDocument): string | null {
   // Try meta description
-  const metaDesc = doc.querySelector('meta[name="twitter:description"]')?.getAttribute("content");
+  const metaDesc = doc.querySelector('meta[name="twitter:description"]')
+    ?.getAttribute("content");
   if (metaDesc) {
     // Format: "Download 31009 Small Cottage, Creator"
     const match = metaDesc.match(/\d+\s+([^,]+)/);
@@ -152,13 +161,15 @@ function extractSetName(doc: HTMLDocument): string | null {
  */
 function extractDescription(doc: HTMLDocument): string | null {
   // Look for description in tab content
-  const descDiv = doc.querySelector('.tab-value');
+  const descDiv = doc.querySelector(".tab-value");
   if (descDiv) {
     return descDiv.textContent?.trim() || null;
   }
 
   // Fallback to meta description
-  const metaDesc = doc.querySelector('meta[name="description"]')?.getAttribute("content");
+  const metaDesc = doc.querySelector('meta[name="description"]')?.getAttribute(
+    "content",
+  );
   return metaDesc?.trim() || null;
 }
 
@@ -168,15 +179,15 @@ function extractDescription(doc: HTMLDocument): string | null {
  */
 function extractLegoYearField(doc: HTMLDocument): string | null {
   // Find all h3 elements with "LEGO year:" text
-  const headings = doc.querySelectorAll('h3.body_title');
+  const headings = doc.querySelectorAll("h3.body_title");
 
   for (const heading of headings) {
     const text = heading.textContent?.trim();
-    if (text && text.toLowerCase().includes('lego year')) {
+    if (text && text.toLowerCase().includes("lego year")) {
       // Get the next sibling with class tab-value
       let sibling = (heading as Element).nextElementSibling;
       while (sibling) {
-        if (sibling.classList && sibling.classList.contains('tab-value')) {
+        if (sibling.classList && sibling.classList.contains("tab-value")) {
           return sibling.textContent?.trim() || null;
         }
         sibling = sibling.nextElementSibling;
@@ -296,13 +307,15 @@ function extractDimensions(doc: HTMLDocument): string | null {
  */
 function extractImageUrl(doc: HTMLDocument): string | null {
   // Try Open Graph secure URL first
-  const ogImage = doc.querySelector('meta[property="og:image:secure_url"]')?.getAttribute("content");
+  const ogImage = doc.querySelector('meta[property="og:image:secure_url"]')
+    ?.getAttribute("content");
   if (ogImage) {
     return ogImage;
   }
 
   // Try Twitter image
-  const twitterImage = doc.querySelector('meta[name="twitter:image"]')?.getAttribute("content");
+  const twitterImage = doc.querySelector('meta[name="twitter:image"]')
+    ?.getAttribute("content");
   if (twitterImage) {
     return twitterImage;
   }
@@ -388,7 +401,10 @@ export function constructSearchUrl(setNumber: string): string {
  * @param setNumber - LEGO set number being searched for
  * @returns Product page URL or null if not found
  */
-export function parseSearchResults(html: string, setNumber: string): string | null {
+export function parseSearchResults(
+  html: string,
+  setNumber: string,
+): string | null {
   const doc = new DOMParser().parseFromString(html, "text/html");
 
   if (!doc) {
@@ -430,7 +446,7 @@ export function parseSearchResults(html: string, setNumber: string): string | nu
  */
 export function constructWorldBricksUrl(
   setNumber: string,
-  setName?: string
+  setName?: string,
 ): string | null {
   try {
     const num = parseInt(setNumber, 10);
@@ -475,7 +491,9 @@ export function isValidWorldBricksPage(html: string): boolean {
  * @param description - Product description text
  * @returns Theme name or null
  */
-export function extractThemeFromDescription(description: string): string | null {
+export function extractThemeFromDescription(
+  description: string,
+): string | null {
   // Look for "part of the Creator theme" pattern
   const match = description.match(/part of the ([^,]+) theme/i);
   return match ? match[1].trim() : null;

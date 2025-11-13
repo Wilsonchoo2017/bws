@@ -182,12 +182,19 @@ export class ValueInvestingService {
     }
 
     // Build intrinsic value inputs
-    const availabilityDataPoints = analysis.dimensions?.availability?.dataPoints || {};
+    const availabilityDataPoints =
+      analysis.dimensions?.availability?.dataPoints || {};
     const pricingDataPoints = analysis.dimensions?.pricing?.dataPoints || {};
-    const retirementStatus = availabilityDataPoints.retirementStatus as string | undefined;
+    const retirementStatus = availabilityDataPoints.retirementStatus as
+      | string
+      | undefined;
     const intrinsicValueInputs: IntrinsicValueInputs = {
-      bricklinkAvgPrice: pricingDataPoints.bricklinkAvgPrice as number | undefined,
-      bricklinkMaxPrice: pricingDataPoints.bricklinkMaxPrice as number | undefined,
+      bricklinkAvgPrice: pricingDataPoints.bricklinkAvgPrice as
+        | number
+        | undefined,
+      bricklinkMaxPrice: pricingDataPoints.bricklinkMaxPrice as
+        | number
+        | undefined,
       demandScore: analysis.dimensions?.demand?.value ?? 50,
       qualityScore: analysis.dimensions?.quality?.value ?? 50,
       retirementStatus: isRetirementStatus(retirementStatus)

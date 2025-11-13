@@ -16,7 +16,7 @@
 
 import { db } from "../db/client.ts";
 import { bricklinkItems, products } from "../db/schema.ts";
-import { isNull, and, isNotNull, eq } from "drizzle-orm";
+import { and, eq, isNotNull, isNull } from "drizzle-orm";
 import { imageDownloadService } from "../services/image/ImageDownloadService.ts";
 import { imageStorageService } from "../services/image/ImageStorageService.ts";
 import { IMAGE_CONFIG, ImageDownloadStatus } from "../config/image.config.ts";
@@ -102,7 +102,9 @@ async function backfillBricklinkImages(
   for (let i = 0; i < items.length; i += batchSize) {
     const batch = items.slice(i, i + batchSize);
     console.log(
-      `\n📥 Processing batch ${Math.floor(i / batchSize) + 1}/${Math.ceil(items.length / batchSize)} (${batch.length} items)`,
+      `\n📥 Processing batch ${Math.floor(i / batchSize) + 1}/${
+        Math.ceil(items.length / batchSize)
+      } (${batch.length} items)`,
     );
 
     // Process batch items
@@ -115,7 +117,9 @@ async function backfillBricklinkImages(
           continue;
         }
 
-        console.log(`  [${stats.totalProcessed}/${items.length}] ${item.itemId}: Downloading...`);
+        console.log(
+          `  [${stats.totalProcessed}/${items.length}] ${item.itemId}: Downloading...`,
+        );
 
         // Download image
         const imageData = await imageDownloadService.download(item.imageUrl, {
@@ -144,10 +148,14 @@ async function backfillBricklinkImages(
           .where(eq(bricklinkItems.itemId, item.itemId));
 
         stats.successful++;
-        console.log(`  ✅ ${item.itemId}: Saved to ${storageResult.relativePath}`);
+        console.log(
+          `  ✅ ${item.itemId}: Saved to ${storageResult.relativePath}`,
+        );
       } catch (error) {
         stats.failed++;
-        const errorMessage = error instanceof Error ? error.message : String(error);
+        const errorMessage = error instanceof Error
+          ? error.message
+          : String(error);
         stats.errors.push({ id: item.itemId, error: errorMessage });
         console.error(`  ❌ ${item.itemId}: ${errorMessage}`);
 
@@ -198,7 +206,12 @@ async function backfillProductImages(
   ];
 
   if (options.source) {
-    conditions.push(eq(products.source, options.source));
+    conditions.push(
+      eq(
+        products.source,
+        options.source as "shopee" | "toysrus" | "brickeconomy" | "self",
+      ),
+    );
   }
 
   // Query products that have image URLs but no local paths
@@ -213,7 +226,9 @@ async function backfillProductImages(
   if (options.dryRun) {
     console.log("🔍 DRY RUN - No images will be downloaded");
     items.forEach((item, index) => {
-      console.log(`  ${index + 1}. ${item.productId} (${item.source}): ${item.image}`);
+      console.log(
+        `  ${index + 1}. ${item.productId} (${item.source}): ${item.image}`,
+      );
     });
     return stats;
   }
@@ -225,7 +240,9 @@ async function backfillProductImages(
   for (let i = 0; i < items.length; i += batchSize) {
     const batch = items.slice(i, i + batchSize);
     console.log(
-      `\n📥 Processing batch ${Math.floor(i / batchSize) + 1}/${Math.ceil(items.length / batchSize)} (${batch.length} items)`,
+      `\n📥 Processing batch ${Math.floor(i / batchSize) + 1}/${
+        Math.ceil(items.length / batchSize)
+      } (${batch.length} items)`,
     );
 
     // Process batch items
@@ -238,7 +255,9 @@ async function backfillProductImages(
           continue;
         }
 
-        console.log(`  [${stats.totalProcessed}/${items.length}] ${item.productId}: Downloading...`);
+        console.log(
+          `  [${stats.totalProcessed}/${items.length}] ${item.productId}: Downloading...`,
+        );
 
         // Download image
         const imageData = await imageDownloadService.download(item.image, {
@@ -260,7 +279,9 @@ async function backfillProductImages(
         const localImagesArray: string[] = [storageResult.relativePath];
 
         if (item.images && Array.isArray(item.images)) {
-          console.log(`  📸 Downloading ${item.images.length} additional images...`);
+          console.log(
+            `  📸 Downloading ${item.images.length} additional images...`,
+          );
 
           const imageResults = await imageDownloadService.downloadMultiple(
             item.images as string[],
@@ -299,10 +320,14 @@ async function backfillProductImages(
           .where(eq(products.productId, item.productId));
 
         stats.successful++;
-        console.log(`  ✅ ${item.productId}: Saved ${localImagesArray.length} image(s)`);
+        console.log(
+          `  ✅ ${item.productId}: Saved ${localImagesArray.length} image(s)`,
+        );
       } catch (error) {
         stats.failed++;
-        const errorMessage = error instanceof Error ? error.message : String(error);
+        const errorMessage = error instanceof Error
+          ? error.message
+          : String(error);
         stats.errors.push({ id: item.productId, error: errorMessage });
         console.error(`  ❌ ${item.productId}: ${errorMessage}`);
 
@@ -384,7 +409,8 @@ async function main() {
     // Overall summary
     const totalSuccessful = bricklinkStats.successful + productStats.successful;
     const totalFailed = bricklinkStats.failed + productStats.failed;
-    const totalProcessed = bricklinkStats.totalProcessed + productStats.totalProcessed;
+    const totalProcessed = bricklinkStats.totalProcessed +
+      productStats.totalProcessed;
 
     console.log(`\n${"=".repeat(60)}`);
     console.log("🎉 Overall Summary");
@@ -392,7 +418,9 @@ async function main() {
     console.log(`Total items processed: ${totalProcessed}`);
     console.log(`✅ Total successful: ${totalSuccessful}`);
     console.log(`❌ Total failed: ${totalFailed}`);
-    console.log(`Success rate: ${((totalSuccessful / totalProcessed) * 100).toFixed(2)}%`);
+    console.log(
+      `Success rate: ${((totalSuccessful / totalProcessed) * 100).toFixed(2)}%`,
+    );
 
     if (options.dryRun) {
       console.log("\n🔍 This was a DRY RUN - no changes were made");

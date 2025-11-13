@@ -38,8 +38,10 @@ export default function QueuePage() {
               <div class="collapse-content">
                 <div class="prose max-w-none">
                   <p class="text-base-content/80 mb-4">
-                    This system integrates multiple data sources to provide comprehensive LEGO set information.
-                    Below is a detailed breakdown of each source, what data is collected, and how it's used.
+                    This system integrates multiple data sources to provide
+                    comprehensive LEGO set information. Below is a detailed
+                    breakdown of each source, what data is collected, and how
+                    it's used.
                   </p>
 
                   {/* Summary Table */}
@@ -97,17 +99,24 @@ export default function QueuePage() {
                     <div class="card-body">
                       <h3 class="card-title text-lg">🧱 Bricklink</h3>
                       <p class="text-sm text-base-content/70 mb-2">
-                        <strong>Source:</strong> <code>https://www.bricklink.com/v2/catalog/catalogitem.page?S=[SET_NUMBER]</code>
+                        <strong>Source:</strong>{" "}
+                        <code>
+                          https://www.bricklink.com/v2/catalog/catalogitem.page?S=[SET_NUMBER]
+                        </code>
                       </p>
                       <p class="text-sm mb-2">
-                        <strong>Database Tables:</strong> <code>bricklink_items</code>, <code>bricklink_price_history</code>, <code>bricklink_volume_history</code>
+                        <strong>Database Tables:</strong>{" "}
+                        <code>bricklink_items</code>,{" "}
+                        <code>bricklink_price_history</code>,{" "}
+                        <code>bricklink_volume_history</code>
                       </p>
 
                       <div class="text-sm">
                         <strong>Data Collected:</strong>
                         <ul class="list-disc list-inside ml-2 mt-1">
                           <li>Item metadata (title, weight, image URL)</li>
-                          <li>Historical pricing data (4 categories):
+                          <li>
+                            Historical pricing data (4 categories):
                             <ul class="list-circle list-inside ml-4">
                               <li>6-month new condition prices</li>
                               <li>6-month used condition prices</li>
@@ -115,7 +124,11 @@ export default function QueuePage() {
                               <li>Current used condition prices</li>
                             </ul>
                           </li>
-                          <li>Volume metrics per category: times_sold, total_lots, total_qty, min_price, avg_price, qty_avg_price, max_price</li>
+                          <li>
+                            Volume metrics per category: times_sold, total_lots,
+                            total_qty, min_price, avg_price, qty_avg_price,
+                            max_price
+                          </li>
                         </ul>
                       </div>
 
@@ -137,7 +150,9 @@ export default function QueuePage() {
 }`}</code></pre>
                       </div>
 
-                      <div class="badge badge-info mt-2">Rate Limit: Max 15 requests/hour</div>
+                      <div class="badge badge-info mt-2">
+                        Rate Limit: Max 15 requests/hour
+                      </div>
                     </div>
                   </div>
 
@@ -146,10 +161,12 @@ export default function QueuePage() {
                     <div class="card-body">
                       <h3 class="card-title text-lg">📅 BrickRanker</h3>
                       <p class="text-sm text-base-content/70 mb-2">
-                        <strong>Source:</strong> <code>https://brickranker.com/retirement-tracker</code>
+                        <strong>Source:</strong>{" "}
+                        <code>https://brickranker.com/retirement-tracker</code>
                       </p>
                       <p class="text-sm mb-2">
-                        <strong>Database Table:</strong> <code>brickranker_retirement_items</code>
+                        <strong>Database Table:</strong>{" "}
+                        <code>brickranker_retirement_items</code>
                       </p>
 
                       <div class="text-sm">
@@ -175,7 +192,9 @@ export default function QueuePage() {
 }`}</code></pre>
                       </div>
 
-                      <div class="badge badge-warning mt-2">Batch scraping: All themes processed monthly</div>
+                      <div class="badge badge-warning mt-2">
+                        Batch scraping: All themes processed monthly
+                      </div>
                     </div>
                   </div>
 
@@ -184,10 +203,14 @@ export default function QueuePage() {
                     <div class="card-body">
                       <h3 class="card-title text-lg">🌍 WorldBricks</h3>
                       <p class="text-sm text-base-content/70 mb-2">
-                        <strong>Source:</strong> <code>https://www.worldbricks.com/en/instructions-number/[range]/lego-set/[setNumber]-[name].html</code>
+                        <strong>Source:</strong>{" "}
+                        <code>
+                          https://www.worldbricks.com/en/instructions-number/[range]/lego-set/[setNumber]-[name].html
+                        </code>
                       </p>
                       <p class="text-sm mb-2">
-                        <strong>Database Table:</strong> <code>worldbricks_sets</code>
+                        <strong>Database Table:</strong>{" "}
+                        <code>worldbricks_sets</code>
                       </p>
 
                       <div class="text-sm">
@@ -216,7 +239,9 @@ export default function QueuePage() {
 }`}</code></pre>
                       </div>
 
-                      <div class="badge badge-success mt-2">Updated quarterly (every 90 days)</div>
+                      <div class="badge badge-success mt-2">
+                        Updated quarterly (every 90 days)
+                      </div>
                     </div>
                   </div>
 
@@ -225,10 +250,14 @@ export default function QueuePage() {
                     <div class="card-body">
                       <h3 class="card-title text-lg">💬 Reddit</h3>
                       <p class="text-sm text-base-content/70 mb-2">
-                        <strong>Source:</strong> <code>https://www.reddit.com/r/lego/search.json?q=[SET_NUMBER]</code>
+                        <strong>Source:</strong>{" "}
+                        <code>
+                          https://www.reddit.com/r/lego/search.json?q=[SET_NUMBER]
+                        </code>
                       </p>
                       <p class="text-sm mb-2">
-                        <strong>Database Table:</strong> <code>reddit_search_results</code>
+                        <strong>Database Table:</strong>{" "}
+                        <code>reddit_search_results</code>
                       </p>
 
                       <div class="text-sm">
@@ -238,7 +267,10 @@ export default function QueuePage() {
                           <li>Authors and timestamps</li>
                           <li>Scores and comment counts</li>
                           <li>Post URLs and permalinks</li>
-                          <li>Subreddits: r/lego, r/legostarwars, r/legotechnic, etc.</li>
+                          <li>
+                            Subreddits: r/lego, r/legostarwars, r/legotechnic,
+                            etc.
+                          </li>
                         </ul>
                       </div>
 
@@ -255,7 +287,9 @@ export default function QueuePage() {
 }`}</code></pre>
                       </div>
 
-                      <div class="badge badge-primary mt-2">Unauthenticated API access</div>
+                      <div class="badge badge-primary mt-2">
+                        Unauthenticated API access
+                      </div>
                     </div>
                   </div>
 
@@ -264,10 +298,16 @@ export default function QueuePage() {
                     <div class="card-body">
                       <h3 class="card-title text-lg">📊 BrickEconomy</h3>
                       <p class="text-sm text-base-content/70 mb-2">
-                        <strong>Source:</strong> <code>https://www.brickeconomy.com/set/[SET_NUMBER]</code>
+                        <strong>Source:</strong>{" "}
+                        <code>
+                          https://www.brickeconomy.com/set/[SET_NUMBER]
+                        </code>
                       </p>
                       <p class="text-sm mb-2">
-                        <strong>Status:</strong> <span class="badge badge-warning">Manual parsing only (not automated)</span>
+                        <strong>Status:</strong>{" "}
+                        <span class="badge badge-warning">
+                          Manual parsing only (not automated)
+                        </span>
                       </p>
 
                       <div class="text-sm">
@@ -277,10 +317,15 @@ export default function QueuePage() {
                           <li>Market value (new/sealed and used)</li>
                           <li>Growth percentages (overall, annual, 90-day)</li>
                           <li>Investment forecasts (1-year, 5-year)</li>
-                          <li>Pieces, minifigs, minifigs value, PPP (price per piece)</li>
+                          <li>
+                            Pieces, minifigs, minifigs value, PPP (price per
+                            piece)
+                          </li>
                           <li>Theme and subtheme</li>
                           <li>Release and retirement dates</li>
-                          <li>Quick buy prices (eBay, Amazon, StockX, Bricklink)</li>
+                          <li>
+                            Quick buy prices (eBay, Amazon, StockX, Bricklink)
+                          </li>
                           <li>UPC/EAN codes</li>
                         </ul>
                       </div>
@@ -301,23 +346,44 @@ export default function QueuePage() {
 }`}</code></pre>
                       </div>
 
-                      <div class="badge badge-error mt-2">Not currently in queue system</div>
+                      <div class="badge badge-error mt-2">
+                        Not currently in queue system
+                      </div>
                     </div>
                   </div>
 
                   {/* Additional Notes */}
                   <div class="alert alert-info mt-4">
-                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" class="stroke-current shrink-0 w-6 h-6">
-                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                      class="stroke-current shrink-0 w-6 h-6"
+                    >
+                      <path
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        stroke-width="2"
+                        d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+                      >
+                      </path>
                     </svg>
                     <div>
                       <h4 class="font-bold">Integration Notes</h4>
                       <ul class="text-sm list-disc list-inside">
-                        <li>No automated data merging between sources currently</li>
+                        <li>
+                          No automated data merging between sources currently
+                        </li>
                         <li>Each source maintains its own database table</li>
                         <li>Cross-referencing possible via set numbers</li>
-                        <li>Images are downloaded and stored locally with deduplication</li>
-                        <li>All scrapers implement circuit breaker pattern and exponential backoff</li>
+                        <li>
+                          Images are downloaded and stored locally with
+                          deduplication
+                        </li>
+                        <li>
+                          All scrapers implement circuit breaker pattern and
+                          exponential backoff
+                        </li>
                       </ul>
                     </div>
                   </div>

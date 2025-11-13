@@ -82,7 +82,8 @@ export class ErrorBoundary extends Component<
                 {this.state.error?.message ||
                   "An unexpected error occurred while rendering this component."}
               </div>
-              {Deno.env.get("DENO_ENV") === "development" && this.state.error?.stack && (
+              {Deno.env.get("DENO_ENV") === "development" &&
+                this.state.error?.stack && (
                 <details class="mt-2">
                   <summary class="cursor-pointer text-xs opacity-70">
                     Error Details (Development Only)

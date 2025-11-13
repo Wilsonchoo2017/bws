@@ -257,7 +257,10 @@ export default function UnifiedParser() {
           ageRange: currentProduct._originalData.ageRange,
           rawData: {
             product_url: currentProduct._originalData.productUrl,
-            ...(currentProduct._originalData.rawData as Record<string, unknown> || {}),
+            ...(currentProduct._originalData.rawData as Record<
+              string,
+              unknown
+            > || {}),
           },
         };
 
@@ -570,8 +573,10 @@ export default function UnifiedParser() {
                         );
 
                         // Determine row background color based on price change
-                        const isPriceDrop = product.priceDelta && product.priceDelta < 0;
-                        const isPriceIncrease = product.priceDelta && product.priceDelta > 0;
+                        const isPriceDrop = product.priceDelta &&
+                          product.priceDelta < 0;
+                        const isPriceIncrease = product.priceDelta &&
+                          product.priceDelta > 0;
                         const rowBgClass = product.isNew
                           ? "bg-warning/10 hover:bg-warning/20"
                           : isPriceDrop
@@ -671,7 +676,8 @@ export default function UnifiedParser() {
                                 <div class="font-semibold text-base">
                                   {formatPrice(product.price)}
                                 </div>
-                                {product.priceChangePercent !== null && product.priceChangePercent !== undefined && (
+                                {product.priceChangePercent !== null &&
+                                  product.priceChangePercent !== undefined && (
                                   <span
                                     class={`badge badge-sm font-bold ${
                                       product.priceChangePercent < 0

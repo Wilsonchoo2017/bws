@@ -94,7 +94,9 @@ export class BricklinkDashboardService {
     const conditions = [eq(bricklinkVolumeHistory.itemId, itemId)];
 
     if (options?.startDate) {
-      conditions.push(gte(bricklinkVolumeHistory.recordedAt, options.startDate));
+      conditions.push(
+        gte(bricklinkVolumeHistory.recordedAt, options.startDate),
+      );
     }
 
     if (options?.endDate) {
@@ -186,7 +188,9 @@ export class BricklinkDashboardService {
     }
 
     if (options?.startDate) {
-      conditions.push(gte(bricklinkVolumeHistory.recordedAt, options.startDate));
+      conditions.push(
+        gte(bricklinkVolumeHistory.recordedAt, options.startDate),
+      );
     }
 
     if (options?.endDate) {

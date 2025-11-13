@@ -230,7 +230,9 @@ export const shopeeScrapes = pgTable(
     productIdIdx: index("idx_shopee_scrapes_product_id").on(table.productId),
 
     // Index for session lookup
-    sessionIdIdx: index("idx_shopee_scrapes_session_id").on(table.scrapeSessionId),
+    sessionIdIdx: index("idx_shopee_scrapes_session_id").on(
+      table.scrapeSessionId,
+    ),
 
     // Composite index for time-series queries (most important!)
     productTimeIdx: index("idx_shopee_scrapes_product_time").on(

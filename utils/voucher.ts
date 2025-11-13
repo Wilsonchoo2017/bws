@@ -95,9 +95,7 @@ function calculateEligibleSubtotal(
   ) {
     const requiredTags = voucher.conditions.requiredTags;
     return items
-      .filter((item) =>
-        item.tags?.some((tag) => requiredTags.includes(tag))
-      )
+      .filter((item) => item.tags?.some((tag) => requiredTags.includes(tag)))
       .reduce((sum, item) => sum + item.unitPrice * item.quantity, 0);
   }
 
@@ -151,8 +149,9 @@ export function calculateVoucherDiscount(
         discount: 0,
         isCapped: false,
         isValid: false,
-        validationMessage:
-          `Minimum purchase not met. Add RM${(needed / 100).toFixed(2)} more.`,
+        validationMessage: `Minimum purchase not met. Add RM${
+          (needed / 100).toFixed(2)
+        } more.`,
       };
     }
   }
@@ -163,9 +162,7 @@ export function calculateVoucherDiscount(
     voucher.conditions?.requiredTags
   ) {
     const hasTaggedItems = items.some((item) =>
-      item.tags?.some((tag) =>
-        voucher.conditions!.requiredTags!.includes(tag)
-      )
+      item.tags?.some((tag) => voucher.conditions!.requiredTags!.includes(tag))
     );
 
     if (!hasTaggedItems) {
@@ -372,9 +369,7 @@ export function validateVoucherConditions(
     voucher.conditions?.requiredTags
   ) {
     const hasTaggedItems = items.some((item) =>
-      item.tags?.some((tag) =>
-        voucher.conditions!.requiredTags!.includes(tag)
-      )
+      item.tags?.some((tag) => voucher.conditions!.requiredTags!.includes(tag))
     );
 
     if (!hasTaggedItems) {

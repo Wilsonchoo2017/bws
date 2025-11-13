@@ -36,6 +36,7 @@ import * as $CartManager from "./islands/CartManager.tsx";
 import * as $Counter from "./islands/Counter.tsx";
 import * as $ProductAnalysisCard from "./islands/ProductAnalysisCard.tsx";
 import * as $ProductEditModal from "./islands/ProductEditModal.tsx";
+import * as $ProductImageGallery from "./islands/ProductImageGallery.tsx";
 import * as $ProductsList from "./islands/ProductsList.tsx";
 import * as $QueueDiagnosticsDashboard from "./islands/QueueDiagnosticsDashboard.tsx";
 import * as $ShopeeParser from "./islands/ShopeeParser.tsx";
@@ -88,6 +89,7 @@ const manifest = {
     "./islands/Counter.tsx": $Counter,
     "./islands/ProductAnalysisCard.tsx": $ProductAnalysisCard,
     "./islands/ProductEditModal.tsx": $ProductEditModal,
+    "./islands/ProductImageGallery.tsx": $ProductImageGallery,
     "./islands/ProductsList.tsx": $ProductsList,
     "./islands/QueueDiagnosticsDashboard.tsx": $QueueDiagnosticsDashboard,
     "./islands/ShopeeParser.tsx": $ShopeeParser,

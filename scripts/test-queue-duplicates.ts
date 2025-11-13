@@ -8,7 +8,10 @@
  *   deno run -A scripts/test-queue-duplicates.ts
  */
 
-import { getQueueService, JobPriority } from "../services/queue/QueueService.ts";
+import {
+  getQueueService,
+  JobPriority,
+} from "../services/queue/QueueService.ts";
 
 // ANSI color codes
 const colors = {
@@ -21,7 +24,9 @@ const colors = {
 };
 
 async function main() {
-  console.log(`${colors.cyan}🧪 Testing Queue Duplicate Prevention${colors.reset}\n`);
+  console.log(
+    `${colors.cyan}🧪 Testing Queue Duplicate Prevention${colors.reset}\n`,
+  );
 
   const queueService = getQueueService();
 
@@ -30,15 +35,21 @@ async function main() {
     await queueService.initialize();
     console.log(`${colors.green}✓${colors.reset} Queue initialized\n`);
   } catch (error) {
-    console.error(`${colors.red}✗ Failed to initialize queue:${colors.reset}`, error);
+    console.error(
+      `${colors.red}✗ Failed to initialize queue:${colors.reset}`,
+      error,
+    );
     Deno.exit(1);
   }
 
   // Test 1: Try adding the same job twice (HIGH priority)
-  console.log(`${colors.blue}Test 1: Adding same HIGH priority job twice${colors.reset}`);
+  console.log(
+    `${colors.blue}Test 1: Adding same HIGH priority job twice${colors.reset}`,
+  );
 
   const testItemId = "10332-1";
-  const testUrl = `https://www.bricklink.com/v2/catalog/catalogitem.page?S=${testItemId}`;
+  const testUrl =
+    `https://www.bricklink.com/v2/catalog/catalogitem.page?S=${testItemId}`;
 
   try {
     const job1 = await queueService.addScrapeJob({
@@ -58,9 +69,13 @@ async function main() {
     });
 
     if (job1.id === job2.id) {
-      console.log(`${colors.green}✓${colors.reset} Duplicate detected - returned existing job: ${job2.id}`);
+      console.log(
+        `${colors.green}✓${colors.reset} Duplicate detected - returned existing job: ${job2.id}`,
+      );
     } else {
-      console.log(`${colors.red}✗${colors.reset} FAIL: Different job IDs - duplicate was not prevented!`);
+      console.log(
+        `${colors.red}✗${colors.reset} FAIL: Different job IDs - duplicate was not prevented!`,
+      );
       console.log(`  Job 1: ${job1.id}`);
       console.log(`  Job 2: ${job2.id}`);
     }
@@ -71,22 +86,45 @@ async function main() {
   console.log();
 
   // Test 2: Try adding multiple jobs in bulk
-  console.log(`${colors.blue}Test 2: Adding bulk jobs (some duplicates)${colors.reset}`);
+  console.log(
+    `${colors.blue}Test 2: Adding bulk jobs (some duplicates)${colors.reset}`,
+  );
 
   const bulkJobs = [
-    { url: "https://www.bricklink.com/v2/catalog/catalogitem.page?S=10123-1", itemId: "10123-1", saveToDb: true, priority: JobPriority.MEDIUM },
-    { url: "https://www.bricklink.com/v2/catalog/catalogitem.page?S=10124-1", itemId: "10124-1", saveToDb: true, priority: JobPriority.MEDIUM },
-    { url: "https://www.bricklink.com/v2/catalog/catalogitem.page?S=10123-1", itemId: "10123-1", saveToDb: true, priority: JobPriority.MEDIUM }, // Duplicate
+    {
+      url: "https://www.bricklink.com/v2/catalog/catalogitem.page?S=10123-1",
+      itemId: "10123-1",
+      saveToDb: true,
+      priority: JobPriority.MEDIUM,
+    },
+    {
+      url: "https://www.bricklink.com/v2/catalog/catalogitem.page?S=10124-1",
+      itemId: "10124-1",
+      saveToDb: true,
+      priority: JobPriority.MEDIUM,
+    },
+    {
+      url: "https://www.bricklink.com/v2/catalog/catalogitem.page?S=10123-1",
+      itemId: "10123-1",
+      saveToDb: true,
+      priority: JobPriority.MEDIUM,
+    }, // Duplicate
   ];
 
   try {
     const addedJobs = await queueService.addScrapeJobsBulk(bulkJobs);
-    console.log(`${colors.green}✓${colors.reset} Added ${addedJobs.length} jobs (expected 2, got ${addedJobs.length})`);
+    console.log(
+      `${colors.green}✓${colors.reset} Added ${addedJobs.length} jobs (expected 2, got ${addedJobs.length})`,
+    );
 
     if (addedJobs.length === 2) {
-      console.log(`${colors.green}✓${colors.reset} Duplicate filtering worked correctly`);
+      console.log(
+        `${colors.green}✓${colors.reset} Duplicate filtering worked correctly`,
+      );
     } else {
-      console.log(`${colors.yellow}⚠${colors.reset} Expected 2 jobs but got ${addedJobs.length}`);
+      console.log(
+        `${colors.yellow}⚠${colors.reset} Expected 2 jobs but got ${addedJobs.length}`,
+      );
     }
   } catch (error) {
     console.log(`${colors.red}✗${colors.reset} Test failed: ${error.message}`);
@@ -97,11 +135,21 @@ async function main() {
   // Test 3: Check final queue status
   console.log(`${colors.blue}Test 3: Final Queue Status${colors.reset}`);
   const counts = await queueService.getJobCounts();
-  console.log(`   Waiting:   ${colors.yellow}${counts.waiting || 0}${colors.reset}`);
-  console.log(`   Active:    ${colors.cyan}${counts.active || 0}${colors.reset}`);
-  console.log(`   Completed: ${colors.green}${counts.completed || 0}${colors.reset}`);
-  console.log(`   Failed:    ${colors.red}${counts.failed || 0}${colors.reset}`);
-  console.log(`   Delayed:   ${colors.yellow}${counts.delayed || 0}${colors.reset}`);
+  console.log(
+    `   Waiting:   ${colors.yellow}${counts.waiting || 0}${colors.reset}`,
+  );
+  console.log(
+    `   Active:    ${colors.cyan}${counts.active || 0}${colors.reset}`,
+  );
+  console.log(
+    `   Completed: ${colors.green}${counts.completed || 0}${colors.reset}`,
+  );
+  console.log(
+    `   Failed:    ${colors.red}${counts.failed || 0}${colors.reset}`,
+  );
+  console.log(
+    `   Delayed:   ${colors.yellow}${counts.delayed || 0}${colors.reset}`,
+  );
 
   console.log();
   console.log(`${colors.green}✓ Tests complete!${colors.reset}`);
@@ -110,8 +158,8 @@ async function main() {
   console.log(`\n${colors.yellow}Cleaning up test jobs...${colors.reset}`);
   await queueService.cleanOldJobs();
 
-  // Shutdown
-  await queueService.shutdown();
+  // Close queue service
+  await queueService.close();
   console.log(`${colors.green}✓ Queue shutdown complete${colors.reset}`);
 }
 

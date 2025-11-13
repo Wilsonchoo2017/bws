@@ -121,7 +121,12 @@ export async function findProductsByBaseSetNumber(
   baseSetNumber: string,
 ): Promise<
   Array<
-    { id: number; name: string | null; legoSetNumber: string | null; source: string }
+    {
+      id: number;
+      name: string | null;
+      legoSetNumber: string | null;
+      source: string;
+    }
   >
 > {
   const { products } = await import("./schema.ts");

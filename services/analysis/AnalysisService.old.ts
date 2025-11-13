@@ -280,8 +280,8 @@ export class AnalysisService {
   // Helper methods for data normalization
 
   private calculateDiscountPercentage(
-    price: number | null,
-    priceBeforeDiscount: number | null,
+    price: number | null | undefined,
+    priceBeforeDiscount: number | null | undefined,
   ): number | undefined {
     if (!price || !priceBeforeDiscount || priceBeforeDiscount <= price) {
       return undefined;

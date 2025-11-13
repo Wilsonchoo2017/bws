@@ -109,9 +109,7 @@ export function AddProductModal({
             onClick={onSubmit}
             disabled={isAdding}
           >
-            {isAdding && (
-              <span class="loading loading-spinner"></span>
-            )}
+            {isAdding && <span class="loading loading-spinner"></span>}
             {isAdding ? "Adding..." : "Add Product"}
           </button>
         </div>

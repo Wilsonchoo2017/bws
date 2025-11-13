@@ -1,7 +1,7 @@
 import { FreshContext } from "$fresh/server.ts";
-import { eq, sql, desc } from "drizzle-orm";
+import { desc, eq, sql } from "drizzle-orm";
 import { db } from "../../db/client.ts";
-import { shopeeScrapes, products, scrapeSessions } from "../../db/schema.ts";
+import { products, scrapeSessions, shopeeScrapes } from "../../db/schema.ts";
 import { extractShopUsername, findExistingProduct } from "../../db/utils.ts";
 import { parseShopeeHtml } from "../../utils/shopee-extractors.ts";
 
@@ -208,12 +208,14 @@ export const handler = async (
         // Calculate deltas and price change percentage
         const previousPrice = previousScrape?.price || null;
         const previousSold = previousScrape?.unitsSold || null;
-        const priceDelta = existingProduct && product.price !== null && previousPrice
-          ? product.price - previousPrice
-          : null;
-        const soldDelta = existingProduct && product.units_sold !== null && previousSold
-          ? product.units_sold - previousSold
-          : null;
+        const priceDelta =
+          existingProduct && product.price !== null && previousPrice
+            ? product.price - previousPrice
+            : null;
+        const soldDelta =
+          existingProduct && product.units_sold !== null && previousSold
+            ? product.units_sold - previousSold
+            : null;
         const priceChangePercent = previousPrice && priceDelta
           ? Math.round((priceDelta / previousPrice) * 10000) / 100 // 2 decimal places
           : null;

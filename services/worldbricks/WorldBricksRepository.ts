@@ -16,11 +16,11 @@
 
 import { db } from "../../db/client.ts";
 import {
+  type NewWorldbricksSet,
   type WorldbricksSet,
   worldbricksSets,
-  type NewWorldbricksSet,
 } from "../../db/schema.ts";
-import { eq, sql, and, or, isNull, inArray } from "drizzle-orm";
+import { and, eq, inArray, isNull, or, sql } from "drizzle-orm";
 
 /**
  * Interface for update data
@@ -50,7 +50,9 @@ export class WorldBricksRepository {
   /**
    * Find set by set number
    */
-  async findBySetNumber(setNumber: string): Promise<WorldbricksSet | undefined> {
+  async findBySetNumber(
+    setNumber: string,
+  ): Promise<WorldbricksSet | undefined> {
     return await db.query.worldbricksSets.findFirst({
       where: eq(worldbricksSets.setNumber, setNumber),
     });
@@ -197,7 +199,10 @@ export class WorldBricksRepository {
   /**
    * Find sets by year range
    */
-  async findByYearRange(startYear: number, endYear: number): Promise<WorldbricksSet[]> {
+  async findByYearRange(
+    startYear: number,
+    endYear: number,
+  ): Promise<WorldbricksSet[]> {
     return await db.select()
       .from(worldbricksSets)
       .where(
@@ -350,12 +355,16 @@ export class WorldBricksRepository {
         .then((r) => r[0]?.count || 0),
     ]);
 
-    const withPartsCountResult = await db.select({ count: sql<number>`count(*)::int` })
+    const withPartsCountResult = await db.select({
+      count: sql<number>`count(*)::int`,
+    })
       .from(worldbricksSets)
       .where(sql`${worldbricksSets.partsCount} IS NOT NULL`);
     const withPartsCount = withPartsCountResult[0]?.count || 0;
 
-    const withImagesResult = await db.select({ count: sql<number>`count(*)::int` })
+    const withImagesResult = await db.select({
+      count: sql<number>`count(*)::int`,
+    })
       .from(worldbricksSets)
       .where(eq(worldbricksSets.imageDownloadStatus, "completed"));
     const withImages = withImagesResult[0]?.count || 0;

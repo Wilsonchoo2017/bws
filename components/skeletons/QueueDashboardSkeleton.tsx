@@ -70,21 +70,41 @@ export default function QueueDashboardSkeleton() {
             <table class="table table-zebra w-full">
               <thead>
                 <tr>
-                  <th><div class="skeleton h-4 w-16"></div></th>
-                  <th><div class="skeleton h-4 w-12"></div></th>
-                  <th><div class="skeleton h-4 w-16"></div></th>
-                  <th><div class="skeleton h-4 w-24"></div></th>
-                  <th><div class="skeleton h-4 w-16"></div></th>
+                  <th>
+                    <div class="skeleton h-4 w-16"></div>
+                  </th>
+                  <th>
+                    <div class="skeleton h-4 w-12"></div>
+                  </th>
+                  <th>
+                    <div class="skeleton h-4 w-16"></div>
+                  </th>
+                  <th>
+                    <div class="skeleton h-4 w-24"></div>
+                  </th>
+                  <th>
+                    <div class="skeleton h-4 w-16"></div>
+                  </th>
                 </tr>
               </thead>
               <tbody>
                 {[...Array(5)].map((_, idx) => (
                   <tr key={idx}>
-                    <td><div class="skeleton h-4 w-32"></div></td>
-                    <td><div class="skeleton h-5 w-16 rounded-full"></div></td>
-                    <td><div class="skeleton h-4 w-48"></div></td>
-                    <td><div class="skeleton h-4 w-20"></div></td>
-                    <td><div class="skeleton h-5 w-12 rounded-full"></div></td>
+                    <td>
+                      <div class="skeleton h-4 w-32"></div>
+                    </td>
+                    <td>
+                      <div class="skeleton h-5 w-16 rounded-full"></div>
+                    </td>
+                    <td>
+                      <div class="skeleton h-4 w-48"></div>
+                    </td>
+                    <td>
+                      <div class="skeleton h-4 w-20"></div>
+                    </td>
+                    <td>
+                      <div class="skeleton h-5 w-12 rounded-full"></div>
+                    </td>
                   </tr>
                 ))}
               </tbody>

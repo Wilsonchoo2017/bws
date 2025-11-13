@@ -127,7 +127,10 @@ export class RedditRepository {
       .onConflictDoUpdate({
         // TODO: This will be updated to use composite key once migration is applied
         // For now, this won't trigger because there's no unique constraint yet
-        target: [redditSearchResults.legoSetNumber, redditSearchResults.subreddit],
+        target: [
+          redditSearchResults.legoSetNumber,
+          redditSearchResults.subreddit,
+        ],
         set: {
           totalPosts: data.totalPosts,
           posts: data.posts,

@@ -8,7 +8,10 @@
  * 4. ScraperService orchestrates everything
  */
 
-import { getHttpClient, closeHttpClient } from "../services/http/HttpClientService.ts";
+import {
+  closeHttpClient,
+  getHttpClient,
+} from "../services/http/HttpClientService.ts";
 import { RateLimiterService } from "../services/rate-limiter/RateLimiterService.ts";
 import { getWorldBricksRepository } from "../services/worldbricks/WorldBricksRepository.ts";
 import { WorldBricksScraperService } from "../services/worldbricks/WorldBricksScraperService.ts";
@@ -20,7 +23,8 @@ const TEST_SETS = [
   {
     setNumber: "31009",
     setName: "Small Cottage",
-    url: "https://www.worldbricks.com/en/instructions-number/30000/31000-31099/lego-set/31009-Small-Cottage.html",
+    url:
+      "https://www.worldbricks.com/en/instructions-number/30000/31000-31099/lego-set/31009-Small-Cottage.html",
   },
   // Add more test sets here if needed
 ];
@@ -59,13 +63,25 @@ async function testWorldBricksScraper() {
       console.log("-".repeat(60));
       console.log(`Set Number:     ${result1.data.set_number}`);
       console.log(`Set Name:       ${result1.data.set_name}`);
-      console.log(`Year Released:  ${result1.data.year_released || "Not found"}`);
-      console.log(`Year Retired:   ${result1.data.year_retired || "Not found"}`);
+      console.log(
+        `Year Released:  ${result1.data.year_released || "Not found"}`,
+      );
+      console.log(
+        `Year Retired:   ${result1.data.year_retired || "Not found"}`,
+      );
       console.log(`Parts Count:    ${result1.data.parts_count || "Not found"}`);
       console.log(`Designer:       ${result1.data.designer || "Not found"}`);
       console.log(`Dimensions:     ${result1.data.dimensions || "Not found"}`);
-      console.log(`Image URL:      ${result1.data.image_url ? "Found" : "Not found"}`);
-      console.log(`Description:    ${result1.data.description ? result1.data.description.substring(0, 100) + "..." : "Not found"}`);
+      console.log(
+        `Image URL:      ${result1.data.image_url ? "Found" : "Not found"}`,
+      );
+      console.log(
+        `Description:    ${
+          result1.data.description
+            ? result1.data.description.substring(0, 100) + "..."
+            : "Not found"
+        }`,
+      );
       console.log("-".repeat(60));
     } else {
       console.error("\n❌ Scraping failed:", result1.error);
@@ -118,7 +134,9 @@ async function testWorldBricksScraper() {
     console.log("TEST 4: URL construction test");
     console.log("=".repeat(60));
 
-    const { constructWorldBricksUrl } = await import("../services/worldbricks/WorldBricksParser.ts");
+    const { constructWorldBricksUrl } = await import(
+      "../services/worldbricks/WorldBricksParser.ts"
+    );
 
     const testCases = [
       { setNumber: "31009", setName: "Small Cottage" },
@@ -135,7 +153,6 @@ async function testWorldBricksScraper() {
     console.log("\n" + "=".repeat(60));
     console.log("✅ All tests completed successfully!");
     console.log("=".repeat(60));
-
   } catch (error) {
     console.error("\n❌ Test failed with error:", error);
     throw error;

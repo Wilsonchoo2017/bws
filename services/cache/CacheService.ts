@@ -162,7 +162,9 @@ export class CacheService {
     }
 
     if (removed > 0) {
-      console.debug(`[CacheService] Cleanup removed ${removed} expired entries`);
+      console.debug(
+        `[CacheService] Cleanup removed ${removed} expired entries`,
+      );
     }
 
     return removed;

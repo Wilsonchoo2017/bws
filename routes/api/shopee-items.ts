@@ -140,7 +140,10 @@ export const handler: Handlers = {
           hasBricklinkData: sql<boolean>`${bricklinkItems.itemId} IS NOT NULL`,
         })
         .from(products)
-        .leftJoin(bricklinkItems, eq(products.legoSetNumber, bricklinkItems.itemId))
+        .leftJoin(
+          bricklinkItems,
+          eq(products.legoSetNumber, bricklinkItems.itemId),
+        )
         .where(whereClause)
         .orderBy(orderByClause)
         .limit(query.limit!)

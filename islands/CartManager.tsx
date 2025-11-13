@@ -198,7 +198,9 @@ export default function CartManager() {
   };
 
   const handleRemoveVoucher = (voucherId: string) => {
-    appliedVouchers.value = appliedVouchers.value.filter((v) => v.id !== voucherId);
+    appliedVouchers.value = appliedVouchers.value.filter((v) =>
+      v.id !== voucherId
+    );
     saveAppliedVouchers(appliedVouchers.value);
   };
 
@@ -235,8 +237,12 @@ export default function CartManager() {
     : null;
 
   const subtotal = calculateCartSubtotal(cartItems.value);
-  const total = voucherResult ? voucherResult.finalTotal : calculateCartTotal(cartItems.value);
-  const totalSavings = voucherResult ? voucherResult.totalDiscount : calculateTotalSavings(cartItems.value);
+  const total = voucherResult
+    ? voucherResult.finalTotal
+    : calculateCartTotal(cartItems.value);
+  const totalSavings = voucherResult
+    ? voucherResult.totalDiscount
+    : calculateTotalSavings(cartItems.value);
   const cartDiscountPct = calculateCartDiscountPercentage(cartItems.value);
 
   return (
@@ -444,7 +450,8 @@ export default function CartManager() {
               </h3>
               <button
                 class="btn btn-sm btn-secondary"
-                onClick={() => showVoucherManager.value = !showVoucherManager.value}
+                onClick={() =>
+                  showVoucherManager.value = !showVoucherManager.value}
               >
                 {showVoucherManager.value ? "Hide" : "Show"}
               </button>
@@ -461,7 +468,9 @@ export default function CartManager() {
                     class="select select-bordered"
                     onChange={(e) => {
                       const selectedId = (e.target as HTMLSelectElement).value;
-                      const voucher = voucherTemplates.value.find((v) => v.id === selectedId);
+                      const voucher = voucherTemplates.value.find((v) =>
+                        v.id === selectedId
+                      );
                       if (voucher) {
                         handleAddVoucher(voucher);
                         (e.target as HTMLSelectElement).value = "";
@@ -491,49 +500,52 @@ export default function CartManager() {
                         </button>
                       )}
                     </div>
-                    {voucherResult && voucherResult.appliedVouchers.map((voucher, index) => (
-                      <div
-                        key={voucher.id}
-                        class={`alert ${voucher.isValid ? "alert-success" : "alert-warning"}`}
-                      >
-                        <div class="flex-1">
-                          <div class="flex items-center gap-2">
-                            <span class="badge badge-sm">{index + 1}</span>
-                            <span class="font-semibold">{voucher.name}</span>
-                            {voucher.isValid && (
-                              <svg
-                                xmlns="http://www.w3.org/2000/svg"
-                                class="h-4 w-4"
-                                viewBox="0 0 20 20"
-                                fill="currentColor"
-                              >
-                                <path
-                                  fill-rule="evenodd"
-                                  d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z"
-                                  clip-rule="evenodd"
-                                />
-                              </svg>
+                    {voucherResult &&
+                      voucherResult.appliedVouchers.map((voucher, index) => (
+                        <div
+                          key={voucher.id}
+                          class={`alert ${
+                            voucher.isValid ? "alert-success" : "alert-warning"
+                          }`}
+                        >
+                          <div class="flex-1">
+                            <div class="flex items-center gap-2">
+                              <span class="badge badge-sm">{index + 1}</span>
+                              <span class="font-semibold">{voucher.name}</span>
+                              {voucher.isValid && (
+                                <svg
+                                  xmlns="http://www.w3.org/2000/svg"
+                                  class="h-4 w-4"
+                                  viewBox="0 0 20 20"
+                                  fill="currentColor"
+                                >
+                                  <path
+                                    fill-rule="evenodd"
+                                    d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z"
+                                    clip-rule="evenodd"
+                                  />
+                                </svg>
+                              )}
+                            </div>
+                            <div class="text-sm mt-1">
+                              {voucher.isValid
+                                ? getDiscountDescription(voucher)
+                                : voucher.validationMessage}
+                            </div>
+                            {voucher.description && (
+                              <div class="text-xs opacity-70 mt-1">
+                                {voucher.description}
+                              </div>
                             )}
                           </div>
-                          <div class="text-sm mt-1">
-                            {voucher.isValid
-                              ? getDiscountDescription(voucher)
-                              : voucher.validationMessage}
-                          </div>
-                          {voucher.description && (
-                            <div class="text-xs opacity-70 mt-1">
-                              {voucher.description}
-                            </div>
-                          )}
+                          <button
+                            class="btn btn-ghost btn-xs"
+                            onClick={() => handleRemoveVoucher(voucher.id)}
+                          >
+                            Remove
+                          </button>
                         </div>
-                        <button
-                          class="btn btn-ghost btn-xs"
-                          onClick={() => handleRemoveVoucher(voucher.id)}
-                        >
-                          Remove
-                        </button>
-                      </div>
-                    ))}
+                      ))}
 
                     {/* Voucher Breakdown */}
                     {voucherResult && voucherResult.totalDiscount > 0 && (
@@ -545,20 +557,31 @@ export default function CartManager() {
                               <span>Subtotal:</span>
                               <span>{formatPrice(voucherResult.subtotal)}</span>
                             </div>
-                            {voucherResult.appliedVouchers.filter((v) => v.isValid).map((voucher) => (
-                              <div key={voucher.id} class="flex justify-between text-success">
+                            {voucherResult.appliedVouchers.filter((v) =>
+                              v.isValid
+                            ).map((voucher) => (
+                              <div
+                                key={voucher.id}
+                                class="flex justify-between text-success"
+                              >
                                 <span>- {voucher.name}:</span>
-                                <span>-{formatPrice(voucher.calculatedDiscount)}</span>
+                                <span>
+                                  -{formatPrice(voucher.calculatedDiscount)}
+                                </span>
                               </div>
                             ))}
                             <div class="divider my-1"></div>
                             <div class="flex justify-between font-bold text-lg">
                               <span>Final Total:</span>
-                              <span>{formatPrice(voucherResult.finalTotal)}</span>
+                              <span>
+                                {formatPrice(voucherResult.finalTotal)}
+                              </span>
                             </div>
                             <div class="flex justify-between text-success font-medium">
                               <span>Total Savings:</span>
-                              <span>{formatPrice(voucherResult.totalDiscount)}</span>
+                              <span>
+                                {formatPrice(voucherResult.totalDiscount)}
+                              </span>
                             </div>
                           </div>
                         </div>
@@ -569,7 +592,8 @@ export default function CartManager() {
 
                 {appliedVouchers.value.length === 0 && (
                   <div class="text-center py-4 text-base-content/70">
-                    No vouchers applied. Select a template above to simulate vouchers.
+                    No vouchers applied. Select a template above to simulate
+                    vouchers.
                   </div>
                 )}
               </div>
@@ -703,7 +727,10 @@ export default function CartManager() {
                           {item.tags && item.tags.length > 0 && (
                             <div class="flex gap-1 mt-1 flex-wrap">
                               {item.tags.map((tag) => (
-                                <span key={tag} class="badge badge-sm badge-secondary">
+                                <span
+                                  key={tag}
+                                  class="badge badge-sm badge-secondary"
+                                >
                                   {tag}
                                 </span>
                               ))}
@@ -813,7 +840,10 @@ export default function CartManager() {
                           {item.tags && item.tags.length > 0 && (
                             <div class="flex gap-1 mt-1 flex-wrap">
                               {item.tags.map((tag) => (
-                                <span key={tag} class="badge badge-sm badge-secondary">
+                                <span
+                                  key={tag}
+                                  class="badge badge-sm badge-secondary"
+                                >
                                   {tag}
                                 </span>
                               ))}

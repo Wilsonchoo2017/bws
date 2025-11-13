@@ -13,16 +13,6 @@ import { calculateSimilarity } from "../../utils/string-similarity.ts";
 import type { ParsedBrickEconomyProduct } from "../../utils/brickeconomy-extractors.ts";
 type BrickEconomyProduct = ParsedBrickEconomyProduct;
 
-/**
- * Similar product found in database
- */
-interface SimilarProduct {
-  id: number;
-  source: string;
-  name: string;
-  legoSetNumber: string | null;
-  similarity: number;
-}
 
 export const handler = async (
   req: Request,
@@ -93,40 +83,6 @@ export const handler = async (
       );
     }
 
-    // Check for similar products in database (by LEGO set number)
-    const similarProducts: SimilarProduct[] = [];
-
-    if (parsedProduct.lego_set_number) {
-      const baseSetNumber = normalizeLegoSetNumber(
-        parsedProduct.lego_set_number,
-      );
-      const matchingProducts = await findProductsByBaseSetNumber(
-        db,
-        baseSetNumber,
-      );
-
-      // Calculate name similarity for each matching product
-      for (const product of matchingProducts) {
-        const similarity = calculateSimilarity(
-          parsedProduct.product_name,
-          product.name,
-        );
-
-        // Only include if similarity is above threshold (0.5 for reporting)
-        if (similarity >= 0.5) {
-          similarProducts.push({
-            id: product.id,
-            source: product.source,
-            name: product.name,
-            legoSetNumber: product.legoSetNumber,
-            similarity: Math.round(similarity * 100) / 100, // Round to 2 decimals
-          });
-        }
-      }
-
-      // Sort by similarity score (highest first)
-      similarProducts.sort((a, b) => b.similarity - a.similarity);
-    }
 
     // Create scrape session
     const [session] = await db.insert(scrapeSessions).values({
@@ -242,10 +198,7 @@ export const handler = async (
         success: true,
         sessionId: sessionId,
         product: productWithMeta,
-        similarProductsFound: similarProducts,
-        message: similarProducts.length > 0
-          ? `Product saved successfully. Found ${similarProducts.length} similar product(s) in database with matching LEGO set number.`
-          : "Product saved successfully.",
+        message: "Product saved successfully.",
       }),
       {
         status: 200,

@@ -13,10 +13,14 @@
  * - Image URL
  */
 
-import { getHttpClient, closeHttpClient } from "../services/http/HttpClientService.ts";
+import {
+  closeHttpClient,
+  getHttpClient,
+} from "../services/http/HttpClientService.ts";
 import { DOMParser } from "https://deno.land/x/deno_dom@v0.1.38/deno-dom-wasm.ts";
 
-const TEST_URL = "https://www.worldbricks.com/en/instructions-number/30000/31000-31099/lego-set/31009-Small-Cottage.html";
+const TEST_URL =
+  "https://www.worldbricks.com/en/instructions-number/30000/31000-31099/lego-set/31009-Small-Cottage.html";
 const OUTPUT_FILE = "./scripts/worldbricks-sample.html";
 
 async function testWorldBricksFetch() {
@@ -45,7 +49,6 @@ async function testWorldBricksFetch() {
     // Parse HTML and try to extract data
     console.log("🔍 Analyzing HTML structure...\n");
     analyzeHTML(response.html);
-
   } catch (error) {
     console.error("❌ Error:", error);
   } finally {
@@ -70,9 +73,14 @@ function analyzeHTML(html: string) {
   // Try to extract meta tags
   console.log("\n📋 META TAGS:");
   const metaTags = {
-    title: doc.querySelector('meta[property="og:title"]')?.getAttribute("content"),
-    description: doc.querySelector('meta[name="description"]')?.getAttribute("content"),
-    image: doc.querySelector('meta[property="og:image:secure_url"]')?.getAttribute("content"),
+    title: doc.querySelector('meta[property="og:title"]')?.getAttribute(
+      "content",
+    ),
+    description: doc.querySelector('meta[name="description"]')?.getAttribute(
+      "content",
+    ),
+    image: doc.querySelector('meta[property="og:image:secure_url"]')
+      ?.getAttribute("content"),
   };
   console.log(JSON.stringify(metaTags, null, 2));
 
@@ -87,7 +95,9 @@ function analyzeHTML(html: string) {
   // Search for year patterns in the HTML
   const yearMatches = html.match(/\b(19\d{2}|20\d{2})\b/g);
   if (yearMatches) {
-    console.log(`  Years found in HTML: ${[...new Set(yearMatches)].join(", ")}`);
+    console.log(
+      `  Years found in HTML: ${[...new Set(yearMatches)].join(", ")}`,
+    );
   }
 
   // Search for "parts" or "pieces"
@@ -97,9 +107,13 @@ function analyzeHTML(html: string) {
   }
 
   // Search for designer/creator
-  const designerMatches = html.match(/(designer|creator|designed by|created by)[:;\s]+([^\n<]+)/gi);
+  const designerMatches = html.match(
+    /(designer|creator|designed by|created by)[:;\s]+([^\n<]+)/gi,
+  );
   if (designerMatches) {
-    console.log(`  Designer mentions: ${designerMatches.slice(0, 3).join(", ")}`);
+    console.log(
+      `  Designer mentions: ${designerMatches.slice(0, 3).join(", ")}`,
+    );
   }
 
   // Look for common table structures
@@ -108,13 +122,13 @@ function analyzeHTML(html: string) {
   console.log(`  Total tables: ${tables.length}`);
 
   tables.forEach((table, index) => {
-    const rows = table.querySelectorAll("tr");
+    const rows = (table as unknown as Element).querySelectorAll("tr");
     if (rows.length > 0 && rows.length < 20) { // Focus on smaller, data tables
       console.log(`\n  Table ${index + 1} (${rows.length} rows):`);
-      rows.forEach((row, rowIndex) => {
+      rows.forEach((row: Element, rowIndex: number) => {
         const cells = row.querySelectorAll("td, th");
         if (cells.length > 0 && rowIndex < 10) {
-          const cellText = Array.from(cells).map(cell =>
+          const cellText = Array.from(cells).map((cell: Element) =>
             cell.textContent?.trim().substring(0, 50)
           ).join(" | ");
           console.log(`    Row ${rowIndex + 1}: ${cellText}`);
@@ -125,17 +139,25 @@ function analyzeHTML(html: string) {
 
   // Look for divs with product information
   console.log("\n📦 PRODUCT INFO DIVS:");
-  const productDivs = doc.querySelectorAll(".djc_item, .product, [class*='detail'], [class*='info']");
+  const productDivs = doc.querySelectorAll(
+    ".djc_item, .product, [class*='detail'], [class*='info']",
+  );
   console.log(`  Found ${productDivs.length} potential product containers`);
 
   // Look for specific class patterns
   console.log("\n🎨 INTERESTING CLASSES:");
-  const allElements = doc.querySelectorAll("[class*='djc'], [class*='item'], [class*='product']");
+  const allElements = doc.querySelectorAll(
+    "[class*='djc'], [class*='item'], [class*='product']",
+  );
   const classes = new Set<string>();
-  allElements.forEach(el => {
-    const classList = el.getAttribute("class")?.split(" ") || [];
-    classList.forEach(cls => {
-      if (cls && (cls.includes("djc") || cls.includes("item") || cls.includes("product"))) {
+  allElements.forEach((el) => {
+    const classList =
+      (el as unknown as Element).getAttribute("class")?.split(" ") || [];
+    classList.forEach((cls: string) => {
+      if (
+        cls &&
+        (cls.includes("djc") || cls.includes("item") || cls.includes("product"))
+      ) {
         classes.add(cls);
       }
     });
@@ -144,12 +166,17 @@ function analyzeHTML(html: string) {
 
   // Look for JSON-LD structured data
   console.log("\n🏷️  JSON-LD STRUCTURED DATA:");
-  const jsonLdScripts = doc.querySelectorAll('script[type="application/ld+json"]');
+  const jsonLdScripts = doc.querySelectorAll(
+    'script[type="application/ld+json"]',
+  );
   console.log(`  Found ${jsonLdScripts.length} JSON-LD blocks`);
   jsonLdScripts.forEach((script, index) => {
     try {
       const data = JSON.parse(script.textContent || "{}");
-      console.log(`  Block ${index + 1}:`, JSON.stringify(data, null, 2).substring(0, 200));
+      console.log(
+        `  Block ${index + 1}:`,
+        JSON.stringify(data, null, 2).substring(0, 200),
+      );
     } catch {
       console.log(`  Block ${index + 1}: Failed to parse`);
     }

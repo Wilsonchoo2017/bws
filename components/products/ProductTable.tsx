@@ -1,5 +1,5 @@
 import { ProductTableRow } from "./ProductTableRow.tsx";
-import type { Product, Pagination } from "../../hooks/useProductList.ts";
+import type { Pagination, Product } from "../../hooks/useProductList.ts";
 import type { ProductSource } from "../../db/schema.ts";
 import type { SortBy, SortOrder } from "../../hooks/useProductFilters.ts";
 
@@ -112,12 +112,13 @@ export function ProductTable({
   // Results info
   const resultsInfo = pagination && (
     <div class="text-sm text-base-content/70 mb-4">
-      Showing {items.length > 0
-        ? ((pagination.page - 1) * pagination.limit + 1)
-        : 0} to {Math.min(
-          pagination.page * pagination.limit,
-          pagination.totalCount,
-        )} of {pagination.totalCount} products
+      Showing{" "}
+      {items.length > 0 ? ((pagination.page - 1) * pagination.limit + 1) : 0} to
+      {" "}
+      {Math.min(
+        pagination.page * pagination.limit,
+        pagination.totalCount,
+      )} of {pagination.totalCount} products
     </div>
   );
 
@@ -138,14 +139,24 @@ export function ProductTable({
                 class="cursor-pointer hover:bg-base-200 w-28"
                 onClick={() => onSort("price")}
               >
-                Price <SortIcon column="price" currentSortBy={sortBy} currentSortOrder={sortOrder} />
+                Price{" "}
+                <SortIcon
+                  column="price"
+                  currentSortBy={sortBy}
+                  currentSortOrder={sortOrder}
+                />
               </th>
               {sourceFilter !== "toysrus" && (
                 <th
                   class="cursor-pointer hover:bg-base-200 w-24"
                   onClick={() => onSort("sold")}
                 >
-                  Sold <SortIcon column="sold" currentSortBy={sortBy} currentSortOrder={sortOrder} />
+                  Sold{" "}
+                  <SortIcon
+                    column="sold"
+                    currentSortBy={sortBy}
+                    currentSortOrder={sortOrder}
+                  />
                 </th>
               )}
               <th>
@@ -155,7 +166,12 @@ export function ProductTable({
                 class="cursor-pointer hover:bg-base-200 w-32"
                 onClick={() => onSort("updatedAt")}
               >
-                Updated <SortIcon column="updatedAt" currentSortBy={sortBy} currentSortOrder={sortOrder} />
+                Updated{" "}
+                <SortIcon
+                  column="updatedAt"
+                  currentSortBy={sortBy}
+                  currentSortOrder={sortOrder}
+                />
               </th>
             </tr>
           </thead>

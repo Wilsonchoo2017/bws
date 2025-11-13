@@ -367,13 +367,15 @@ export class RateLimiterService {
   /**
    * Get statistics for a domain
    */
-  async getStats(domain: string): Promise<{
-    requestCount: number;
-    lastRequestTime: number;
-    windowStart: number;
-    timeUntilReset: number;
-    canMakeRequest: boolean;
-  } | null> {
+  async getStats(domain: string): Promise<
+    {
+      requestCount: number;
+      lastRequestTime: number;
+      windowStart: number;
+      timeUntilReset: number;
+      canMakeRequest: boolean;
+    } | null
+  > {
     await this.ensureInitialized();
 
     const history = await this.getHistory(domain);
