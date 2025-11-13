@@ -8,14 +8,20 @@ import { Head } from "$fresh/runtime.ts";
 import { desc, eq } from "drizzle-orm";
 import { db } from "../../db/client.ts";
 import {
+  type BricklinkItem,
+  bricklinkItems,
   priceHistory,
   type Product,
   products,
   shopeeScrapes,
+  type WorldbricksSet,
 } from "../../db/schema.ts";
+import { getBricklinkRepository } from "../../services/bricklink/BricklinkRepository.ts";
+import { getWorldBricksRepository } from "../../services/worldbricks/WorldBricksRepository.ts";
 import ProductAnalysisCard from "../../islands/ProductAnalysisCard.tsx";
 import ProductEditModal from "../../islands/ProductEditModal.tsx";
 import ProductImageGallery from "../../islands/ProductImageGallery.tsx";
+import PricingOverview from "../../islands/PricingOverview.tsx";
 
 interface ShopeeScrape {
   id: number;
@@ -36,10 +42,27 @@ interface PriceHistoryRecord {
   recordedAt: Date;
 }
 
+interface PriceData {
+  amount: number;
+  currency: string;
+}
+
+interface PricingBox {
+  avg_price?: PriceData;
+  min_price?: PriceData;
+  max_price?: PriceData;
+  qty_avg_price?: PriceData;
+  total_qty?: number;
+  total_lots?: number;
+  times_sold?: number;
+}
+
 interface ProductDetailData {
   product: Product;
   shopeeScrapes: ShopeeScrape[];
   priceHistory: PriceHistoryRecord[];
+  bricklinkItem: BricklinkItem | undefined;
+  worldbricksSet: WorldbricksSet | undefined;
 }
 
 export const handler: Handlers<ProductDetailData | null> = {
@@ -78,10 +101,34 @@ export const handler: Handlers<ProductDetailData | null> = {
       .orderBy(desc(priceHistory.recordedAt))
       .limit(50);
 
+    // Fetch Bricklink data if product has LEGO set number
+    let bricklinkData: BricklinkItem | undefined = undefined;
+    if (product.legoSetNumber) {
+      const repo = getBricklinkRepository();
+      // Try exact match first
+      bricklinkData = await repo.findByItemId(product.legoSetNumber);
+
+      // If not found and doesn't end with -1, try appending -1
+      if (!bricklinkData && !product.legoSetNumber.endsWith("-1")) {
+        bricklinkData = await repo.findByItemId(`${product.legoSetNumber}-1`);
+      }
+    }
+
+    // Fetch WorldBricks data if product has LEGO set number
+    let worldbricksData: WorldbricksSet | undefined = undefined;
+    if (product.legoSetNumber) {
+      const worldbricksRepo = getWorldBricksRepository();
+      worldbricksData = await worldbricksRepo.findBySetNumber(
+        product.legoSetNumber,
+      );
+    }
+
     return ctx.render({
       product,
       shopeeScrapes: shopeeScrapesData,
       priceHistory: priceHistoryData,
+      bricklinkItem: bricklinkData,
+      worldbricksSet: worldbricksData,
     });
   },
 };
@@ -102,7 +149,13 @@ export default function ProductDetailPage(
     );
   }
 
-  const { product, shopeeScrapes, priceHistory } = data;
+  const {
+    product,
+    shopeeScrapes,
+    priceHistory,
+    bricklinkItem,
+    worldbricksSet,
+  } = data;
 
   // Helper functions
   const formatPrice = (price: number | null, currency: string | null) => {
@@ -216,6 +269,14 @@ export default function ProductDetailPage(
             </div>
           </div>
 
+          {/* Pricing Overview */}
+          <PricingOverview
+            productId={product.productId}
+            currentPrice={product.price ?? undefined}
+            priceBeforeDiscount={product.priceBeforeDiscount ?? undefined}
+            currency={product.currency ?? "MYR"}
+          />
+
           {/* Images Section */}
           <div class="card bg-base-100 shadow-xl">
             <div class="card-body">
@@ -228,6 +289,364 @@ export default function ProductDetailPage(
               </div>
             </div>
           </div>
+
+          {/* Bricklink Market Data Section */}
+          {bricklinkItem && (() => {
+            // Type cast JSONB fields to PricingBox
+            const currentNew = bricklinkItem.currentNew as PricingBox | null;
+            const currentUsed = bricklinkItem.currentUsed as PricingBox | null;
+            const sixMonthNew = bricklinkItem.sixMonthNew as PricingBox | null;
+            const sixMonthUsed = bricklinkItem.sixMonthUsed as
+              | PricingBox
+              | null;
+
+            return (
+              <div class="card bg-base-100 shadow-xl">
+                <div class="card-body">
+                  <h2 class="card-title text-2xl mb-4">
+                    Bricklink Market Data
+                  </h2>
+
+                  {/* Last Scraped Info */}
+                  <div class="alert alert-info mb-6">
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                      class="stroke-current shrink-0 w-6 h-6"
+                    >
+                      <path
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        stroke-width="2"
+                        d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+                      >
+                      </path>
+                    </svg>
+                    <span>
+                      Last updated: {bricklinkItem.lastScrapedAt
+                        ? formatDate(bricklinkItem.lastScrapedAt)
+                        : "Never"}
+                    </span>
+                  </div>
+
+                  {/* Current Market Prices */}
+                  <h3 class="text-lg font-semibold mb-3">
+                    Current Market Prices
+                  </h3>
+                  <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+                    {/* New Condition */}
+                    {currentNew && (
+                      <div class="card bg-base-200">
+                        <div class="card-body">
+                          <h4 class="card-title text-success mb-4">
+                            New Condition
+                          </h4>
+                          <div class="grid grid-cols-2 gap-3">
+                            <div class="stat bg-base-100 rounded-lg p-3">
+                              <div class="stat-title text-xs">
+                                Average Price
+                              </div>
+                              <div class="stat-value text-lg">
+                                {currentNew.avg_price?.currency}{" "}
+                                {currentNew.avg_price?.amount?.toFixed(2) ||
+                                  "N/A"}
+                              </div>
+                            </div>
+                            <div class="stat bg-base-100 rounded-lg p-3">
+                              <div class="stat-title text-xs">
+                                Qty Avg Price
+                              </div>
+                              <div class="stat-value text-lg">
+                                {currentNew.qty_avg_price?.currency}{" "}
+                                {currentNew.qty_avg_price?.amount?.toFixed(2) ||
+                                  "N/A"}
+                              </div>
+                            </div>
+                            <div class="stat bg-base-100 rounded-lg p-3">
+                              <div class="stat-title text-xs">Min Price</div>
+                              <div class="stat-value text-base text-info">
+                                {currentNew.min_price?.currency}{" "}
+                                {currentNew.min_price?.amount?.toFixed(2) ||
+                                  "N/A"}
+                              </div>
+                            </div>
+                            <div class="stat bg-base-100 rounded-lg p-3">
+                              <div class="stat-title text-xs">Max Price</div>
+                              <div class="stat-value text-base text-warning">
+                                {currentNew.max_price?.currency}{" "}
+                                {currentNew.max_price?.amount?.toFixed(2) ||
+                                  "N/A"}
+                              </div>
+                            </div>
+                            <div class="stat bg-base-100 rounded-lg p-3">
+                              <div class="stat-title text-xs">
+                                Total Units Sold
+                              </div>
+                              <div class="stat-value text-base">
+                                {formatNumber(currentNew.total_qty ?? null)}
+                              </div>
+                            </div>
+                            <div class="stat bg-base-100 rounded-lg p-3">
+                              <div class="stat-title text-xs">Total Lots</div>
+                              <div class="stat-value text-base">
+                                {formatNumber(currentNew.total_lots ?? null)}
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Used Condition */}
+                    {currentUsed && (
+                      <div class="card bg-base-200">
+                        <div class="card-body">
+                          <h4 class="card-title text-warning mb-4">
+                            Used Condition
+                          </h4>
+                          <div class="grid grid-cols-2 gap-3">
+                            <div class="stat bg-base-100 rounded-lg p-3">
+                              <div class="stat-title text-xs">
+                                Average Price
+                              </div>
+                              <div class="stat-value text-lg">
+                                {currentUsed.avg_price?.currency}{" "}
+                                {currentUsed.avg_price?.amount?.toFixed(2) ||
+                                  "N/A"}
+                              </div>
+                            </div>
+                            <div class="stat bg-base-100 rounded-lg p-3">
+                              <div class="stat-title text-xs">
+                                Qty Avg Price
+                              </div>
+                              <div class="stat-value text-lg">
+                                {currentUsed.qty_avg_price?.currency}{" "}
+                                {currentUsed.qty_avg_price?.amount?.toFixed(
+                                  2,
+                                ) || "N/A"}
+                              </div>
+                            </div>
+                            <div class="stat bg-base-100 rounded-lg p-3">
+                              <div class="stat-title text-xs">Min Price</div>
+                              <div class="stat-value text-base text-info">
+                                {currentUsed.min_price?.currency}{" "}
+                                {currentUsed.min_price?.amount?.toFixed(2) ||
+                                  "N/A"}
+                              </div>
+                            </div>
+                            <div class="stat bg-base-100 rounded-lg p-3">
+                              <div class="stat-title text-xs">Max Price</div>
+                              <div class="stat-value text-base text-warning">
+                                {currentUsed.max_price?.currency}{" "}
+                                {currentUsed.max_price?.amount?.toFixed(2) ||
+                                  "N/A"}
+                              </div>
+                            </div>
+                            <div class="stat bg-base-100 rounded-lg p-3">
+                              <div class="stat-title text-xs">
+                                Total Units Sold
+                              </div>
+                              <div class="stat-value text-base">
+                                {formatNumber(currentUsed.total_qty ?? null)}
+                              </div>
+                            </div>
+                            <div class="stat bg-base-100 rounded-lg p-3">
+                              <div class="stat-title text-xs">Total Lots</div>
+                              <div class="stat-value text-base">
+                                {formatNumber(currentUsed.total_lots ?? null)}
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* 6-Month Historical Comparison */}
+                  <h3 class="text-lg font-semibold mb-3">
+                    6-Month Historical Data
+                  </h3>
+                  <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                    {/* New Condition - Historical */}
+                    {sixMonthNew && (
+                      <div class="card bg-base-200">
+                        <div class="card-body">
+                          <h4 class="card-title text-success mb-4">
+                            New Condition (Past 6 Months)
+                          </h4>
+                          <div class="grid grid-cols-2 gap-3">
+                            <div class="stat bg-base-100 rounded-lg p-3">
+                              <div class="stat-title text-xs">
+                                Average Price
+                              </div>
+                              <div class="stat-value text-lg">
+                                {sixMonthNew.avg_price?.currency}{" "}
+                                {sixMonthNew.avg_price?.amount?.toFixed(2) ||
+                                  "N/A"}
+                              </div>
+                              {currentNew?.avg_price && sixMonthNew.avg_price &&
+                                (
+                                  <div class="stat-desc">
+                                    {((currentNew.avg_price.amount -
+                                        sixMonthNew.avg_price.amount) /
+                                        sixMonthNew.avg_price.amount * 100) > 0
+                                      ? (
+                                        <span class="text-error">
+                                          ↑ {((currentNew.avg_price.amount -
+                                            sixMonthNew.avg_price.amount) /
+                                            sixMonthNew.avg_price.amount * 100)
+                                            .toFixed(1)}%
+                                        </span>
+                                      )
+                                      : (
+                                        <span class="text-success">
+                                          ↓ {Math.abs(
+                                            (currentNew.avg_price.amount -
+                                              sixMonthNew.avg_price.amount) /
+                                              sixMonthNew.avg_price.amount *
+                                              100,
+                                          ).toFixed(1)}%
+                                        </span>
+                                      )}
+                                  </div>
+                                )}
+                            </div>
+                            <div class="stat bg-base-100 rounded-lg p-3">
+                              <div class="stat-title text-xs">
+                                Qty Avg Price
+                              </div>
+                              <div class="stat-value text-lg">
+                                {sixMonthNew.qty_avg_price?.currency}{" "}
+                                {sixMonthNew.qty_avg_price?.amount?.toFixed(
+                                  2,
+                                ) || "N/A"}
+                              </div>
+                            </div>
+                            <div class="stat bg-base-100 rounded-lg p-3">
+                              <div class="stat-title text-xs">Min Price</div>
+                              <div class="stat-value text-base text-info">
+                                {sixMonthNew.min_price?.currency}{" "}
+                                {sixMonthNew.min_price?.amount?.toFixed(2) ||
+                                  "N/A"}
+                              </div>
+                            </div>
+                            <div class="stat bg-base-100 rounded-lg p-3">
+                              <div class="stat-title text-xs">Max Price</div>
+                              <div class="stat-value text-base text-warning">
+                                {sixMonthNew.max_price?.currency}{" "}
+                                {sixMonthNew.max_price?.amount?.toFixed(2) ||
+                                  "N/A"}
+                              </div>
+                            </div>
+                            <div class="stat bg-base-100 rounded-lg p-3">
+                              <div class="stat-title text-xs">Times Sold</div>
+                              <div class="stat-value text-base">
+                                {formatNumber(sixMonthNew.times_sold ?? null)}
+                              </div>
+                            </div>
+                            <div class="stat bg-base-100 rounded-lg p-3">
+                              <div class="stat-title text-xs">Total Units</div>
+                              <div class="stat-value text-base">
+                                {formatNumber(sixMonthNew.total_qty ?? null)}
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Used Condition - Historical */}
+                    {sixMonthUsed && (
+                      <div class="card bg-base-200">
+                        <div class="card-body">
+                          <h4 class="card-title text-warning mb-4">
+                            Used Condition (Past 6 Months)
+                          </h4>
+                          <div class="grid grid-cols-2 gap-3">
+                            <div class="stat bg-base-100 rounded-lg p-3">
+                              <div class="stat-title text-xs">
+                                Average Price
+                              </div>
+                              <div class="stat-value text-lg">
+                                {sixMonthUsed.avg_price?.currency}{" "}
+                                {sixMonthUsed.avg_price?.amount?.toFixed(2) ||
+                                  "N/A"}
+                              </div>
+                              {currentUsed?.avg_price &&
+                                sixMonthUsed.avg_price && (
+                                <div class="stat-desc">
+                                  {((currentUsed.avg_price.amount -
+                                      sixMonthUsed.avg_price.amount) /
+                                      sixMonthUsed.avg_price.amount * 100) > 0
+                                    ? (
+                                      <span class="text-error">
+                                        ↑ {((currentUsed.avg_price.amount -
+                                          sixMonthUsed.avg_price.amount) /
+                                          sixMonthUsed.avg_price.amount * 100)
+                                          .toFixed(1)}%
+                                      </span>
+                                    )
+                                    : (
+                                      <span class="text-success">
+                                        ↓ {Math.abs(
+                                          (currentUsed.avg_price.amount -
+                                            sixMonthUsed.avg_price.amount) /
+                                            sixMonthUsed.avg_price.amount * 100,
+                                        ).toFixed(1)}%
+                                      </span>
+                                    )}
+                                </div>
+                              )}
+                            </div>
+                            <div class="stat bg-base-100 rounded-lg p-3">
+                              <div class="stat-title text-xs">
+                                Qty Avg Price
+                              </div>
+                              <div class="stat-value text-lg">
+                                {sixMonthUsed.qty_avg_price?.currency}{" "}
+                                {sixMonthUsed.qty_avg_price?.amount?.toFixed(
+                                  2,
+                                ) || "N/A"}
+                              </div>
+                            </div>
+                            <div class="stat bg-base-100 rounded-lg p-3">
+                              <div class="stat-title text-xs">Min Price</div>
+                              <div class="stat-value text-base text-info">
+                                {sixMonthUsed.min_price?.currency}{" "}
+                                {sixMonthUsed.min_price?.amount?.toFixed(2) ||
+                                  "N/A"}
+                              </div>
+                            </div>
+                            <div class="stat bg-base-100 rounded-lg p-3">
+                              <div class="stat-title text-xs">Max Price</div>
+                              <div class="stat-value text-base text-warning">
+                                {sixMonthUsed.max_price?.currency}{" "}
+                                {sixMonthUsed.max_price?.amount?.toFixed(2) ||
+                                  "N/A"}
+                              </div>
+                            </div>
+                            <div class="stat bg-base-100 rounded-lg p-3">
+                              <div class="stat-title text-xs">Times Sold</div>
+                              <div class="stat-value text-base">
+                                {formatNumber(sixMonthUsed.times_sold ?? null)}
+                              </div>
+                            </div>
+                            <div class="stat bg-base-100 rounded-lg p-3">
+                              <div class="stat-title text-xs">Total Units</div>
+                              <div class="stat-value text-base">
+                                {formatNumber(sixMonthUsed.total_qty ?? null)}
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
 
           {/* Core Product Info Section */}
           <div class="card bg-base-100 shadow-xl">
@@ -280,49 +699,86 @@ export default function ProductDetailPage(
             </div>
           </div>
 
-          {/* Pricing Section */}
-          <div class="card bg-base-100 shadow-xl">
-            <div class="card-body">
-              <h2 class="card-title text-2xl mb-4">Pricing</h2>
-              <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                <div class="stat bg-base-200 rounded-lg">
-                  <div class="stat-title">Current Price</div>
-                  <div class="stat-value text-2xl text-primary">
-                    {formatPrice(product.price, product.currency)}
+          {/* LEGO Set Information Section */}
+          {worldbricksSet && (
+            <div class="card bg-base-100 shadow-xl">
+              <div class="card-body">
+                <h2 class="card-title text-2xl mb-4">LEGO Set Information</h2>
+                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  <div class="stat bg-base-200 rounded-lg">
+                    <div class="stat-title">Set Name</div>
+                    <div class="stat-value text-lg">
+                      {worldbricksSet.setName || "N/A"}
+                    </div>
                   </div>
-                </div>
-                <div class="stat bg-base-200 rounded-lg">
-                  <div class="stat-title">Price Before Discount</div>
-                  <div class="stat-value text-xl">
-                    {formatPrice(product.priceBeforeDiscount, product.currency)}
+                  <div class="stat bg-base-200 rounded-lg">
+                    <div class="stat-title">Year Released</div>
+                    <div class="stat-value text-xl">
+                      {worldbricksSet.yearReleased || "N/A"}
+                    </div>
                   </div>
-                  {discount && (
-                    <div class="stat-desc">
-                      <div class="badge badge-success">{discount}% OFF</div>
+                  <div class="stat bg-base-200 rounded-lg">
+                    <div class="stat-title">Retirement</div>
+                    <div class="stat-value text-xl">
+                      {worldbricksSet.yearRetired
+                        ? (
+                          <div class="flex items-center gap-2">
+                            <span>{worldbricksSet.yearRetired}</span>
+                            <div class="badge badge-warning">Retired</div>
+                          </div>
+                        )
+                        : "Not retired"}
+                    </div>
+                  </div>
+                  {worldbricksSet.designer && (
+                    <div class="stat bg-base-200 rounded-lg">
+                      <div class="stat-title">Designer</div>
+                      <div class="stat-value text-lg">
+                        {worldbricksSet.designer}
+                      </div>
+                    </div>
+                  )}
+                  {worldbricksSet.partsCount && (
+                    <div class="stat bg-base-200 rounded-lg">
+                      <div class="stat-title">Parts Count</div>
+                      <div class="stat-value text-xl">
+                        {formatNumber(worldbricksSet.partsCount)}
+                      </div>
+                    </div>
+                  )}
+                  {worldbricksSet.dimensions && (
+                    <div class="stat bg-base-200 rounded-lg">
+                      <div class="stat-title">Dimensions</div>
+                      <div class="stat-value text-sm">
+                        {worldbricksSet.dimensions}
+                      </div>
                     </div>
                   )}
                 </div>
-                <div class="stat bg-base-200 rounded-lg">
-                  <div class="stat-title">Currency</div>
-                  <div class="stat-value text-xl">
-                    {product.currency || "N/A"}
+                {worldbricksSet.description && (
+                  <div class="mt-4">
+                    <h3 class="text-lg font-semibold mb-2">Description</h3>
+                    <p class="text-sm">{worldbricksSet.description}</p>
                   </div>
-                </div>
-                <div class="stat bg-base-200 rounded-lg">
-                  <div class="stat-title">Price Min</div>
-                  <div class="stat-value text-xl">
-                    {formatPrice(product.priceMin, product.currency)}
-                  </div>
-                </div>
-                <div class="stat bg-base-200 rounded-lg">
-                  <div class="stat-title">Price Max</div>
-                  <div class="stat-value text-xl">
-                    {formatPrice(product.priceMax, product.currency)}
-                  </div>
-                </div>
+                )}
               </div>
             </div>
-          </div>
+          )}
+
+          {/* Bricklink/Investment Analysis Section */}
+          {product.legoSetNumber && (
+            <div class="card bg-base-100 shadow-xl">
+              <div class="card-body">
+                <h2 class="card-title text-2xl mb-4">
+                  Bricklink Investment Analysis
+                </h2>
+                <ProductAnalysisCard
+                  productId={product.productId}
+                  defaultStrategy="Investment Focus"
+                />
+              </div>
+            </div>
+          )}
 
           {/* Shopee Section */}
           {product.source === "shopee" && (
@@ -507,21 +963,6 @@ export default function ProductDetailPage(
                     </div>
                   </div>
                 </div>
-              </div>
-            </div>
-          )}
-
-          {/* Bricklink/Investment Analysis Section */}
-          {product.legoSetNumber && (
-            <div class="card bg-base-100 shadow-xl">
-              <div class="card-body">
-                <h2 class="card-title text-2xl mb-4">
-                  Bricklink Investment Analysis
-                </h2>
-                <ProductAnalysisCard
-                  productId={product.productId}
-                  defaultStrategy="Investment Focus"
-                />
               </div>
             </div>
           )}
@@ -716,7 +1157,6 @@ export default function ProductDetailPage(
                   </div>
                 )}
               </div>
-
             </div>
           </div>
         </div>
