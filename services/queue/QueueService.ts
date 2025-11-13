@@ -216,30 +216,48 @@ export class QueueService {
 
   /**
    * Process bulk scrape job
+   * Optimized: Enqueues individual jobs instead of processing them sequentially in a single job
+   * This allows for better parallelization, fault tolerance, and progress tracking
    */
   private async processBulkScrapeJob(
     data: BulkScrapeJobData,
   ): Promise<ScrapeResult[]> {
-    const results: ScrapeResult[] = [];
-
-    for (const url of data.urls) {
-      // Extract itemId from URL for single scrape job
+    // Prepare individual jobs
+    const jobsToEnqueue: ScrapeJobData[] = data.urls.map((url) => {
+      // Extract itemId from URL
       const itemIdMatch = url.match(/[?&](?:S|M|G|P)=([^&]+)/);
       const itemId = itemIdMatch ? itemIdMatch[1] : url;
 
-      const result = await this.processSingleScrapeJob({
+      return {
         url,
         itemId,
         saveToDb: data.saveToDb ?? true,
-      });
-      results.push(result);
-    }
+      };
+    });
 
-    return results;
+    try {
+      // Enqueue all jobs using bulk operation
+      await this.addScrapeJobsBulk(jobsToEnqueue);
+
+      // Return success results
+      return jobsToEnqueue.map(() => ({
+        success: true,
+        data: undefined,
+        saved: false,
+      }));
+    } catch (error) {
+      console.error(`❌ Failed to enqueue bulk scrape jobs:`, error);
+      // Return failure results
+      return jobsToEnqueue.map(() => ({
+        success: false,
+        error: error.message,
+      }));
+    }
   }
 
   /**
    * Process scheduled scrape job - finds items needing scraping
+   * Optimized: Uses bulk enqueueing instead of sequential awaits
    */
   private async processScheduledScrapeJob(): Promise<ScrapeResult[]> {
     const repository = getBricklinkRepository();
@@ -252,35 +270,32 @@ export class QueueService {
       return [];
     }
 
-    const results: ScrapeResult[] = [];
+    // Prepare all jobs for bulk enqueueing
+    const jobsToEnqueue: ScrapeJobData[] = items.map((item) => ({
+      url:
+        `https://www.bricklink.com/v2/catalog/catalogitem.page?${item.itemType}=${item.itemId}`,
+      itemId: item.itemId,
+      saveToDb: true,
+    }));
 
-    // Enqueue individual scrape jobs for each item
-    for (const item of items) {
-      const url =
-        `https://www.bricklink.com/v2/catalog/catalogitem.page?${item.itemType}=${item.itemId}`;
+    try {
+      // Enqueue all jobs at once using bulk operation
+      await this.addScrapeJobsBulk(jobsToEnqueue);
 
-      try {
-        await this.addScrapeJob({
-          url,
-          itemId: item.itemId,
-          saveToDb: true,
-        });
-
-        results.push({
-          success: true,
-          data: undefined,
-          saved: false,
-        });
-      } catch (error) {
-        console.error(`❌ Failed to enqueue job for ${item.itemId}:`, error);
-        results.push({
-          success: false,
-          error: error.message,
-        });
-      }
+      // Return success results for all items
+      return jobsToEnqueue.map(() => ({
+        success: true,
+        data: undefined,
+        saved: false,
+      }));
+    } catch (error) {
+      console.error(`❌ Failed to enqueue bulk jobs:`, error);
+      // Return failure results
+      return jobsToEnqueue.map(() => ({
+        success: false,
+        error: error.message,
+      }));
     }
-
-    return results;
   }
 
   /**
@@ -334,6 +349,31 @@ export class QueueService {
     console.log(`➕ Added scrape job: ${job.id} for ${data.itemId}`);
 
     return job;
+  }
+
+  /**
+   * Add multiple scrape jobs to the queue in bulk (optimized for performance)
+   * Uses BullMQ's addBulk method for efficient batch enqueueing
+   */
+  async addScrapeJobsBulk(jobs: ScrapeJobData[]): Promise<Job[]> {
+    if (!this.queue) {
+      throw new Error("Queue not initialized. Call initialize() first.");
+    }
+
+    if (jobs.length === 0) {
+      return [];
+    }
+
+    // Use BullMQ's addBulk for efficient batch operations
+    const bulkJobs = jobs.map((data) => ({
+      name: JOB_TYPES.SCRAPE_SINGLE,
+      data,
+    }));
+
+    const addedJobs = await this.queue.addBulk(bulkJobs);
+    console.log(`➕ Added ${addedJobs.length} scrape jobs in bulk`);
+
+    return addedJobs;
   }
 
   /**

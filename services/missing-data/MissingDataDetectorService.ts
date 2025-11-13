@@ -14,8 +14,12 @@
  */
 
 import { db } from "../../db/client.ts";
-import { bricklinkItems, products, type BricklinkItem } from "../../db/schema.ts";
-import { eq, isNotNull, notInArray, sql } from "drizzle-orm";
+import {
+  type BricklinkItem,
+  bricklinkItems,
+  products,
+} from "../../db/schema.ts";
+import { eq, isNotNull, sql } from "drizzle-orm";
 import { getQueueService } from "../queue/QueueService.ts";
 import type { PricingBox } from "../bricklink/BricklinkParser.ts";
 
@@ -98,31 +102,37 @@ export class MissingDataDetectorService {
         return result;
       }
 
-      // Enqueue jobs for each missing item
-      for (const product of productsWithMissingData) {
-        try {
-          const legoSetNumber = product.legoSetNumber!;
-          // BrickLink requires -1 suffix for LEGO sets
-          const bricklinkItemId = `${legoSetNumber}-1`;
-          const url =
-            `https://www.bricklink.com/v2/catalog/catalogitem.page?S=${bricklinkItemId}`;
+      // Prepare all jobs for bulk enqueueing (optimized)
+      const bricklinkJobsToEnqueue = productsWithMissingData.map((product) => {
+        const legoSetNumber = product.legoSetNumber!;
+        // BrickLink requires -1 suffix for LEGO sets
+        const bricklinkItemId = `${legoSetNumber}-1`;
+        const url =
+          `https://www.bricklink.com/v2/catalog/catalogitem.page?S=${bricklinkItemId}`;
 
-          await queueService.addScrapeJob({
-            url,
-            itemId: bricklinkItemId,
-            saveToDb: true,
-          });
+        return {
+          url,
+          itemId: bricklinkItemId,
+          saveToDb: true,
+        };
+      });
 
-          result.jobsEnqueued++;
+      // Enqueue all jobs at once using bulk operation
+      try {
+        await queueService.addScrapeJobsBulk(bricklinkJobsToEnqueue);
+        result.jobsEnqueued += bricklinkJobsToEnqueue.length;
+
+        // Log individual jobs
+        productsWithMissingData.forEach((product) => {
           console.log(
-            `✅ Enqueued Bricklink scraping job for LEGO set ${legoSetNumber} (${product.name})`,
+            `✅ Enqueued Bricklink scraping job for LEGO set ${product.legoSetNumber} (${product.name})`,
           );
-        } catch (error) {
-          const errorMsg =
-            `Failed to enqueue job for LEGO set ${product.legoSetNumber}: ${error.message}`;
-          console.error(`❌ ${errorMsg}`);
-          result.errors.push(errorMsg);
-        }
+        });
+      } catch (error) {
+        const errorMsg =
+          `Failed to enqueue bulk jobs for missing Bricklink data: ${error.message}`;
+        console.error(`❌ ${errorMsg}`);
+        result.errors.push(errorMsg);
       }
 
       console.log(
@@ -139,28 +149,32 @@ export class MissingDataDetectorService {
       );
 
       if (itemsWithMissingVolume.length > 0) {
-        // Enqueue jobs for items with missing volume (one-time catch-up)
-        for (const item of itemsWithMissingVolume) {
-          try {
-            const url =
-              `https://www.bricklink.com/v2/catalog/catalogitem.page?S=${item.itemId}`;
+        // Prepare all volume re-scrape jobs for bulk enqueueing (optimized)
+        const volumeJobsToEnqueue = itemsWithMissingVolume.map((item) => ({
+          url:
+            `https://www.bricklink.com/v2/catalog/catalogitem.page?S=${item.itemId}`,
+          itemId: item.itemId,
+          saveToDb: true,
+        }));
 
-            await queueService.addScrapeJob({
-              url,
-              itemId: item.itemId,
-              saveToDb: true,
-            });
+        // Enqueue all jobs at once using bulk operation
+        try {
+          await queueService.addScrapeJobsBulk(volumeJobsToEnqueue);
+          result.jobsEnqueued += volumeJobsToEnqueue.length;
 
-            result.jobsEnqueued++;
+          // Log individual jobs
+          itemsWithMissingVolume.forEach((item) => {
             console.log(
-              `✅ Enqueued re-scraping job for ${item.itemId} (${item.title}) - missing: ${item.missingBoxes.join(", ")}`,
+              `✅ Enqueued re-scraping job for ${item.itemId} (${item.title}) - missing: ${
+                item.missingBoxes.join(", ")
+              }`,
             );
-          } catch (error) {
-            const errorMsg =
-              `Failed to enqueue job for ${item.itemId}: ${error.message}`;
-            console.error(`❌ ${errorMsg}`);
-            result.errors.push(errorMsg);
-          }
+          });
+        } catch (error) {
+          const errorMsg =
+            `Failed to enqueue bulk jobs for missing volume data: ${error.message}`;
+          console.error(`❌ ${errorMsg}`);
+          result.errors.push(errorMsg);
         }
 
         console.log(
@@ -273,6 +287,7 @@ export class MissingDataDetectorService {
 
   /**
    * Find products with LEGO set numbers that don't have corresponding Bricklink items
+   * Optimized: Uses SQL LEFT JOIN instead of in-memory filtering
    */
   private async findProductsMissingBricklinkData(): Promise<
     Array<{
@@ -281,33 +296,21 @@ export class MissingDataDetectorService {
       name: string | null;
     }>
   > {
-    // Get all products with LEGO set numbers
-    const productsWithLegoSets = await db.select({
-      productId: products.productId,
-      legoSetNumber: products.legoSetNumber,
-      name: products.name,
-    })
+    // Use LEFT JOIN to find products without matching Bricklink items in a single query
+    const missingProducts = await db
+      .select({
+        productId: products.productId,
+        legoSetNumber: products.legoSetNumber,
+        name: products.name,
+      })
       .from(products)
-      .where(isNotNull(products.legoSetNumber));
-
-    if (productsWithLegoSets.length === 0) {
-      return [];
-    }
-
-    // Get all existing Bricklink item IDs
-    const existingBricklinkItems = await db.select({
-      itemId: bricklinkItems.itemId,
-    })
-      .from(bricklinkItems);
-
-    const existingItemIds = new Set(
-      existingBricklinkItems.map((item) => item.itemId),
-    );
-
-    // Filter products that don't have corresponding Bricklink items
-    const missingProducts = productsWithLegoSets.filter(
-      (product) => !existingItemIds.has(product.legoSetNumber!),
-    );
+      .leftJoin(
+        bricklinkItems,
+        eq(products.legoSetNumber, bricklinkItems.itemId),
+      )
+      .where(
+        sql`${products.legoSetNumber} IS NOT NULL AND ${bricklinkItems.itemId} IS NULL`,
+      );
 
     return missingProducts;
   }
@@ -361,7 +364,7 @@ export class MissingDataDetectorService {
 
     // Check if total_qty is missing, null, or undefined
     return pricingBox.total_qty === null ||
-           pricingBox.total_qty === undefined;
+      pricingBox.total_qty === undefined;
   }
 
   /**
@@ -395,6 +398,7 @@ export class MissingDataDetectorService {
   /**
    * Find Bricklink items with missing volume data
    * Only checks items with watch_status = 'active'
+   * Optimized: Uses SQL to filter items with missing volume data instead of checking in application code
    */
   private async findItemsMissingVolumeData(): Promise<
     Array<{
@@ -403,27 +407,40 @@ export class MissingDataDetectorService {
       missingBoxes: string[];
     }>
   > {
-    // Get all active Bricklink items
-    const activeItems = await db.select()
+    // Use SQL to find items where any pricing box has null total_qty
+    // This is much more efficient than fetching all items and checking in JavaScript
+    const itemsWithMissingVolume = await db
+      .select({
+        itemId: bricklinkItems.itemId,
+        title: bricklinkItems.title,
+        sixMonthNew: bricklinkItems.sixMonthNew,
+        sixMonthUsed: bricklinkItems.sixMonthUsed,
+        currentNew: bricklinkItems.currentNew,
+        currentUsed: bricklinkItems.currentUsed,
+      })
       .from(bricklinkItems)
-      .where(eq(bricklinkItems.watchStatus, "active"));
+      .where(
+        sql`${bricklinkItems.watchStatus} = 'active' AND (
+          ${bricklinkItems.sixMonthNew} IS NULL OR
+          ${bricklinkItems.sixMonthNew}->>'total_qty' IS NULL OR
+          ${bricklinkItems.sixMonthUsed} IS NULL OR
+          ${bricklinkItems.sixMonthUsed}->>'total_qty' IS NULL OR
+          ${bricklinkItems.currentNew} IS NULL OR
+          ${bricklinkItems.currentNew}->>'total_qty' IS NULL OR
+          ${bricklinkItems.currentUsed} IS NULL OR
+          ${bricklinkItems.currentUsed}->>'total_qty' IS NULL
+        )`,
+      );
 
-    // Filter items with missing volume data
-    const itemsWithMissingVolume = [];
-
-    for (const item of activeItems) {
-      const { hasMissing, missingBoxes } = this.hasAnyMissingVolume(item);
-
-      if (hasMissing) {
-        itemsWithMissingVolume.push({
-          itemId: item.itemId,
-          title: item.title,
-          missingBoxes,
-        });
-      }
-    }
-
-    return itemsWithMissingVolume;
+    // Now determine which specific boxes are missing for each item
+    return itemsWithMissingVolume.map((item) => {
+      const { missingBoxes } = this.hasAnyMissingVolume(item as BricklinkItem);
+      return {
+        itemId: item.itemId,
+        title: item.title,
+        missingBoxes,
+      };
+    });
   }
 }
 

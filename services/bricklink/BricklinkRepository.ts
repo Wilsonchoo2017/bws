@@ -24,8 +24,8 @@ import {
   type NewBricklinkPriceHistory,
   type NewBricklinkVolumeHistory,
 } from "../../db/schema.ts";
-import { eq } from "drizzle-orm";
-import type { PricingBox, PriceData } from "./BricklinkParser.ts";
+import { and, eq, lte, or, sql } from "drizzle-orm";
+import type { PriceData, PricingBox } from "./BricklinkParser.ts";
 
 /**
  * Interface for update data
@@ -122,23 +122,24 @@ export class BricklinkRepository {
 
   /**
    * Get items that need scraping (next_scrape_at <= now and watch_status = active)
+   * Optimized: Uses SQL WHERE clause instead of filtering in application code
    */
   async findItemsNeedingScraping(): Promise<BricklinkItem[]> {
     const now = new Date();
 
-    // Use raw SQL for better control
-    const items = await db.select()
+    // Use SQL to filter items that need scraping
+    // Items need scraping if: watch_status = active AND (next_scrape_at IS NULL OR next_scrape_at <= now)
+    return await db.select()
       .from(bricklinkItems)
-      .where(eq(bricklinkItems.watchStatus, "active"));
-
-    // Filter items that need scraping
-    return items.filter((item) => {
-      if (!item.nextScrapeAt) {
-        // If never scraped, needs scraping
-        return true;
-      }
-      return item.nextScrapeAt <= now;
-    });
+      .where(
+        and(
+          eq(bricklinkItems.watchStatus, "active"),
+          or(
+            sql`${bricklinkItems.nextScrapeAt} IS NULL`,
+            lte(bricklinkItems.nextScrapeAt, now),
+          ),
+        ),
+      );
   }
 
   /**
@@ -183,6 +184,56 @@ export class BricklinkRepository {
         updatedAt: now,
       })
       .where(eq(bricklinkItems.itemId, itemId));
+  }
+
+  /**
+   * Batch update scraping timestamps for multiple items
+   * Optimized: Updates multiple items at once using SQL IN clause
+   */
+  async updateManyScrapingTimestamps(
+    itemIds: string[],
+    intervalDays: number,
+  ): Promise<void> {
+    if (itemIds.length === 0) return;
+
+    const now = new Date();
+    const nextScrape = new Date(
+      now.getTime() + intervalDays * 24 * 60 * 60 * 1000,
+    );
+
+    await db.update(bricklinkItems)
+      .set({
+        lastScrapedAt: now,
+        nextScrapeAt: nextScrape,
+        updatedAt: now,
+      })
+      .where(sql`${bricklinkItems.itemId} = ANY(${itemIds})`);
+  }
+
+  /**
+   * Batch update multiple items with different data
+   * Note: For truly different data per item, use transactions with individual updates
+   * For same-data updates, use updateManyScrapingTimestamps or similar methods
+   */
+  async updateMany(
+    updates: Array<{
+      itemId: string;
+      data: UpdateBricklinkItemData;
+    }>,
+  ): Promise<void> {
+    if (updates.length === 0) return;
+
+    // Use a transaction to ensure atomicity
+    await db.transaction(async (tx) => {
+      for (const { itemId, data } of updates) {
+        await tx.update(bricklinkItems)
+          .set({
+            ...data,
+            updatedAt: new Date(),
+          })
+          .where(eq(bricklinkItems.itemId, itemId));
+      }
+    });
   }
 
   /**
@@ -284,25 +335,29 @@ export class BricklinkRepository {
 
   /**
    * Count total items
+   * Optimized: Uses SQL COUNT(*) instead of fetching all rows
    */
   async count(): Promise<number> {
-    const result = await db.select()
+    const result = await db
+      .select({ count: sql<number>`cast(count(*) as integer)` })
       .from(bricklinkItems);
 
-    return result.length;
+    return result[0]?.count ?? 0;
   }
 
   /**
    * Count items by watch status
+   * Optimized: Uses SQL COUNT(*) instead of fetching all rows
    */
   async countByWatchStatus(
     watchStatus: "active" | "paused" | "stopped" | "archived",
   ): Promise<number> {
-    const result = await db.select()
+    const result = await db
+      .select({ count: sql<number>`cast(count(*) as integer)` })
       .from(bricklinkItems)
       .where(eq(bricklinkItems.watchStatus, watchStatus));
 
-    return result.length;
+    return result[0]?.count ?? 0;
   }
 
   /**
@@ -347,16 +402,24 @@ export class BricklinkRepository {
         qtyAvgPrice: this.priceToInteger(box.qty_avg_price) ?? null,
         maxPrice: this.priceToInteger(box.max_price) ?? null,
         currency: box.min_price?.currency ||
-                  box.avg_price?.currency ||
-                  box.max_price?.currency ||
-                  "USD",
+          box.avg_price?.currency ||
+          box.max_price?.currency ||
+          "USD",
         recordedAt: now,
       };
     };
 
     // Create records for all 4 boxes
-    const sixMonthNewRecord = createRecord(data.sixMonthNew, "new", "six_month");
-    const sixMonthUsedRecord = createRecord(data.sixMonthUsed, "used", "six_month");
+    const sixMonthNewRecord = createRecord(
+      data.sixMonthNew,
+      "new",
+      "six_month",
+    );
+    const sixMonthUsedRecord = createRecord(
+      data.sixMonthUsed,
+      "used",
+      "six_month",
+    );
     const currentNewRecord = createRecord(data.currentNew, "new", "current");
     const currentUsedRecord = createRecord(data.currentUsed, "used", "current");
 
@@ -385,13 +448,11 @@ export class BricklinkRepository {
       endDate?: Date;
     },
   ): Promise<typeof bricklinkVolumeHistory.$inferSelect[]> {
-    let query = db.select()
-      .from(bricklinkVolumeHistory)
-      .where(eq(bricklinkVolumeHistory.itemId, itemId));
-
     // Note: Additional filtering would require building the query dynamically
     // For now, we return all records and let the caller filter
-    const results = await query
+    const results = await db.select()
+      .from(bricklinkVolumeHistory)
+      .where(eq(bricklinkVolumeHistory.itemId, itemId))
       .orderBy(bricklinkVolumeHistory.recordedAt)
       .limit(options?.limit || 1000);
 

@@ -102,8 +102,9 @@ export class RateLimiterService {
 
       await this.delay(waitTime);
     } else {
-      // Add jitter even if enough time has passed
-      const jitter = getRandomDelay(1000, 3000); // 1-3 second jitter
+      // Optimized: Only add small jitter if enough time has already passed
+      // This prevents unnecessary delays when rate limits are already satisfied
+      const jitter = getRandomDelay(500, 1000); // Reduced from 1-3s to 0.5-1s
       console.log(
         `⏳ Adding ${Math.ceil(jitter / 1000)}s jitter for natural pattern`,
       );
