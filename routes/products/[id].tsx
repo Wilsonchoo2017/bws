@@ -181,6 +181,41 @@ export default function ProductDetailPage(
             <ProductEditModal product={product} />
           </div>
 
+          {/* Quick Actions */}
+          <div class="card bg-base-100 shadow-xl">
+            <div class="card-body">
+              <h2 class="card-title text-2xl mb-4">Quick Links</h2>
+              <div class="flex flex-wrap gap-3">
+                <a
+                  href={`/products?search=${product.productId}`}
+                  class="btn btn-primary"
+                >
+                  View in Product List
+                </a>
+                {product.legoSetNumber && (
+                  <>
+                    <a
+                      href={`https://www.bricklink.com/v2/catalog/catalogitem.page?S=${product.legoSetNumber}-1`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      class="btn btn-outline"
+                    >
+                      View on Bricklink ↗
+                    </a>
+                    <a
+                      href={`https://www.brickeconomy.com/set/${product.legoSetNumber}-1/`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      class="btn btn-outline"
+                    >
+                      View on Brickeconomy ↗
+                    </a>
+                  </>
+                )}
+              </div>
+            </div>
+          </div>
+
           {/* Images Section */}
           <div class="card bg-base-100 shadow-xl">
             <div class="card-body">
@@ -682,26 +717,6 @@ export default function ProductDetailPage(
                 )}
               </div>
 
-              {/* Action Buttons */}
-              <h3 class="text-lg font-semibold mb-3">Quick Actions</h3>
-              <div class="flex flex-wrap gap-3">
-                <a
-                  href={`/products?search=${product.productId}`}
-                  class="btn btn-primary"
-                >
-                  View in Product List
-                </a>
-                {product.legoSetNumber && (
-                  <a
-                    href={`https://www.bricklink.com/v2/catalog/catalogitem.page?S=${product.legoSetNumber}-1`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    class="btn btn-outline"
-                  >
-                    View on Bricklink ↗
-                  </a>
-                )}
-              </div>
             </div>
           </div>
         </div>
