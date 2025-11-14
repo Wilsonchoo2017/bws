@@ -197,6 +197,63 @@ export const productTags = pgTable(
   }),
 );
 
+// Enums for vouchers
+export const voucherTypeEnum = pgEnum("voucher_type", [
+  "platform",
+  "shop",
+  "item_tag",
+]);
+
+export const discountTypeEnum = pgEnum("discount_type", [
+  "percentage",
+  "fixed",
+]);
+
+// Vouchers table
+export const vouchers = pgTable(
+  "vouchers",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    name: varchar("name", { length: 255 }).notNull(),
+    description: text("description"),
+    voucherType: voucherTypeEnum("voucher_type").notNull(),
+    discountType: discountTypeEnum("discount_type").notNull(),
+    discountValue: integer("discount_value").notNull(), // Cents or percentage * 100
+
+    // Platform/Shop specifics
+    platform: varchar("platform", { length: 50 }), // 'shopee', 'toysrus', null
+    shopId: bigint("shop_id", { mode: "number" }), // For shop vouchers
+    shopName: varchar("shop_name", { length: 255 }),
+
+    // Conditions
+    minPurchase: integer("min_purchase"), // Minimum purchase in cents
+    maxDiscount: integer("max_discount"), // Maximum discount cap in cents
+    requiredTagIds: uuid("required_tag_ids").array(), // Array of tag UUIDs
+
+    // Tiered discounts (JSONB array of {minSpend: number, discount: number})
+    tieredDiscounts: jsonb("tiered_discounts"),
+
+    // Status
+    isActive: boolean("is_active").default(true).notNull(),
+    startDate: timestamp("start_date"),
+    endDate: timestamp("end_date"),
+
+    // Metadata
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().notNull(),
+  },
+  (table) => ({
+    // Index for active status lookup
+    activeIdx: index("idx_vouchers_active").on(table.isActive),
+    // Index for platform filtering
+    platformIdx: index("idx_vouchers_platform").on(table.platform),
+    // Index for finding expiring/expired vouchers
+    endDateIdx: index("idx_vouchers_end_date").on(table.endDate),
+    // Index for finding soon-to-start vouchers
+    startDateIdx: index("idx_vouchers_start_date").on(table.startDate),
+  }),
+);
+
 // Unified price history for tracking price changes over time (all platforms)
 export const priceHistory = pgTable(
   "price_history",

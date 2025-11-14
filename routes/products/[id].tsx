@@ -5,18 +5,22 @@
 
 import { Handlers, PageProps } from "$fresh/server.ts";
 import { Head } from "$fresh/runtime.ts";
-import { desc, eq } from "drizzle-orm";
+import { desc, eq, sql } from "drizzle-orm";
 import { db } from "../../db/client.ts";
 import {
   type BricklinkItem,
+  type BrickrankerRetirementItem,
   priceHistory,
   type Product,
+  productTags,
   products,
   shopeeScrapes,
   type WorldbricksSet,
 } from "../../db/schema.ts";
 import { getBricklinkRepository } from "../../services/bricklink/BricklinkRepository.ts";
+import { getBrickRankerRepository } from "../../services/brickranker/BrickRankerRepository.ts";
 import { getWorldBricksRepository } from "../../services/worldbricks/WorldBricksRepository.ts";
+import TagBadge from "../../components/tags/TagBadge.tsx";
 import IntrinsicValueCard from "../../islands/IntrinsicValueCard.tsx";
 import ProductEditModal from "../../islands/ProductEditModal.tsx";
 import ProductImageGallery from "../../islands/ProductImageGallery.tsx";
@@ -56,12 +60,22 @@ interface PricingBox {
   times_sold?: number;
 }
 
+interface ProductTag {
+  id: string;
+  name: string;
+  description: string | null;
+  endDate: string | null;
+  isExpired?: boolean;
+}
+
 interface ProductDetailData {
   product: Product;
   shopeeScrapes: ShopeeScrape[];
   priceHistory: PriceHistoryRecord[];
   bricklinkItem: BricklinkItem | undefined;
   worldbricksSet: WorldbricksSet | undefined;
+  brickrankerItem: BrickrankerRetirementItem | undefined;
+  productTags: ProductTag[];
 }
 
 export const handler: Handlers<ProductDetailData | null> = {
@@ -122,12 +136,48 @@ export const handler: Handlers<ProductDetailData | null> = {
       );
     }
 
+    // Fetch BrickRanker retirement data if product has LEGO set number
+    let brickrankerData: BrickrankerRetirementItem | undefined = undefined;
+    if (product.legoSetNumber) {
+      const brickrankerRepo = getBrickRankerRepository();
+      brickrankerData = await brickrankerRepo.findBySetNumber(
+        product.legoSetNumber,
+      );
+    }
+
+    // Fetch product tags
+    const productTagsData: ProductTag[] = [];
+    if (product.tags && Array.isArray(product.tags)) {
+      const tagIds = (product.tags as Array<{ tagId: string; addedAt: string }>)
+        .map((t) => t.tagId);
+
+      if (tagIds.length > 0) {
+        const tags = await db
+          .select()
+          .from(productTags)
+          .where(
+            sql`${productTags.id} = ANY(${tagIds})`,
+          );
+
+        // Map tags and check if expired
+        const now = new Date();
+        productTagsData.push(
+          ...tags.map((tag) => ({
+            ...tag,
+            isExpired: tag.endDate ? new Date(tag.endDate) < now : false,
+          })),
+        );
+      }
+    }
+
     return ctx.render({
       product,
       shopeeScrapes: shopeeScrapesData,
       priceHistory: priceHistoryData,
       bricklinkItem: bricklinkData,
       worldbricksSet: worldbricksData,
+      brickrankerItem: brickrankerData,
+      productTags: productTagsData,
     });
   },
 };
@@ -154,6 +204,8 @@ export default function ProductDetailPage(
     priceHistory,
     bricklinkItem,
     worldbricksSet,
+    brickrankerItem,
+    productTags,
   } = data;
 
   // Helper functions
@@ -238,41 +290,144 @@ export default function ProductDetailPage(
                   </div>
                 )}
               </div>
+              {productTags.length > 0 && (
+                <div class="flex items-center gap-2 flex-wrap mt-2">
+                  <span class="text-sm text-base-content/60">Tags:</span>
+                  {productTags.map((tag) => (
+                    <TagBadge
+                      key={tag.id}
+                      name={tag.name}
+                      isExpired={tag.isExpired}
+                      showStatus={tag.isExpired}
+                    />
+                  ))}
+                </div>
+              )}
             </div>
-            <ProductEditModal product={product} />
+            <ProductEditModal
+              product={product}
+              worldbricksSet={worldbricksSet}
+              brickrankerItem={brickrankerItem}
+            />
           </div>
 
-          {/* Quick Actions */}
-          <div class="card bg-base-100 shadow-xl">
-            <div class="card-body">
-              <h2 class="card-title text-2xl mb-4">Quick Links</h2>
-              <div class="flex flex-wrap gap-3">
-                <a
-                  href={`/products?search=${product.productId}`}
-                  class="btn btn-primary"
-                >
-                  View in Product List
-                </a>
-                {product.legoSetNumber && (
-                  <>
-                    <a
-                      href={`https://www.bricklink.com/v2/catalog/catalogitem.page?S=${product.legoSetNumber}-1`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      class="btn btn-outline"
+          {/* Quick Links & Core Information - Side by Side Layout */}
+          <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            {/* Quick Links & Core Information */}
+            <div class="card bg-base-100 shadow-xl">
+              <div class="card-body">
+                <h2 class="card-title text-xl mb-3">Core Information</h2>
+
+                <div class="flex flex-wrap gap-3 mb-4">
+                  <a
+                    href={`/products?search=${product.productId}`}
+                    class="btn btn-primary btn-sm"
+                  >
+                    View in Product List
+                  </a>
+                  {product.legoSetNumber && (
+                    <>
+                      <a
+                        href={`https://www.bricklink.com/v2/catalog/catalogitem.page?S=${product.legoSetNumber}-1`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        class="btn btn-outline btn-sm"
+                      >
+                        View on Bricklink ↗
+                      </a>
+                      <a
+                        href={`https://www.brickeconomy.com/set/${product.legoSetNumber}-1/`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        class="btn btn-outline btn-sm"
+                      >
+                        View on Brickeconomy ↗
+                      </a>
+                    </>
+                  )}
+                </div>
+
+                <div class="space-y-3">
+                  {/* LEGO Set Number & Watch Status */}
+                  <div class="flex items-center gap-2 flex-wrap text-sm">
+                    <span class="text-base-content/60">LEGO Set:</span>
+                    <span class="font-semibold">{product.legoSetNumber || "N/A"}</span>
+                    <span class="text-base-content/60">•</span>
+                    <span class="text-base-content/60">Watch Status:</span>
+                    <div
+                      class={`badge badge-sm ${
+                        product.watchStatus === "active"
+                          ? "badge-success"
+                          : product.watchStatus === "paused"
+                          ? "badge-warning"
+                          : product.watchStatus === "stopped"
+                          ? "badge-error"
+                          : "badge-ghost"
+                      }`}
                     >
-                      View on Bricklink ↗
-                    </a>
-                    <a
-                      href={`https://www.brickeconomy.com/set/${product.legoSetNumber}-1/`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      class="btn btn-outline"
-                    >
-                      View on Brickeconomy ↗
-                    </a>
-                  </>
-                )}
+                      {product.watchStatus || "N/A"}
+                    </div>
+                  </div>
+
+                  {/* Retirement Timeline */}
+                  {(worldbricksSet || brickrankerItem) && (
+                    <div class="divider my-2"></div>
+                  )}
+
+                  {/* Release Year */}
+                  {(worldbricksSet?.yearReleased || brickrankerItem?.yearReleased) && (
+                    <div class="flex items-center gap-2 text-sm">
+                      <span class="text-base-content/60">Release Year:</span>
+                      <span class="font-semibold text-success">
+                        {worldbricksSet?.yearReleased || brickrankerItem?.yearReleased}
+                      </span>
+                    </div>
+                  )}
+
+                  {/* Retirement Status */}
+                  {(() => {
+                    const isRetired = worldbricksSet?.yearRetired;
+                    const isRetiringSoon = brickrankerItem?.retiringSoon;
+                    const expectedRetirement = brickrankerItem?.expectedRetirementDate;
+
+                    if (isRetired) {
+                      return (
+                        <div class="flex items-center gap-2 text-sm">
+                          <span class="text-base-content/60">Retirement Year:</span>
+                          <span class="font-semibold text-error">{worldbricksSet.yearRetired}</span>
+                          <div class="badge badge-error badge-sm">Retired</div>
+                        </div>
+                      );
+                    } else if (isRetiringSoon && expectedRetirement) {
+                      return (
+                        <div class="flex items-center gap-2 text-sm">
+                          <span class="text-base-content/60">Expected Retirement:</span>
+                          <span class="font-semibold text-warning">{expectedRetirement}</span>
+                          <div class="badge badge-warning badge-sm">Retiring Soon</div>
+                        </div>
+                      );
+                    } else if (worldbricksSet?.yearReleased || brickrankerItem?.yearReleased) {
+                      return (
+                        <div class="flex items-center gap-2 text-sm">
+                          <span class="text-base-content/60">Status:</span>
+                          <div class="badge badge-success badge-sm">Active</div>
+                        </div>
+                      );
+                    }
+                    return null;
+                  })()}
+                </div>
+              </div>
+            </div>
+
+            {/* Product Images */}
+            <div class="card bg-base-100 shadow-xl">
+              <div class="card-body">
+                <h2 class="card-title text-2xl mb-4">Product Images</h2>
+                <ProductImageGallery
+                  images={productImages}
+                  productName={product.name || "Product"}
+                />
               </div>
             </div>
           </div>
@@ -285,18 +440,6 @@ export default function ProductDetailPage(
             currency={product.currency ?? "MYR"}
           />
 
-          {/* Images Section */}
-          <div class="card bg-base-100 shadow-xl">
-            <div class="card-body">
-              <h2 class="card-title text-2xl mb-4">Product Images</h2>
-              <div class="max-w-2xl mx-auto">
-                <ProductImageGallery
-                  images={productImages}
-                  productName={product.name || "Product"}
-                />
-              </div>
-            </div>
-          </div>
 
           {/* Bricklink Market Data Section */}
           {bricklinkItem && (() => {
@@ -357,26 +500,10 @@ export default function ProductDetailPage(
                   </h2>
 
                   {/* Last Scraped Info */}
-                  <div class="alert alert-info mb-6">
-                    <svg
-                      xmlns="http://www.w3.org/2000/svg"
-                      fill="none"
-                      viewBox="0 0 24 24"
-                      class="stroke-current shrink-0 w-6 h-6"
-                    >
-                      <path
-                        stroke-linecap="round"
-                        stroke-linejoin="round"
-                        stroke-width="2"
-                        d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
-                      >
-                      </path>
-                    </svg>
-                    <span>
-                      Last updated: {bricklinkItem.lastScrapedAt
-                        ? formatDate(bricklinkItem.lastScrapedAt)
-                        : "Never"}
-                    </span>
+                  <div class="text-xs text-base-content/60 mb-6">
+                    Last updated: {bricklinkItem.lastScrapedAt
+                      ? formatDate(bricklinkItem.lastScrapedAt)
+                      : "Never"}
                   </div>
 
                   <div class="divider divider-start">
@@ -469,48 +596,16 @@ export default function ProductDetailPage(
                               </div>
                             </div>
                             <div class="stat bg-base-100 rounded-lg p-3">
-                              <div class="stat-figure text-info">
-                                <svg
-                                  xmlns="http://www.w3.org/2000/svg"
-                                  fill="none"
-                                  viewBox="0 0 24 24"
-                                  class="inline-block w-8 h-8 stroke-current"
-                                >
-                                  <path
-                                    stroke-linecap="round"
-                                    stroke-linejoin="round"
-                                    stroke-width="2"
-                                    d="M13 17h8m0 0V9m0 8l-8-8-4 4-6-6"
-                                  >
-                                  </path>
-                                </svg>
-                              </div>
                               <div class="stat-title text-xs">Min Price</div>
-                              <div class="stat-value text-base text-info">
+                              <div class="stat-value text-base">
                                 {currentNew.min_price?.currency}{" "}
                                 {currentNew.min_price?.amount?.toFixed(2) ||
                                   "N/A"}
                               </div>
                             </div>
                             <div class="stat bg-base-100 rounded-lg p-3">
-                              <div class="stat-figure text-warning">
-                                <svg
-                                  xmlns="http://www.w3.org/2000/svg"
-                                  fill="none"
-                                  viewBox="0 0 24 24"
-                                  class="inline-block w-8 h-8 stroke-current"
-                                >
-                                  <path
-                                    stroke-linecap="round"
-                                    stroke-linejoin="round"
-                                    stroke-width="2"
-                                    d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6"
-                                  >
-                                  </path>
-                                </svg>
-                              </div>
                               <div class="stat-title text-xs">Max Price</div>
-                              <div class="stat-value text-base text-warning">
+                              <div class="stat-value text-base">
                                 {currentNew.max_price?.currency}{" "}
                                 {currentNew.max_price?.amount?.toFixed(2) ||
                                   "N/A"}
@@ -620,48 +715,16 @@ export default function ProductDetailPage(
                               </div>
                             </div>
                             <div class="stat bg-base-100 rounded-lg p-3">
-                              <div class="stat-figure text-info">
-                                <svg
-                                  xmlns="http://www.w3.org/2000/svg"
-                                  fill="none"
-                                  viewBox="0 0 24 24"
-                                  class="inline-block w-8 h-8 stroke-current"
-                                >
-                                  <path
-                                    stroke-linecap="round"
-                                    stroke-linejoin="round"
-                                    stroke-width="2"
-                                    d="M13 17h8m0 0V9m0 8l-8-8-4 4-6-6"
-                                  >
-                                  </path>
-                                </svg>
-                              </div>
                               <div class="stat-title text-xs">Min Price</div>
-                              <div class="stat-value text-base text-info">
+                              <div class="stat-value text-base">
                                 {currentUsed.min_price?.currency}{" "}
                                 {currentUsed.min_price?.amount?.toFixed(2) ||
                                   "N/A"}
                               </div>
                             </div>
                             <div class="stat bg-base-100 rounded-lg p-3">
-                              <div class="stat-figure text-warning">
-                                <svg
-                                  xmlns="http://www.w3.org/2000/svg"
-                                  fill="none"
-                                  viewBox="0 0 24 24"
-                                  class="inline-block w-8 h-8 stroke-current"
-                                >
-                                  <path
-                                    stroke-linecap="round"
-                                    stroke-linejoin="round"
-                                    stroke-width="2"
-                                    d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6"
-                                  >
-                                  </path>
-                                </svg>
-                              </div>
                               <div class="stat-title text-xs">Max Price</div>
-                              <div class="stat-value text-base text-warning">
+                              <div class="stat-value text-base">
                                 {currentUsed.max_price?.currency}{" "}
                                 {currentUsed.max_price?.amount?.toFixed(2) ||
                                   "N/A"}
@@ -780,7 +843,7 @@ export default function ProductDetailPage(
                             </div>
                             <div class="stat bg-base-100 rounded-lg p-3">
                               <div class="stat-title text-xs">Min Price</div>
-                              <div class="stat-value text-base text-info">
+                              <div class="stat-value text-base">
                                 {sixMonthNew.min_price?.currency}{" "}
                                 {sixMonthNew.min_price?.amount?.toFixed(2) ||
                                   "N/A"}
@@ -788,7 +851,7 @@ export default function ProductDetailPage(
                             </div>
                             <div class="stat bg-base-100 rounded-lg p-3">
                               <div class="stat-title text-xs">Max Price</div>
-                              <div class="stat-value text-base text-warning">
+                              <div class="stat-value text-base">
                                 {sixMonthNew.max_price?.currency}{" "}
                                 {sixMonthNew.max_price?.amount?.toFixed(2) ||
                                   "N/A"}
@@ -897,7 +960,7 @@ export default function ProductDetailPage(
                             </div>
                             <div class="stat bg-base-100 rounded-lg p-3">
                               <div class="stat-title text-xs">Min Price</div>
-                              <div class="stat-value text-base text-info">
+                              <div class="stat-value text-base">
                                 {sixMonthUsed.min_price?.currency}{" "}
                                 {sixMonthUsed.min_price?.amount?.toFixed(2) ||
                                   "N/A"}
@@ -905,7 +968,7 @@ export default function ProductDetailPage(
                             </div>
                             <div class="stat bg-base-100 rounded-lg p-3">
                               <div class="stat-title text-xs">Max Price</div>
-                              <div class="stat-value text-base text-warning">
+                              <div class="stat-value text-base">
                                 {sixMonthUsed.max_price?.currency}{" "}
                                 {sixMonthUsed.max_price?.amount?.toFixed(2) ||
                                   "N/A"}
@@ -933,63 +996,6 @@ export default function ProductDetailPage(
             );
           })()}
 
-          {/* Core Product Info Section */}
-          <div class="card bg-base-100 shadow-xl">
-            <div class="card-body">
-              <h2 class="card-title text-2xl mb-4">ℹ️ Core Information</h2>
-              <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                <div class="stat bg-base-200 rounded-lg">
-                  <div class="stat-title">Product ID</div>
-                  <div class="stat-value text-lg">
-                    <div
-                      class="tooltip tooltip-top"
-                      data-tip={product.productId}
-                    >
-                      <span class="truncate block max-w-full">
-                        {product.productId}
-                      </span>
-                    </div>
-                  </div>
-                </div>
-                <div class="stat bg-base-200 rounded-lg">
-                  <div class="stat-title">Database ID</div>
-                  <div class="stat-value text-lg">{product.id}</div>
-                </div>
-                <div class="stat bg-base-200 rounded-lg">
-                  <div class="stat-title">Source</div>
-                  <div class="stat-value text-lg">{product.source}</div>
-                </div>
-                <div class="stat bg-base-200 rounded-lg">
-                  <div class="stat-title">Brand</div>
-                  <div class="stat-value text-lg">{product.brand || "N/A"}</div>
-                </div>
-                <div class="stat bg-base-200 rounded-lg">
-                  <div class="stat-title">LEGO Set Number</div>
-                  <div class="stat-value text-lg">
-                    {product.legoSetNumber || "N/A"}
-                  </div>
-                </div>
-                <div class="stat bg-base-200 rounded-lg">
-                  <div class="stat-title">Watch Status</div>
-                  <div class="stat-value text-lg">
-                    <div
-                      class={`badge badge-lg ${
-                        product.watchStatus === "active"
-                          ? "badge-success"
-                          : product.watchStatus === "paused"
-                          ? "badge-warning"
-                          : product.watchStatus === "stopped"
-                          ? "badge-error"
-                          : "badge-ghost"
-                      }`}
-                    >
-                      {product.watchStatus || "N/A"}
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
 
           {/* LEGO Set Information Section */}
           {worldbricksSet && (
@@ -1076,142 +1082,6 @@ export default function ProductDetailPage(
             <div class="card bg-base-100 shadow-xl">
               <div class="card-body">
                 <h2 class="card-title text-2xl mb-4">🛒 Shopee Data</h2>
-
-                <div class="divider divider-start">
-                  <span class="text-lg font-semibold">Sales & Engagement</span>
-                </div>
-                <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 mb-6">
-                  <div class="stat bg-base-200 rounded-lg">
-                    <div class="stat-title">Units Sold</div>
-                    <div class="stat-value text-xl">
-                      {formatNumber(product.unitsSold)}
-                    </div>
-                  </div>
-                  <div class="stat bg-base-200 rounded-lg">
-                    <div class="stat-title">Lifetime Sold</div>
-                    <div class="stat-value text-xl">
-                      {formatNumber(product.lifetimeSold)}
-                    </div>
-                  </div>
-                  <div class="stat bg-base-200 rounded-lg">
-                    <div class="stat-title">Views</div>
-                    <div class="stat-value text-xl">
-                      {formatNumber(product.view_count)}
-                    </div>
-                  </div>
-                  <div class="stat bg-base-200 rounded-lg">
-                    <div class="stat-title">Likes</div>
-                    <div class="stat-value text-xl">
-                      {formatNumber(product.liked_count)}
-                    </div>
-                  </div>
-                  <div class="stat bg-base-200 rounded-lg">
-                    <div class="stat-title">Comments</div>
-                    <div class="stat-value text-xl">
-                      {formatNumber(product.commentCount)}
-                    </div>
-                  </div>
-                  <div class="stat bg-base-200 rounded-lg">
-                    <div class="stat-title">Avg Star Rating</div>
-                    <div class="stat-value text-xl">
-                      {product.avgStarRating
-                        ? (product.avgStarRating / 10).toFixed(1)
-                        : "N/A"}
-                    </div>
-                  </div>
-                </div>
-
-                <div class="divider divider-start">
-                  <span class="text-lg font-semibold">Shop Information</span>
-                </div>
-                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
-                  <div class="stat bg-base-200 rounded-lg">
-                    <div class="stat-title">Shop ID</div>
-                    <div class="stat-value text-lg">
-                      {product.shopId?.toString() || "N/A"}
-                    </div>
-                  </div>
-                  <div class="stat bg-base-200 rounded-lg">
-                    <div class="stat-title">Shop Name</div>
-                    <div class="stat-value text-lg">
-                      {product.shopName || "N/A"}
-                    </div>
-                  </div>
-                  <div class="stat bg-base-200 rounded-lg">
-                    <div class="stat-title">Shop Location</div>
-                    <div class="stat-value text-lg">
-                      {product.shopLocation || "N/A"}
-                    </div>
-                  </div>
-                </div>
-
-                <div class="divider divider-start">
-                  <span class="text-lg font-semibold">Stock Information</span>
-                </div>
-                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
-                  <div class="stat bg-base-200 rounded-lg">
-                    <div class="stat-title">Current Stock</div>
-                    <div
-                      class={`stat-value text-xl ${
-                        product.currentStock === 0
-                          ? "text-error"
-                          : (product.currentStock || 0) < 10
-                          ? "text-warning"
-                          : "text-success"
-                      }`}
-                    >
-                      {formatNumber(product.currentStock)}
-                    </div>
-                  </div>
-                  <div class="stat bg-base-200 rounded-lg">
-                    <div class="stat-title">Stock Type</div>
-                    <div class="stat-value text-lg">
-                      {product.stockType?.toString() || "N/A"}
-                    </div>
-                  </div>
-                  <div class="stat bg-base-200 rounded-lg">
-                    <div class="stat-title">Stock Info Summary</div>
-                    <div class="stat-value text-sm">
-                      {product.stockInfoSummary || "N/A"}
-                    </div>
-                  </div>
-                </div>
-
-                <div class="divider divider-start">
-                  <span class="text-lg font-semibold">Shop Badges & Flags</span>
-                </div>
-                <div class="flex flex-wrap gap-2">
-                  <div
-                    class={`badge badge-lg ${
-                      product.isPreferred ? "badge-success" : "badge-ghost"
-                    }`}
-                  >
-                    {product.isPreferred ? "✓" : "✗"} Preferred Seller
-                  </div>
-                  <div
-                    class={`badge badge-lg ${
-                      product.isMart ? "badge-info" : "badge-ghost"
-                    }`}
-                  >
-                    {product.isMart ? "✓" : "✗"} Shopee Mall
-                  </div>
-                  <div
-                    class={`badge badge-lg ${
-                      product.isServiceByShopee
-                        ? "badge-primary"
-                        : "badge-ghost"
-                    }`}
-                  >
-                    {product.isServiceByShopee ? "✓" : "✗"} Service by Shopee
-                  </div>
-                  <div
-                    class={`badge badge-lg ${
-                      product.isAdult ? "badge-warning" : "badge-ghost"
-                    }`}
-                  >
-                    {product.isAdult ? "✓" : "✗"} Adult Content
-                  </div>
-                </div>
 
                 {/* Rating Distribution */}
                 {product.ratingCount &&

@@ -1,19 +1,21 @@
 import { Handlers } from "$fresh/server.ts";
 import { eq } from "drizzle-orm";
 import { db } from "../../../db/client.ts";
-import { products } from "../../../db/schema.ts";
+import {
+  brickrankerRetirementItems,
+  products,
+  worldbricksSets,
+} from "../../../db/schema.ts";
 
 interface UpdateProductRequest {
   name?: string;
-  brand?: string;
   legoSetNumber?: string;
-  currency?: string;
   price?: number;
-  priceMin?: number;
-  priceMax?: number;
   priceBeforeDiscount?: number;
-  image?: string;
   watchStatus?: "active" | "paused" | "stopped" | "archived";
+  yearReleased?: number | null;
+  yearRetired?: number | null;
+  expectedRetirementDate?: string | null;
 }
 
 export const handler: Handlers = {
@@ -47,26 +49,27 @@ export const handler: Handlers = {
       };
 
       if (body.name !== undefined) updateData.name = body.name || null;
-      if (body.brand !== undefined) updateData.brand = body.brand || null;
       if (body.legoSetNumber !== undefined) {
         updateData.legoSetNumber = body.legoSetNumber || null;
       }
-      if (body.currency !== undefined) {
-        updateData.currency = body.currency || null;
-      }
       if (body.price !== undefined) updateData.price = body.price || null;
-      if (body.priceMin !== undefined) {
-        updateData.priceMin = body.priceMin || null;
-      }
-      if (body.priceMax !== undefined) {
-        updateData.priceMax = body.priceMax || null;
-      }
       if (body.priceBeforeDiscount !== undefined) {
         updateData.priceBeforeDiscount = body.priceBeforeDiscount || null;
       }
-      if (body.image !== undefined) updateData.image = body.image || null;
       if (body.watchStatus !== undefined) {
         updateData.watchStatus = body.watchStatus;
+      }
+
+      // Get current product to check for LEGO set number
+      const currentProduct = await db.query.products.findFirst({
+        where: eq(products.productId, productId),
+      });
+
+      if (!currentProduct) {
+        return new Response(
+          JSON.stringify({ error: "Product not found" }),
+          { status: 404, headers: { "Content-Type": "application/json" } },
+        );
       }
 
       // Update the product - using productId (not serial id)
@@ -76,11 +79,59 @@ export const handler: Handlers = {
         .where(eq(products.productId, productId))
         .returning();
 
-      if (updatedProducts.length === 0) {
-        return new Response(
-          JSON.stringify({ error: "Product not found" }),
-          { status: 404, headers: { "Content-Type": "application/json" } },
-        );
+      // Update retirement information if LEGO set number exists
+      const legoSetNumber = body.legoSetNumber || currentProduct.legoSetNumber;
+
+      if (legoSetNumber) {
+        // Update WorldBricks data if yearReleased or yearRetired provided
+        if (
+          body.yearReleased !== undefined || body.yearRetired !== undefined
+        ) {
+          const worldbricksUpdateData: Partial<
+            typeof worldbricksSets.$inferInsert
+          > = {
+            updatedAt: new Date(),
+          };
+
+          if (body.yearReleased !== undefined) {
+            worldbricksUpdateData.yearReleased = body.yearReleased;
+          }
+          if (body.yearRetired !== undefined) {
+            worldbricksUpdateData.yearRetired = body.yearRetired;
+          }
+
+          // Try to update existing WorldBricks record
+          await db
+            .update(worldbricksSets)
+            .set(worldbricksUpdateData)
+            .where(eq(worldbricksSets.setNumber, legoSetNumber));
+        }
+
+        // Update BrickRanker data if expectedRetirementDate provided
+        if (
+          body.expectedRetirementDate !== undefined ||
+          body.yearReleased !== undefined
+        ) {
+          const brickrankerUpdateData: Partial<
+            typeof brickrankerRetirementItems.$inferInsert
+          > = {
+            updatedAt: new Date(),
+          };
+
+          if (body.yearReleased !== undefined) {
+            brickrankerUpdateData.yearReleased = body.yearReleased;
+          }
+          if (body.expectedRetirementDate !== undefined) {
+            brickrankerUpdateData.expectedRetirementDate =
+              body.expectedRetirementDate;
+          }
+
+          // Try to update existing BrickRanker record
+          await db
+            .update(brickrankerRetirementItems)
+            .set(brickrankerUpdateData)
+            .where(eq(brickrankerRetirementItems.setNumber, legoSetNumber));
+        }
       }
 
       return new Response(

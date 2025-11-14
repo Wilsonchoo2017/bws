@@ -1,8 +1,15 @@
 import { signal } from "@preact/signals";
-import type { Product } from "../db/schema.ts";
+import type {
+  BrickrankerRetirementItem,
+  Product,
+  WorldbricksSet,
+} from "../db/schema.ts";
+import TagSelector from "../components/tags/TagSelector.tsx";
 
 interface ProductEditModalProps {
   product: Product;
+  worldbricksSet?: WorldbricksSet;
+  brickrankerItem?: BrickrankerRetirementItem;
 }
 
 const showModal = signal(false);
@@ -12,37 +19,34 @@ const success = signal(false);
 
 // Form field signals
 const editName = signal("");
-const editBrand = signal("");
 const editLegoSetNumber = signal("");
-const editCurrency = signal("");
 const editPrice = signal("");
-const editPriceMin = signal("");
-const editPriceMax = signal("");
 const editPriceBeforeDiscount = signal("");
-const editImage = signal("");
 const editWatchStatus = signal<"active" | "paused" | "stopped" | "archived">(
   "active",
 );
+const editYearReleased = signal("");
+const editYearRetired = signal("");
+const editExpectedRetirement = signal("");
+const editSelectedTagIds = signal<string[]>([]);
 
-export default function ProductEditModal({ product }: ProductEditModalProps) {
+export default function ProductEditModal(
+  { product, worldbricksSet, brickrankerItem }: ProductEditModalProps,
+) {
   const openModal = () => {
     // Initialize form with current product data
     editName.value = product.name || "";
-    editBrand.value = product.brand || "";
     editLegoSetNumber.value = product.legoSetNumber || "";
-    editCurrency.value = product.currency || "SGD";
     editPrice.value = product.price ? (product.price / 100).toFixed(2) : "";
-    editPriceMin.value = product.priceMin
-      ? (product.priceMin / 100).toFixed(2)
-      : "";
-    editPriceMax.value = product.priceMax
-      ? (product.priceMax / 100).toFixed(2)
-      : "";
     editPriceBeforeDiscount.value = product.priceBeforeDiscount
       ? (product.priceBeforeDiscount / 100).toFixed(2)
       : "";
-    editImage.value = product.image || "";
     editWatchStatus.value = product.watchStatus || "active";
+    editYearReleased.value = worldbricksSet?.yearReleased?.toString() ||
+      brickrankerItem?.yearReleased?.toString() || "";
+    editYearRetired.value = worldbricksSet?.yearRetired?.toString() || "";
+    editExpectedRetirement.value = brickrankerItem?.expectedRetirementDate ||
+      "";
     error.value = null;
     success.value = false;
     showModal.value = true;
@@ -64,14 +68,16 @@ export default function ProductEditModal({ product }: ProductEditModalProps) {
       const priceInCents = editPrice.value
         ? Math.round(parseFloat(editPrice.value) * 100)
         : null;
-      const priceMinInCents = editPriceMin.value
-        ? Math.round(parseFloat(editPriceMin.value) * 100)
-        : null;
-      const priceMaxInCents = editPriceMax.value
-        ? Math.round(parseFloat(editPriceMax.value) * 100)
-        : null;
       const priceBeforeDiscountInCents = editPriceBeforeDiscount.value
         ? Math.round(parseFloat(editPriceBeforeDiscount.value) * 100)
+        : null;
+
+      // Parse retirement years
+      const yearReleased = editYearReleased.value
+        ? parseInt(editYearReleased.value)
+        : null;
+      const yearRetired = editYearRetired.value
+        ? parseInt(editYearRetired.value)
         : null;
 
       const response = await fetch(`/api/products/${product.productId}`, {
@@ -81,15 +87,13 @@ export default function ProductEditModal({ product }: ProductEditModalProps) {
         },
         body: JSON.stringify({
           name: editName.value || null,
-          brand: editBrand.value || null,
           legoSetNumber: editLegoSetNumber.value || null,
-          currency: editCurrency.value || null,
           price: priceInCents,
-          priceMin: priceMinInCents,
-          priceMax: priceMaxInCents,
           priceBeforeDiscount: priceBeforeDiscountInCents,
-          image: editImage.value || null,
           watchStatus: editWatchStatus.value,
+          yearReleased,
+          yearRetired,
+          expectedRetirementDate: editExpectedRetirement.value || null,
         }),
       });
 
@@ -153,20 +157,6 @@ export default function ProductEditModal({ product }: ProductEditModalProps) {
                 />
               </div>
 
-              {/* Brand */}
-              <div class="form-control">
-                <label class="label">
-                  <span class="label-text">Brand</span>
-                </label>
-                <input
-                  type="text"
-                  class="input input-bordered w-full"
-                  value={editBrand.value}
-                  onInput={(e) => editBrand.value = e.currentTarget.value}
-                  disabled={isLoading.value}
-                />
-              </div>
-
               {/* LEGO Set Number */}
               <div class="form-control">
                 <label class="label">
@@ -181,21 +171,6 @@ export default function ProductEditModal({ product }: ProductEditModalProps) {
                     editLegoSetNumber.value = e.currentTarget.value}
                   disabled={isLoading.value}
                   maxLength={10}
-                />
-              </div>
-
-              {/* Currency */}
-              <div class="form-control">
-                <label class="label">
-                  <span class="label-text">Currency</span>
-                </label>
-                <input
-                  type="text"
-                  class="input input-bordered w-full"
-                  value={editCurrency.value}
-                  onInput={(e) => editCurrency.value = e.currentTarget.value}
-                  disabled={isLoading.value}
-                  placeholder="SGD"
                 />
               </div>
 
@@ -235,47 +210,63 @@ export default function ProductEditModal({ product }: ProductEditModalProps) {
                 />
               </div>
 
-              {/* Price Range */}
-              <div class="grid grid-cols-2 gap-4">
-                <div class="form-control">
-                  <label class="label">
-                    <span class="label-text">Min Price</span>
-                  </label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    class="input input-bordered w-full"
-                    value={editPriceMin.value}
-                    onInput={(e) => editPriceMin.value = e.currentTarget.value}
-                    disabled={isLoading.value}
-                  />
-                </div>
-                <div class="form-control">
-                  <label class="label">
-                    <span class="label-text">Max Price</span>
-                  </label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    class="input input-bordered w-full"
-                    value={editPriceMax.value}
-                    onInput={(e) => editPriceMax.value = e.currentTarget.value}
-                    disabled={isLoading.value}
-                  />
-                </div>
-              </div>
+              <div class="divider">Retirement Information</div>
 
-              {/* Image URL */}
+              {/* Year Released */}
               <div class="form-control">
                 <label class="label">
-                  <span class="label-text">Image URL</span>
+                  <span class="label-text">Release Year</span>
+                  <span class="label-text-alt">Year the set was released</span>
+                </label>
+                <input
+                  type="number"
+                  class="input input-bordered w-full"
+                  value={editYearReleased.value}
+                  onInput={(e) =>
+                    editYearReleased.value = e.currentTarget.value}
+                  disabled={isLoading.value}
+                  placeholder="e.g., 2023"
+                  min="1900"
+                  max="2100"
+                />
+              </div>
+
+              {/* Year Retired */}
+              <div class="form-control">
+                <label class="label">
+                  <span class="label-text">Retirement Year</span>
+                  <span class="label-text-alt">
+                    Year the set was retired (leave empty if active)
+                  </span>
+                </label>
+                <input
+                  type="number"
+                  class="input input-bordered w-full"
+                  value={editYearRetired.value}
+                  onInput={(e) => editYearRetired.value = e.currentTarget.value}
+                  disabled={isLoading.value}
+                  placeholder="e.g., 2025"
+                  min="1900"
+                  max="2100"
+                />
+              </div>
+
+              {/* Expected Retirement Date */}
+              <div class="form-control">
+                <label class="label">
+                  <span class="label-text">Expected Retirement Date</span>
+                  <span class="label-text-alt">
+                    Expected retirement (e.g., "Q4 2024", "2025")
+                  </span>
                 </label>
                 <input
                   type="text"
                   class="input input-bordered w-full"
-                  value={editImage.value}
-                  onInput={(e) => editImage.value = e.currentTarget.value}
+                  value={editExpectedRetirement.value}
+                  onInput={(e) =>
+                    editExpectedRetirement.value = e.currentTarget.value}
                   disabled={isLoading.value}
+                  placeholder="e.g., Q4 2024, December 2024, 2025"
                 />
               </div>
 

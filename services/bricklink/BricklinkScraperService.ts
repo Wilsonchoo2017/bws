@@ -143,6 +143,16 @@ export class BricklinkScraperService extends BaseScraperService {
             );
           }
 
+          // Check if Bricklink redirected to "not found" page
+          // Bricklink returns HTTP 200 for error pages instead of 404
+          if (priceResponse.url.includes("notFound.asp")) {
+            throw new Error(
+              `Price guide not found for item ${itemId}. ` +
+                `Item may not exist on Bricklink or the item type/ID may be incorrect. ` +
+                `Redirected to: ${priceResponse.url}`,
+            );
+          }
+
           // Save raw HTML for price guide page if saveToDb is true
           if (saveToDb && scrapeSessionId) {
             await this.saveRawHtml({

@@ -22,6 +22,12 @@ import {
 import { and, eq, isNotNull, lte, or, sql } from "drizzle-orm";
 import { getQueueService, JobPriority } from "../queue/QueueService.ts";
 import type { PricingBox } from "../bricklink/BricklinkParser.ts";
+import {
+  asBaseSetNumber,
+  asBricklinkItemId,
+  buildBricklinkCatalogUrl,
+  toBricklinkItemId,
+} from "../../types/lego-set.ts";
 
 /**
  * Result of a missing data detection run
@@ -106,9 +112,9 @@ export class MissingDataDetectorService {
       const bricklinkJobsToEnqueue = productsWithMissingData.map((product) => {
         const legoSetNumber = product.legoSetNumber!;
         // BrickLink requires -1 suffix for LEGO sets
-        const bricklinkItemId = `${legoSetNumber}-1`;
-        const url =
-          `https://www.bricklink.com/v2/catalog/catalogitem.page?S=${bricklinkItemId}`;
+        const baseSetNumber = asBaseSetNumber(legoSetNumber);
+        const bricklinkItemId = toBricklinkItemId(baseSetNumber);
+        const url = buildBricklinkCatalogUrl(bricklinkItemId);
 
         return {
           url,
@@ -146,18 +152,21 @@ export class MissingDataDetectorService {
       result.itemsWithMissingVolume = itemsWithMissingVolume;
 
       console.log(
-        `📊 Found ${itemsWithMissingVolume.length} active Bricklink items with missing volume data`,
+        `📊 Found ${itemsWithMissingVolume.length} active Bricklink items with missing volume data (checking all items)`,
       );
 
       if (itemsWithMissingVolume.length > 0) {
         // Prepare all volume re-scrape jobs for bulk enqueueing (optimized) with MEDIUM priority
-        const volumeJobsToEnqueue = itemsWithMissingVolume.map((item) => ({
-          url:
-            `https://www.bricklink.com/v2/catalog/catalogitem.page?S=${item.itemId}`,
-          itemId: item.itemId,
-          saveToDb: true,
-          priority: JobPriority.MEDIUM,
-        }));
+        const volumeJobsToEnqueue = itemsWithMissingVolume.map((item) => {
+          // item.itemId is already in Bricklink format (e.g., "60365-1")
+          const bricklinkItemId = asBricklinkItemId(item.itemId);
+          return {
+            url: buildBricklinkCatalogUrl(bricklinkItemId),
+            itemId: item.itemId,
+            saveToDb: true,
+            priority: JobPriority.MEDIUM,
+          };
+        });
 
         // Enqueue all jobs at once using bulk operation
         try {
@@ -257,9 +266,9 @@ export class MissingDataDetectorService {
       }
 
       // BrickLink requires -1 suffix for LEGO sets
-      const bricklinkItemId = `${product.legoSetNumber}-1`;
-      const url =
-        `https://www.bricklink.com/v2/catalog/catalogitem.page?S=${bricklinkItemId}`;
+      const baseSetNumber = asBaseSetNumber(product.legoSetNumber);
+      const bricklinkItemId = toBricklinkItemId(baseSetNumber);
+      const url = buildBricklinkCatalogUrl(bricklinkItemId);
 
       await queueService.addScrapeJob({
         url,
@@ -424,10 +433,8 @@ export class MissingDataDetectorService {
     // Important: We only flag as missing if the box EXISTS but total_qty is null.
     // If the box itself is null (no sales exist), that's legitimate, not missing data.
     //
-    // Respects scrape intervals:
-    // - Items with NULL next_scrape_at → Never scraped before → Will be enqueued immediately
-    // - Items with next_scrape_at <= now → Due for re-scraping → Will be enqueued
-    // - Items with next_scrape_at > now → Not due yet → Will be skipped
+    // Note: This checks ALL active items regardless of scrape schedule to provide
+    // immediate visibility into data quality issues.
     const itemsWithMissingVolume = await db
       .select({
         itemId: bricklinkItems.itemId,
@@ -441,10 +448,6 @@ export class MissingDataDetectorService {
       .where(
         and(
           sql`${bricklinkItems.watchStatus} = 'active'`,
-          or(
-            sql`${bricklinkItems.nextScrapeAt} IS NULL`,
-            lte(bricklinkItems.nextScrapeAt, now),
-          ),
           or(
             sql`(${bricklinkItems.sixMonthNew} IS NOT NULL AND ${bricklinkItems.sixMonthNew}->>'total_qty' IS NULL)`,
             sql`(${bricklinkItems.sixMonthUsed} IS NOT NULL AND ${bricklinkItems.sixMonthUsed}->>'total_qty' IS NULL)`,

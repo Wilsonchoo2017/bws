@@ -65,6 +65,9 @@ export default function QueueDiagnosticsDashboard() {
   const [isResetting, setIsResetting] = useState(false);
   const [showResetConfirm, setShowResetConfirm] = useState(false);
   const [resetSuccess, setResetSuccess] = useState<string | null>(null);
+  const [isTriggeringRescrape, setIsTriggeringRescrape] = useState(false);
+  const [showRescrapeConfirm, setShowRescrapeConfirm] = useState(false);
+  const [rescrapeSuccess, setRescrapeSuccess] = useState<string | null>(null);
 
   // Fetch queue status
   const fetchQueueStats = async () => {
@@ -127,6 +130,47 @@ export default function QueueDiagnosticsDashboard() {
     }
   };
 
+  // Trigger rescrape handler
+  const handleTriggerRescrape = async () => {
+    setIsTriggeringRescrape(true);
+    setError(null);
+    setRescrapeSuccess(null);
+    setShowRescrapeConfirm(false);
+
+    try {
+      const response = await fetch("/api/scrape-scheduler", {
+        method: "POST",
+      });
+
+      if (response.ok) {
+        const result = await response.json();
+        const total = result.jobsQueued || 0;
+        const priorityCounts = result.priorityCounts || {};
+
+        let message = `Successfully queued ${total} scrape jobs!`;
+        if (Object.keys(priorityCounts).length > 0) {
+          const breakdown = Object.entries(priorityCounts)
+            .map(([priority, count]) => `${priority}: ${count}`)
+            .join(", ");
+          message += ` (${breakdown})`;
+        }
+
+        setRescrapeSuccess(message);
+
+        // Refresh stats after triggering
+        setTimeout(() => fetchQueueStats(), 1000);
+      } else {
+        const errorData = await response.json();
+        setError(errorData.message || "Failed to trigger rescrape");
+      }
+    } catch (err) {
+      console.error("Rescrape trigger error:", err);
+      setError(err instanceof Error ? err.message : "Failed to trigger rescrape");
+    } finally {
+      setIsTriggeringRescrape(false);
+    }
+  };
+
   // Auto-refresh every 30 seconds
   useEffect(() => {
     fetchQueueStats();
@@ -171,7 +215,7 @@ export default function QueueDiagnosticsDashboard() {
                 <button
                   class="btn btn-outline"
                   onClick={fetchQueueStats}
-                  disabled={isLoading || isResetting}
+                  disabled={isLoading || isResetting || isTriggeringRescrape}
                 >
                   {isLoading && <span class="loading loading-spinner" />}
                   {!isLoading && (
@@ -193,9 +237,33 @@ export default function QueueDiagnosticsDashboard() {
                   Refresh
                 </button>
                 <button
+                  class="btn btn-success btn-outline"
+                  onClick={() => setShowRescrapeConfirm(true)}
+                  disabled={isLoading || isResetting || isTriggeringRescrape}
+                >
+                  {isTriggeringRescrape && <span class="loading loading-spinner" />}
+                  {!isTriggeringRescrape && (
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      class="h-5 w-5"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                      stroke="currentColor"
+                    >
+                      <path
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        stroke-width="2"
+                        d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+                      />
+                    </svg>
+                  )}
+                  Trigger Scrape All
+                </button>
+                <button
                   class="btn btn-error btn-outline"
                   onClick={() => setShowResetConfirm(true)}
-                  disabled={isLoading || isResetting}
+                  disabled={isLoading || isResetting || isTriggeringRescrape}
                 >
                   {isResetting && <span class="loading loading-spinner" />}
                   {!isResetting && (
@@ -357,7 +425,7 @@ export default function QueueDiagnosticsDashboard() {
         />
       )}
 
-      {/* Success Message */}
+      {/* Success Message - Queue Reset */}
       {resetSuccess && (
         <div class="alert alert-success">
           <svg
@@ -377,6 +445,32 @@ export default function QueueDiagnosticsDashboard() {
           <button
             class="btn btn-sm btn-ghost"
             onClick={() => setResetSuccess(null)}
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
+
+      {/* Success Message - Rescrape Triggered */}
+      {rescrapeSuccess && (
+        <div class="alert alert-success">
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            class="stroke-current shrink-0 h-6 w-6"
+            fill="none"
+            viewBox="0 0 24 24"
+          >
+            <path
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              stroke-width="2"
+              d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"
+            />
+          </svg>
+          <span>{rescrapeSuccess}</span>
+          <button
+            class="btn btn-sm btn-ghost"
+            onClick={() => setRescrapeSuccess(null)}
           >
             Dismiss
           </button>
@@ -434,6 +528,48 @@ export default function QueueDiagnosticsDashboard() {
           <div
             class="modal-backdrop"
             onClick={() => !isResetting && setShowResetConfirm(false)}
+          />
+        </dialog>
+      )}
+
+      {/* Rescrape Confirmation Dialog */}
+      {showRescrapeConfirm && (
+        <dialog class="modal modal-open">
+          <div class="modal-box">
+            <h3 class="font-bold text-lg">Trigger Scrape All?</h3>
+            <p class="py-4">
+              This will queue scrape jobs for all products that need updates from Bricklink.
+              The scheduler will intelligently prioritize:
+            </p>
+            <ul class="list-disc list-inside py-2 space-y-1">
+              <li><strong>HIGH priority:</strong> Products missing Bricklink data</li>
+              <li><strong>MEDIUM priority:</strong> Products with incomplete data</li>
+              <li><strong>NORMAL priority:</strong> Products needing refresh</li>
+            </ul>
+            <p class="pt-2 text-sm text-base-content/70">
+              Jobs will be processed by the queue worker. This is safe to run and won't reset existing jobs.
+            </p>
+            <div class="modal-action">
+              <button
+                class="btn btn-ghost"
+                onClick={() => setShowRescrapeConfirm(false)}
+                disabled={isTriggeringRescrape}
+              >
+                Cancel
+              </button>
+              <button
+                class="btn btn-success"
+                onClick={handleTriggerRescrape}
+                disabled={isTriggeringRescrape}
+              >
+                {isTriggeringRescrape && <span class="loading loading-spinner" />}
+                Trigger Scrape All
+              </button>
+            </div>
+          </div>
+          <div
+            class="modal-backdrop"
+            onClick={() => !isTriggeringRescrape && setShowRescrapeConfirm(false)}
           />
         </dialog>
       )}

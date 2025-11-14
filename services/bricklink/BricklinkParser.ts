@@ -125,9 +125,13 @@ export function parseBricklinkUrl(url: string): BricklinkUrlInfo {
  * Pure function - no side effects
  */
 export function extractPriceBox(boxText: string): PricingBox | null {
-  // Check if box has "(unavailable)" message
+  // Check if box has "(unavailable)" message - this means no sales, not missing data
   if (boxText.toLowerCase().includes("(unavailable)")) {
-    return null;
+    return {
+      times_sold: 0,
+      total_lots: 0,
+      total_qty: 0,
+    };
   }
 
   const data: PricingBox = {};
@@ -289,11 +293,30 @@ export function parsePriceGuide(html: string): {
     throw new Error("Failed to parse price guide HTML");
   }
 
+  // Check if this is an error page
+  const pageTitle = doc.querySelector("title")?.textContent || "";
+  if (
+    pageTitle.toLowerCase().includes("not found") ||
+    html.includes("notFound.asp")
+  ) {
+    throw new Error(
+      "Price guide page not found - item may not exist on Bricklink",
+    );
+  }
+
   // Extract pricing boxes (4 boxes: 6mo new, 6mo used, current new, current used)
   // The boxes are in the row with bgcolor="#C0C0C0" which contains the summary statistics
   const priceBoxes = doc.querySelectorAll(
     'tr[bgcolor="#C0C0C0"] > td',
   );
+
+  // Validate that we found the expected price table structure
+  if (priceBoxes.length === 0) {
+    throw new Error(
+      "Price guide table structure not found. " +
+        "Page may have been redirected or Bricklink's HTML structure has changed.",
+    );
+  }
 
   const pricingData = {
     six_month_new: null as PricingBox | null,
@@ -379,7 +402,8 @@ export function hasAnyPricingChanged(
  */
 export function hasAnyPriceField(box: PricingBox | null): boolean {
   if (!box) return false;
-  return !!(box.min_price || box.avg_price || box.qty_avg_price || box.max_price);
+  return !!(box.min_price || box.avg_price || box.qty_avg_price ||
+    box.max_price);
 }
 
 /**
@@ -393,8 +417,7 @@ export function validatePricingData(data: {
   current_new: PricingBox | null;
   current_used: PricingBox | null;
 }): void {
-  const hasAnyPrice =
-    hasAnyPriceField(data.six_month_new) ||
+  const hasAnyPrice = hasAnyPriceField(data.six_month_new) ||
     hasAnyPriceField(data.six_month_used) ||
     hasAnyPriceField(data.current_new) ||
     hasAnyPriceField(data.current_used);

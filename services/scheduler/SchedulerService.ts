@@ -17,6 +17,12 @@ import { getRedditRepository } from "../reddit/RedditRepository.ts";
 import { getWorldBricksRepository } from "../worldbricks/WorldBricksRepository.ts";
 import { getQueueService, JobPriority } from "../queue/QueueService.ts";
 import { getMissingDataDetector } from "../missing-data/MissingDataDetectorService.ts";
+import {
+  asBaseSetNumber,
+  asBricklinkItemId,
+  buildBricklinkCatalogUrl,
+  toBricklinkItemId,
+} from "../../types/lego-set.ts";
 
 /**
  * Result of a scheduler run
@@ -91,12 +97,14 @@ export class SchedulerService {
             continue;
           }
 
-          const url =
-            `https://www.bricklink.com/v2/catalog/catalogitem.page?S=${setNumber}`;
+          // BrickLink requires -1 suffix for LEGO sets
+          const baseSetNumber = asBaseSetNumber(setNumber);
+          const bricklinkItemId = toBricklinkItemId(baseSetNumber);
+          const url = buildBricklinkCatalogUrl(bricklinkItemId);
 
           await queueService.addScrapeJob({
             url,
-            itemId: setNumber,
+            itemId: bricklinkItemId,
             saveToDb: true,
             priority: JobPriority.HIGH,
           });
@@ -122,8 +130,9 @@ export class SchedulerService {
         try {
           // Missing data result includes itemId and missingBoxes but not itemType
           // Default to 'S' for LEGO sets
-          const url =
-            `https://www.bricklink.com/v2/catalog/catalogitem.page?S=${item.itemId}`;
+          // item.itemId is already in Bricklink format (e.g., "60365-1")
+          const bricklinkItemId = asBricklinkItemId(item.itemId);
+          const url = buildBricklinkCatalogUrl(bricklinkItemId);
 
           await queueService.addScrapeJob({
             url,
@@ -152,8 +161,12 @@ export class SchedulerService {
 
       for (const item of scheduledItems) {
         try {
-          const url =
-            `https://www.bricklink.com/v2/catalog/catalogitem.page?${item.itemType}=${item.itemId}`;
+          // item.itemId is already in Bricklink format (e.g., "60365-1")
+          const bricklinkItemId = asBricklinkItemId(item.itemId);
+          const url = buildBricklinkCatalogUrl(
+            bricklinkItemId,
+            item.itemType,
+          );
 
           await queueService.addScrapeJob({
             url,

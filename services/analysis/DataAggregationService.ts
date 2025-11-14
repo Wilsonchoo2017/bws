@@ -19,6 +19,7 @@ import type {
   QualityData,
 } from "./types.ts";
 import { asCents, type Cents } from "../../types/price.ts";
+import { asBaseSetNumber, toBricklinkItemId } from "../../types/lego-set.ts";
 
 import type {
   IBricklinkRepository,
@@ -73,13 +74,15 @@ export class DataAggregationService {
         : Promise.resolve(null),
       product.legoSetNumber
         ? this.bricklinkRepo.getPastSalesStatistics(
-          `S-${product.legoSetNumber}`,
+          toBricklinkItemId(asBaseSetNumber(product.legoSetNumber)),
         )
         : Promise.resolve(null),
     ]);
 
     // Validate Bricklink data completeness (prerequisite for recommendations)
-    const validation = BricklinkDataValidator.validateCompleteness(bricklinkData);
+    const validation = BricklinkDataValidator.validateCompleteness(
+      bricklinkData,
+    );
     if (!validation.isComplete) {
       throw new Error(
         `Complete Bricklink sales data is required for analysis. ${validation.message}. Product: ${product.name} (${productId})`,
@@ -125,7 +128,9 @@ export class DataAggregationService {
     const uniqueSetNumbers = Array.from(new Set(legoSetNumbers));
 
     // Convert set numbers to Bricklink item IDs for past sales
-    const bricklinkItemIds = uniqueSetNumbers.map((num) => `S-${num}`);
+    const bricklinkItemIds = uniqueSetNumbers.map((num) =>
+      toBricklinkItemId(asBaseSetNumber(num))
+    );
 
     // Batch fetch all related data in parallel (5 queries instead of 5*N!)
     const [
@@ -156,14 +161,18 @@ export class DataAggregationService {
     );
 
     // Validate Bricklink data completeness for all products FIRST
-    const incompleteProducts: Array<{ productId: string; name: string; message: string }> = [];
+    const incompleteProducts: Array<
+      { productId: string; name: string; message: string }
+    > = [];
 
     for (const product of products) {
       const bricklinkData = product.legoSetNumber
         ? bricklinkMap.get(product.legoSetNumber) || null
         : null;
 
-      const validation = BricklinkDataValidator.validateCompleteness(bricklinkData);
+      const validation = BricklinkDataValidator.validateCompleteness(
+        bricklinkData,
+      );
       if (!validation.isComplete) {
         incompleteProducts.push({
           productId: product.productId,
@@ -175,9 +184,12 @@ export class DataAggregationService {
 
     // If any products have incomplete data, throw error with details
     if (incompleteProducts.length > 0) {
-      const errorMessage = `Complete Bricklink sales data is required for analysis. ${incompleteProducts.length} of ${products.length} products have incomplete data:\n${
-        incompleteProducts.map((p) => `- ${p.name} (${p.productId}): ${p.message}`).join("\n")
-      }`;
+      const errorMessage =
+        `Complete Bricklink sales data is required for analysis. ${incompleteProducts.length} of ${products.length} products have incomplete data:\n${
+          incompleteProducts.map((p) =>
+            `- ${p.name} (${p.productId}): ${p.message}`
+          ).join("\n")
+        }`;
       throw new Error(errorMessage);
     }
 
@@ -199,7 +211,9 @@ export class DataAggregationService {
         ? worldBricksMap.get(product.legoSetNumber) || null
         : null;
       const pastSalesStats = product.legoSetNumber
-        ? pastSalesMap.get(`S-${product.legoSetNumber}`) || null
+        ? pastSalesMap.get(
+          toBricklinkItemId(asBaseSetNumber(product.legoSetNumber)),
+        ) || null
         : null;
 
       const analysisInput: ProductAnalysisInput = {
@@ -242,8 +256,12 @@ export class DataAggregationService {
     const originalPriceCents = this.safeNumber(product.priceBeforeDiscount);
 
     return {
-      currentRetailPrice: currentPriceCents !== undefined ? asCents(currentPriceCents) : undefined,
-      originalRetailPrice: originalPriceCents !== undefined ? asCents(originalPriceCents) : undefined,
+      currentRetailPrice: currentPriceCents !== undefined
+        ? asCents(currentPriceCents)
+        : undefined,
+      originalRetailPrice: originalPriceCents !== undefined
+        ? asCents(originalPriceCents)
+        : undefined,
       discountPercentage: this.calculateDiscountPercentage(
         currentPriceCents,
         originalPriceCents,

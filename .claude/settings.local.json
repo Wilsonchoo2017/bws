@@ -21,7 +21,9 @@
       "Bash(sed:*)",
       "Bash(deno test:*)",
       "WebFetch(domain:docs.bullmq.io)",
-      "WebFetch(domain:github.com)"
+      "WebFetch(domain:github.com)",
+      "Bash(gunzip:*)",
+      "Bash(sha256sum:*)"
     ],
     "deny": [],
     "ask": []
