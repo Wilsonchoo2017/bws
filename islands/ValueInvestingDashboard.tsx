@@ -4,18 +4,51 @@ import type { ValueInvestingProduct } from "../types/value-investing.ts";
 import { ErrorBoundary } from "./components/ErrorBoundary.tsx";
 import { IntrinsicValueProgressBar } from "./components/IntrinsicValueProgressBar.tsx";
 import { formatCurrency, formatPercentage } from "../utils/formatters.ts";
+import VoucherSelector from "./VoucherSelector.tsx";
+import type { VoucherTemplate } from "../types/voucher.ts";
+import type { Voucher } from "../hooks/useVoucherList.ts";
+import { VoucherEnhancedCalculator } from "../services/value-investing/VoucherEnhancedCalculator.ts";
+import type { VoucherEnhancedMetrics } from "../services/value-investing/VoucherEnhancedCalculator.ts";
 
 interface ValueInvestingDashboardProps {
   products: ValueInvestingProduct[];
+  availableVouchers: Voucher[];
 }
 
 export default function ValueInvestingDashboard(
-  { products: initialProducts }: ValueInvestingDashboardProps,
+  { products: initialProducts, availableVouchers }: ValueInvestingDashboardProps,
 ) {
   const products = useSignal<ValueInvestingProduct[]>(initialProducts);
   const minROI = useSignal<number>(0);
   const maxDistanceFromIntrinsic = useSignal<number>(50); // ±50% from intrinsic value
   const sortBy = useSignal<string>("bestValue"); // Default: furthest below intrinsic first
+  const selectedVouchers = useSignal<VoucherTemplate[]>([]);
+  const _voucherMode = useSignal<"original" | "voucher" | "both">("both");
+
+  /**
+   * Memoized voucher-enhanced products
+   * Calculates voucher-adjusted metrics for each product
+   */
+  const productsWithVouchers = useMemo<Array<{
+    product: ValueInvestingProduct;
+    voucherMetrics: VoucherEnhancedMetrics;
+  }>>(() => {
+    return products.value.map((product) => {
+      const voucherMetrics = VoucherEnhancedCalculator.calculateVoucherEnhancedMetrics({
+        productId: product.productId,
+        legoSetNumber: product.legoSetNumber || undefined,
+        currentPrice: product.currentPrice,
+        tags: undefined, // TODO: Add tags to product data if needed
+        valueMetrics: product.valueMetrics,
+        selectedVouchers: selectedVouchers.value,
+      });
+
+      return {
+        product,
+        voucherMetrics,
+      };
+    });
+  }, [products.value, selectedVouchers.value]);
 
   /**
    * Memoized filtered products computation
@@ -23,21 +56,28 @@ export default function ValueInvestingDashboard(
    * Prevents expensive filtering/sorting on every render
    */
   const filteredProducts = useMemo(() => {
-    let filtered = [...products.value];
+    let filtered = [...productsWithVouchers];
 
-    // ROI filter
+    // ROI filter (use voucher-enhanced ROI when vouchers are selected)
     if (minROI.value > 0) {
-      filtered = filtered.filter((p) =>
-        p.valueMetrics?.expectedROI >= minROI.value
-      );
+      filtered = filtered.filter(({ product, voucherMetrics }) => {
+        const roiToCheck = selectedVouchers.value.length > 0
+          ? voucherMetrics.voucherEnhancedROI
+          : product.valueMetrics?.expectedROI ?? 0;
+        return roiToCheck >= minROI.value;
+      });
     }
 
     // Distance from intrinsic value filter
-    filtered = filtered.filter((p) => {
-      const intrinsicValue = p.valueMetrics?.intrinsicValue ?? 0;
+    filtered = filtered.filter(({ product, voucherMetrics }) => {
+      const intrinsicValue = product.valueMetrics?.intrinsicValue ?? 0;
       if (intrinsicValue === 0) return false;
 
-      const distancePercent = ((p.currentPrice - intrinsicValue) / intrinsicValue) * 100;
+      const priceToCheck = selectedVouchers.value.length > 0
+        ? voucherMetrics.voucherDiscountedPrice
+        : product.currentPrice;
+
+      const distancePercent = ((priceToCheck - intrinsicValue) / intrinsicValue) * 100;
       return Math.abs(distancePercent) <= maxDistanceFromIntrinsic.value;
     });
 
@@ -46,17 +86,47 @@ export default function ValueInvestingDashboard(
       switch (sortBy.value) {
         case "bestValue": {
           // Furthest below intrinsic value first (most negative distance)
-          const aDistance = ((a.currentPrice - (a.valueMetrics?.intrinsicValue ?? 0)) / (a.valueMetrics?.intrinsicValue ?? 1)) * 100;
-          const bDistance = ((b.currentPrice - (b.valueMetrics?.intrinsicValue ?? 0)) / (b.valueMetrics?.intrinsicValue ?? 1)) * 100;
+          const aPrice = selectedVouchers.value.length > 0
+            ? a.voucherMetrics.voucherDiscountedPrice
+            : a.product.currentPrice;
+          const bPrice = selectedVouchers.value.length > 0
+            ? b.voucherMetrics.voucherDiscountedPrice
+            : b.product.currentPrice;
+
+          const aIntrinsic = a.product.valueMetrics?.intrinsicValue ?? 0;
+          const bIntrinsic = b.product.valueMetrics?.intrinsicValue ?? 0;
+
+          const aDistance = ((aPrice - aIntrinsic) / (aIntrinsic || 1)) * 100;
+          const bDistance = ((bPrice - bIntrinsic) / (bIntrinsic || 1)) * 100;
           return aDistance - bDistance;
         }
-        case "expectedROI":
-          return (b.valueMetrics?.expectedROI ?? 0) -
-            (a.valueMetrics?.expectedROI ?? 0);
-        case "price":
-          return a.currentPrice - b.currentPrice;
-        case "priceDesc":
-          return b.currentPrice - a.currentPrice;
+        case "expectedROI": {
+          const aROI = selectedVouchers.value.length > 0
+            ? a.voucherMetrics.voucherEnhancedROI
+            : a.product.valueMetrics?.expectedROI ?? 0;
+          const bROI = selectedVouchers.value.length > 0
+            ? b.voucherMetrics.voucherEnhancedROI
+            : b.product.valueMetrics?.expectedROI ?? 0;
+          return bROI - aROI;
+        }
+        case "price": {
+          const aPrice = selectedVouchers.value.length > 0
+            ? a.voucherMetrics.voucherDiscountedPrice
+            : a.product.currentPrice;
+          const bPrice = selectedVouchers.value.length > 0
+            ? b.voucherMetrics.voucherDiscountedPrice
+            : b.product.currentPrice;
+          return aPrice - bPrice;
+        }
+        case "priceDesc": {
+          const aPrice = selectedVouchers.value.length > 0
+            ? a.voucherMetrics.voucherDiscountedPrice
+            : a.product.currentPrice;
+          const bPrice = selectedVouchers.value.length > 0
+            ? b.voucherMetrics.voucherDiscountedPrice
+            : b.product.currentPrice;
+          return bPrice - aPrice;
+        }
         default:
           return 0;
       }
@@ -64,10 +134,11 @@ export default function ValueInvestingDashboard(
 
     return filtered;
   }, [
-    products.value,
+    productsWithVouchers,
     minROI.value,
     maxDistanceFromIntrinsic.value,
     sortBy.value,
+    selectedVouchers.value,
   ]);
 
 
@@ -78,9 +149,17 @@ export default function ValueInvestingDashboard(
         <div class="flex flex-col gap-2">
           <h1 class="text-3xl font-bold">Buy Opportunities</h1>
           <p class="text-base-content/70">
-            Find products close to their intrinsic value
+            Find products close to their intrinsic value{selectedVouchers.value.length > 0 ? " (with voucher simulation)" : ""}
           </p>
         </div>
+
+        {/* Voucher Selector */}
+        <VoucherSelector
+          availableVouchers={availableVouchers}
+          selectedVouchers={selectedVouchers.value}
+          onSelectionChange={(vouchers) => selectedVouchers.value = vouchers}
+          maxSelections={5}
+        />
 
         {/* Filters */}
         <div class="card bg-base-100">
@@ -208,71 +287,129 @@ export default function ValueInvestingDashboard(
                       </tr>
                     </thead>
                     <tbody>
-                      {filteredProducts.map((product) => (
-                        <tr key={product.id} class="hover">
-                          <td>
-                            <div class="flex items-center gap-3">
-                              <div class="avatar">
-                                <div class="mask mask-squircle w-12 h-12">
-                                  <img
-                                    src={product.image}
-                                    alt={product.name}
-                                  />
+                      {filteredProducts.map(({ product, voucherMetrics }) => {
+                        const hasVouchers = selectedVouchers.value.length > 0;
+                        const showBothPrices = hasVouchers && voucherMode.value === "both";
+                        const useVoucherPrice = hasVouchers && (voucherMode.value === "voucher" || voucherMode.value === "both");
+
+                        return (
+                          <tr key={product.id} class="hover">
+                            <td>
+                              <div class="flex items-center gap-3">
+                                <div class="avatar">
+                                  <div class="mask mask-squircle w-12 h-12">
+                                    <img
+                                      src={product.image}
+                                      alt={product.name}
+                                    />
+                                  </div>
                                 </div>
-                              </div>
-                              <div>
-                                <div class="font-bold text-sm line-clamp-1">
-                                  {product.name}
-                                </div>
-                                <div class="text-xs opacity-50">
-                                  {product.legoSetNumber || product.productId}
-                                </div>
-                              </div>
-                            </div>
-                          </td>
-                          <td>
-                            <div class="flex flex-col gap-1">
-                              <div class="flex items-center gap-2">
-                                <span class="text-xs opacity-60">Current:</span>
-                                <span class="badge badge-neutral font-mono">
-                                  {formatCurrency(
-                                    product.currentPrice,
-                                    product.currency,
+                                <div>
+                                  <div class="font-bold text-sm line-clamp-1">
+                                    {product.name}
+                                  </div>
+                                  <div class="text-xs opacity-50">
+                                    {product.legoSetNumber || product.productId}
+                                  </div>
+                                  {voucherMetrics.worthItWithVoucher && (
+                                    <div class="badge badge-success badge-xs mt-1">
+                                      Good deal with vouchers!
+                                    </div>
                                   )}
-                                </span>
+                                </div>
                               </div>
-                              <div class="flex items-center gap-2">
-                                <span class="text-xs opacity-60">Intrinsic:</span>
-                                <span class="badge badge-info font-mono">
-                                  {formatCurrency(
-                                    product.valueMetrics.intrinsicValue,
-                                    product.currency,
-                                  )}
-                                </span>
+                            </td>
+                            <td>
+                              <div class="flex flex-col gap-1">
+                                <div class="flex items-center gap-2">
+                                  <span class="text-xs opacity-60">
+                                    {showBothPrices ? "Original:" : "Current:"}
+                                  </span>
+                                  <span class={`badge font-mono ${showBothPrices ? "badge-ghost line-through opacity-60" : "badge-neutral"}`}>
+                                    {formatCurrency(
+                                      product.currentPrice,
+                                      product.currency,
+                                    )}
+                                  </span>
+                                </div>
+                                {useVoucherPrice && voucherMetrics.voucherSavings > 0 && (
+                                  <div class="flex items-center gap-2">
+                                    <span class="text-xs opacity-60">With Voucher:</span>
+                                    <span class="badge badge-success font-mono font-bold">
+                                      {formatCurrency(
+                                        voucherMetrics.voucherDiscountedPrice,
+                                        product.currency,
+                                      )}
+                                    </span>
+                                    <span class="text-xs text-success">
+                                      (-{formatCurrency(voucherMetrics.voucherSavings, product.currency)})
+                                    </span>
+                                  </div>
+                                )}
+                                <div class="flex items-center gap-2">
+                                  <span class="text-xs opacity-60">Intrinsic:</span>
+                                  <span class="badge badge-info font-mono">
+                                    {formatCurrency(
+                                      product.valueMetrics.intrinsicValue,
+                                      product.currency,
+                                    )}
+                                  </span>
+                                </div>
                               </div>
-                            </div>
-                          </td>
-                          <td class="min-w-[300px]">
-                            <IntrinsicValueProgressBar
-                              currentPriceCents={product.currentPrice}
-                              intrinsicValueCents={product.valueMetrics.intrinsicValue}
-                            />
-                          </td>
-                          <td>
-                            <span
-                              class={`badge font-mono font-bold ${
-                                product.valueMetrics.expectedROI > 0
-                                  ? "badge-success"
-                                  : "badge-error"
-                              }`}
-                            >
-                              {formatPercentage(
-                                product.valueMetrics.expectedROI,
+                            </td>
+                            <td class="min-w-[300px]">
+                              <IntrinsicValueProgressBar
+                                currentPriceCents={useVoucherPrice ? voucherMetrics.voucherDiscountedPrice : product.currentPrice}
+                                intrinsicValueCents={product.valueMetrics.intrinsicValue}
+                              />
+                              {showBothPrices && voucherMetrics.voucherSavings > 0 && (
+                                <div class="text-xs text-gray-500 mt-1">
+                                  Margin: {formatPercentage(voucherMetrics.originalMarginOfSafety)} → {formatPercentage(voucherMetrics.voucherEnhancedMarginOfSafety)}
+                                </div>
                               )}
-                            </span>
-                          </td>
-                        </tr>
-                      ))}
+                            </td>
+                            <td>
+                              <div class="flex flex-col gap-1">
+                                {showBothPrices ? (
+                                  <>
+                                    <span class="badge badge-ghost font-mono line-through opacity-60">
+                                      {formatPercentage(product.valueMetrics.expectedROI)}
+                                    </span>
+                                    {voucherMetrics.voucherSavings > 0 && (
+                                      <span
+                                        class={`badge font-mono font-bold ${
+                                          voucherMetrics.voucherEnhancedROI > 0
+                                            ? "badge-success"
+                                            : "badge-error"
+                                        }`}
+                                      >
+                                        {formatPercentage(voucherMetrics.voucherEnhancedROI)}
+                                        {voucherMetrics.roiImprovement > 0 && (
+                                          <span class="ml-1 text-xs">
+                                            (+{formatPercentage(voucherMetrics.roiImprovement)}pp)
+                                          </span>
+                                        )}
+                                      </span>
+                                    )}
+                                  </>
+                                ) : (
+                                  <span
+                                    class={`badge font-mono font-bold ${
+                                      (useVoucherPrice ? voucherMetrics.voucherEnhancedROI : product.valueMetrics.expectedROI) > 0
+                                        ? "badge-success"
+                                        : "badge-error"
+                                    }`}
+                                  >
+                                    {formatPercentage(
+                                      useVoucherPrice ? voucherMetrics.voucherEnhancedROI : product.valueMetrics.expectedROI,
+                                    )}
+                                  </span>
+                                )}
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
                     </tbody>
                   </table>
                 </div>

@@ -1,16 +1,18 @@
 import { Handlers, PageProps } from "$fresh/server.ts";
 import { Head } from "$fresh/runtime.ts";
 import { db } from "../db/client.ts";
-import { bricklinkItems, products } from "../db/schema.ts";
-import { and, eq, gt, isNotNull, or, sql } from "drizzle-orm";
+import { bricklinkItems, products, vouchers } from "../db/schema.ts";
+import { and, eq, gt, isNotNull, lte, or, sql } from "drizzle-orm";
 import { AnalysisService } from "../services/analysis/AnalysisService.ts";
 import { ValueInvestingService } from "../services/value-investing/ValueInvestingService.ts";
 import type { ValueInvestingProduct } from "../types/value-investing.ts";
 import ValueInvestingDashboard from "../islands/ValueInvestingDashboard.tsx";
 import { globalCache } from "../services/cache/CacheService.ts";
+import type { Voucher } from "../hooks/useVoucherList.ts";
 
 interface BuyPageData {
   products: ValueInvestingProduct[];
+  availableVouchers: Voucher[];
   error?: string;
 }
 
@@ -27,7 +29,26 @@ export const handler: Handlers<BuyPageData> = {
       const cachedData = await globalCache.getOrCompute<BuyPageData>(
         CACHE_KEY,
         async () => {
-          // Step 1: Fetch all active products with Bricklink data
+          // Step 1: Fetch active vouchers
+          const now = new Date();
+          const activeVouchers = await db
+            .select()
+            .from(vouchers)
+            .where(
+              and(
+                eq(vouchers.isActive, true),
+                or(
+                  isNotNull(vouchers.startDate) === false,
+                  lte(vouchers.startDate, now.toISOString())
+                ),
+                or(
+                  isNotNull(vouchers.endDate) === false,
+                  gt(vouchers.endDate, now.toISOString())
+                )
+              )
+            );
+
+          // Step 2: Fetch all active products with Bricklink data
           const allProducts = await db
             .select({
               id: products.id,

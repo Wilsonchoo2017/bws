@@ -19,7 +19,7 @@ import {
   bricklinkItems,
   products,
 } from "../../db/schema.ts";
-import { and, eq, isNotNull, lte, or, sql } from "drizzle-orm";
+import { and, eq, isNotNull, or, sql } from "drizzle-orm";
 import { getQueueService, JobPriority } from "../queue/QueueService.ts";
 import type { PricingBox } from "../bricklink/BricklinkParser.ts";
 import {
@@ -425,8 +425,6 @@ export class MissingDataDetectorService {
       missingBoxes: string[];
     }>
   > {
-    const now = new Date();
-
     // Use SQL to find items where any pricing box has null total_qty
     // This is much more efficient than fetching all items and checking in JavaScript
     //

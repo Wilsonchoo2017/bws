@@ -163,7 +163,10 @@ export const handler: Handlers<ProductDetailData | null> = {
         const now = new Date();
         productTagsData.push(
           ...tags.map((tag) => ({
-            ...tag,
+            id: tag.id,
+            name: tag.name,
+            description: tag.description,
+            endDate: tag.endDate ? tag.endDate.toISOString() : null,
             isExpired: tag.endDate ? new Date(tag.endDate) < now : false,
           })),
         );

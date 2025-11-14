@@ -4,8 +4,6 @@ import {
   formatPrice,
 } from "../../utils/formatters.ts";
 import {
-  getProductPlatformBadgeClass,
-  getProductPlatformLabel,
   getSoldBadgeColor,
 } from "../../utils/product-helpers.ts";
 import type { Product } from "../../hooks/useProductList.ts";
