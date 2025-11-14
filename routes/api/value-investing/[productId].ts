@@ -12,7 +12,7 @@ import { db } from "../../../db/client.ts";
 import { products } from "../../../db/schema.ts";
 import { AnalysisService } from "../../../services/analysis/AnalysisService.ts";
 import { ValueInvestingService } from "../../../services/value-investing/ValueInvestingService.ts";
-import { asCents, dollarsToCents } from "../../../types/price.ts";
+import { asCents } from "../../../types/price.ts";
 
 export const handler: Handlers = {
   async GET(_req, ctx) {
@@ -75,17 +75,17 @@ export const handler: Handlers = {
       // Calculate value metrics from the analysis
       // IMPORTANT: product.price is in CENTS (from database)
       // analysis.recommendedBuyPrice.price is in DOLLARS (from ValueCalculator)
-      // All prices in API response should be in CENTS for consistency
-      const currentPriceCents = asCents(product.price!);
-      const targetPriceCents = dollarsToCents(analysis.recommendedBuyPrice.price);
-      const intrinsicValueCents = dollarsToCents(analysis.recommendedBuyPrice.price / (1 - 0.25)); // Estimate intrinsic value assuming 25% margin
+      // IntrinsicValueCard expects all prices in DOLLARS (uses Intl.NumberFormat)
+      const currentPriceDollars = asCents(product.price!) / 100;
+      const targetPriceDollars = analysis.recommendedBuyPrice.price;
+      const intrinsicValueDollars = analysis.recommendedBuyPrice.price / (1 - 0.25); // Estimate intrinsic value assuming 25% margin
 
       const valueMetrics = {
-        currentPrice: currentPriceCents,
-        targetPrice: targetPriceCents,
-        intrinsicValue: intrinsicValueCents,
-        marginOfSafety: ((targetPriceCents - currentPriceCents) / targetPriceCents) * 100,
-        expectedROI: ((targetPriceCents - currentPriceCents) / currentPriceCents) * 100,
+        currentPrice: currentPriceDollars,
+        targetPrice: targetPriceDollars,
+        intrinsicValue: intrinsicValueDollars,
+        marginOfSafety: ((targetPriceDollars - currentPriceDollars) / targetPriceDollars) * 100,
+        expectedROI: ((targetPriceDollars - currentPriceDollars) / currentPriceDollars) * 100,
         timeHorizon: analysis.timeHorizon || "Unknown",
       };
 
