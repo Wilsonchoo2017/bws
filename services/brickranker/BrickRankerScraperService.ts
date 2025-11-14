@@ -32,19 +32,9 @@ import {
   IMAGE_CONFIG,
   ImageDownloadStatus,
 } from "../../config/image.config.ts";
-import {
-  BRICKRANKER_CONFIG,
-  calculateBackoff,
-  RETRY_CONFIG,
-} from "../../config/scraper.config.ts";
-import {
-  createCircuitBreaker,
-  type RedisCircuitBreaker,
-} from "../../utils/RedisCircuitBreaker.ts";
+import { BRICKRANKER_CONFIG } from "../../config/scraper.config.ts";
 import { scraperLogger } from "../../utils/logger.ts";
-import { rawDataService } from "../raw-data/index.ts";
-import { db } from "../../db/client.ts";
-import { scrapeSessions } from "../../db/schema.ts";
+import { BaseScraperService } from "../base/BaseScraperService.ts";
 
 /**
  * Result of a scraping operation
@@ -74,16 +64,13 @@ export interface ScrapeOptions {
 /**
  * BrickRankerScraperService - Orchestrates the entire scraping workflow
  */
-export class BrickRankerScraperService {
-  private circuitBreaker: RedisCircuitBreaker;
-
+export class BrickRankerScraperService extends BaseScraperService {
   constructor(
     private httpClient: HttpClientService,
-    private rateLimiter: RateLimiterService,
+    rateLimiter: RateLimiterService,
     private repository: BrickRankerRepository,
   ) {
-    // Initialize Redis-based circuit breaker for distributed state
-    this.circuitBreaker = createCircuitBreaker("brickranker");
+    super(rateLimiter, "brickranker");
   }
 
   /**
@@ -108,154 +95,89 @@ export class BrickRankerScraperService {
       };
     }
 
-    // Check circuit breaker
-    if (await this.circuitBreaker.isCircuitOpen()) {
-      scraperLogger.warn("BrickRanker circuit breaker is open", {
-        url,
-        source: "brickranker",
-      });
-      return {
-        success: false,
-        error: "Circuit breaker is open. Too many recent failures.",
-      };
-    }
-
-    let lastError: Error | null = null;
-    let retries = 0;
     let scrapeSessionId: number | null = null;
 
     // Create scrape session if saveToDb is true
     if (saveToDb) {
-      const [session] = await db.insert(scrapeSessions).values({
+      scrapeSessionId = await this.createScrapeSession({
         source: "brickranker",
         sourceUrl: url,
-        productsFound: 0,
-        productsStored: 0,
-        status: "success",
-      }).returning();
-      scrapeSessionId = session.id;
+      });
     }
 
-    // Retry loop with exponential backoff
-    for (let attempt = 1; attempt <= RETRY_CONFIG.MAX_RETRIES; attempt++) {
-      try {
-        retries = attempt - 1;
-
-        scraperLogger.info("Starting BrickRanker scraping attempt", {
-          url,
-          attempt,
-          maxRetries: RETRY_CONFIG.MAX_RETRIES,
-          source: "brickranker",
-        });
-
-        // Rate limiting (unless skipped)
-        if (!skipRateLimit) {
-          await this.rateLimiter.waitForNextRequest({
-            domain: "brickranker.com",
-          });
-        }
-
-        // Fetch retirement tracker page
-        scraperLogger.info("Fetching BrickRanker retirement tracker page", {
-          url,
-          source: "brickranker",
-        });
-        const response = await this.httpClient.fetch({
-          url,
-          waitForSelector: "table", // Wait for tables to load
-        });
-
-        if (response.status !== 200) {
-          throw new Error(
-            `Failed to fetch retirement tracker page: HTTP ${response.status}`,
-          );
-        }
-
-        // Save raw HTML if saveToDb is true
-        if (saveToDb && scrapeSessionId) {
-          await rawDataService.saveRawData({
-            scrapeSessionId,
-            source: "brickranker",
-            sourceUrl: url,
-            rawHtml: response.html,
-            contentType: "text/html",
-            httpStatus: response.status,
-          });
-        }
-
-        // Parse the page to extract all retirement items
-        scraperLogger.info("Parsing BrickRanker retirement data", {
-          url,
-          source: "brickranker",
-        });
-        const data = parseRetirementTrackerPage(response.html);
-
-        scraperLogger.info("Successfully parsed BrickRanker data", {
-          totalItems: data.totalItems,
-          themesCount: data.themes.length,
-          themes: data.themes.join(", "),
-          source: "brickranker",
-        });
-
-        // Save to database if requested
-        let saved = false;
-        let stats = undefined;
-        if (saveToDb) {
-          stats = await this.saveToDatabase(data.items);
-          saved = true;
-        }
-
-        // Reset circuit breaker on success
-        await this.circuitBreaker.recordSuccess();
-
-        return {
-          success: true,
-          data,
-          retries,
-          saved,
-          stats,
-        };
-      } catch (error) {
-        lastError = error as Error;
-        scraperLogger.error("BrickRanker scraping attempt failed", {
-          url,
-          attempt,
-          maxRetries: RETRY_CONFIG.MAX_RETRIES,
-          error: error.message,
-          stack: error.stack,
-          source: "brickranker",
-        });
-
-        // If not the last attempt, wait with exponential backoff
-        if (attempt < RETRY_CONFIG.MAX_RETRIES) {
-          const backoffDelay = calculateBackoff(attempt);
-          scraperLogger.info("Waiting before retry with exponential backoff", {
+    try {
+      const result = await this.withRetryLogic(
+        async (_attempt) => {
+          // Fetch retirement tracker page
+          scraperLogger.info("Fetching BrickRanker retirement tracker page", {
             url,
-            backoffMs: backoffDelay,
-            backoffSeconds: backoffDelay / 1000,
-            nextAttempt: attempt + 1,
             source: "brickranker",
           });
-          await this.delay(backoffDelay);
-        }
-      }
+          const response = await this.httpClient.fetch({
+            url,
+            waitForSelector: "table", // Wait for tables to load
+          });
+
+          if (response.status !== 200) {
+            throw new Error(
+              `Failed to fetch retirement tracker page: HTTP ${response.status}`,
+            );
+          }
+
+          // Save raw HTML if saveToDb is true
+          if (saveToDb && scrapeSessionId) {
+            await this.saveRawHtml({
+              scrapeSessionId,
+              source: "brickranker",
+              sourceUrl: url,
+              rawHtml: response.html,
+              httpStatus: response.status,
+            });
+          }
+
+          // Parse the page to extract all retirement items
+          scraperLogger.info("Parsing BrickRanker retirement data", {
+            url,
+            source: "brickranker",
+          });
+          const data = parseRetirementTrackerPage(response.html);
+
+          scraperLogger.info("Successfully parsed BrickRanker data", {
+            totalItems: data.totalItems,
+            themesCount: data.themes.length,
+            themes: data.themes.join(", "),
+            source: "brickranker",
+          });
+
+          // Save to database if requested
+          let stats = undefined;
+          if (saveToDb) {
+            stats = await this.saveToDatabase(data.items);
+          }
+
+          return { data, stats, saved: saveToDb };
+        },
+        {
+          url,
+          skipRateLimit,
+          domain: "brickranker.com",
+          source: "brickranker",
+        },
+      );
+
+      return {
+        success: true,
+        data: result.data,
+        saved: result.saved,
+        stats: result.stats,
+        retries: 0,
+      };
+    } catch (error) {
+      return {
+        success: false,
+        error: error.message || "Unknown error",
+      };
     }
-
-    // All retries failed
-    await this.circuitBreaker.recordFailure();
-
-    scraperLogger.error("All BrickRanker scraping attempts failed", {
-      url,
-      totalAttempts: RETRY_CONFIG.MAX_RETRIES,
-      finalError: lastError?.message || "Unknown error",
-      source: "brickranker",
-    });
-
-    return {
-      success: false,
-      error: lastError?.message || "Unknown error",
-      retries: RETRY_CONFIG.MAX_RETRIES,
-    };
   }
 
   /**
@@ -384,20 +306,6 @@ export class BrickRankerScraperService {
     options: Omit<ScrapeOptions, "saveToDb"> = {},
   ): Promise<ScrapeResult> {
     return await this.scrape({ ...options, saveToDb: true });
-  }
-
-  /**
-   * Get circuit breaker status (for monitoring/debugging)
-   */
-  async getCircuitBreakerStatus() {
-    return await this.circuitBreaker.getState();
-  }
-
-  /**
-   * Delay helper
-   */
-  private delay(ms: number): Promise<void> {
-    return new Promise((resolve) => setTimeout(resolve, ms));
   }
 
   /**
