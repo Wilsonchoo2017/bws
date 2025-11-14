@@ -42,7 +42,8 @@ function isValidProduct(product: Product): boolean {
     product.price !== null &&
     product.price > 0 &&
     product.image &&
-    product.currency
+    product.currency &&
+    product.legoSetNumber // Required to link to Bricklink data
   );
 }
 
