@@ -4,7 +4,7 @@
     "check": "deno fmt --check && deno lint && deno check **/*.ts && deno check **/*.tsx",
     "cli": "echo \"import '\\$fresh/src/dev/cli.ts'\" | deno run --unstable -A -",
     "manifest": "deno task cli manifest $(pwd)",
-    "start": "deno run -A --watch=static/,routes/ dev.ts",
+    "start": "deno run -A --watch=static/,routes/ --watch-exclude=static/images/ --watch-exclude=logs/ --watch-exclude=**/*.log dev.ts",
     "build": "deno run -A dev.ts build",
     "preview": "deno run -A main.ts",
     "update": "deno run -A -r https://fresh.deno.dev/update .",
@@ -12,10 +12,11 @@
     "test:watch": "deno test -A --watch",
     "db:generate": "deno run -A npm:drizzle-kit generate",
     "db:migrate": "deno run -A db/migrate.ts",
-    "db:studio": "deno run -A npm:drizzle-kit studio"
+    "db:studio": "deno run -A npm:drizzle-kit studio",
+    "db:reset": "deno run -A db/reset.ts && deno run -A npm:drizzle-kit push"
   },
   "lint": { "rules": { "tags": ["fresh", "recommended"] } },
-  "exclude": ["**/_fresh/*"],
+  "exclude": ["**/_fresh/*", "static/images/", "logs/", "**/*.log"],
   "imports": {
     "$fresh/": "https://deno.land/x/fresh@1.7.3/",
     "preact": "https://esm.sh/preact@10.22.0",
