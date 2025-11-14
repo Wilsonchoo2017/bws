@@ -8,6 +8,8 @@
     "build": "deno run -A dev.ts build",
     "preview": "deno run -A main.ts",
     "update": "deno run -A -r https://fresh.deno.dev/update .",
+    "test": "deno test -A",
+    "test:watch": "deno test -A --watch",
     "db:generate": "deno run -A npm:drizzle-kit generate",
     "db:migrate": "deno run -A db/migrate.ts",
     "db:studio": "deno run -A npm:drizzle-kit studio"

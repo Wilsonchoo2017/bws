@@ -28,6 +28,9 @@ export const productSourceEnum = pgEnum("product_source", [
   "shopee",
   "toysrus",
   "brickeconomy",
+  "bricklink",
+  "worldbricks",
+  "brickranker",
   "self",
 ]);
 
@@ -417,6 +420,50 @@ export const scrapeSessions = pgTable(
   }),
 );
 
+// Raw HTML/API response data for all scrapers
+// Stores compressed raw data for debugging, testing, and re-parsing
+export const scrapeRawData = pgTable(
+  "scrape_raw_data",
+  {
+    id: serial("id").primaryKey(),
+
+    // Foreign key to scrape session
+    scrapeSessionId: integer("scrape_session_id").notNull(),
+
+    // Source and URL information
+    source: productSourceEnum("source").notNull(),
+    sourceUrl: text("source_url").notNull(),
+
+    // Raw HTML/data storage (gzip compressed)
+    rawHtmlCompressed: text("raw_html_compressed").notNull(), // Base64-encoded gzipped data
+    rawHtmlSize: integer("raw_html_size").notNull(), // Original size in bytes
+    compressedSize: integer("compressed_size").notNull(), // Compressed size in bytes
+
+    // Metadata
+    contentType: varchar("content_type", { length: 100 }).default("text/html"),
+    httpStatus: integer("http_status"), // HTTP response status code (if applicable)
+
+    // Timestamp
+    scrapedAt: timestamp("scraped_at").defaultNow().notNull(),
+  },
+  (table) => ({
+    // Index for scrape session lookup
+    scrapeSessionIdIdx: index("idx_scrape_raw_data_session_id").on(table.scrapeSessionId),
+
+    // Index for source filtering
+    sourceIdx: index("idx_scrape_raw_data_source").on(table.source),
+
+    // Index for time-based queries
+    scrapedAtIdx: index("idx_scrape_raw_data_scraped_at").on(table.scrapedAt),
+
+    // Composite index for efficient session + source queries
+    sessionSourceIdx: index("idx_scrape_raw_data_session_source").on(
+      table.scrapeSessionId,
+      table.source,
+    ),
+  }),
+);
+
 // Reddit search results for LEGO sets
 export const redditSearchResults = pgTable(
   "reddit_search_results",
@@ -588,6 +635,9 @@ export type NewShopeeScrape = typeof shopeeScrapes.$inferInsert;
 
 export type ScrapeSession = typeof scrapeSessions.$inferSelect;
 export type NewScrapeSession = typeof scrapeSessions.$inferInsert;
+
+export type ScrapeRawData = typeof scrapeRawData.$inferSelect;
+export type NewScrapeRawData = typeof scrapeRawData.$inferInsert;
 
 export type RedditSearchResult = typeof redditSearchResults.$inferSelect;
 export type NewRedditSearchResult = typeof redditSearchResults.$inferInsert;

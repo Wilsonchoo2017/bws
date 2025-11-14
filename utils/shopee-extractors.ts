@@ -23,6 +23,9 @@ export interface ParsedShopeeProduct {
   brand: string | null;
   price: number | null;
   price_string: string;
+  price_before_discount: number | null;
+  discount_percentage: number | null;
+  promotional_badges: string[];
   units_sold: number | null;
   units_sold_string: string;
   lego_set_number: string | null;
@@ -405,6 +408,98 @@ export function extractShopInfo(
 }
 
 /**
+ * Normalizes badge text to simple tag format
+ * Converts to lowercase and removes all non-alphanumeric characters
+ * @param badge - Raw badge text
+ * @returns Normalized tag string
+ */
+export function normalizeBadgeToTag(badge: string): string {
+  return badge.toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+/**
+ * Extracts promotional badges from a Shopee item element
+ * Looks for text badges like "Shopee Lagi Murah", "COD", "Sea Shipping"
+ * Also checks for flag label images indicating verified products
+ * @param item - DOM element for the product
+ * @returns Array of normalized badge tags
+ */
+export function extractPromotionalBadges(item: Element): string[] {
+  const badges: string[] = [];
+
+  // Extract text badges (Shopee Lagi Murah, COD, etc.)
+  // Target: small badges with h-4 class and truncate spans
+  const badgeElements = item.querySelectorAll(
+    'div[class*="flex items-center"][class*="h-4"] span.truncate',
+  );
+
+  for (const badge of Array.from(badgeElements)) {
+    const text = (badge as Element).textContent?.trim();
+    // Exclude numeric-only text (prices, percentages)
+    if (text && !text.match(/^[\d\.,RM%\-\s]+$/)) {
+      const normalized = normalizeBadgeToTag(text);
+      if (normalized && !badges.includes(normalized)) {
+        badges.push(normalized);
+      }
+    }
+  }
+
+  // Check for flag label (verified products)
+  const flagLabel = item.querySelector('img[alt="flag-label"]');
+  if (flagLabel && !badges.includes("verified")) {
+    badges.push("verified");
+  }
+
+  return badges;
+}
+
+/**
+ * Extracts discount percentage from a Shopee item element
+ * Looks for discount badges like "-3%", "-6%", "-12%"
+ * @param item - DOM element for the product
+ * @returns Discount percentage as number (e.g., 3 for "-3%") or null
+ */
+export function extractDiscountPercentage(item: Element): number | null {
+  // Target: discount badges with pink background
+  const discountBadges = item.querySelectorAll(
+    'div[class*="bg-shopee-pink"]',
+  );
+
+  for (const badge of Array.from(discountBadges)) {
+    const text = (badge as Element).textContent?.trim();
+    // Match patterns like "-3%", "-12%"
+    const match = text?.match(/^-?(\d+(?:\.\d+)?)%$/);
+    if (match) {
+      return parseFloat(match[1]);
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Calculates original price before discount
+ * @param currentPrice - Current price in cents
+ * @param discountPercentage - Discount percentage (e.g., 3 for 3%)
+ * @returns Original price in cents or null
+ */
+export function calculatePriceBeforeDiscount(
+  currentPrice: number | null,
+  discountPercentage: number | null,
+): number | null {
+  if (
+    currentPrice === null || discountPercentage === null ||
+    discountPercentage <= 0
+  ) {
+    return null;
+  }
+
+  // Formula: original = current / (1 - discount/100)
+  const original = currentPrice / (1 - discountPercentage / 100);
+  return Math.round(original);
+}
+
+/**
  * Parses a single Shopee product item element
  * @param item - DOM element for the product
  * @param index - Index of the item in the list
@@ -436,6 +531,12 @@ export function parseProductItem(
     const image = extractImage(item);
     const brand = extractBrand(productName);
     const { shopId, shopName } = extractShopInfo(item, shopUsername);
+    const promotionalBadges = extractPromotionalBadges(item);
+    const discountPercentage = extractDiscountPercentage(item);
+    const priceBeforeDiscount = calculatePriceBeforeDiscount(
+      price,
+      discountPercentage,
+    );
 
     return {
       product_id: productId,
@@ -443,6 +544,9 @@ export function parseProductItem(
       brand,
       price,
       price_string: priceString,
+      price_before_discount: priceBeforeDiscount,
+      discount_percentage: discountPercentage,
+      promotional_badges: promotionalBadges,
       units_sold,
       units_sold_string,
       lego_set_number: legoSetNumber,
