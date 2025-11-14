@@ -9,7 +9,6 @@ import {
   parseHtmlDocument,
   parseProductItem,
   parseShopeeHtml,
-  type ParsedShopeeProduct,
 } from "./shopee-extractors.ts";
 import {
   EMPTY_HTML,

@@ -18,6 +18,7 @@ import {
   ValueCalculator,
 } from "../value-investing/ValueCalculator.ts";
 import type { IntrinsicValueInputs } from "../../types/value-investing.ts";
+import { asCents } from "../../types/price.ts";
 
 export class RecommendationEngine {
   private demandAnalyzer: IAnalyzer<DemandData>;
@@ -83,7 +84,16 @@ export class RecommendationEngine {
 
     if (recommendedBuyPrice) {
       // No conversion needed - ValueCalculator now works in CENTS
-      recommendation.recommendedBuyPrice = recommendedBuyPrice;
+      // Cast to Cents branded type
+      recommendation.recommendedBuyPrice = {
+        price: asCents(recommendedBuyPrice.price),
+        reasoning: recommendedBuyPrice.reasoning,
+        confidence: recommendedBuyPrice.confidence,
+        breakdown: recommendedBuyPrice.breakdown ? {
+          ...recommendedBuyPrice.breakdown,
+          intrinsicValue: asCents(recommendedBuyPrice.breakdown.intrinsicValue),
+        } : undefined,
+      };
     }
 
     return recommendation;
@@ -98,7 +108,26 @@ export class RecommendationEngine {
     demandScore: { value: number } | null,
     availabilityScore: { value: number } | null,
     qualityScore: { value: number } | null,
-  ): { price: number; reasoning: string; confidence: number } | null {
+  ): {
+    price: number;
+    reasoning: string;
+    confidence: number;
+    breakdown?: {
+      intrinsicValue: number;
+      baseMargin: number;
+      adjustedMargin: number;
+      marginAdjustments: Array<{ reason: string; value: number }>;
+      inputs: {
+        msrp?: number;
+        bricklinkAvgPrice?: number;
+        bricklinkMaxPrice?: number;
+        retirementStatus?: string;
+        demandScore?: number;
+        qualityScore?: number;
+        availabilityScore?: number;
+      };
+    };
+  } | null {
     // Determine retirement status with time-decay support
     // IMPROVED: Use WorldBricks yearRetired for accurate calculation
     let retirementStatus: "active" | "retiring_soon" | "retired" | undefined;

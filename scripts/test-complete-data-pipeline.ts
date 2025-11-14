@@ -13,6 +13,7 @@ import type {
 } from "../services/analysis/types.ts";
 import { ValueCalculator } from "../services/value-investing/ValueCalculator.ts";
 import type { IntrinsicValueInputs } from "../types/value-investing.ts";
+import { asCents } from "../types/price.ts";
 
 console.log("=".repeat(80));
 console.log("COMPLETE DATA PIPELINE TEST");
@@ -94,16 +95,16 @@ console.log("Step 2: Building ProductAnalysisInput");
 console.log("-".repeat(80));
 
 const pricingData: PricingData = {
-  currentRetailPrice: mockProduct.price,
-  originalRetailPrice: mockProduct.priceBeforeDiscount, // MSRP
+  currentRetailPrice: asCents(mockProduct.price),
+  originalRetailPrice: asCents(mockProduct.priceBeforeDiscount), // MSRP
   discountPercentage: mockProduct.discount,
   bricklink: {
     current: {
-      newAvg: mockBricklink.current.newAvg,
-      newMax: mockBricklink.current.newMax,
+      newAvg: asCents(mockBricklink.current.newAvg),
+      newMax: asCents(mockBricklink.current.newMax),
     },
     sixMonth: {
-      newAvg: mockBricklink.sixMonth.newAvg,
+      newAvg: asCents(mockBricklink.sixMonth.newAvg),
     },
   },
 };

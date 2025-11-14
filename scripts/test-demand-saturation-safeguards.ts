@@ -5,6 +5,7 @@
 
 import { ValueCalculator } from "../services/value-investing/ValueCalculator.ts";
 import type { IntrinsicValueInputs } from "../types/value-investing.ts";
+import { asCents } from "../types/price.ts";
 
 console.log("=".repeat(80));
 console.log("DEMAND-GATED RETIREMENT & SATURATION DETECTION - TEST SUITE");
@@ -16,8 +17,8 @@ console.log("Test 1: Retired Set WITH Sufficient Demand (Score: 70)");
 console.log("-".repeat(80));
 
 const test1: IntrinsicValueInputs = {
-  bricklinkAvgPrice: 100,
-  bricklinkMaxPrice: 120,
+  bricklinkAvgPrice: asCents(100),
+  bricklinkMaxPrice: asCents(120),
   retirementStatus: "retired",
   yearsPostRetirement: 3, // 3 years retired = 20% premium normally
   demandScore: 70, // ABOVE threshold (40) - should get premium
@@ -42,8 +43,8 @@ console.log("Test 2: Retired Set WITHOUT Sufficient Demand (Score: 25)");
 console.log("-".repeat(80));
 
 const test2: IntrinsicValueInputs = {
-  bricklinkAvgPrice: 100,
-  bricklinkMaxPrice: 120,
+  bricklinkAvgPrice: asCents(100),
+  bricklinkMaxPrice: asCents(120),
   retirementStatus: "retired",
   yearsPostRetirement: 3, // Same 3 years retired
   demandScore: 25, // BELOW threshold (40) - NO premium!
@@ -76,8 +77,8 @@ console.log("Test 3: SATURATED Market (600 units, 60 sellers)");
 console.log("-".repeat(80));
 
 const test3: IntrinsicValueInputs = {
-  bricklinkAvgPrice: 100,
-  bricklinkMaxPrice: 120,
+  bricklinkAvgPrice: asCents(100),
+  bricklinkMaxPrice: asCents(120),
   retirementStatus: "retired",
   yearsPostRetirement: 3,
   demandScore: 70, // Good demand
@@ -111,8 +112,8 @@ console.log("Test 4: THE WORST CASE - Retired + No Demand + Saturated");
 console.log("-".repeat(80));
 
 const test4: IntrinsicValueInputs = {
-  bricklinkAvgPrice: 100,
-  bricklinkMaxPrice: 120,
+  bricklinkAvgPrice: asCents(100),
+  bricklinkMaxPrice: asCents(120),
   retirementStatus: "retired",
   yearsPostRetirement: 5, // 5 years = normally 25% premium
   demandScore: 15, // Very low demand
@@ -158,8 +159,8 @@ console.log("Same set with different supply levels:");
 console.log();
 
 const baseline = {
-  bricklinkAvgPrice: 100,
-  bricklinkMaxPrice: 120,
+  bricklinkAvgPrice: asCents(100),
+  bricklinkMaxPrice: asCents(120),
   retirementStatus: "retired" as const,
   yearsPostRetirement: 2,
   demandScore: 65,
@@ -189,8 +190,8 @@ console.log("Retired set at different demand scores:");
 console.log();
 
 const baseRetired = {
-  bricklinkAvgPrice: 100,
-  bricklinkMaxPrice: 120,
+  bricklinkAvgPrice: asCents(100),
+  bricklinkMaxPrice: asCents(120),
   retirementStatus: "retired" as const,
   yearsPostRetirement: 2,
   qualityScore: 60,

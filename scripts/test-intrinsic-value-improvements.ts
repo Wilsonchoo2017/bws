@@ -5,7 +5,7 @@
 
 import { ValueCalculator } from "../services/value-investing/ValueCalculator.ts";
 import type { IntrinsicValueInputs } from "../types/value-investing.ts";
-
+import { asCents } from "../types/price.ts";
 console.log("=".repeat(80));
 console.log("INTRINSIC VALUE CALCULATION IMPROVEMENTS - TEST SUITE");
 console.log("=".repeat(80));
@@ -16,8 +16,8 @@ console.log("Test 1: High Liquidity + Low Volatility + Recently Retired");
 console.log("-".repeat(80));
 
 const test1: IntrinsicValueInputs = {
-  bricklinkAvgPrice: 100,
-  bricklinkMaxPrice: 120,
+  bricklinkAvgPrice: asCents(100),
+  bricklinkMaxPrice: asCents(120),
   retirementStatus: "retired",
   yearsPostRetirement: 0.5, // Just retired 6 months ago
   demandScore: 70,
@@ -52,8 +52,8 @@ console.log("Test 2: Low Liquidity + High Volatility + Active Set");
 console.log("-".repeat(80));
 
 const test2: IntrinsicValueInputs = {
-  bricklinkAvgPrice: 100,
-  bricklinkMaxPrice: 120,
+  bricklinkAvgPrice: asCents(100),
+  bricklinkMaxPrice: asCents(120),
   retirementStatus: "active",
   demandScore: 40,
   qualityScore: 50,
@@ -96,8 +96,8 @@ console.log("Test 3: Time-Decayed Retirement Premium Progression");
 console.log("-".repeat(80));
 
 const baseInputs: IntrinsicValueInputs = {
-  bricklinkAvgPrice: 100,
-  bricklinkMaxPrice: 120,
+  bricklinkAvgPrice: asCents(100),
+  bricklinkMaxPrice: asCents(120),
   retirementStatus: "retired",
   demandScore: 60,
   qualityScore: 60,
@@ -131,8 +131,8 @@ console.log("Test 4: Legacy Calculation (No New Metrics)");
 console.log("-".repeat(80));
 
 const test4: IntrinsicValueInputs = {
-  bricklinkAvgPrice: 100,
-  bricklinkMaxPrice: 120,
+  bricklinkAvgPrice: asCents(100),
+  bricklinkMaxPrice: asCents(120),
   retirementStatus: "retired",
   // No yearsPostRetirement - uses legacy 15% flat
   demandScore: 60,

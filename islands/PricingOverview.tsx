@@ -64,17 +64,6 @@ function formatPrice(cents: Cents | number, currency: string = "MYR"): string {
   }).format(cents / 100);
 }
 
-/**
- * Format price from dollars (for ValueCalculator breakdown inputs)
- * ⚠️ UNIT CONVENTION: Accepts DOLLARS (from ValueCalculator inputs), displays as currency
- */
-function formatPriceFromDollars(dollars: number, currency: string = "MYR"): string {
-  return new Intl.NumberFormat("en-MY", {
-    style: "currency",
-    currency: currency,
-    minimumFractionDigits: 2,
-  }).format(dollars);
-}
 
 /**
  * Compare current price vs recommended price

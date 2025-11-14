@@ -1,4 +1,4 @@
-import type { Cents, Dollars } from "./price.ts";
+import type { Cents } from "./price.ts";
 
 /**
  * Value metrics for investment analysis (API/Display layer)

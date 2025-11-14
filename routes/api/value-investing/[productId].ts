@@ -11,7 +11,6 @@ import { eq } from "drizzle-orm";
 import { db } from "../../../db/client.ts";
 import { products } from "../../../db/schema.ts";
 import { AnalysisService } from "../../../services/analysis/AnalysisService.ts";
-import { ValueInvestingService } from "../../../services/value-investing/ValueInvestingService.ts";
 import { asCents } from "../../../types/price.ts";
 
 export const handler: Handlers = {

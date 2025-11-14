@@ -5,7 +5,7 @@
 
 import { ValueCalculator } from "../services/value-investing/ValueCalculator.ts";
 import type { IntrinsicValueInputs } from "../types/value-investing.ts";
-
+import { asCents } from "../types/price.ts";
 console.log("=".repeat(80));
 console.log("FUNDAMENTAL VALUE APPROACH - TEST SUITE");
 console.log("Critical Fix: MSRP as base value (NOT market price)");
@@ -18,8 +18,8 @@ console.log("-".repeat(80));
 
 const test1Old: IntrinsicValueInputs = {
   // OLD WAY: Using Bricklink as base (circular reasoning)
-  bricklinkAvgPrice: 200, // Market speculation
-  bricklinkMaxPrice: 250,
+  bricklinkAvgPrice: asCents(200), // Market speculation
+  bricklinkMaxPrice: asCents(250),
   retirementStatus: "retired",
   yearsPostRetirement: 3,
   demandScore: 65,
@@ -28,9 +28,9 @@ const test1Old: IntrinsicValueInputs = {
 
 const test1New: IntrinsicValueInputs = {
   // NEW WAY: Using MSRP as base (fundamental value)
-  msrp: 100, // Original retail price
-  bricklinkAvgPrice: 200, // For comparison only
-  bricklinkMaxPrice: 250,
+  msrp: asCents(100), // Original retail price
+  bricklinkAvgPrice: asCents(200), // For comparison only
+  bricklinkMaxPrice: asCents(250),
   retirementStatus: "retired",
   yearsPostRetirement: 3,
   demandScore: 65,
@@ -63,11 +63,11 @@ console.log("Test 2: Price-to-Retail (P/R) Ratio Filter");
 console.log("-".repeat(80));
 
 const scenarios = [
-  { market: 80, msrp: 100, label: "Below retail" },
-  { market: 120, msrp: 100, label: "Normal aftermarket" },
-  { market: 180, msrp: 100, label: "Speculation" },
-  { market: 250, msrp: 100, label: "Bubble territory" },
-  { market: 350, msrp: 100, label: "Extreme bubble" },
+  { market: 80, msrp: asCents(100), label: "Below retail" },
+  { market: 120, msrp: asCents(100), label: "Normal aftermarket" },
+  { market: 180, msrp: asCents(100), label: "Speculation" },
+  { market: 250, msrp: asCents(100), label: "Bubble territory" },
+  { market: 350, msrp: asCents(100), label: "Extreme bubble" },
 ];
 
 console.log("P/R Ratio Analysis:");
@@ -91,7 +91,7 @@ console.log("Test 3: Realistic J-Curve vs Old Linear Curve");
 console.log("-".repeat(80));
 
 const baseSet = {
-  msrp: 100,
+  msrp: asCents(100),
   retirementStatus: "retired" as const,
   demandScore: 70, // Sufficient for premium
   qualityScore: 60,
@@ -140,7 +140,7 @@ console.log("Same set, different themes:");
 console.log();
 
 const baseThemeSet = {
-  msrp: 100,
+  msrp: asCents(100),
   retirementStatus: "retired" as const,
   yearsPostRetirement: 3,
   demandScore: 65,
@@ -163,17 +163,17 @@ console.log("Test 5: Parts-Per-Dollar Quality Metric");
 console.log("-".repeat(80));
 
 const ppdTests = [
-  { parts: 1200, msrp: 100, label: "Excellent (12 PPD)" },
-  { parts: 900, msrp: 100, label: "Good (9 PPD)" },
-  { parts: 700, msrp: 100, label: "Fair (7 PPD)" },
-  { parts: 500, msrp: 100, label: "Poor (5 PPD)" },
+  { parts: 1200, msrp: asCents(100), label: "Excellent (12 PPD)" },
+  { parts: 900, msrp: asCents(100), label: "Good (9 PPD)" },
+  { parts: 700, msrp: asCents(100), label: "Fair (7 PPD)" },
+  { parts: 500, msrp: asCents(100), label: "Poor (5 PPD)" },
 ];
 
 console.log("Same MSRP, different piece counts:");
 console.log();
 
 const basePPD = {
-  msrp: 100,
+  msrp: asCents(100),
   retirementStatus: "retired" as const,
   yearsPostRetirement: 3,
   demandScore: 65,
@@ -233,8 +233,8 @@ console.log("Test 7: COMPREHENSIVE COMPARISON");
 console.log("-".repeat(80));
 
 const comprehensiveOld: IntrinsicValueInputs = {
-  bricklinkAvgPrice: 300, // Speculation-driven
-  bricklinkMaxPrice: 350,
+  bricklinkAvgPrice: asCents(300), // Speculation-driven
+  bricklinkMaxPrice: asCents(350),
   retirementStatus: "retired",
   yearsPostRetirement: 1, // Just retired
   demandScore: 45, // Moderate demand
@@ -247,10 +247,10 @@ const comprehensiveOld: IntrinsicValueInputs = {
 };
 
 const comprehensiveNew: IntrinsicValueInputs = {
-  msrp: 150, // TRUE fundamental value
+  msrp: asCents(150), // TRUE fundamental value
   currentRetailPrice: undefined, // Retired
-  bricklinkAvgPrice: 300,
-  bricklinkMaxPrice: 350,
+  bricklinkAvgPrice: asCents(300),
+  bricklinkMaxPrice: asCents(350),
   retirementStatus: "retired",
   yearsPostRetirement: 1, // Just retired - J-curve dip!
   yearReleased: new Date().getFullYear() - 4,

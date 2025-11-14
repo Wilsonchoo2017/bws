@@ -17,7 +17,7 @@ import type { Product } from "../../db/schema.ts";
 import type { AnalysisService } from "../analysis/AnalysisService.ts";
 import type { ProductRecommendation } from "../analysis/types.ts";
 import type { ValueInvestingProduct } from "../../types/value-investing.ts";
-import { asCents, centsToDollars, dollarsToCents, type Cents } from "../../types/price.ts";
+import { asCents } from "../../types/price.ts";
 
 /**
  * Type guard for retirement status

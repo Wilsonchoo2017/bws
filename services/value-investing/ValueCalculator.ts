@@ -6,6 +6,7 @@ import {
   getValueRatingConfig,
   VALUE_INVESTING_CONFIG as CONFIG,
 } from "./ValueInvestingConfig.ts";
+import type { Cents } from "../../types/price.ts";
 
 // Strategy-specific margin of safety configurations
 export const STRATEGY_MARGINS = {
@@ -931,9 +932,9 @@ export class ValueCalculator {
       adjustedMargin: number;
       marginAdjustments: Array<{ reason: string; value: number }>;
       inputs: {
-        msrp?: number;
-        bricklinkAvgPrice?: number;
-        bricklinkMaxPrice?: number;
+        msrp?: Cents;
+        bricklinkAvgPrice?: Cents;
+        bricklinkMaxPrice?: Cents;
         retirementStatus?: string;
         demandScore?: number;
         qualityScore?: number;

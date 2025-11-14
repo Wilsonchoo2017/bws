@@ -18,6 +18,7 @@ import type {
   ProductAnalysisInput,
   QualityData,
 } from "./types.ts";
+import { asCents, type Cents } from "../../types/price.ts";
 
 import type {
   IBricklinkRepository,
@@ -205,8 +206,8 @@ export class DataAggregationService {
     const originalPriceCents = this.safeNumber(product.priceBeforeDiscount);
 
     return {
-      currentRetailPrice: currentPriceCents,
-      originalRetailPrice: originalPriceCents,
+      currentRetailPrice: currentPriceCents !== undefined ? asCents(currentPriceCents) : undefined,
+      originalRetailPrice: originalPriceCents !== undefined ? asCents(originalPriceCents) : undefined,
       discountPercentage: this.calculateDiscountPercentage(
         currentPriceCents,
         originalPriceCents,
@@ -408,8 +409,29 @@ export class DataAggregationService {
     return ((priceBeforeDiscount - price) / priceBeforeDiscount) * 100;
   }
 
-  private normalizeBricklinkPricing(item: BricklinkItem) {
-    const parseBox = (box: unknown) => {
+  private normalizeBricklinkPricing(item: BricklinkItem): {
+    current: {
+      newAvg?: Cents;
+      newMin?: Cents;
+      newMax?: Cents;
+      usedAvg?: Cents;
+      usedMin?: Cents;
+      usedMax?: Cents;
+    };
+    sixMonth: {
+      newAvg?: Cents;
+      newMin?: Cents;
+      newMax?: Cents;
+      usedAvg?: Cents;
+      usedMin?: Cents;
+      usedMax?: Cents;
+    };
+  } {
+    const parseBox = (box: unknown): {
+      newAvg?: Cents;
+      newMin?: Cents;
+      newMax?: Cents;
+    } => {
       if (!box || typeof box !== "object") return {};
       const b = box as Record<string, string>;
       return {
@@ -447,12 +469,12 @@ export class DataAggregationService {
     };
   }
 
-  private parsePrice(priceStr: string | undefined | null): number | undefined {
+  private parsePrice(priceStr: string | undefined | null): Cents | undefined {
     if (!priceStr) return undefined;
     const cleaned = priceStr.replace(/[^0-9.]/g, "");
     const parsed = parseFloat(cleaned);
     // Bricklink prices are in dollars, convert to cents
-    return isNaN(parsed) ? undefined : Math.round(parsed * 100);
+    return isNaN(parsed) ? undefined : asCents(Math.round(parsed * 100));
   }
 
   private extractBricklinkTimesSold(item: BricklinkItem): number | undefined {
