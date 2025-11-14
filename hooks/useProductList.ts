@@ -61,6 +61,8 @@ export interface Product {
   hasRetiringSoon: boolean;
   hasBricklinkData: boolean;
   hasBrickEconomyData: boolean;
+  bricklinkDataStatus: "complete" | "partial" | "missing";
+  bricklinkMissingBoxes: string[];
 }
 
 export interface Pagination {

@@ -8,6 +8,7 @@ import {
   productTags as productTagsTable,
   worldbricksSets,
 } from "../../db/schema.ts";
+import { BricklinkDataValidator } from "../../services/bricklink/BricklinkDataValidator.ts";
 
 export const handler = async (
   req: Request,
@@ -185,6 +186,14 @@ export const handler = async (
           ? (brickEconomy?.priceBeforeDiscount ?? product.priceBeforeDiscount)
           : product.priceBeforeDiscount;
 
+        // Validate Bricklink data completeness
+        const bricklinkValidation = BricklinkDataValidator.validateCompleteness(bricklink);
+        const bricklinkDataStatus = !bricklink
+          ? "missing"
+          : bricklinkValidation.isComplete
+          ? "complete"
+          : "partial";
+
         // Return enriched product with availability flags
         return {
           ...product,
@@ -201,6 +210,9 @@ export const handler = async (
           hasRetiringSoon: brickranker?.retiringSoon != null,
           hasBricklinkData: bricklink != null,
           hasBrickEconomyData: brickEconomy?.id != null,
+          // Enhanced Bricklink data status
+          bricklinkDataStatus,
+          bricklinkMissingBoxes: bricklinkValidation.missingBoxes,
         };
       }),
     );

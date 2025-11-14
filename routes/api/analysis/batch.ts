@@ -76,12 +76,19 @@ export const handler: Handlers = {
     } catch (error) {
       console.error("Batch analysis error:", error);
 
+      const errorMessage = error instanceof Error ? error.message : "Unknown error";
+
+      // Check if error is due to incomplete Bricklink data
+      const isBricklinkDataError = errorMessage.includes("Complete Bricklink sales data is required");
+      const statusCode = isBricklinkDataError ? 422 : 500;
+
       return new Response(
         JSON.stringify({
-          error: error instanceof Error ? error.message : "Unknown error",
+          error: errorMessage,
+          code: isBricklinkDataError ? "INCOMPLETE_BRICKLINK_DATA" : "INTERNAL_ERROR",
         }),
         {
-          status: 500,
+          status: statusCode,
           headers: {
             "Content-Type": "application/json",
           },

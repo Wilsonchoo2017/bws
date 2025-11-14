@@ -120,13 +120,18 @@ export const handler: Handlers = {
         ? error.message
         : "Unknown error";
 
+      // Check if error is due to incomplete Bricklink data
+      const isBricklinkDataError = errorMessage.includes("Complete Bricklink sales data is required");
+      const statusCode = isBricklinkDataError ? 422 : 500;
+
       return new Response(
         JSON.stringify({
           error: errorMessage,
           productId,
+          code: isBricklinkDataError ? "INCOMPLETE_BRICKLINK_DATA" : "INTERNAL_ERROR",
         }),
         {
-          status: 500,
+          status: statusCode,
           headers: { "Content-Type": "application/json" },
         },
       );

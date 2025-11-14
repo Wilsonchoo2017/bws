@@ -30,6 +30,8 @@ import type {
   WorldBricksSet,
 } from "./repositories/IRepository.ts";
 
+import { BricklinkDataValidator } from "../bricklink/BricklinkDataValidator.ts";
+
 export class DataAggregationService {
   constructor(
     private productRepo: IProductRepository,
@@ -75,6 +77,14 @@ export class DataAggregationService {
         )
         : Promise.resolve(null),
     ]);
+
+    // Validate Bricklink data completeness (prerequisite for recommendations)
+    const validation = BricklinkDataValidator.validateCompleteness(bricklinkData);
+    if (!validation.isComplete) {
+      throw new Error(
+        `Complete Bricklink sales data is required for analysis. ${validation.message}. Product: ${product.name} (${productId})`,
+      );
+    }
 
     // Build analysis input using pure transformation functions
     return {
@@ -144,6 +154,32 @@ export class DataAggregationService {
         pastSalesHits: pastSalesMap.size,
       },
     );
+
+    // Validate Bricklink data completeness for all products FIRST
+    const incompleteProducts: Array<{ productId: string; name: string; message: string }> = [];
+
+    for (const product of products) {
+      const bricklinkData = product.legoSetNumber
+        ? bricklinkMap.get(product.legoSetNumber) || null
+        : null;
+
+      const validation = BricklinkDataValidator.validateCompleteness(bricklinkData);
+      if (!validation.isComplete) {
+        incompleteProducts.push({
+          productId: product.productId,
+          name: product.name || "Unknown Product",
+          message: validation.message || "Missing Bricklink data",
+        });
+      }
+    }
+
+    // If any products have incomplete data, throw error with details
+    if (incompleteProducts.length > 0) {
+      const errorMessage = `Complete Bricklink sales data is required for analysis. ${incompleteProducts.length} of ${products.length} products have incomplete data:\n${
+        incompleteProducts.map((p) => `- ${p.name} (${p.productId}): ${p.message}`).join("\n")
+      }`;
+      throw new Error(errorMessage);
+    }
 
     // Build analysis input for each product
     const resultMap = new Map<string, ProductAnalysisInput>();

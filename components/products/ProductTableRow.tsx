@@ -124,11 +124,34 @@ export function ProductTableRow(
           : <span class="text-base-content/30 text-lg">✗</span>}
       </td>
 
-      {/* Bricklink Data Availability - Checkmark/X */}
+      {/* Bricklink Data Availability - Enhanced status indicator */}
       <td class="text-center">
-        {product.hasBricklinkData
-          ? <span class="text-success text-lg" title="Bricklink data available">✓</span>
-          : <span class="text-error text-lg" title="No Bricklink data">✗</span>}
+        {product.bricklinkDataStatus === "complete"
+          ? (
+            <span
+              class="text-success text-lg cursor-help"
+              title="Bricklink data complete - all 4 pricing boxes available"
+            >
+              ✓
+            </span>
+          )
+          : product.bricklinkDataStatus === "partial"
+          ? (
+            <span
+              class="text-warning text-lg cursor-help"
+              title={`Incomplete Bricklink data. Missing: ${product.bricklinkMissingBoxes.join(", ")}`}
+            >
+              ⚠
+            </span>
+          )
+          : (
+            <span
+              class="text-error text-lg cursor-help"
+              title="No Bricklink data available"
+            >
+              ✗
+            </span>
+          )}
       </td>
 
       {/* Brick Economy Data Availability - Checkmark/X */}
