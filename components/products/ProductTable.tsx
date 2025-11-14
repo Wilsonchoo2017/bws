@@ -134,7 +134,12 @@ export function ProductTable({
               <th class="w-20">Image</th>
               <th>Name</th>
               <th class="w-24">LEGO Set</th>
-              <th class="w-24">BL Data</th>
+              <th class="w-28">Retail Price</th>
+              <th class="w-16 text-center" title="Release Year">Rel Yr</th>
+              <th class="w-16 text-center" title="Retired Year">Ret Yr</th>
+              <th class="w-16 text-center" title="Retiring Soon">Ret Soon</th>
+              <th class="w-16 text-center" title="Bricklink Data">BL</th>
+              <th class="w-16 text-center" title="Brick Economy Data">BE</th>
               <th
                 class="cursor-pointer hover:bg-base-200 w-28"
                 onClick={() => onSort("price")}

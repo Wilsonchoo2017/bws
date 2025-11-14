@@ -57,6 +57,7 @@ import * as $TagManager from "./islands/TagManager.tsx";
 import * as $UnifiedParser from "./islands/UnifiedParser.tsx";
 import * as $ValueInvestingDashboard from "./islands/ValueInvestingDashboard.tsx";
 import * as $components_ErrorBoundary from "./islands/components/ErrorBoundary.tsx";
+import * as $components_IntrinsicValueProgressBar from "./islands/components/IntrinsicValueProgressBar.tsx";
 import * as $components_QueueHealthBanner from "./islands/components/QueueHealthBanner.tsx";
 import * as $components_QueueStatsBanner from "./islands/components/QueueStatsBanner.tsx";
 import * as $components_SyncStatusBadge from "./islands/components/SyncStatusBadge.tsx";
@@ -125,6 +126,8 @@ const manifest = {
     "./islands/UnifiedParser.tsx": $UnifiedParser,
     "./islands/ValueInvestingDashboard.tsx": $ValueInvestingDashboard,
     "./islands/components/ErrorBoundary.tsx": $components_ErrorBoundary,
+    "./islands/components/IntrinsicValueProgressBar.tsx":
+      $components_IntrinsicValueProgressBar,
     "./islands/components/QueueHealthBanner.tsx": $components_QueueHealthBanner,
     "./islands/components/QueueStatsBanner.tsx": $components_QueueStatsBanner,
     "./islands/components/SyncStatusBadge.tsx": $components_SyncStatusBadge,

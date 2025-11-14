@@ -47,7 +47,20 @@ export interface Product {
   rawData: unknown | null;
   createdAt: Date | null;
   updatedAt: Date | null;
+
+  // LEGO data fields
+  releaseYear: number | null;
+  retiredYear: number | null;
+  retiringSoon: boolean;
+  expectedRetirementDate: string | null;
+  retailPrice: number | null;
+
+  // Data availability flags (for UI indicators)
+  hasReleaseYear: boolean;
+  hasRetiredYear: boolean;
+  hasRetiringSoon: boolean;
   hasBricklinkData: boolean;
+  hasBrickEconomyData: boolean;
 }
 
 export interface Pagination {
@@ -128,7 +141,7 @@ export function useProductList(
         params.set("source", filters.sourceFilter);
       }
 
-      const response = await fetch(`/api/shopee-items?${params}`);
+      const response = await fetch(`/api/products?${params}`);
 
       if (!response.ok) {
         throw new Error(`HTTP error! status: ${response.status}`);

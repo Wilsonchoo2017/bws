@@ -1,8 +1,8 @@
 import { useSignal } from "@preact/signals";
-import { useCallback, useMemo } from "preact/hooks";
+import { useMemo } from "preact/hooks";
 import type { ValueInvestingProduct } from "../types/value-investing.ts";
 import { ErrorBoundary } from "./components/ErrorBoundary.tsx";
-import { ValueRatingBadge } from "./components/ValueRatingBadge.tsx";
+import { IntrinsicValueProgressBar } from "./components/IntrinsicValueProgressBar.tsx";
 import { formatCurrency, formatPercentage } from "../utils/formatters.ts";
 
 interface ValueInvestingDashboardProps {
@@ -14,9 +14,8 @@ export default function ValueInvestingDashboard(
 ) {
   const products = useSignal<ValueInvestingProduct[]>(initialProducts);
   const minROI = useSignal<number>(0);
-  const minPrice = useSignal<number>(0);
-  const maxPrice = useSignal<number>(10000);
-  const sortBy = useSignal<string>("marginOfSafety"); // Default: best value first
+  const maxDistanceFromIntrinsic = useSignal<number>(50); // ±50% from intrinsic value
+  const sortBy = useSignal<string>("bestValue"); // Default: furthest below intrinsic first
 
   /**
    * Memoized filtered products computation
@@ -33,22 +32,24 @@ export default function ValueInvestingDashboard(
       );
     }
 
-    // Price range filter
-    filtered = filtered.filter((p) =>
-      p.currentPrice >= minPrice.value && p.currentPrice <= maxPrice.value
-    );
+    // Distance from intrinsic value filter
+    filtered = filtered.filter((p) => {
+      const intrinsicValue = p.valueMetrics?.intrinsicValue ?? 0;
+      if (intrinsicValue === 0) return false;
 
-    // Only show buy opportunities
-    filtered = filtered.filter((p) =>
-      p.action === "strong_buy" || p.action === "buy"
-    );
+      const distancePercent = ((p.currentPrice - intrinsicValue) / intrinsicValue) * 100;
+      return Math.abs(distancePercent) <= maxDistanceFromIntrinsic.value;
+    });
 
     // Sort products (with null safety)
     filtered.sort((a, b) => {
       switch (sortBy.value) {
-        case "marginOfSafety":
-          return (b.valueMetrics?.marginOfSafety ?? 0) -
-            (a.valueMetrics?.marginOfSafety ?? 0);
+        case "bestValue": {
+          // Furthest below intrinsic value first (most negative distance)
+          const aDistance = ((a.currentPrice - (a.valueMetrics?.intrinsicValue ?? 0)) / (a.valueMetrics?.intrinsicValue ?? 1)) * 100;
+          const bDistance = ((b.currentPrice - (b.valueMetrics?.intrinsicValue ?? 0)) / (b.valueMetrics?.intrinsicValue ?? 1)) * 100;
+          return aDistance - bDistance;
+        }
         case "expectedROI":
           return (b.valueMetrics?.expectedROI ?? 0) -
             (a.valueMetrics?.expectedROI ?? 0);
@@ -65,121 +66,65 @@ export default function ValueInvestingDashboard(
   }, [
     products.value,
     minROI.value,
-    minPrice.value,
-    maxPrice.value,
+    maxDistanceFromIntrinsic.value,
     sortBy.value,
   ]);
 
-  /**
-   * Memoized summary statistics computation
-   * Only recalculates when filtered products change
-   * Prevents expensive reduce operations on every render
-   */
-  const stats = useMemo(() => {
-    const count = filteredProducts.length;
-
-    if (count === 0) {
-      return {
-        count: 0,
-        avgMarginOfSafety: 0,
-        avgExpectedROI: 0,
-        totalValueGap: 0,
-      };
-    }
-
-    const avgMarginOfSafety = filteredProducts.reduce(
-      (sum, p) => sum + (p.valueMetrics?.marginOfSafety ?? 0),
-      0,
-    ) / count;
-
-    const avgExpectedROI = filteredProducts.reduce(
-      (sum, p) => sum + (p.valueMetrics?.expectedROI ?? 0),
-      0,
-    ) / count;
-
-    const totalValueGap = filteredProducts.reduce(
-      (sum, p) =>
-        sum +
-        ((p.valueMetrics?.intrinsicValue ?? 0) - p.currentPrice),
-      0,
-    );
-
-    return {
-      count,
-      avgMarginOfSafety,
-      avgExpectedROI,
-      totalValueGap,
-    };
-  }, [filteredProducts]);
-
-  /**
-   * Memoized reset filters callback
-   * Prevents function recreation on every render
-   */
-  const resetFilters = useCallback(() => {
-    minROI.value = 0;
-    minPrice.value = 0;
-    maxPrice.value = 10000;
-  }, [minROI, minPrice, maxPrice]);
 
   return (
     <ErrorBoundary>
       <div class="space-y-6">
         {/* Header */}
         <div class="flex flex-col gap-2">
-          <h1 class="text-3xl font-bold">Value Investing Dashboard</h1>
+          <h1 class="text-3xl font-bold">Buy Opportunities</h1>
           <p class="text-base-content/70">
-            Buy quality assets at a discount to intrinsic value - inspired by
-            Buffett & Pabrai
+            Find products close to their intrinsic value
           </p>
-        </div>
-
-        {/* Summary Stats */}
-        <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
-          <div class="stat bg-base-100 rounded-lg">
-            <div class="stat-title">Buy Opportunities</div>
-            <div class="stat-value text-success">
-              {stats.count}
-            </div>
-            <div class="stat-desc">Products with margin of safety</div>
-          </div>
-
-          <div class="stat bg-base-100 rounded-lg">
-            <div class="stat-title">Avg Margin of Safety</div>
-            <div class="stat-value text-primary">
-              {formatPercentage(stats.avgMarginOfSafety)}
-            </div>
-            <div class="stat-desc">Average discount to value</div>
-          </div>
-
-          <div class="stat bg-base-100 rounded-lg">
-            <div class="stat-title">Avg Expected ROI</div>
-            <div class="stat-value text-info">
-              {formatPercentage(stats.avgExpectedROI)}
-            </div>
-            <div class="stat-desc">Potential returns</div>
-          </div>
-
-          <div class="stat bg-base-100 rounded-lg">
-            <div class="stat-title">Total Value Gap</div>
-            <div class="stat-value text-accent">
-              {formatCurrency(stats.totalValueGap)}
-            </div>
-            <div class="stat-desc">Intrinsic value - current price</div>
-          </div>
         </div>
 
         {/* Filters */}
         <div class="card bg-base-100">
           <div class="card-body">
-            <h2 class="card-title text-lg">Filters</h2>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+              {/* Distance from Intrinsic Filter */}
+              <div class="form-control">
+                <label class="label">
+                  <span class="label-text font-semibold">
+                    Max Distance from Intrinsic Value
+                  </span>
+                  <span class="label-text-alt badge badge-primary">
+                    ±{maxDistanceFromIntrinsic.value}%
+                  </span>
+                </label>
+                <input
+                  type="range"
+                  min="0"
+                  max="100"
+                  value={maxDistanceFromIntrinsic.value}
+                  class="range range-primary"
+                  step="5"
+                  onInput={(e) =>
+                    maxDistanceFromIntrinsic.value = parseInt(
+                      (e.target as HTMLInputElement).value,
+                    )}
+                />
+                <div class="w-full flex justify-between text-xs px-2 opacity-60 mt-1">
+                  <span>0%</span>
+                  <span>±25%</span>
+                  <span>±50%</span>
+                  <span>±75%</span>
+                  <span>±100%</span>
+                </div>
+              </div>
 
-            <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
               {/* Min ROI Filter */}
               <div class="form-control">
                 <label class="label">
-                  <span class="label-text">
-                    Min ROI: {minROI.value}%
+                  <span class="label-text font-semibold">
+                    Minimum Expected ROI
+                  </span>
+                  <span class="label-text-alt badge badge-secondary">
+                    {minROI.value}%
                   </span>
                 </label>
                 <input
@@ -187,60 +132,25 @@ export default function ValueInvestingDashboard(
                   min="0"
                   max="100"
                   value={minROI.value}
-                  class="range range-primary"
+                  class="range range-secondary"
                   step="5"
                   onInput={(e) =>
                     minROI.value = parseInt(
                       (e.target as HTMLInputElement).value,
                     )}
                 />
-                <div class="w-full flex justify-between text-xs px-2 opacity-60">
+                <div class="w-full flex justify-between text-xs px-2 opacity-60 mt-1">
                   <span>0%</span>
                   <span>50%</span>
                   <span>100%</span>
                 </div>
               </div>
-
-              {/* Price Range */}
-              <div class="form-control">
-                <label class="label">
-                  <span class="label-text">Min Price</span>
-                </label>
-                <input
-                  type="number"
-                  class="input input-bordered w-full"
-                  value={minPrice.value}
-                  min="0"
-                  step="10"
-                  onInput={(e) =>
-                    minPrice.value = parseFloat(
-                      (e.target as HTMLInputElement).value,
-                    )}
-                />
-              </div>
-
-              <div class="form-control">
-                <label class="label">
-                  <span class="label-text">Max Price</span>
-                </label>
-                <input
-                  type="number"
-                  class="input input-bordered w-full"
-                  value={maxPrice.value}
-                  min="0"
-                  step="10"
-                  onInput={(e) =>
-                    maxPrice.value = parseFloat(
-                      (e.target as HTMLInputElement).value,
-                    )}
-                />
-              </div>
             </div>
 
-            <div class="flex gap-2 mt-4">
-              <button class="btn btn-sm btn-ghost" onClick={resetFilters}>
-                Reset Filters
-              </button>
+            <div class="flex gap-2 items-center mt-4">
+              <div class="badge badge-ghost">
+                {filteredProducts.length} products
+              </div>
               <div class="ml-auto flex gap-2 items-center">
                 <span class="text-sm opacity-70">Sort by:</span>
                 <select
@@ -249,8 +159,8 @@ export default function ValueInvestingDashboard(
                   onChange={(e) =>
                     sortBy.value = (e.target as HTMLSelectElement).value}
                 >
-                  <option value="marginOfSafety">
-                    Margin of Safety (Best)
+                  <option value="bestValue">
+                    Best Value (Furthest Below Intrinsic)
                   </option>
                   <option value="expectedROI">Expected ROI (Highest)</option>
                   <option value="price">Price (Low to High)</option>
@@ -264,10 +174,6 @@ export default function ValueInvestingDashboard(
         {/* Products Table */}
         <div class="card bg-base-100">
           <div class="card-body">
-            <h2 class="card-title">
-              Buy List ({filteredProducts.length} opportunities)
-            </h2>
-
             {filteredProducts.length === 0
               ? (
                 <div class="alert">
@@ -296,13 +202,9 @@ export default function ValueInvestingDashboard(
                     <thead>
                       <tr>
                         <th>Product</th>
-                        <th>Current Price</th>
-                        <th>Target Price</th>
-                        <th>Intrinsic Value</th>
-                        <th>Margin of Safety</th>
+                        <th>Price Comparison</th>
+                        <th>Distance from Intrinsic</th>
                         <th>Expected ROI</th>
-                        <th>Time Horizon</th>
-                        <th>Rating</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -329,48 +231,39 @@ export default function ValueInvestingDashboard(
                             </div>
                           </td>
                           <td>
-                            <span class="font-mono">
-                              {formatCurrency(
-                                product.currentPrice,
-                                product.currency,
-                              )}
-                            </span>
+                            <div class="flex flex-col gap-1">
+                              <div class="flex items-center gap-2">
+                                <span class="text-xs opacity-60">Current:</span>
+                                <span class="badge badge-neutral font-mono">
+                                  {formatCurrency(
+                                    product.currentPrice,
+                                    product.currency,
+                                  )}
+                                </span>
+                              </div>
+                              <div class="flex items-center gap-2">
+                                <span class="text-xs opacity-60">Intrinsic:</span>
+                                <span class="badge badge-info font-mono">
+                                  {formatCurrency(
+                                    product.valueMetrics.intrinsicValue,
+                                    product.currency,
+                                  )}
+                                </span>
+                              </div>
+                            </div>
                           </td>
-                          <td>
-                            <span class="font-mono text-success">
-                              {formatCurrency(
-                                product.valueMetrics.targetPrice,
-                                product.currency,
-                              )}
-                            </span>
-                          </td>
-                          <td>
-                            <span class="font-mono text-info">
-                              {formatCurrency(
-                                product.valueMetrics.intrinsicValue,
-                                product.currency,
-                              )}
-                            </span>
-                          </td>
-                          <td>
-                            <span
-                              class={`font-mono font-bold ${
-                                product.valueMetrics.marginOfSafety > 0
-                                  ? "text-success"
-                                  : "text-error"
-                              }`}
-                            >
-                              {formatPercentage(
-                                product.valueMetrics.marginOfSafety,
-                              )}
-                            </span>
+                          <td class="min-w-[300px]">
+                            <IntrinsicValueProgressBar
+                              currentPriceCents={product.currentPrice}
+                              intrinsicValueCents={product.valueMetrics.intrinsicValue}
+                            />
                           </td>
                           <td>
                             <span
-                              class={`font-mono font-bold ${
+                              class={`badge font-mono font-bold ${
                                 product.valueMetrics.expectedROI > 0
-                                  ? "text-success"
-                                  : "text-error"
+                                  ? "badge-success"
+                                  : "badge-error"
                               }`}
                             >
                               {formatPercentage(
@@ -378,62 +271,12 @@ export default function ValueInvestingDashboard(
                               )}
                             </span>
                           </td>
-                          <td>
-                            <span class="text-sm">
-                              {product.valueMetrics.timeHorizon}
-                            </span>
-                          </td>
-                          <td>
-                            <ValueRatingBadge
-                              marginOfSafety={product.valueMetrics
-                                .marginOfSafety}
-                            />
-                          </td>
                         </tr>
                       ))}
                     </tbody>
                   </table>
                 </div>
               )}
-          </div>
-        </div>
-
-        {/* Educational Footer */}
-        <div class="alert alert-info">
-          <svg
-            xmlns="http://www.w3.org/2000/svg"
-            fill="none"
-            viewBox="0 0 24 24"
-            class="stroke-current shrink-0 w-6 h-6"
-          >
-            <path
-              stroke-linecap="round"
-              stroke-linejoin="round"
-              stroke-width="2"
-              d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
-            >
-            </path>
-          </svg>
-          <div class="text-sm">
-            <p class="font-bold">Value Investing Principles:</p>
-            <ul class="list-disc list-inside mt-1 space-y-1">
-              <li>
-                <strong>Intrinsic Value:</strong>{" "}
-                The true worth based on resale potential, demand, and quality
-              </li>
-              <li>
-                <strong>Margin of Safety:</strong>{" "}
-                Buy below intrinsic value to protect against errors
-              </li>
-              <li>
-                <strong>Target Price:</strong>{" "}
-                The price you should pay (intrinsic value - margin of safety)
-              </li>
-              <li>
-                <strong>Be Patient:</strong>{" "}
-                Wait for opportunities where you can buy quality at a discount
-              </li>
-            </ul>
           </div>
         </div>
       </div>

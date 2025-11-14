@@ -170,14 +170,6 @@ export class ValueInvestingService {
       return null;
     }
 
-    // Only include buy opportunities
-    if (
-      analysis.action !== "strong_buy" && analysis.action !== "buy"
-    ) {
-      stats.skipped.notBuyable++;
-      return null;
-    }
-
     // If recommendation already has a buy price, use it directly
     if (analysis.recommendedBuyPrice) {
       // IMPORTANT: Both product.price and analysis.recommendedBuyPrice.price are now in CENTS

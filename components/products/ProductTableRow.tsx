@@ -86,15 +86,67 @@ export function ProductTableRow(
           : <span class="text-base-content/50">—</span>}
       </td>
 
-      {/* Bricklink Data Availability */}
+      {/* Retail Price */}
       <td>
-        <span
-          class={`badge badge-sm ${
-            product.hasBricklinkData ? "badge-success" : "badge-ghost"
-          }`}
-        >
-          {product.hasBricklinkData ? "Available" : "Missing"}
-        </span>
+        {product.retailPrice
+          ? <div class="font-medium">{formatPrice(product.retailPrice)}</div>
+          : <span class="text-base-content/50">—</span>}
+      </td>
+
+      {/* Release Year - Checkmark/X with tooltip */}
+      <td class="text-center">
+        {product.hasReleaseYear
+          ? (
+            <span
+              class="text-success text-lg cursor-help"
+              title={`Released: ${product.releaseYear}`}
+            >
+              ✓
+            </span>
+          )
+          : <span class="text-error text-lg">✗</span>}
+      </td>
+
+      {/* Retired Year - Checkmark/X with tooltip */}
+      <td class="text-center">
+        {product.hasRetiredYear
+          ? (
+            <span
+              class="text-success text-lg cursor-help"
+              title={`Retired: ${product.retiredYear}`}
+            >
+              ✓
+            </span>
+          )
+          : <span class="text-error text-lg">✗</span>}
+      </td>
+
+      {/* Retiring Soon - Checkmark/X with tooltip */}
+      <td class="text-center">
+        {product.hasRetiringSoon
+          ? (
+            <span
+              class="text-warning text-lg cursor-help"
+              title={`Expected retirement: ${product.expectedRetirementDate || "Unknown"}`}
+            >
+              ✓
+            </span>
+          )
+          : <span class="text-base-content/30 text-lg">✗</span>}
+      </td>
+
+      {/* Bricklink Data Availability - Checkmark/X */}
+      <td class="text-center">
+        {product.hasBricklinkData
+          ? <span class="text-success text-lg" title="Bricklink data available">✓</span>
+          : <span class="text-error text-lg" title="No Bricklink data">✗</span>}
+      </td>
+
+      {/* Brick Economy Data Availability - Checkmark/X */}
+      <td class="text-center">
+        {product.hasBrickEconomyData
+          ? <span class="text-success text-lg" title="Brick Economy data available">✓</span>
+          : <span class="text-error text-lg" title="No Brick Economy data">✗</span>}
       </td>
 
       {/* Price */}
