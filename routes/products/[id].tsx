@@ -940,8 +940,15 @@ export default function ProductDetailPage(
               <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                 <div class="stat bg-base-200 rounded-lg">
                   <div class="stat-title">Product ID</div>
-                  <div class="stat-value text-lg break-all">
-                    {product.productId}
+                  <div class="stat-value text-lg">
+                    <div
+                      class="tooltip tooltip-top"
+                      data-tip={product.productId}
+                    >
+                      <span class="truncate block max-w-full">
+                        {product.productId}
+                      </span>
+                    </div>
                   </div>
                 </div>
                 <div class="stat bg-base-200 rounded-lg">
@@ -1717,14 +1724,36 @@ export default function ProductDetailPage(
               <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
                 <div class="stat bg-base-200 rounded-lg">
                   <div class="stat-title">Main Image URL</div>
-                  <div class="stat-value text-xs break-all">
-                    {product.image || "N/A"}
+                  <div class="stat-value text-xs">
+                    {product.image
+                      ? (
+                        <div
+                          class="tooltip tooltip-top"
+                          data-tip={product.image}
+                        >
+                          <span class="truncate block max-w-full">
+                            {product.image}
+                          </span>
+                        </div>
+                      )
+                      : "N/A"}
                   </div>
                 </div>
                 <div class="stat bg-base-200 rounded-lg">
                   <div class="stat-title">Local Image Path</div>
-                  <div class="stat-value text-xs break-all">
-                    {product.localImagePath || "N/A"}
+                  <div class="stat-value text-xs">
+                    {product.localImagePath
+                      ? (
+                        <div
+                          class="tooltip tooltip-top"
+                          data-tip={product.localImagePath}
+                        >
+                          <span class="truncate block max-w-full">
+                            {product.localImagePath}
+                          </span>
+                        </div>
+                      )
+                      : "N/A"}
                   </div>
                 </div>
                 <div class="stat bg-base-200 rounded-lg">
