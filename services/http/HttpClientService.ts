@@ -158,6 +158,7 @@ export class HttpClientService {
             ? Promise.resolve({
               state: "granted",
             })
+            // @ts-ignore: Type mismatch between browser and Deno types
             : originalQuery ? originalQuery(parameters) : Promise.resolve({ state: "granted" })
         );
       }
