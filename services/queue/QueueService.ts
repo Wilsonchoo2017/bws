@@ -105,6 +105,7 @@ export class QueueService {
   private worker: Worker | null = null;
   private connection: Redis | null = null;
   private isInitialized = false;
+  private bricklinkSemaphoreKey = "bricklink:scrape:lock";
 
   /**
    * Initialize the queue service
@@ -135,6 +136,7 @@ export class QueueService {
       });
 
       // Create worker
+      // Note: We'll handle Bricklink sequential processing via concurrency control in the processJob method
       this.worker = new Worker(
         QUEUE_CONFIG.QUEUE_NAME,
         this.processJob.bind(this),
@@ -241,28 +243,86 @@ export class QueueService {
   }
 
   /**
+   * Acquire a lock for Bricklink scraping (ensures sequential processing)
+   * Uses Redis SET NX (set if not exists) with expiration
+   */
+  private async acquireBricklinkLock(
+    timeoutMs: number = 300000,
+  ): Promise<boolean> {
+    if (!this.connection) return false;
+
+    const maxWaitTime = timeoutMs;
+    const startTime = Date.now();
+
+    while (Date.now() - startTime < maxWaitTime) {
+      // Try to acquire lock with 5 minute expiration (longer than expected scrape time)
+      const acquired = await this.connection.set(
+        this.bricklinkSemaphoreKey,
+        "locked",
+        "EX",
+        300, // 5 minutes
+        "NX", // Only set if not exists
+      );
+
+      if (acquired) {
+        queueLogger.info("Acquired Bricklink scraping lock");
+        return true;
+      }
+
+      // Wait 1 second before retrying
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+    }
+
+    queueLogger.warn("Failed to acquire Bricklink lock within timeout");
+    return false;
+  }
+
+  /**
+   * Release the Bricklink scraping lock
+   */
+  private async releaseBricklinkLock(): Promise<void> {
+    if (!this.connection) return;
+    await this.connection.del(this.bricklinkSemaphoreKey);
+    queueLogger.info("Released Bricklink scraping lock");
+  }
+
+  /**
    * Process a single scrape job
+   * Uses a distributed lock to ensure only one Bricklink job runs at a time
    */
   private async processSingleScrapeJob(
     data: ScrapeJobData,
   ): Promise<ScrapeResult> {
-    const httpClient = getHttpClient();
-    const rateLimiter = getRateLimiter();
-    const repository = getBricklinkRepository();
+    // Acquire lock for sequential processing
+    const lockAcquired = await this.acquireBricklinkLock();
+    if (!lockAcquired) {
+      throw new Error(
+        "Failed to acquire Bricklink scraping lock - another job may be running",
+      );
+    }
 
-    const scraper = createBricklinkScraperService(
-      httpClient,
-      rateLimiter,
-      repository,
-    );
+    try {
+      const httpClient = getHttpClient();
+      const rateLimiter = getRateLimiter();
+      const repository = getBricklinkRepository();
 
-    const options: ScrapeOptions = {
-      url: data.url,
-      saveToDb: data.saveToDb ?? true,
-      skipRateLimit: false,
-    };
+      const scraper = createBricklinkScraperService(
+        httpClient,
+        rateLimiter,
+        repository,
+      );
 
-    return await scraper.scrape(options);
+      const options: ScrapeOptions = {
+        url: data.url,
+        saveToDb: data.saveToDb ?? true,
+        skipRateLimit: false,
+      };
+
+      return await scraper.scrape(options);
+    } finally {
+      // Always release the lock, even if scraping fails
+      await this.releaseBricklinkLock();
+    }
   }
 
   /**
@@ -439,6 +499,7 @@ export class QueueService {
   /**
    * Add a scrape job to the queue with smart pre-checks
    * Checks if item was recently scraped (BullMQ handles duplicate jobId automatically)
+   * Uses a rate limiter to ensure only 1 Bricklink job runs at a time (sequential processing)
    */
   async addScrapeJob(data: ScrapeJobData): Promise<Job> {
     if (!this.queue) {
@@ -465,6 +526,7 @@ export class QueueService {
 
     // Add the job with jobId - BullMQ prevents duplicates automatically
     // If a job with this ID already exists in waiting/active/delayed state, it returns the existing job
+    // Sequential processing is enforced by the worker's limiter configuration
     const job = await this.queue.add(JOB_TYPES.SCRAPE_SINGLE, data, {
       priority,
       jobId,
@@ -522,6 +584,7 @@ export class QueueService {
     // Use BullMQ's addBulk for efficient batch operations with jobId
     // BullMQ automatically handles duplicate jobIds - if a job with the same ID already exists,
     // it will not add a duplicate
+    // Sequential processing is enforced by the worker's limiter configuration
     const bulkJobs = filteredJobs.map((data) => ({
       name: JOB_TYPES.SCRAPE_SINGLE,
       data,

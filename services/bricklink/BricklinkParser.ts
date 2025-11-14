@@ -374,6 +374,39 @@ export function hasAnyPricingChanged(
 }
 
 /**
+ * Check if a pricing box has any price field (min, avg, qty_avg, or max price)
+ * Pure function - no side effects
+ */
+export function hasAnyPriceField(box: PricingBox | null): boolean {
+  if (!box) return false;
+  return !!(box.min_price || box.avg_price || box.qty_avg_price || box.max_price);
+}
+
+/**
+ * Validate that pricing data contains at least one price field
+ * Throws error if no price information is found
+ * Pure function - no side effects (other than throwing)
+ */
+export function validatePricingData(data: {
+  six_month_new: PricingBox | null;
+  six_month_used: PricingBox | null;
+  current_new: PricingBox | null;
+  current_used: PricingBox | null;
+}): void {
+  const hasAnyPrice =
+    hasAnyPriceField(data.six_month_new) ||
+    hasAnyPriceField(data.six_month_used) ||
+    hasAnyPriceField(data.current_new) ||
+    hasAnyPriceField(data.current_used);
+
+  if (!hasAnyPrice) {
+    throw new Error(
+      "No price information found in any pricing box (6-month new/used, current new/used)",
+    );
+  }
+}
+
+/**
  * Validate Bricklink URL
  * Pure function - no side effects
  */

@@ -27,6 +27,7 @@ import {
   parseItemInfo,
   parsePastSales,
   parsePriceGuide,
+  validatePricingData,
 } from "./BricklinkParser.ts";
 import { imageDownloadService } from "../image/ImageDownloadService.ts";
 import { imageStorageService } from "../image/ImageStorageService.ts";
@@ -155,6 +156,9 @@ export class BricklinkScraperService extends BaseScraperService {
 
           // Parse price guide
           const pricingData = parsePriceGuide(priceResponse.html);
+
+          // Validate that we got price information
+          validatePricingData(pricingData);
 
           // Parse past sales transactions from the item page
           scraperLogger.info("Parsing past sales", { itemId });

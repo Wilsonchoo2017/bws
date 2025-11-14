@@ -148,15 +148,19 @@ export class HttpClientService {
       }
 
       // Override permissions API
-      const originalQuery = globalThis.navigator.permissions.query;
-      // @ts-ignore: Overriding query
-      window.navigator.permissions.query = (parameters) => (
-        parameters.name === "notifications"
-          ? Promise.resolve({
-            state: Notification.permission,
-          } as PermissionStatus)
-          : originalQuery(parameters)
-      );
+      // @ts-ignore: Browser-specific API not available in Deno types
+      const originalQuery = globalThis.navigator?.permissions?.query;
+      // @ts-ignore: Overriding query for anti-bot detection
+      if (window.navigator.permissions) {
+        // @ts-ignore: Browser permissions API not in Deno types
+        window.navigator.permissions.query = (parameters: { name: string }) => (
+          parameters.name === "notifications"
+            ? Promise.resolve({
+              state: "granted",
+            })
+            : originalQuery ? originalQuery(parameters) : Promise.resolve({ state: "granted" })
+        );
+      }
     });
 
     console.log(
@@ -182,6 +186,7 @@ export class HttpClientService {
     // Random scroll
     const scrollAmount = Math.floor(Math.random() * 300);
     await page.evaluate((amount) => {
+      // @ts-ignore: scrollBy is available in browser context
       globalThis.scrollBy(0, amount);
     }, scrollAmount);
 
