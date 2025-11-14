@@ -19,20 +19,21 @@ export interface ValueMetrics {
 }
 
 /**
- * Value metrics in dollars (Internal calculation layer)
+ * Value metrics (Internal calculation layer)
  *
- * UNIT CONVENTION: All prices are in DOLLARS for ValueCalculator
- * - Used internally by ValueCalculator
- * - Convert to ValueMetrics (cents) at service boundaries
+ * UNIT CONVENTION: All prices are in CENTS (using branded Cents type)
+ * - Used internally by ValueCalculator (works in cents)
+ * - Despite the legacy name "InDollars", this now uses CENTS branded type
+ * - TODO: Rename interface to ValueMetricsInternal for clarity
  */
 export interface ValueMetricsInDollars {
-  currentPrice: number;        // Current market price in dollars
-  targetPrice: number;          // Recommended buy price in dollars
-  intrinsicValue: number;       // Calculated intrinsic value in dollars
-  realizedValue?: number;       // After transaction costs in dollars
-  marginOfSafety: number;      // Percentage (e.g., 25 = 25%)
-  expectedROI: number;         // Percentage (theoretical)
-  realizedROI?: number;        // Percentage (after transaction costs)
+  currentPrice: Cents;         // Current market price in CENTS
+  targetPrice: Cents;           // Recommended buy price in CENTS
+  intrinsicValue: Cents;        // Calculated intrinsic value in CENTS
+  realizedValue?: Cents;        // After transaction costs in CENTS
+  marginOfSafety: number;       // Percentage (e.g., 25 = 25%)
+  expectedROI: number;          // Percentage (theoretical)
+  realizedROI?: number;         // Percentage (after transaction costs)
   timeHorizon: string;
 }
 

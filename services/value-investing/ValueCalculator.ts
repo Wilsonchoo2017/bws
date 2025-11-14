@@ -403,7 +403,8 @@ export class ValueCalculator {
       return 1.0; // Neutral if no data
     }
 
-    const ppd = partsCount / msrp;
+    // Convert cents to dollars for PPD calculation (thresholds are calibrated for dollars)
+    const ppd = partsCount / (msrp / 100);
     const config = CONFIG.INTRINSIC_VALUE.PARTS_PER_DOLLAR;
 
     // Convert PPD to multiplier (0.9-1.1 range)
@@ -462,8 +463,10 @@ export class ValueCalculator {
    * 3. Liquidity adjustment (sales velocity, time between sales)
    * 4. Volatility discount (risk-adjusted valuation)
    * 5. Time-decayed retirement premium (appreciation curve)
+   *
+   * @returns Intrinsic value in CENTS (Cents branded type)
    */
-  static calculateIntrinsicValue(inputs: IntrinsicValueInputs): number {
+  static calculateIntrinsicValue(inputs: IntrinsicValueInputs): Cents {
     // Validate inputs
     this.validatePrice(inputs.bricklinkAvgPrice, "bricklinkAvgPrice");
     this.validatePrice(inputs.bricklinkMaxPrice, "bricklinkMaxPrice");
@@ -519,7 +522,7 @@ export class ValueCalculator {
       baseValue = bricklinkMaxPrice * 0.50; // 50% discount (very conservative)
     } else {
       // No data - cannot calculate intrinsic value
-      return 0;
+      return 0 as Cents;
     }
 
     // DEMAND-GATED retirement multiplier (CRITICAL: demand required for premium)
@@ -585,11 +588,11 @@ export class ValueCalculator {
         "[ValueCalculator] Calculated invalid intrinsic value:",
         { intrinsicValue, inputs },
       );
-      return 0;
+      return 0 as Cents;
     }
 
     // Return as integer cents (already in cents, just ensure it's an integer)
-    return Math.round(intrinsicValue);
+    return Math.round(intrinsicValue) as Cents;
   }
 
   /**
@@ -597,22 +600,24 @@ export class ValueCalculator {
    * Using margin of safety principle - buy at a discount to intrinsic value
    *
    * Enhanced with strategy-specific margins and availability/demand adjustments
+   *
+   * @returns Target price in CENTS (Cents branded type)
    */
   static calculateTargetPrice(
-    intrinsicValue: number,
+    intrinsicValue: Cents,
     options: {
       strategy?: StrategyType;
       availabilityScore?: number;
       demandScore?: number;
       desiredMarginOfSafety?: number;
     } = {},
-  ): number {
+  ): Cents {
     // Validate inputs
     if (
       typeof intrinsicValue !== "number" || isNaN(intrinsicValue) ||
       intrinsicValue <= 0
     ) {
-      return 0;
+      return 0 as Cents;
     }
 
     let marginOfSafety: number;
@@ -656,7 +661,7 @@ export class ValueCalculator {
 
     const targetPrice = intrinsicValue * (1 - marginOfSafety);
     return Math.round(targetPrice * Math.pow(10, CONFIG.PRECISION.PRICE)) /
-      Math.pow(10, CONFIG.PRECISION.PRICE);
+      Math.pow(10, CONFIG.PRECISION.PRICE) as Cents;
   }
 
   /**
@@ -665,8 +670,8 @@ export class ValueCalculator {
    * Negative = paying above intrinsic value (bad!)
    */
   static calculateMarginOfSafety(
-    currentPrice: number,
-    intrinsicValue: number,
+    currentPrice: Cents,
+    intrinsicValue: Cents,
   ): number {
     // Validate inputs
     if (
@@ -698,17 +703,19 @@ export class ValueCalculator {
    * Calculate realized value after transaction costs
    * UPDATED: More realistic costs including returns and damage
    * Real-world costs: selling fees, shipping, packaging, returns
+   *
+   * @returns Realized value in CENTS (Cents branded type)
    */
   static calculateRealizedValue(
-    intrinsicValue: number,
+    intrinsicValue: Cents,
     estimatedWeight: number = 2, // pounds, default estimate
-  ): number {
+  ): Cents {
     // Validate input
     if (
       typeof intrinsicValue !== "number" || isNaN(intrinsicValue) ||
       intrinsicValue <= 0
     ) {
-      return 0;
+      return 0 as Cents;
     }
 
     const costs = CONFIG.TRANSACTION_COSTS;
@@ -730,7 +737,7 @@ export class ValueCalculator {
     const realizedValue = afterReturns - shippingCost - packagingCost;
 
     // Guard against negative values
-    return Math.max(0, realizedValue);
+    return Math.max(0, realizedValue) as Cents;
   }
 
   /**
@@ -762,8 +769,8 @@ export class ValueCalculator {
    * NEW: Returns both theoretical and realized ROI (after transaction costs)
    */
   static calculateExpectedROI(
-    currentPrice: number,
-    intrinsicValue: number,
+    currentPrice: Cents,
+    intrinsicValue: Cents,
   ): number {
     // Validate inputs
     if (
@@ -796,8 +803,8 @@ export class ValueCalculator {
    * More accurate projection of actual profit
    */
   static calculateRealizedROI(
-    currentPrice: number,
-    intrinsicValue: number,
+    currentPrice: Cents,
+    intrinsicValue: Cents,
   ): number {
     // Validate inputs
     if (
@@ -852,9 +859,11 @@ export class ValueCalculator {
   /**
    * Calculate complete value metrics for a product
    * Includes both theoretical and realized (post-transaction cost) metrics
+   *
+   * @returns ValueMetricsInDollars (all prices in CENTS despite the name)
    */
   static calculateValueMetrics(
-    currentPrice: number,
+    currentPrice: Cents,
     inputs: IntrinsicValueInputs,
     urgency?: string,
   ): ValueMetricsInDollars {
@@ -923,11 +932,11 @@ export class ValueCalculator {
       demandScore?: number;
     } = {},
   ): {
-    price: number;
+    price: Cents;
     reasoning: string;
     confidence: number;
     breakdown?: {
-      intrinsicValue: number;
+      intrinsicValue: Cents;
       baseMargin: number;
       adjustedMargin: number;
       marginAdjustments: Array<{ reason: string; value: number }>;
@@ -993,7 +1002,7 @@ export class ValueCalculator {
 
     const targetPrice = intrinsicValue * (1 - adjustedMargin);
     // Round to integer cents
-    const roundedTargetPrice = Math.round(targetPrice);
+    const roundedTargetPrice = Math.round(targetPrice) as Cents;
 
     // Calculate confidence based on data availability
     let dataPoints = 0;
@@ -1023,7 +1032,7 @@ export class ValueCalculator {
     if (inputs.bricklinkAvgPrice) {
       reasoningParts.push(
         `Based on Bricklink resale value of $${
-          inputs.bricklinkAvgPrice.toFixed(2)
+          (inputs.bricklinkAvgPrice / 100).toFixed(2)
         }`,
       );
     }

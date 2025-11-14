@@ -5,15 +5,16 @@
 
 import { useSignal } from "@preact/signals";
 import { useEffect } from "preact/hooks";
+import type { Cents } from "../types/price.ts";
 
 interface ValueMetrics {
-  currentPrice: number;
-  targetPrice: number;
-  intrinsicValue: number;
-  realizedValue?: number;
-  marginOfSafety: number;
-  expectedROI: number;
-  realizedROI?: number;
+  currentPrice: Cents;         // Branded Cents type
+  targetPrice: Cents;           // Branded Cents type
+  intrinsicValue: Cents;        // Branded Cents type
+  realizedValue?: Cents;        // Branded Cents type
+  marginOfSafety: number;       // Percentage
+  expectedROI: number;          // Percentage
+  realizedROI?: number;         // Percentage
   timeHorizon: string;
 }
 
@@ -97,11 +98,11 @@ export default function IntrinsicValueCard(
   const { valueMetrics, action, risks, opportunities, analyzedAt, currency } =
     data.value;
 
-  const formatCurrency = (amount: number) => {
+  const formatCurrency = (amountInCents: Cents) => {
     return new Intl.NumberFormat("en-US", {
       style: "currency",
       currency: currency || "USD",
-    }).format(amount);
+    }).format(amountInCents / 100); // Convert cents to dollars
   };
 
   const formatPercentage = (value: number) => {

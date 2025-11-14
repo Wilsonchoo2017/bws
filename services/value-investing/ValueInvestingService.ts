@@ -17,7 +17,7 @@ import type { Product } from "../../db/schema.ts";
 import type { AnalysisService } from "../analysis/AnalysisService.ts";
 import type { ProductRecommendation } from "../analysis/types.ts";
 import type { ValueInvestingProduct } from "../../types/value-investing.ts";
-import { asCents } from "../../types/price.ts";
+import { asCents, type Cents } from "../../types/price.ts";
 
 /**
  * Type guard for retirement status
@@ -173,11 +173,11 @@ export class ValueInvestingService {
     // If recommendation already has a buy price, use it directly
     if (analysis.recommendedBuyPrice) {
       // IMPORTANT: Both product.price and analysis.recommendedBuyPrice.price are now in CENTS
-      const currentPriceCents = asCents(product.price!);
-      const targetPriceCents = asCents(analysis.recommendedBuyPrice.price);
-      const intrinsicValueCents = analysis.recommendedBuyPrice.breakdown?.intrinsicValue
+      const currentPriceCents: Cents = asCents(product.price!);
+      const targetPriceCents: Cents = asCents(analysis.recommendedBuyPrice.price);
+      const intrinsicValueCents: Cents = analysis.recommendedBuyPrice.breakdown?.intrinsicValue
         ? asCents(analysis.recommendedBuyPrice.breakdown.intrinsicValue)
-        : asCents(analysis.recommendedBuyPrice.price / (1 - 0.25)); // Estimate intrinsic value assuming 25% margin
+        : asCents(Math.round(analysis.recommendedBuyPrice.price / (1 - 0.25))); // Estimate intrinsic value assuming 25% margin
 
       const valueMetrics = {
         currentPrice: currentPriceCents,

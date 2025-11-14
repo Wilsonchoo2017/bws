@@ -1,8 +1,9 @@
 import { type JSX } from "preact";
+import type { Cents } from "../../types/price.ts";
 
 interface IntrinsicValueProgressBarProps {
-  currentPriceCents: number;
-  intrinsicValueCents: number;
+  currentPriceCents: Cents;
+  intrinsicValueCents: Cents;
 }
 
 export function IntrinsicValueProgressBar(

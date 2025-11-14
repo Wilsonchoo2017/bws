@@ -11,7 +11,7 @@ import { eq } from "drizzle-orm";
 import { db } from "../../../db/client.ts";
 import { products } from "../../../db/schema.ts";
 import { AnalysisService } from "../../../services/analysis/AnalysisService.ts";
-import { asCents } from "../../../types/price.ts";
+import { asCents, type Cents } from "../../../types/price.ts";
 
 export const handler: Handlers = {
   async GET(_req, ctx) {
@@ -72,19 +72,24 @@ export const handler: Handlers = {
       }
 
       // Calculate value metrics from the analysis
-      // IMPORTANT: product.price is in CENTS (from database)
-      // analysis.recommendedBuyPrice.price is in DOLLARS (from ValueCalculator)
-      // IntrinsicValueCard expects all prices in DOLLARS (uses Intl.NumberFormat)
-      const currentPriceDollars = asCents(product.price!) / 100;
-      const targetPriceDollars = analysis.recommendedBuyPrice.price;
-      const intrinsicValueDollars = analysis.recommendedBuyPrice.price / (1 - 0.25); // Estimate intrinsic value assuming 25% margin
+      // IMPORTANT: ALL prices are in CENTS throughout the system
+      // - product.price is in CENTS (from database)
+      // - analysis.recommendedBuyPrice.price is in CENTS (from ValueCalculator)
+      // - IntrinsicValueCard expects all prices in CENTS (converts to dollars for display)
+      const currentPriceCents: Cents = asCents(product.price!);
+      const targetPriceCents: Cents = asCents(analysis.recommendedBuyPrice.price);
+
+      // Calculate intrinsic value from breakdown if available, otherwise estimate
+      const intrinsicValueCents: Cents = analysis.recommendedBuyPrice.breakdown?.intrinsicValue
+        ? asCents(analysis.recommendedBuyPrice.breakdown.intrinsicValue)
+        : asCents(Math.round(analysis.recommendedBuyPrice.price / (1 - 0.25))); // Estimate assuming 25% margin
 
       const valueMetrics = {
-        currentPrice: currentPriceDollars,
-        targetPrice: targetPriceDollars,
-        intrinsicValue: intrinsicValueDollars,
-        marginOfSafety: ((targetPriceDollars - currentPriceDollars) / targetPriceDollars) * 100,
-        expectedROI: ((targetPriceDollars - currentPriceDollars) / currentPriceDollars) * 100,
+        currentPrice: currentPriceCents,
+        targetPrice: targetPriceCents,
+        intrinsicValue: intrinsicValueCents,
+        marginOfSafety: ((intrinsicValueCents - currentPriceCents) / intrinsicValueCents) * 100,
+        expectedROI: ((intrinsicValueCents - currentPriceCents) / currentPriceCents) * 100,
         timeHorizon: analysis.timeHorizon || "Unknown",
       };
 
