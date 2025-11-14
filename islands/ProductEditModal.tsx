@@ -47,6 +47,13 @@ export default function ProductEditModal(
     editYearRetired.value = worldbricksSet?.yearRetired?.toString() || "";
     editExpectedRetirement.value = brickrankerItem?.expectedRetirementDate ||
       "";
+
+    // Initialize tags from product
+    const productTags = product.tags as Array<{ tagId: string; addedAt: string }> | null;
+    editSelectedTagIds.value = productTags
+      ? productTags.map((t) => t.tagId)
+      : [];
+
     error.value = null;
     success.value = false;
     showModal.value = true;
@@ -101,6 +108,25 @@ export default function ProductEditModal(
 
       if (!response.ok) {
         throw new Error(data.error || "Failed to update product");
+      }
+
+      // Update tags separately
+      const tagsResponse = await fetch(
+        `/api/products/${product.productId}/tags`,
+        {
+          method: "PUT",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            tagIds: editSelectedTagIds.value,
+          }),
+        },
+      );
+
+      if (!tagsResponse.ok) {
+        const tagsData = await tagsResponse.json();
+        throw new Error(tagsData.error || "Failed to update tags");
       }
 
       success.value = true;
@@ -291,6 +317,23 @@ export default function ProductEditModal(
                   <option value="stopped">Stopped</option>
                   <option value="archived">Archived</option>
                 </select>
+              </div>
+
+              <div class="divider">Tags</div>
+
+              {/* Tags */}
+              <div class="form-control">
+                <label class="label">
+                  <span class="label-text">Product Tags</span>
+                  <span class="label-text-alt">
+                    Select tags for promotions/vouchers
+                  </span>
+                </label>
+                <TagSelector
+                  selectedTagIds={editSelectedTagIds.value}
+                  onChange={(tagIds) => editSelectedTagIds.value = tagIds}
+                  disabled={isLoading.value}
+                />
               </div>
             </div>
 
