@@ -9,10 +9,15 @@ import "$std/dotenv/load.ts";
 import { start } from "$fresh/server.ts";
 import manifest from "./fresh.gen.ts";
 import config from "./fresh.config.ts";
-import { initializeQueue } from "./services/queue/init.ts";
+import { initializeQueue, getQueueService } from "./services/queue/init.ts";
 import { getScheduler } from "./services/scheduler/SchedulerService.ts";
 import { getMissingDataDetector } from "./services/missing-data/MissingDataDetectorService.ts";
 import { logger } from "./utils/logger.ts";
+import { shutdownManager } from "./utils/ShutdownManager.ts";
+import { closeRateLimiter } from "./services/rate-limiter/RateLimiterService.ts";
+import { closeFileLockManager } from "./utils/FileLockManager.ts";
+import { closeHttpClient } from "./services/http/HttpClientService.ts";
+import { closeDb } from "./db/client.ts";
 
 // Initialize BullMQ queue service for background scraping jobs
 await initializeQueue();
@@ -103,7 +108,7 @@ getScheduler().runAll().then((result) => {
 });
 
 // Set up periodic checks (every hour)
-setInterval(async () => {
+const schedulerInterval = setInterval(async () => {
   // Check if daily scheduler should run (at 2 AM)
   if (shouldRunDailyScheduler(lastSchedulerRun)) {
     logger.info("Running daily schedulers (Bricklink, Reddit, WorldBricks)...");
@@ -169,5 +174,21 @@ logger.info(
   "   - Bricklink, Reddit, WorldBricks schedulers: On startup + Daily at 2 AM",
 );
 logger.info("   - Missing data detector: On startup + Every 6 hours");
+
+// Register all services for graceful shutdown
+shutdownManager.registerTimer(schedulerInterval);
+shutdownManager.registerService("HttpClient", closeHttpClient);
+shutdownManager.registerService("FileLockManager", closeFileLockManager);
+shutdownManager.registerService("RateLimiter", closeRateLimiter);
+shutdownManager.registerService("QueueService", async () => {
+  const queueService = getQueueService();
+  if (queueService) {
+    await queueService.close();
+  }
+});
+shutdownManager.registerService("Database", closeDb);
+
+// Initialize shutdown handlers
+shutdownManager.initialize();
 
 await start(manifest, config);

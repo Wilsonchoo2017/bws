@@ -23,18 +23,6 @@ export async function initializeQueue(): Promise<void> {
     await queueService.initialize();
 
     console.log("✅ Queue service initialized successfully");
-
-    // Add graceful shutdown handler
-    const shutdownHandler = async () => {
-      console.log("🛑 Shutting down queue service...");
-      await queueService.close();
-      console.log("✅ Queue service shut down successfully");
-      Deno.exit(0);
-    };
-
-    // Handle shutdown signals
-    Deno.addSignalListener("SIGINT", shutdownHandler);
-    Deno.addSignalListener("SIGTERM", shutdownHandler);
   } catch (error) {
     console.error("❌ Failed to initialize queue service:", error);
     // Don't throw - allow app to start even if Redis is not available

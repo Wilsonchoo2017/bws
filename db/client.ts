@@ -16,13 +16,7 @@ export const connection = postgres(DATABASE_URL, {
 // Create Drizzle ORM instance
 export const db = drizzle(connection, { schema });
 
-// Graceful shutdown
-Deno.addSignalListener("SIGINT", async () => {
+// Export close function for graceful shutdown
+export async function closeDb(): Promise<void> {
   await connection.end();
-  Deno.exit(0);
-});
-
-Deno.addSignalListener("SIGTERM", async () => {
-  await connection.end();
-  Deno.exit(0);
-});
+}
