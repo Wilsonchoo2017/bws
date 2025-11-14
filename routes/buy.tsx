@@ -11,7 +11,6 @@ import { globalCache } from "../services/cache/CacheService.ts";
 
 interface BuyPageData {
   products: ValueInvestingProduct[];
-  strategies: string[];
   error?: string;
 }
 
@@ -52,19 +51,14 @@ export const handler: Handlers<BuyPageData> = {
           const { opportunities, stats } = await valueService
             .getValueOpportunities(allProducts);
 
-          // Step 3: Extract unique strategies
-          const strategies = valueService.extractStrategies(opportunities);
-
           console.info("[BuyPage] Processing summary:", {
             totalProducts: stats.totalProducts,
             includedOpportunities: stats.includedOpportunities,
             skipped: stats.skipped,
-            strategies: strategies.length,
           });
 
           return {
             products: opportunities,
-            strategies,
           };
         },
         CACHE_TTL,
@@ -90,7 +84,6 @@ export const handler: Handlers<BuyPageData> = {
 
       return ctx.render({
         products: [],
-        strategies: [],
         error: error instanceof Error
           ? error.message
           : "Failed to load value investing opportunities. Please try again later.",
@@ -129,7 +122,6 @@ export default function BuyPage({ data }: PageProps<BuyPageData>) {
             : (
               <ValueInvestingDashboard
                 products={data.products}
-                strategies={data.strategies}
               />
             )}
         </div>

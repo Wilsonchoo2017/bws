@@ -6,7 +6,7 @@
 import { Handlers, PageProps } from "$fresh/server.ts";
 import { db } from "../db/client.ts";
 import { products } from "../db/schema.ts";
-import ProductAnalysisCard from "../islands/ProductAnalysisCard.tsx";
+import IntrinsicValueCard from "../islands/IntrinsicValueCard.tsx";
 
 interface AnalysisDemoData {
   sampleProducts: Array<{
@@ -44,11 +44,10 @@ export default function AnalysisDemoPage(
         {/* Header */}
         <div class="mb-8">
           <h1 class="text-3xl font-bold text-gray-900 mb-2">
-            Product Analysis System
+            Value Investing Analysis
           </h1>
           <p class="text-gray-600">
-            Investment-focused analysis for LEGO products using
-            multi-dimensional scoring
+            Intrinsic value-based investment analysis for LEGO products
           </p>
         </div>
 
@@ -84,10 +83,7 @@ export default function AnalysisDemoPage(
                   <h2 class="text-2xl font-bold text-gray-900 mb-4">
                     {product.name}
                   </h2>
-                  <ProductAnalysisCard
-                    productId={product.productId}
-                    defaultStrategy="Investment Focus"
-                  />
+                  <IntrinsicValueCard productId={product.productId} />
                 </div>
               ))}
             </div>
@@ -103,46 +99,26 @@ export default function AnalysisDemoPage(
 
         {/* System Overview */}
         <div class="mt-12 bg-white rounded-lg shadow-md p-6">
-          <h2 class="text-xl font-semibold mb-4">System Overview</h2>
+          <h2 class="text-xl font-semibold mb-4">Value Investing Principles</h2>
           <div class="space-y-4 text-gray-700">
             <div>
-              <h3 class="font-semibold text-lg mb-2">Analysis Dimensions</h3>
+              <h3 class="font-semibold text-lg mb-2">Key Metrics</h3>
               <ul class="list-disc list-inside space-y-1">
                 <li>
-                  <strong>Pricing:</strong>{" "}
-                  Retail vs resale margins, discounts, price trends,
-                  appreciation potential
+                  <strong>Intrinsic Value:</strong>{" "}
+                  The true worth based on MSRP, retirement status, demand, quality, and market conditions
                 </li>
                 <li>
-                  <strong>Demand:</strong>{" "}
-                  Sales velocity, Reddit community sentiment, Bricklink resale
-                  activity
+                  <strong>Target Price:</strong>{" "}
+                  Maximum price to pay with margin of safety built in
                 </li>
                 <li>
-                  <strong>Availability:</strong>{" "}
-                  Stock levels, retirement timing, scarcity signals
+                  <strong>Margin of Safety:</strong>{" "}
+                  Discount percentage from intrinsic value
                 </li>
                 <li>
-                  <strong>Quality:</strong>{" "}
-                  Product ratings, seller trust signals, brand authenticity
-                </li>
-              </ul>
-            </div>
-
-            <div>
-              <h3 class="font-semibold text-lg mb-2">Investment Strategies</h3>
-              <ul class="list-disc list-inside space-y-1">
-                <li>
-                  <strong>Investment Focus:</strong>{" "}
-                  Long-term ROI, retirement timing, price appreciation
-                </li>
-                <li>
-                  <strong>Quick Flip:</strong>{" "}
-                  Immediate resale potential, high current demand, low stock
-                </li>
-                <li>
-                  <strong>Bargain Hunter:</strong>{" "}
-                  Deep discounts, quality products, good value
+                  <strong>Expected ROI:</strong>{" "}
+                  Theoretical return based on current price vs intrinsic value
                 </li>
               </ul>
             </div>
@@ -152,8 +128,8 @@ export default function AnalysisDemoPage(
               <ul class="list-disc list-inside space-y-1">
                 <li>Shopee/ToysRUs retail pricing and sales metrics</li>
                 <li>Bricklink resale pricing and historical trends</li>
-                <li>BrickRanker retirement tracking</li>
-                <li>Reddit community sentiment analysis</li>
+                <li>WorldBricks retirement tracking and MSRP data</li>
+                <li>Demand and quality analysis</li>
               </ul>
             </div>
           </div>

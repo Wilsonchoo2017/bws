@@ -7,14 +7,12 @@ import { formatCurrency, formatPercentage } from "../utils/formatters.ts";
 
 interface ValueInvestingDashboardProps {
   products: ValueInvestingProduct[];
-  strategies: string[];
 }
 
 export default function ValueInvestingDashboard(
-  { products: initialProducts, strategies }: ValueInvestingDashboardProps,
+  { products: initialProducts }: ValueInvestingDashboardProps,
 ) {
   const products = useSignal<ValueInvestingProduct[]>(initialProducts);
-  const selectedStrategy = useSignal<string>("all");
   const minROI = useSignal<number>(0);
   const minPrice = useSignal<number>(0);
   const maxPrice = useSignal<number>(10000);
@@ -27,11 +25,6 @@ export default function ValueInvestingDashboard(
    */
   const filteredProducts = useMemo(() => {
     let filtered = [...products.value];
-
-    // Strategy filter
-    if (selectedStrategy.value !== "all") {
-      filtered = filtered.filter((p) => p.strategy === selectedStrategy.value);
-    }
 
     // ROI filter
     if (minROI.value > 0) {
@@ -71,7 +64,6 @@ export default function ValueInvestingDashboard(
     return filtered;
   }, [
     products.value,
-    selectedStrategy.value,
     minROI.value,
     minPrice.value,
     maxPrice.value,
@@ -125,11 +117,10 @@ export default function ValueInvestingDashboard(
    * Prevents function recreation on every render
    */
   const resetFilters = useCallback(() => {
-    selectedStrategy.value = "all";
     minROI.value = 0;
     minPrice.value = 0;
     maxPrice.value = 10000;
-  }, [selectedStrategy, minROI, minPrice, maxPrice]);
+  }, [minROI, minPrice, maxPrice]);
 
   return (
     <ErrorBoundary>
@@ -183,26 +174,7 @@ export default function ValueInvestingDashboard(
           <div class="card-body">
             <h2 class="card-title text-lg">Filters</h2>
 
-            <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
-              {/* Strategy Filter */}
-              <div class="form-control">
-                <label class="label">
-                  <span class="label-text">Investment Strategy</span>
-                </label>
-                <select
-                  class="select select-bordered w-full"
-                  value={selectedStrategy.value}
-                  onChange={(e) =>
-                    selectedStrategy.value =
-                      (e.target as HTMLSelectElement).value}
-                >
-                  <option value="all">All Strategies</option>
-                  {strategies.map((strategy) => (
-                    <option key={strategy} value={strategy}>{strategy}</option>
-                  ))}
-                </select>
-              </div>
-
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
               {/* Min ROI Filter */}
               <div class="form-control">
                 <label class="label">
@@ -330,7 +302,6 @@ export default function ValueInvestingDashboard(
                         <th>Margin of Safety</th>
                         <th>Expected ROI</th>
                         <th>Time Horizon</th>
-                        <th>Strategy</th>
                         <th>Rating</th>
                       </tr>
                     </thead>
@@ -410,11 +381,6 @@ export default function ValueInvestingDashboard(
                           <td>
                             <span class="text-sm">
                               {product.valueMetrics.timeHorizon}
-                            </span>
-                          </td>
-                          <td>
-                            <span class="badge badge-outline badge-sm">
-                              {product.strategy}
                             </span>
                           </td>
                           <td>

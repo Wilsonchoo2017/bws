@@ -29,6 +29,7 @@ import * as $api_scrape_scheduler from "./routes/api/scrape-scheduler.ts";
 import * as $api_shopee_items from "./routes/api/shopee-items.ts";
 import * as $api_tags from "./routes/api/tags.ts";
 import * as $api_tags_cleanup_expired from "./routes/api/tags/cleanup-expired.ts";
+import * as $api_value_investing_productId_ from "./routes/api/value-investing/[productId].ts";
 import * as $bricklink_items from "./routes/bricklink-items.tsx";
 import * as $buy from "./routes/buy.tsx";
 import * as $cart from "./routes/cart.tsx";
@@ -41,13 +42,12 @@ import * as $tags from "./routes/tags.tsx";
 import * as $BricklinkProductsList from "./islands/BricklinkProductsList.tsx";
 import * as $CartManager from "./islands/CartManager.tsx";
 import * as $Counter from "./islands/Counter.tsx";
+import * as $IntrinsicValueCard from "./islands/IntrinsicValueCard.tsx";
 import * as $PricingOverview from "./islands/PricingOverview.tsx";
-import * as $ProductAnalysisCard from "./islands/ProductAnalysisCard.tsx";
 import * as $ProductEditModal from "./islands/ProductEditModal.tsx";
 import * as $ProductImageGallery from "./islands/ProductImageGallery.tsx";
 import * as $ProductsList from "./islands/ProductsList.tsx";
 import * as $QueueDiagnosticsDashboard from "./islands/QueueDiagnosticsDashboard.tsx";
-import * as $ScoreBreakdownModal from "./islands/ScoreBreakdownModal.tsx";
 import * as $ShopeeParser from "./islands/ShopeeParser.tsx";
 import * as $Sidebar from "./islands/Sidebar.tsx";
 import * as $TagManager from "./islands/TagManager.tsx";
@@ -90,6 +90,8 @@ const manifest = {
     "./routes/api/shopee-items.ts": $api_shopee_items,
     "./routes/api/tags.ts": $api_tags,
     "./routes/api/tags/cleanup-expired.ts": $api_tags_cleanup_expired,
+    "./routes/api/value-investing/[productId].ts":
+      $api_value_investing_productId_,
     "./routes/bricklink-items.tsx": $bricklink_items,
     "./routes/buy.tsx": $buy,
     "./routes/cart.tsx": $cart,
@@ -104,13 +106,12 @@ const manifest = {
     "./islands/BricklinkProductsList.tsx": $BricklinkProductsList,
     "./islands/CartManager.tsx": $CartManager,
     "./islands/Counter.tsx": $Counter,
+    "./islands/IntrinsicValueCard.tsx": $IntrinsicValueCard,
     "./islands/PricingOverview.tsx": $PricingOverview,
-    "./islands/ProductAnalysisCard.tsx": $ProductAnalysisCard,
     "./islands/ProductEditModal.tsx": $ProductEditModal,
     "./islands/ProductImageGallery.tsx": $ProductImageGallery,
     "./islands/ProductsList.tsx": $ProductsList,
     "./islands/QueueDiagnosticsDashboard.tsx": $QueueDiagnosticsDashboard,
-    "./islands/ScoreBreakdownModal.tsx": $ScoreBreakdownModal,
     "./islands/ShopeeParser.tsx": $ShopeeParser,
     "./islands/Sidebar.tsx": $Sidebar,
     "./islands/TagManager.tsx": $TagManager,

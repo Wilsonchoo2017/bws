@@ -17,7 +17,7 @@ import {
 } from "../../db/schema.ts";
 import { getBricklinkRepository } from "../../services/bricklink/BricklinkRepository.ts";
 import { getWorldBricksRepository } from "../../services/worldbricks/WorldBricksRepository.ts";
-import ProductAnalysisCard from "../../islands/ProductAnalysisCard.tsx";
+import IntrinsicValueCard from "../../islands/IntrinsicValueCard.tsx";
 import ProductEditModal from "../../islands/ProductEditModal.tsx";
 import ProductImageGallery from "../../islands/ProductImageGallery.tsx";
 import PricingOverview from "../../islands/PricingOverview.tsx";
@@ -767,17 +767,14 @@ export default function ProductDetailPage(
             </div>
           )}
 
-          {/* Bricklink/Investment Analysis Section */}
+          {/* Investment Analysis Section */}
           {product.legoSetNumber && (
             <div class="card bg-base-100 shadow-xl">
               <div class="card-body">
                 <h2 class="card-title text-2xl mb-4">
-                  Bricklink Investment Analysis
+                  Investment Analysis
                 </h2>
-                <ProductAnalysisCard
-                  productId={product.productId}
-                  defaultStrategy="Investment Focus"
-                />
+                <IntrinsicValueCard productId={product.productId} />
               </div>
             </div>
           )}

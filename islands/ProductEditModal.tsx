@@ -215,11 +215,13 @@ export default function ProductEditModal({ product }: ProductEditModalProps) {
                 />
               </div>
 
-              {/* Price Before Discount */}
+              {/* Retail Price (MSRP) */}
               <div class="form-control">
                 <label class="label">
-                  <span class="label-text">Price Before Discount</span>
-                  <span class="label-text-alt">Optional</span>
+                  <span class="label-text">Retail Price (MSRP)</span>
+                  <span class="label-text-alt">
+                    Manufacturer's suggested retail price
+                  </span>
                 </label>
                 <input
                   type="number"
@@ -229,6 +231,7 @@ export default function ProductEditModal({ product }: ProductEditModalProps) {
                   onInput={(e) =>
                     editPriceBeforeDiscount.value = e.currentTarget.value}
                   disabled={isLoading.value}
+                  placeholder="Enter MSRP"
                 />
               </div>
 
