@@ -26,17 +26,6 @@ export function ProductTableRow(
 ) {
   return (
     <tr key={product.id}>
-      {/* Platform Badge */}
-      <td>
-        <span
-          class={`badge badge-sm ${
-            getProductPlatformBadgeClass(product.source)
-          }`}
-        >
-          {getProductPlatformLabel(product.source)}
-        </span>
-      </td>
-
       {/* Product Image */}
       <td>
         {product.image
@@ -149,17 +138,6 @@ export function ProductTableRow(
           : <span class="text-error text-lg" title="No Brick Economy data">✗</span>}
       </td>
 
-      {/* Price */}
-      <td>
-        <div class="font-semibold">{formatPrice(product.price)}</div>
-        {product.priceBeforeDiscount &&
-          product.priceBeforeDiscount > (product.price || 0) && (
-          <div class="text-xs text-base-content/50 line-through">
-            {formatPrice(product.priceBeforeDiscount)}
-          </div>
-        )}
-      </td>
-
       {/* Units Sold (conditional - not shown for ToysRUs) */}
       {sourceFilter !== "toysrus" && (
         <td>
@@ -170,28 +148,6 @@ export function ProductTableRow(
           </span>
         </td>
       )}
-
-      {/* Shop Info / SKU */}
-      <td>
-        {product.source === "shopee"
-          ? (
-            <>
-              <div class="text-sm">
-                {product.shopName || "Unknown"}
-              </div>
-              {product.shopLocation && (
-                <div class="text-xs text-base-content/50">
-                  {product.shopLocation}
-                </div>
-              )}
-            </>
-          )
-          : (
-            <div class="text-sm font-mono">
-              {product.sku || "—"}
-            </div>
-          )}
-      </td>
 
       {/* Updated Date */}
       <td class="text-sm text-base-content/70">

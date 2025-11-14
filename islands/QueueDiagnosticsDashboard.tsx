@@ -409,9 +409,9 @@ export default function QueueDiagnosticsDashboard() {
           <div class="modal-box">
             <h3 class="font-bold text-lg">Reset Queue?</h3>
             <p class="py-4">
-              This will clear all current queue jobs and repopulate based on
-              current data state. Active jobs will complete first before the
-              reset.
+              This will immediately obliterate all jobs including active ones.
+              Running job code may continue in the background but won't affect
+              queue state or retry.
             </p>
             <div class="modal-action">
               <button

@@ -130,7 +130,6 @@ export function ProductTable({
         <table class="table table-zebra w-full">
           <thead>
             <tr>
-              <th class="w-20">Platform</th>
               <th class="w-20">Image</th>
               <th>Name</th>
               <th class="w-24">LEGO Set</th>
@@ -140,17 +139,6 @@ export function ProductTable({
               <th class="w-16 text-center" title="Retiring Soon">Ret Soon</th>
               <th class="w-16 text-center" title="Bricklink Data">BL</th>
               <th class="w-16 text-center" title="Brick Economy Data">BE</th>
-              <th
-                class="cursor-pointer hover:bg-base-200 w-28"
-                onClick={() => onSort("price")}
-              >
-                Price{" "}
-                <SortIcon
-                  column="price"
-                  currentSortBy={sortBy}
-                  currentSortOrder={sortOrder}
-                />
-              </th>
               {sourceFilter !== "toysrus" && (
                 <th
                   class="cursor-pointer hover:bg-base-200 w-24"
@@ -164,9 +152,6 @@ export function ProductTable({
                   />
                 </th>
               )}
-              <th>
-                {sourceFilter === "toysrus" ? "SKU" : "Shop"}
-              </th>
               <th
                 class="cursor-pointer hover:bg-base-200 w-32"
                 onClick={() => onSort("updatedAt")}

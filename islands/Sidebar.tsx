@@ -53,8 +53,7 @@ export default function Sidebar({ currentPath }: SidebarProps) {
     <div class="flex flex-col h-full">
       {/* Logo/Brand */}
       <div class="p-6 border-b border-base-300">
-        <h2 class="text-2xl font-bold text-primary">LEGO Tracker</h2>
-        <p class="text-sm text-base-content/60 mt-1">Price Monitoring</p>
+        <h2 class="text-2xl font-bold text-primary">BWS</h2>
       </div>
 
       {/* Navigation */}

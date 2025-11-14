@@ -19,7 +19,9 @@
       "Bash(python3:*)",
       "Bash(tr:*)",
       "Bash(sed:*)",
-      "Bash(deno test:*)"
+      "Bash(deno test:*)",
+      "WebFetch(domain:docs.bullmq.io)",
+      "WebFetch(domain:github.com)"
     ],
     "deny": [],
     "ask": []

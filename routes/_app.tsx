@@ -2,12 +2,21 @@ import { type PageProps } from "$fresh/server.ts";
 import Sidebar from "../islands/Sidebar.tsx";
 
 export default function App({ Component, url }: PageProps) {
+  // Generate dynamic page title based on current path
+  const getPageTitle = (pathname: string): string => {
+    if (pathname === "/") return "BWS";
+
+    const segments = pathname.split("/").filter(Boolean);
+    const pageName = segments[0].charAt(0).toUpperCase() + segments[0].slice(1);
+    return `BWS - ${pageName}`;
+  };
+
   return (
     <html>
       <head>
         <meta charset="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-        <title>LEGO Price Tracker</title>
+        <title>{getPageTitle(url.pathname)}</title>
         <link rel="stylesheet" href="/styles.css" />
       </head>
       <body>
@@ -37,7 +46,7 @@ export default function App({ Component, url }: PageProps) {
                 </label>
               </div>
               <div class="flex-1">
-                <span class="text-xl font-bold">LEGO Tracker</span>
+                <span class="text-xl font-bold">BWS</span>
               </div>
             </div>
 

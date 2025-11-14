@@ -1032,25 +1032,50 @@ export class QueueService {
       throw new Error("Queue not initialized");
     }
 
-    queueLogger.info("🔄 Starting queue reset...");
+    queueLogger.info("🔄 Starting queue reset (nuclear obliterate mode)...");
 
-    // Get initial counts
+    // Get initial counts before obliterating
     const initialCounts = await this.getJobCounts();
 
-    // Wait for active jobs to complete
-    await this.waitForActiveJobs();
+    if (initialCounts.active > 0) {
+      queueLogger.warn(
+        `⚠️  Force-removing ${initialCounts.active} active job(s). Running code may continue but won't affect queue state.`,
+      );
+    }
 
-    // Clean all other jobs
-    const cleaned = await this.cleanAllJobs();
+    // Pause worker to prevent new jobs from being picked up
+    if (this.worker) {
+      await this.worker.pause();
+      queueLogger.info("⏸️  Worker paused");
+    }
+
+    // Nuclear option: obliterate entire queue including active jobs
+    await this.queue.obliterate({ force: true });
+    queueLogger.info("💥 Queue obliterated (all jobs force-removed)");
+
+    // Reset all rate limiters to clear request history
+    const rateLimiter = getRateLimiter();
+    await rateLimiter.resetAll();
+    queueLogger.info("🔓 Rate limiters reset (all domains cleared)");
+
+    // Resume worker
+    if (this.worker) {
+      await this.worker.resume();
+      queueLogger.info("▶️  Worker resumed");
+    }
 
     queueLogger.info("✅ Queue reset complete", {
       active: initialCounts.active,
-      ...cleaned,
+      waiting: initialCounts.waiting,
+      completed: initialCounts.completed,
+      failed: initialCounts.failed,
     });
 
     return {
       active: initialCounts.active,
-      ...cleaned,
+      waiting: initialCounts.waiting,
+      completed: initialCounts.completed,
+      failed: initialCounts.failed,
     };
   }
 
