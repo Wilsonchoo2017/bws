@@ -201,12 +201,15 @@ export class DataAggregationService {
     product: Product,
     bricklinkData: BricklinkItem | null,
   ): PricingData {
+    const currentPriceCents = this.safeNumber(product.price);
+    const originalPriceCents = this.safeNumber(product.priceBeforeDiscount);
+
     return {
-      currentRetailPrice: this.safeNumberInDollars(product.price),
-      originalRetailPrice: this.safeNumberInDollars(product.priceBeforeDiscount),
+      currentRetailPrice: currentPriceCents,
+      originalRetailPrice: originalPriceCents,
       discountPercentage: this.calculateDiscountPercentage(
-        this.safeNumberInDollars(product.price),
-        this.safeNumberInDollars(product.priceBeforeDiscount),
+        currentPriceCents,
+        originalPriceCents,
       ),
       bricklink: bricklinkData
         ? this.normalizeBricklinkPricing(bricklinkData)
@@ -448,7 +451,8 @@ export class DataAggregationService {
     if (!priceStr) return undefined;
     const cleaned = priceStr.replace(/[^0-9.]/g, "");
     const parsed = parseFloat(cleaned);
-    return isNaN(parsed) ? undefined : parsed;
+    // Bricklink prices are in dollars, convert to cents
+    return isNaN(parsed) ? undefined : Math.round(parsed * 100);
   }
 
   private extractBricklinkTimesSold(item: BricklinkItem): number | undefined {

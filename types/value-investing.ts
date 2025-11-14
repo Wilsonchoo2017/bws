@@ -91,18 +91,18 @@ export interface ValueInvestingFilters {
 /**
  * Inputs for intrinsic value calculation
  *
- * ⚠️ UNIT CONVENTION: ValueCalculator expects all prices in DOLLARS
- * Convert cents to dollars before passing to ValueCalculator.calculateIntrinsicValue()
+ * ⚠️ UNIT CONVENTION: ValueCalculator now works in CENTS (integers)
+ * All calculations done with integer cents to avoid floating point errors
  */
 export interface IntrinsicValueInputs {
   // FUNDAMENTAL VALUE INPUTS (Replacement cost - TRUE intrinsic value)
-  // All prices in DOLLARS for ValueCalculator
-  msrp?: number;               // Original manufacturer's suggested retail price (DOLLARS)
-  currentRetailPrice?: number; // Current retail price if still available (DOLLARS)
-  // Market prices (for comparison, NOT base value) (DOLLARS)
-  bricklinkAvgPrice?: number;
-  bricklinkMaxPrice?: number;
-  historicalPriceData?: number[];  // Historical prices (DOLLARS)
+  // All prices in CENTS for precision
+  msrp?: Cents;               // Original manufacturer's suggested retail price (CENTS)
+  currentRetailPrice?: Cents; // Current retail price if still available (CENTS)
+  // Market prices (for comparison, NOT base value) (CENTS)
+  bricklinkAvgPrice?: Cents;
+  bricklinkMaxPrice?: Cents;
+  historicalPriceData?: Cents[];  // Historical prices (CENTS)
   // Retirement data
   retirementStatus?: "active" | "retiring_soon" | "retired";
   yearsPostRetirement?: number; // For time-decayed retirement premium

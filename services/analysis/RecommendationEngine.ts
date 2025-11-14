@@ -82,6 +82,7 @@ export class RecommendationEngine {
     );
 
     if (recommendedBuyPrice) {
+      // No conversion needed - ValueCalculator now works in CENTS
       recommendation.recommendedBuyPrice = recommendedBuyPrice;
     }
 

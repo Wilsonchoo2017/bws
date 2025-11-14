@@ -11,7 +11,7 @@ import type { Cents } from "../types/price.ts";
  * ⚠️ UNIT CONVENTION: All prices in CENTS
  * - currentPrice: CENTS (from database, may be raw number)
  * - priceBeforeDiscount: CENTS (from database, may be raw number)
- * - recommendedBuyPrice.price: CENTS (from API after conversion)
+ * - recommendedBuyPrice.price: CENTS (from API - RecommendationEngine converts from ValueCalculator's DOLLARS to CENTS)
  *
  * Note: Accepts number for backward compatibility with database queries
  */
@@ -22,19 +22,23 @@ interface PricingOverviewProps {
   currency?: string;
 }
 
+/**
+ * Recommended buy price data structure
+ * All price fields are in CENTS for consistency with database layer
+ */
 interface RecommendedBuyPrice {
-  price: Cents;  // CENTS (API returns cents)
+  price: Cents;  // CENTS - Target buy price (e.g., 31503 = RM 315.03)
   reasoning: string;
   confidence: number;
   breakdown?: {
-    intrinsicValue: Cents;  // CENTS
-    baseMargin: number;
-    adjustedMargin: number;
+    intrinsicValue: Cents;  // CENTS - Calculated intrinsic value
+    baseMargin: number;  // Decimal (e.g., 0.25 = 25%)
+    adjustedMargin: number;  // Decimal (e.g., 0.30 = 30%)
     marginAdjustments: Array<{ reason: string; value: number }>;
     inputs: {
-      msrp?: number;
-      bricklinkAvgPrice?: number;
-      bricklinkMaxPrice?: number;
+      msrp?: Cents;  // CENTS - ValueCalculator now works in cents
+      bricklinkAvgPrice?: Cents;  // CENTS
+      bricklinkMaxPrice?: Cents;  // CENTS
       retirementStatus?: string;
       demandScore?: number;
       qualityScore?: number;
@@ -281,7 +285,7 @@ export default function PricingOverview(
                         Using:
                         {recommendedBuyPrice.breakdown.inputs.msrp && (
                           <div>
-                            • MSRP: {formatPriceFromDollars(
+                            • MSRP: {formatPrice(
                               recommendedBuyPrice.breakdown.inputs.msrp,
                               currency,
                             )}
@@ -290,7 +294,7 @@ export default function PricingOverview(
                         {recommendedBuyPrice.breakdown.inputs
                           .bricklinkAvgPrice && (
                           <div>
-                            • Bricklink Avg: {formatPriceFromDollars(
+                            • Bricklink Avg: {formatPrice(
                               recommendedBuyPrice.breakdown.inputs
                                 .bricklinkAvgPrice,
                               currency,
@@ -327,7 +331,7 @@ export default function PricingOverview(
                         )}
                       </div>
                       <div class="font-bold text-success mt-2">
-                        = {formatPriceFromDollars(
+                        = {formatPrice(
                           recommendedBuyPrice.breakdown.intrinsicValue,
                           currency,
                         )}
@@ -389,7 +393,7 @@ export default function PricingOverview(
                     </div>
                     <div class="ml-12 text-sm space-y-1">
                       <div class="font-mono text-base-content/70">
-                        {formatPriceFromDollars(
+                        {formatPrice(
                           recommendedBuyPrice.breakdown.intrinsicValue,
                           currency,
                         )}{" "}
@@ -397,7 +401,7 @@ export default function PricingOverview(
                           100).toFixed(1)}%)
                       </div>
                       <div class="font-mono text-base-content/70">
-                        = {formatPriceFromDollars(
+                        = {formatPrice(
                           recommendedBuyPrice.breakdown.intrinsicValue,
                           currency,
                         )}{" "}
@@ -406,7 +410,7 @@ export default function PricingOverview(
                         )}
                       </div>
                       <div class="font-bold text-success text-lg mt-2">
-                        = {formatPriceFromDollars(
+                        = {formatPrice(
                           recommendedBuyPrice.price,
                           currency,
                         )}

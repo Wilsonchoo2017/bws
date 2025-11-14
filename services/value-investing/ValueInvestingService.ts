@@ -180,11 +180,12 @@ export class ValueInvestingService {
 
     // If recommendation already has a buy price, use it directly
     if (analysis.recommendedBuyPrice) {
-      // IMPORTANT: product.price is in CENTS (from database)
-      // analysis.recommendedBuyPrice.price is in DOLLARS (from ValueCalculator)
+      // IMPORTANT: Both product.price and analysis.recommendedBuyPrice.price are now in CENTS
       const currentPriceCents = asCents(product.price!);
-      const targetPriceCents = dollarsToCents(analysis.recommendedBuyPrice.price);
-      const intrinsicValueCents = dollarsToCents(analysis.recommendedBuyPrice.price / (1 - 0.25)); // Estimate intrinsic value assuming 25% margin
+      const targetPriceCents = asCents(analysis.recommendedBuyPrice.price);
+      const intrinsicValueCents = analysis.recommendedBuyPrice.breakdown?.intrinsicValue
+        ? asCents(analysis.recommendedBuyPrice.breakdown.intrinsicValue)
+        : asCents(analysis.recommendedBuyPrice.price / (1 - 0.25)); // Estimate intrinsic value assuming 25% margin
 
       const valueMetrics = {
         currentPrice: currentPriceCents,

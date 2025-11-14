@@ -27,18 +27,19 @@ export type StrategyType = keyof typeof STRATEGY_MARGINS;
  * - Defensive programming against NaN/null/undefined
  *
  * ⚠️ IMPORTANT PRICE UNIT CONVENTION:
- * This calculator works EXCLUSIVELY in DOLLARS (base currency unit) for all calculations.
- * All input prices must be in DOLLARS, and all output prices are in DOLLARS.
+ * This calculator works EXCLUSIVELY in CENTS (integer currency unit) for all calculations.
+ * All input prices must be in CENTS, and all output prices are in CENTS.
  *
  * When interfacing with this calculator:
- * - FROM database (cents) → convert to dollars before passing to calculator
- * - TO database (cents) → convert calculator results from dollars to cents
- * - Display layer → convert from cents to dollars for formatting
+ * - FROM database (cents) → pass directly to calculator
+ * - TO API (cents) → return directly (no conversion needed)
+ * - Display layer → convert from cents to dollars for formatting only
  *
  * This design choice:
- * ✓ Keeps business logic calculations simple and readable (decimal math)
- * ✓ Matches financial conventions (prices quoted in dollars, not cents)
- * ✓ Centralizes all unit conversions at system boundaries
+ * ✓ Eliminates floating point precision errors entirely
+ * ✓ Matches database storage (cents as integers)
+ * ✓ All calculations use integer math with rounding
+ * ✓ Percentages applied as: (cents * percent) / 100
  */
 export class ValueCalculator {
   /**
@@ -586,8 +587,8 @@ export class ValueCalculator {
       return 0;
     }
 
-    return Math.round(intrinsicValue * Math.pow(10, CONFIG.PRECISION.PRICE)) /
-      Math.pow(10, CONFIG.PRECISION.PRICE);
+    // Return as integer cents (already in cents, just ensure it's an integer)
+    return Math.round(intrinsicValue);
   }
 
   /**
@@ -990,8 +991,8 @@ export class ValueCalculator {
     }
 
     const targetPrice = intrinsicValue * (1 - adjustedMargin);
-    const roundedTargetPrice = Math.round(targetPrice * Math.pow(10, CONFIG.PRECISION.PRICE)) /
-      Math.pow(10, CONFIG.PRECISION.PRICE);
+    // Round to integer cents
+    const roundedTargetPrice = Math.round(targetPrice);
 
     // Calculate confidence based on data availability
     let dataPoints = 0;

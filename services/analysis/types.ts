@@ -3,6 +3,8 @@
  * Following SOLID principles for extensibility and maintainability
  */
 
+import type { Cents } from "../../types/price.ts";
+
 // ============================================================================
 // Analysis Result Types
 // ============================================================================
@@ -47,10 +49,29 @@ export interface ProductRecommendation {
   urgency: "urgent" | "moderate" | "low" | "no_rush";
   estimatedROI?: number; // Percentage
   timeHorizon?: string; // e.g., "6-12 months"
+  /**
+   * Recommended buy price calculation
+   * @property {Cents} price - Target buy price in cents (e.g., 31503 = RM 315.03)
+   */
   recommendedBuyPrice?: {
-    price: number;
+    price: Cents;
     reasoning: string;
     confidence: number;
+    breakdown?: {
+      intrinsicValue: Cents;
+      baseMargin: number;
+      adjustedMargin: number;
+      marginAdjustments: Array<{ reason: string; value: number }>;
+      inputs: {
+        msrp?: number;
+        bricklinkAvgPrice?: number;
+        bricklinkMaxPrice?: number;
+        retirementStatus?: string;
+        demandScore?: number;
+        qualityScore?: number;
+        availabilityScore?: number;
+      };
+    };
   };
   risks: string[];
   opportunities: string[];
@@ -61,29 +82,33 @@ export interface ProductRecommendation {
 // Input Data Types (normalized from various sources)
 // ============================================================================
 
+/**
+ * Pricing data from various sources
+ * ⚠️ All price fields are in CENTS for precision
+ */
 export interface PricingData {
-  // Retail pricing (Shopee/ToysRUs)
-  currentRetailPrice?: number;
-  originalRetailPrice?: number;
-  discountPercentage?: number;
+  // Retail pricing (Shopee/ToysRUs) - CENTS
+  currentRetailPrice?: Cents;
+  originalRetailPrice?: Cents;
+  discountPercentage?: number;  // Percentage (0-100)
 
-  // Resale pricing (Bricklink)
+  // Resale pricing (Bricklink) - CENTS
   bricklink?: {
     current: {
-      newAvg?: number;
-      newMin?: number;
-      newMax?: number;
-      usedAvg?: number;
-      usedMin?: number;
-      usedMax?: number;
+      newAvg?: Cents;
+      newMin?: Cents;
+      newMax?: Cents;
+      usedAvg?: Cents;
+      usedMin?: Cents;
+      usedMax?: Cents;
     };
     sixMonth: {
-      newAvg?: number;
-      newMin?: number;
-      newMax?: number;
-      usedAvg?: number;
-      usedMin?: number;
-      usedMax?: number;
+      newAvg?: Cents;
+      newMin?: Cents;
+      newMax?: Cents;
+      usedAvg?: Cents;
+      usedMin?: Cents;
+      usedMax?: Cents;
     };
   };
 
