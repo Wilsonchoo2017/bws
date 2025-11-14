@@ -161,6 +161,18 @@ export const RETRY_CONFIG = {
 } as const;
 
 /**
+ * Maintenance detection and handling configuration
+ */
+export const MAINTENANCE_CONFIG = {
+  /** Safety multiplier for parsed maintenance duration (e.g., 1.5x the stated duration) */
+  SAFETY_MULTIPLIER: 1.5,
+  /** Safety buffer to add to parsed duration in milliseconds (1 minute) */
+  SAFETY_BUFFER_MS: 60000, // 1 minute
+  /** Default delay when maintenance duration cannot be parsed (5 minutes) */
+  DEFAULT_DELAY_MS: 300000, // 5 minutes
+} as const;
+
+/**
  * Proxy configuration (for future use)
  */
 export const PROXY_CONFIG = {

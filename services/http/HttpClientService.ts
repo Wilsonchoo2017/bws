@@ -19,6 +19,7 @@ import {
   getRandomUserAgent,
   getRandomViewport,
 } from "../../config/scraper.config.ts";
+import { BricklinkMaintenanceDetector } from "../bricklink/BricklinkMaintenanceDetector.ts";
 
 /**
  * Interface for HTTP request options
@@ -250,6 +251,11 @@ export class HttpClientService {
       const status = response.status();
       const finalUrl = page.url();
 
+      // Check for Bricklink maintenance page (only for bricklink.com domains)
+      if (finalUrl.includes("bricklink.com")) {
+        BricklinkMaintenanceDetector.checkAndThrow(html);
+      }
+
       console.log(`✅ Successfully fetched: ${finalUrl} (Status: ${status})`);
 
       return {
@@ -259,6 +265,10 @@ export class HttpClientService {
       };
     } catch (error) {
       console.error(`❌ Failed to fetch ${options.url}:`, error);
+      // Re-throw MaintenanceError as-is, don't wrap it
+      if (error.name === "MaintenanceError" || error.isMaintenanceError) {
+        throw error;
+      }
       throw new Error(
         `HTTP request failed: ${error.message}`,
       );

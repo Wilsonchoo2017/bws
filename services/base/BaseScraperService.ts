@@ -21,6 +21,7 @@ import { scraperLogger } from "../../utils/logger.ts";
 import { db } from "../../db/client.ts";
 import { scrapeSessions } from "../../db/schema.ts";
 import { rawDataService } from "../raw-data/index.ts";
+import { MaintenanceError } from "../../types/errors/MaintenanceError.ts";
 
 /**
  * Options for retry logic
@@ -130,6 +131,24 @@ export abstract class BaseScraperService {
         return result;
       } catch (error) {
         lastError = error as Error;
+
+        // Handle maintenance errors specially - don't count toward circuit breaker
+        if (MaintenanceError.isMaintenanceError(error)) {
+          scraperLogger.warn(
+            `Maintenance detected: ${error.message}`,
+            {
+              attempt,
+              estimatedDurationMs: error.estimatedDurationMs,
+              estimatedEndTime: error.getEstimatedEndTime(),
+              url,
+              source,
+              ...context,
+            },
+          );
+          // Re-throw immediately without retrying or counting toward circuit breaker
+          throw error;
+        }
+
         scraperLogger.error(
           `Scraping attempt ${attempt} failed: ${error.message}`,
           {

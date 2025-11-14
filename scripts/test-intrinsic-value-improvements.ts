@@ -5,7 +5,7 @@
 
 import { ValueCalculator } from "../services/value-investing/ValueCalculator.ts";
 import type { IntrinsicValueInputs } from "../types/value-investing.ts";
-import { asCents } from "../types/price.ts";
+import { asCents, dollarsToCents } from "../types/price.ts";
 console.log("=".repeat(80));
 console.log("INTRINSIC VALUE CALCULATION IMPROVEMENTS - TEST SUITE");
 console.log("=".repeat(80));
@@ -29,7 +29,7 @@ const test1: IntrinsicValueInputs = {
 
 const intrinsic1 = ValueCalculator.calculateIntrinsicValue(test1);
 const realized1 = ValueCalculator.calculateRealizedValue(intrinsic1);
-const metrics1 = ValueCalculator.calculateValueMetrics(90, test1);
+const metrics1 = ValueCalculator.calculateValueMetrics(dollarsToCents(90), test1);
 
 console.log("Inputs:");
 console.log("  Bricklink Avg: $100, Max: $120");
@@ -64,7 +64,7 @@ const test2: IntrinsicValueInputs = {
 
 const intrinsic2 = ValueCalculator.calculateIntrinsicValue(test2);
 const realized2 = ValueCalculator.calculateRealizedValue(intrinsic2);
-const metrics2 = ValueCalculator.calculateValueMetrics(90, test2);
+const metrics2 = ValueCalculator.calculateValueMetrics(dollarsToCents(90), test2);
 
 console.log("Inputs:");
 console.log("  Bricklink Avg: $100, Max: $120");
@@ -163,12 +163,13 @@ console.log(
 console.log();
 
 pricePoints.forEach((price) => {
-  const realized = ValueCalculator.calculateRealizedValue(price);
-  const costImpact = price - realized;
-  const percentageImpact = (costImpact / price) * 100;
+  const priceCents = dollarsToCents(price);
+  const realized = ValueCalculator.calculateRealizedValue(priceCents);
+  const costImpact = priceCents - realized;
+  const percentageImpact = (costImpact / priceCents) * 100;
 
   console.log(
-    `  $${price} → $${realized.toFixed(2)} (${
+    `  $${price} → $${(realized / 100).toFixed(2)} (${
       percentageImpact.toFixed(1)
     }% costs)`,
   );

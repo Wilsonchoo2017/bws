@@ -10,7 +10,6 @@ import { createBricklinkScraperService } from "../services/bricklink/BricklinkSc
 import { getHttpClient } from "../services/http/HttpClientService.ts";
 import { getRateLimiter } from "../services/rate-limiter/RateLimiterService.ts";
 import { BricklinkRepository } from "../services/bricklink/BricklinkRepository.ts";
-import { db } from "../db/client.ts";
 import { scraperLogger } from "../utils/logger.ts";
 
 async function main() {
@@ -30,7 +29,7 @@ async function main() {
 
   const httpClient = getHttpClient();
   const rateLimiter = getRateLimiter();
-  const repository = new BricklinkRepository(db);
+  const repository = new BricklinkRepository();
   const scraper = createBricklinkScraperService(
     httpClient,
     rateLimiter,

@@ -5,7 +5,7 @@
 
 import { ValueCalculator } from "../services/value-investing/ValueCalculator.ts";
 import type { IntrinsicValueInputs } from "../types/value-investing.ts";
-import { asCents } from "../types/price.ts";
+import { asCents, dollarsToCents } from "../types/price.ts";
 console.log("=".repeat(80));
 console.log("FUNDAMENTAL VALUE APPROACH - TEST SUITE");
 console.log("Critical Fix: MSRP as base value (NOT market price)");
@@ -196,8 +196,9 @@ console.log("Test 6: Realistic Transaction & Holding Costs");
 console.log("-".repeat(80));
 
 const saleValue = 150;
-const realizedLight = ValueCalculator.calculateRealizedValue(saleValue, 1); // 1 lb
-const realizedHeavy = ValueCalculator.calculateRealizedValue(saleValue, 5); // 5 lbs
+const saleValueCents = dollarsToCents(saleValue);
+const realizedLight = ValueCalculator.calculateRealizedValue(saleValueCents, 1); // 1 lb
+const realizedHeavy = ValueCalculator.calculateRealizedValue(saleValueCents, 5); // 5 lbs
 
 const holdingCosts1yr = ValueCalculator.calculateHoldingCosts(150, 1);
 const holdingCosts2yr = ValueCalculator.calculateHoldingCosts(150, 2);
@@ -205,11 +206,11 @@ const holdingCosts2yr = ValueCalculator.calculateHoldingCosts(150, 2);
 console.log(`Sale Price: $${saleValue.toFixed(2)}`);
 console.log();
 console.log("Transaction Costs:");
-console.log(`  Light set (1 lb): $${realizedLight.toFixed(2)} realized`);
-console.log(`  Heavy set (5 lbs): $${realizedHeavy.toFixed(2)} realized`);
+console.log(`  Light set (1 lb): $${(realizedLight / 100).toFixed(2)} realized`);
+console.log(`  Heavy set (5 lbs): $${(realizedHeavy / 100).toFixed(2)} realized`);
 console.log(
-  `  Cost: -$${(saleValue - realizedLight).toFixed(2)} to -$${
-    (saleValue - realizedHeavy).toFixed(2)
+  `  Cost: -$${(saleValue - realizedLight / 100).toFixed(2)} to -$${
+    (saleValue - realizedHeavy / 100).toFixed(2)
   }`,
 );
 console.log();

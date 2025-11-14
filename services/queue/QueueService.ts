@@ -38,6 +38,7 @@ import {
 import { getWorldBricksRepository } from "../worldbricks/WorldBricksRepository.ts";
 import { WorldBricksScraperService } from "../worldbricks/WorldBricksScraperService.ts";
 import { queueLogger } from "../../utils/logger.ts";
+import { MaintenanceError } from "../../types/errors/MaintenanceError.ts";
 
 /**
  * Job priority levels
@@ -232,6 +233,19 @@ export class QueueService {
           throw new Error(`Unknown job type: ${job.name}`);
       }
     } catch (error) {
+      // Handle maintenance errors specially - reschedule instead of failing
+      if (MaintenanceError.isMaintenanceError(error)) {
+        await this.handleMaintenanceError(error, job);
+        // Return success result to mark job as completed
+        return {
+          success: true,
+          data: undefined,
+          saved: false,
+          rescheduled: true,
+          maintenanceDetected: true,
+        } as ScrapeResult;
+      }
+
       queueLogger.error(`Job processing error for ${job.id}`, {
         jobId: job.id,
         jobType: job.name,
@@ -239,6 +253,72 @@ export class QueueService {
         stack: error.stack,
       });
       throw error;
+    }
+  }
+
+  /**
+   * Handle maintenance error by rescheduling the job
+   */
+  private async handleMaintenanceError(
+    error: MaintenanceError,
+    job: Job,
+  ): Promise<void> {
+    const delayMs = error.estimatedDurationMs;
+    const estimatedEndTime = error.getEstimatedEndTime();
+
+    queueLogger.warn(
+      `Bricklink maintenance detected - rescheduling job ${job.id}`,
+      {
+        jobId: job.id,
+        jobType: job.name,
+        originalJobData: job.data,
+        maintenanceMessage: error.message,
+        delayMs,
+        estimatedEndTime: estimatedEndTime.toISOString(),
+        rescheduledFor: new Date(Date.now() + delayMs).toISOString(),
+      },
+    );
+
+    try {
+      if (!this.queue) {
+        throw new Error("Queue not initialized");
+      }
+
+      // Reschedule the same job with a delay
+      await this.queue.add(
+        job.name,
+        job.data,
+        {
+          delay: delayMs,
+          priority: JobPriority.HIGH, // High priority after maintenance
+          attempts: 3,
+          backoff: {
+            type: "exponential",
+            delay: 30000,
+          },
+        },
+      );
+
+      queueLogger.info(
+        `Successfully rescheduled job ${job.id} after maintenance`,
+        {
+          jobId: job.id,
+          jobType: job.name,
+          delayMs,
+          delayMinutes: Math.ceil(delayMs / 60000),
+        },
+      );
+    } catch (rescheduleError) {
+      queueLogger.error(
+        `Failed to reschedule job ${job.id} after maintenance`,
+        {
+          jobId: job.id,
+          jobType: job.name,
+          error: rescheduleError.message,
+          stack: rescheduleError.stack,
+        },
+      );
+      throw rescheduleError;
     }
   }
 
