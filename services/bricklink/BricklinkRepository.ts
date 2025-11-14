@@ -410,10 +410,22 @@ export class BricklinkRepository {
 
   /**
    * Helper to convert price to cents (integer)
+   * ⚠️ UNIT CONVENTION: Converts DOLLARS to CENTS for database storage
+   *
+   * Parser validation: Ensures price is non-negative before storing
    */
   private priceToInteger(priceData?: PriceData): number | undefined {
     if (!priceData) return undefined;
-    return Math.round(priceData.amount * 100);
+
+    const cents = Math.round(priceData.amount * 100);
+
+    // Validation: Ensure price is valid
+    if (cents < 0 || !isFinite(cents)) {
+      console.warn(`[BricklinkRepository] Invalid price: ${priceData.amount} → ${cents} cents`);
+      return undefined;
+    }
+
+    return cents;
   }
 
   /**

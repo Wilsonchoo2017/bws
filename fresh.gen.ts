@@ -21,6 +21,9 @@ import * as $api_products_bulk_tag from "./routes/api/products/bulk-tag.ts";
 import * as $api_products_manual from "./routes/api/products/manual.ts";
 import * as $api_products_validate_and_save from "./routes/api/products/validate-and-save.ts";
 import * as $api_queue_reset from "./routes/api/queue-reset.ts";
+import * as $api_raw_data_id_ from "./routes/api/raw-data/[id].ts";
+import * as $api_raw_data_session_sessionId_ from "./routes/api/raw-data/session/[sessionId].ts";
+import * as $api_raw_data_stats from "./routes/api/raw-data/stats.ts";
 import * as $api_reddit_results from "./routes/api/reddit-results.ts";
 import * as $api_reddit_search from "./routes/api/reddit-search.ts";
 import * as $api_scrape_bricklink from "./routes/api/scrape-bricklink.ts";
@@ -82,6 +85,10 @@ const manifest = {
     "./routes/api/products/validate-and-save.ts":
       $api_products_validate_and_save,
     "./routes/api/queue-reset.ts": $api_queue_reset,
+    "./routes/api/raw-data/[id].ts": $api_raw_data_id_,
+    "./routes/api/raw-data/session/[sessionId].ts":
+      $api_raw_data_session_sessionId_,
+    "./routes/api/raw-data/stats.ts": $api_raw_data_stats,
     "./routes/api/reddit-results.ts": $api_reddit_results,
     "./routes/api/reddit-search.ts": $api_reddit_search,
     "./routes/api/scrape-bricklink.ts": $api_scrape_bricklink,

@@ -1,18 +1,28 @@
 /**
  * Shared formatting utilities for consistent data presentation across the app.
  * Follows DRY principle by centralizing all formatting logic.
+ *
+ * ⚠️ UNIT CONVENTION: All prices are in CENTS throughout the application
+ * - Database stores prices in cents
+ * - All price parameters expect cents
+ * - Only convert to dollars for display
  */
+
+import type { Cents } from "../types/price.ts";
 
 /**
  * Formats price from cents to Ringgit Malaysia (RM) currency format
  * @param priceInCents - Price value in cents (e.g., 12990 = RM 129.90)
  * @returns Formatted price string with RM prefix
  * @example
- * formatPrice(12990) // "RM 129.90"
+ * formatPrice(12990 as Cents) // "RM 129.90"
  * formatPrice(null) // "N/A"
+ *
+ * ⚠️ UNIT CONVENTION: Accepts CENTS, displays as currency
+ * Note: Also accepts raw number for backward compatibility (will be treated as cents)
  */
 export function formatPrice(
-  priceInCents: number | null | undefined,
+  priceInCents: Cents | number | null | undefined,
 ): string {
   if (priceInCents === null || priceInCents === undefined) return "N/A";
   return `RM ${(priceInCents / 100).toFixed(2)}`;
@@ -72,16 +82,18 @@ export interface DeltaFormat {
 
 /**
  * Formats delta (change) values for price or sold units
- * @param delta - The change amount
+ * @param delta - The change amount (in CENTS for price type)
  * @param type - Type of delta ("sold" or "price")
  * @returns Formatted delta object with text and sign, or null if no change
  * @example
  * formatDelta(100, "sold") // { text: "+100", isPositive: true }
- * formatDelta(-5000, "price") // { text: "-RM 50.00", isPositive: false }
+ * formatDelta(-5000 as Cents, "price") // { text: "-RM 50.00", isPositive: false }
  * formatDelta(0, "sold") // null
+ *
+ * ⚠️ UNIT CONVENTION: For price type, delta must be in CENTS
  */
 export function formatDelta(
-  delta: number | null,
+  delta: number | Cents | null,
   type: "sold" | "price",
 ): DeltaFormat | null {
   if (delta === null || delta === 0) return null;
@@ -95,7 +107,7 @@ export function formatDelta(
       : delta.toString();
     return { text: `${prefix}${formatted}`, isPositive };
   } else {
-    // Price type
+    // Price type - delta is in CENTS
     const formatted = (delta / 100).toFixed(2);
     return { text: `${prefix}RM ${formatted}`, isPositive };
   }
@@ -103,21 +115,26 @@ export function formatDelta(
 
 /**
  * Formats currency with custom currency code
- * @param amount - Amount to format (already in base units, not cents)
+ * @param amountInCents - Amount to format in CENTS
  * @param currency - Currency code (e.g., "SGD", "RM", "USD")
  * @param decimals - Number of decimal places (default: 2)
  * @returns Formatted currency string
  * @example
- * formatCurrency(129.99, "SGD") // "SGD 129.99"
- * formatCurrency(50, "RM", 0) // "RM 50"
+ * formatCurrency(12999 as Cents, "SGD") // "SGD 129.99"
+ * formatCurrency(5000 as Cents, "RM", 0) // "RM 50"
+ *
+ * ⚠️ UNIT CONVENTION: Accepts CENTS, displays as currency
+ * Note: Also accepts raw number for backward compatibility (will be treated as cents)
+ * @deprecated Consider using formatPrice() for consistent RM formatting
  */
 export function formatCurrency(
-  amount: number | null | undefined,
+  amountInCents: Cents | number | null | undefined,
   currency: string = "SGD",
   decimals: number = 2,
 ): string {
-  if (amount === null || amount === undefined || isNaN(amount)) return "N/A";
-  return `${currency} ${amount.toFixed(decimals)}`;
+  if (amountInCents === null || amountInCents === undefined || isNaN(amountInCents)) return "N/A";
+  const dollars = amountInCents / 100;
+  return `${currency} ${dollars.toFixed(decimals)}`;
 }
 
 /**

@@ -7,6 +7,7 @@ import { parseShopeeHtml } from "../../utils/shopee-extractors.ts";
 import { scraperLogger } from "../../utils/logger.ts";
 import { imageDownloadService } from "../../services/image/ImageDownloadService.ts";
 import { imageStorageService } from "../../services/image/ImageStorageService.ts";
+import { rawDataService } from "../../services/raw-data/index.ts";
 
 // Re-export type from shopee-extractors for backwards compatibility
 import type { ParsedShopeeProduct } from "../../utils/shopee-extractors.ts";
@@ -149,6 +150,15 @@ export const handler = async (
 
     sessionId = session.id;
 
+    // Save raw HTML for debugging and testing
+    await rawDataService.saveRawData({
+      scrapeSessionId: sessionId,
+      source: "shopee",
+      sourceUrl: sourceUrl || "unknown",
+      rawHtml: htmlContent,
+      contentType: "text/html",
+    });
+
     scraperLogger.info("Created Shopee scrape session", {
       sessionId,
       shopUsername,
@@ -186,6 +196,7 @@ export const handler = async (
           name: product.product_name,
           currency: "MYR",
           price: product.price,
+          priceBeforeDiscount: product.price_before_discount,
           unitsSold: product.units_sold,
           legoSetNumber: product.lego_set_number,
           shopId: product.shop_id,
@@ -195,6 +206,8 @@ export const handler = async (
             product_url: product.product_url,
             price_string: product.price_string,
             units_sold_string: product.units_sold_string,
+            discount_percentage: product.discount_percentage,
+            promotional_badges: product.promotional_badges,
           },
           updatedAt: new Date(),
         }).onConflictDoUpdate({
@@ -202,6 +215,7 @@ export const handler = async (
           set: {
             name: sql`EXCLUDED.name`,
             price: sql`EXCLUDED.price`,
+            priceBeforeDiscount: sql`EXCLUDED.price_before_discount`,
             unitsSold: sql`EXCLUDED.units_sold`,
             legoSetNumber: sql`EXCLUDED.lego_set_number`,
             shopId: sql`EXCLUDED.shop_id`,
@@ -226,6 +240,9 @@ export const handler = async (
             product_url: product.product_url,
             price_string: product.price_string,
             units_sold_string: product.units_sold_string,
+            discount_percentage: product.discount_percentage,
+            promotional_badges: product.promotional_badges,
+            price_before_discount: product.price_before_discount,
           },
         });
 

@@ -42,6 +42,9 @@ import {
   type RedisCircuitBreaker,
 } from "../../utils/RedisCircuitBreaker.ts";
 import { scraperLogger } from "../../utils/logger.ts";
+import { rawDataService } from "../raw-data/index.ts";
+import { db } from "../../db/client.ts";
+import { scrapeSessions } from "../../db/schema.ts";
 
 /**
  * Result of a scraping operation
@@ -119,6 +122,19 @@ export class BrickRankerScraperService {
 
     let lastError: Error | null = null;
     let retries = 0;
+    let scrapeSessionId: number | null = null;
+
+    // Create scrape session if saveToDb is true
+    if (saveToDb) {
+      const [session] = await db.insert(scrapeSessions).values({
+        source: "brickranker",
+        sourceUrl: url,
+        productsFound: 0,
+        productsStored: 0,
+        status: "success",
+      }).returning();
+      scrapeSessionId = session.id;
+    }
 
     // Retry loop with exponential backoff
     for (let attempt = 1; attempt <= RETRY_CONFIG.MAX_RETRIES; attempt++) {
@@ -153,6 +169,18 @@ export class BrickRankerScraperService {
           throw new Error(
             `Failed to fetch retirement tracker page: HTTP ${response.status}`,
           );
+        }
+
+        // Save raw HTML if saveToDb is true
+        if (saveToDb && scrapeSessionId) {
+          await rawDataService.saveRawData({
+            scrapeSessionId,
+            source: "brickranker",
+            sourceUrl: url,
+            rawHtml: response.html,
+            contentType: "text/html",
+            httpStatus: response.status,
+          });
         }
 
         // Parse the page to extract all retirement items

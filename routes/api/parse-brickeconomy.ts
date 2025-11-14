@@ -6,6 +6,7 @@ import { parseBrickEconomyHtml } from "../../utils/brickeconomy-extractors.ts";
 import { scraperLogger } from "../../utils/logger.ts";
 import { imageDownloadService } from "../../services/image/ImageDownloadService.ts";
 import { imageStorageService } from "../../services/image/ImageStorageService.ts";
+import { rawDataService } from "../../services/raw-data/index.ts";
 
 // Re-export type from brickeconomy-extractors for backwards compatibility
 import type { ParsedBrickEconomyProduct } from "../../utils/brickeconomy-extractors.ts";
@@ -108,6 +109,15 @@ export const handler = async (
     }).returning();
 
     sessionId = session.id;
+
+    // Save raw HTML for debugging and testing
+    await rawDataService.saveRawData({
+      scrapeSessionId: sessionId,
+      source: "brickeconomy",
+      sourceUrl: sourceUrl || "unknown",
+      rawHtml: htmlContent,
+      contentType: "text/html",
+    });
 
     scraperLogger.info("Created BrickEconomy scrape session", {
       sessionId,

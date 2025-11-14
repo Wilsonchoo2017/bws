@@ -14,7 +14,12 @@
       "Bash(git commit:*)",
       "Bash(git rm:*)",
       "Bash(psql:*)",
-      "WebSearch"
+      "WebSearch",
+      "Bash(cat:*)",
+      "Bash(python3:*)",
+      "Bash(tr:*)",
+      "Bash(sed:*)",
+      "Bash(deno test:*)"
     ],
     "deny": [],
     "ask": []

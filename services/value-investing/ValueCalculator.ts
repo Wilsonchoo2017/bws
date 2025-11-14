@@ -1,6 +1,6 @@
 import type {
   IntrinsicValueInputs,
-  ValueMetrics,
+  ValueMetricsInDollars,
 } from "../../types/value-investing.ts";
 import {
   getValueRatingConfig,
@@ -25,6 +25,20 @@ export type StrategyType = keyof typeof STRATEGY_MARGINS;
  * - Input validation for resilience
  * - Centralized configuration
  * - Defensive programming against NaN/null/undefined
+ *
+ * ⚠️ IMPORTANT PRICE UNIT CONVENTION:
+ * This calculator works EXCLUSIVELY in DOLLARS (base currency unit) for all calculations.
+ * All input prices must be in DOLLARS, and all output prices are in DOLLARS.
+ *
+ * When interfacing with this calculator:
+ * - FROM database (cents) → convert to dollars before passing to calculator
+ * - TO database (cents) → convert calculator results from dollars to cents
+ * - Display layer → convert from cents to dollars for formatting
+ *
+ * This design choice:
+ * ✓ Keeps business logic calculations simple and readable (decimal math)
+ * ✓ Matches financial conventions (prices quoted in dollars, not cents)
+ * ✓ Centralizes all unit conversions at system boundaries
  */
 export class ValueCalculator {
   /**
@@ -841,7 +855,7 @@ export class ValueCalculator {
     currentPrice: number,
     inputs: IntrinsicValueInputs,
     urgency?: string,
-  ): ValueMetrics {
+  ): ValueMetricsInDollars {
     // Validate current price
     this.validatePrice(currentPrice, "currentPrice");
 
@@ -910,6 +924,21 @@ export class ValueCalculator {
     price: number;
     reasoning: string;
     confidence: number;
+    breakdown?: {
+      intrinsicValue: number;
+      baseMargin: number;
+      adjustedMargin: number;
+      marginAdjustments: Array<{ reason: string; value: number }>;
+      inputs: {
+        msrp?: number;
+        bricklinkAvgPrice?: number;
+        bricklinkMaxPrice?: number;
+        retirementStatus?: string;
+        demandScore?: number;
+        qualityScore?: number;
+        availabilityScore?: number;
+      };
+    };
   } | null {
     const intrinsicValue = this.calculateIntrinsicValue(inputs);
 
@@ -917,7 +946,52 @@ export class ValueCalculator {
       return null; // Insufficient data
     }
 
-    const targetPrice = this.calculateTargetPrice(intrinsicValue, options);
+    // Calculate margin of safety with detailed tracking
+    const strategy = options.strategy || "Investment Focus";
+    const strategyConfig = STRATEGY_MARGINS[strategy];
+    const baseMargin: number = strategyConfig.margin;
+    let adjustedMargin: number = baseMargin;
+    const marginAdjustments: Array<{ reason: string; value: number }> = [];
+
+    // Track availability adjustment
+    if (
+      typeof options.availabilityScore === "number" &&
+      options.availabilityScore > 80
+    ) {
+      const urgencyAdjustment = ((options.availabilityScore - 80) / 20) * 0.05;
+      adjustedMargin = Math.max(0.05, adjustedMargin - urgencyAdjustment);
+      marginAdjustments.push({
+        reason: `High urgency (availability score ${options.availabilityScore})`,
+        value: -urgencyAdjustment,
+      });
+    }
+
+    // Track demand adjustment
+    if (typeof options.demandScore === "number" && options.demandScore > 70) {
+      const demandAdjustment = ((options.demandScore - 70) / 30) * 0.03;
+      const newMargin = Math.max(0.05, adjustedMargin - demandAdjustment);
+      const actualAdjustment = adjustedMargin - newMargin;
+      adjustedMargin = newMargin;
+      marginAdjustments.push({
+        reason: `High demand/liquidity (demand score ${options.demandScore})`,
+        value: -actualAdjustment,
+      });
+    } else if (
+      typeof options.demandScore === "number" && options.demandScore < 40
+    ) {
+      const demandAdjustment = ((40 - options.demandScore) / 40) * 0.05;
+      const newMargin = Math.min(0.50, adjustedMargin + demandAdjustment);
+      const actualAdjustment = newMargin - adjustedMargin;
+      adjustedMargin = newMargin;
+      marginAdjustments.push({
+        reason: `Low demand/liquidity (demand score ${options.demandScore})`,
+        value: actualAdjustment,
+      });
+    }
+
+    const targetPrice = intrinsicValue * (1 - adjustedMargin);
+    const roundedTargetPrice = Math.round(targetPrice * Math.pow(10, CONFIG.PRECISION.PRICE)) /
+      Math.pow(10, CONFIG.PRECISION.PRICE);
 
     // Calculate confidence based on data availability
     let dataPoints = 0;
@@ -937,8 +1011,6 @@ export class ValueCalculator {
 
     // Build reasoning
     const reasoningParts: string[] = [];
-    const strategy = options.strategy || "Investment Focus";
-    const strategyConfig = STRATEGY_MARGINS[strategy];
 
     reasoningParts.push(
       `${strategy} strategy (${strategyConfig.description}, ${
@@ -977,9 +1049,24 @@ export class ValueCalculator {
     const reasoning = reasoningParts.join(". ") + ".";
 
     return {
-      price: targetPrice,
+      price: roundedTargetPrice,
       reasoning,
       confidence,
+      breakdown: {
+        intrinsicValue,
+        baseMargin,
+        adjustedMargin,
+        marginAdjustments,
+        inputs: {
+          msrp: inputs.msrp,
+          bricklinkAvgPrice: inputs.bricklinkAvgPrice,
+          bricklinkMaxPrice: inputs.bricklinkMaxPrice,
+          retirementStatus: inputs.retirementStatus,
+          demandScore: inputs.demandScore,
+          qualityScore: inputs.qualityScore,
+          availabilityScore: options.availabilityScore,
+        },
+      },
     };
   }
 }

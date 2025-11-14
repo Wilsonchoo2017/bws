@@ -7,6 +7,7 @@ import { parseToysRUsHtml } from "../../utils/toysrus-extractors.ts";
 import { scraperLogger } from "../../utils/logger.ts";
 import { imageDownloadService } from "../../services/image/ImageDownloadService.ts";
 import { imageStorageService } from "../../services/image/ImageStorageService.ts";
+import { rawDataService } from "../../services/raw-data/index.ts";
 
 export const handler = async (
   req: Request,
@@ -126,6 +127,15 @@ export const handler = async (
 
     sessionId = session.id;
 
+    // Save raw HTML for debugging and testing
+    await rawDataService.saveRawData({
+      scrapeSessionId: sessionId,
+      source: "toysrus",
+      sourceUrl: sourceUrl || "unknown",
+      rawHtml: htmlContent,
+      contentType: "text/html",
+    });
+
     scraperLogger.info('Created Toys"R"Us scrape session', {
       sessionId,
       productsWithLegoId: productsWithLegoId.length,
@@ -172,6 +182,8 @@ export const handler = async (
           ageRange: product.ageRange,
           rawData: {
             product_url: product.productUrl,
+            discount_percentage: product.discountPercentage,
+            promotional_badges: product.promotionalBadges,
             ...product.rawData,
           },
           updatedAt: new Date(),

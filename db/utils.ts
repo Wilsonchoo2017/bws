@@ -2,26 +2,30 @@
  * Utility functions for data normalization and conversion
  */
 
+import { centsFromString, type Cents } from "../types/price.ts";
+
 /**
- * Converts a price string (e.g., "RM 150.50", "RM150.50", "150.50") to cents (bigint)
+ * Converts a price string (e.g., "RM 150.50", "RM150.50", "150.50") to cents
  * @param priceStr - Price string with or without currency symbol
- * @returns Price in cents as a number, or null if invalid
+ * @returns Price in cents (branded type), or null if invalid
+ *
+ * ⚠️ UNIT CONVENTION: Returns CENTS for database storage
  */
-export function parsePriceToCents(priceStr: string): number | null {
+export function parsePriceToCents(priceStr: string): Cents | null {
   if (!priceStr || priceStr === "N/A") return null;
 
-  // Remove currency symbols and whitespace
-  const cleanPrice = priceStr
-    .replace(/RM/gi, "")
-    .replace(/\$/g, "")
-    .replace(/,/g, "")
-    .trim();
+  // Use centralized parsing logic from price.ts
+  const parsed = centsFromString(priceStr);
 
-  const price = parseFloat(cleanPrice);
-  if (isNaN(price)) return null;
+  if (parsed === null) return null;
 
-  // Convert to cents (multiply by 100)
-  return Math.round(price * 100);
+  // Add validation: Parser validation requirement
+  if (parsed < 0) {
+    console.warn(`[parsePriceToCents] Invalid negative price: ${priceStr} → ${parsed} cents`);
+    return null;
+  }
+
+  return parsed;
 }
 
 /**

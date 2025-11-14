@@ -41,6 +41,8 @@ import {
   type RedisCircuitBreaker,
 } from "../../utils/RedisCircuitBreaker.ts";
 import { db } from "../../db/client.ts";
+import { rawDataService } from "../raw-data/index.ts";
+import { scrapeSessions } from "../../db/schema.ts";
 
 /**
  * Result of a scraping operation
@@ -93,6 +95,19 @@ export class BricklinkScraperService {
 
     let lastError: Error | null = null;
     let retries = 0;
+    let scrapeSessionId: number | null = null;
+
+    // Create scrape session if saveToDb is true
+    if (saveToDb) {
+      const [session] = await db.insert(scrapeSessions).values({
+        source: "bricklink",
+        sourceUrl: url,
+        productsFound: 0,
+        productsStored: 0,
+        status: "success",
+      }).returning();
+      scrapeSessionId = session.id;
+    }
 
     // Retry loop with exponential backoff
     for (let attempt = 1; attempt <= RETRY_CONFIG.MAX_RETRIES; attempt++) {
@@ -131,6 +146,18 @@ export class BricklinkScraperService {
           );
         }
 
+        // Save raw HTML for item page if saveToDb is true
+        if (saveToDb && scrapeSessionId) {
+          await rawDataService.saveRawData({
+            scrapeSessionId,
+            source: "bricklink",
+            sourceUrl: url,
+            rawHtml: itemResponse.html,
+            contentType: "text/html",
+            httpStatus: itemResponse.status,
+          });
+        }
+
         // Parse item info
         const { title, weight, image_url } = parseItemInfo(itemResponse.html);
 
@@ -155,6 +182,18 @@ export class BricklinkScraperService {
           throw new Error(
             `Failed to fetch price guide: HTTP ${priceResponse.status}`,
           );
+        }
+
+        // Save raw HTML for price guide page if saveToDb is true
+        if (saveToDb && scrapeSessionId) {
+          await rawDataService.saveRawData({
+            scrapeSessionId,
+            source: "bricklink",
+            sourceUrl: priceGuideUrl,
+            rawHtml: priceResponse.html,
+            contentType: "text/html",
+            httpStatus: priceResponse.status,
+          });
         }
 
         // Parse price guide

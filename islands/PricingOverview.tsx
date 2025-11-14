@@ -5,18 +5,42 @@
 
 import { useSignal } from "@preact/signals";
 import { useEffect } from "preact/hooks";
+import type { Cents } from "../types/price.ts";
 
+/**
+ * ⚠️ UNIT CONVENTION: All prices in CENTS
+ * - currentPrice: CENTS (from database, may be raw number)
+ * - priceBeforeDiscount: CENTS (from database, may be raw number)
+ * - recommendedBuyPrice.price: CENTS (from API after conversion)
+ *
+ * Note: Accepts number for backward compatibility with database queries
+ */
 interface PricingOverviewProps {
   productId: string;
-  currentPrice?: number;
-  priceBeforeDiscount?: number;
+  currentPrice?: Cents | number;        // CENTS (accepts number from DB)
+  priceBeforeDiscount?: Cents | number;  // CENTS (accepts number from DB)
   currency?: string;
 }
 
 interface RecommendedBuyPrice {
-  price: number;
+  price: Cents;  // CENTS (API returns cents)
   reasoning: string;
   confidence: number;
+  breakdown?: {
+    intrinsicValue: Cents;  // CENTS
+    baseMargin: number;
+    adjustedMargin: number;
+    marginAdjustments: Array<{ reason: string; value: number }>;
+    inputs: {
+      msrp?: number;
+      bricklinkAvgPrice?: number;
+      bricklinkMaxPrice?: number;
+      retirementStatus?: string;
+      demandScore?: number;
+      qualityScore?: number;
+      availabilityScore?: number;
+    };
+  };
 }
 
 interface AnalysisResponse {
@@ -24,19 +48,40 @@ interface AnalysisResponse {
   availableDimensions: number;
 }
 
-function formatPrice(price: number, currency: string = "MYR"): string {
+/**
+ * Format price from cents (all prices are now in cents)
+ * ⚠️ UNIT CONVENTION: Accepts CENTS (or number), displays as currency
+ */
+function formatPrice(cents: Cents | number, currency: string = "MYR"): string {
   return new Intl.NumberFormat("en-MY", {
     style: "currency",
     currency: currency,
     minimumFractionDigits: 2,
-  }).format(price / 100);
+  }).format(cents / 100);
 }
 
+/**
+ * Format price from dollars (for ValueCalculator breakdown inputs)
+ * ⚠️ UNIT CONVENTION: Accepts DOLLARS (from ValueCalculator inputs), displays as currency
+ */
+function formatPriceFromDollars(dollars: number, currency: string = "MYR"): string {
+  return new Intl.NumberFormat("en-MY", {
+    style: "currency",
+    currency: currency,
+    minimumFractionDigits: 2,
+  }).format(dollars);
+}
+
+/**
+ * Compare current price vs recommended price
+ * ⚠️ UNIT CONVENTION: Both prices in CENTS (or number)
+ */
 function getPriceComparison(
-  currentPrice: number,
-  recommendedPrice: number,
+  currentPriceCents: Cents | number,
+  recommendedPriceCents: Cents | number,
 ): { status: "good" | "fair" | "overpriced"; label: string; color: string } {
-  const ratio = currentPrice / recommendedPrice;
+  // Both already in cents, compare directly
+  const ratio = currentPriceCents / recommendedPriceCents;
 
   if (ratio <= 1.0) {
     return {
@@ -181,13 +226,13 @@ export default function PricingOverview(
                 Current price is {currentPrice < recommendedBuyPrice.price
                   ? `${
                     formatPrice(
-                      recommendedBuyPrice.price - currentPrice,
+                      (recommendedBuyPrice.price - currentPrice) as Cents,
                       currency,
                     )
                   } below`
                   : `${
                     formatPrice(
-                      currentPrice - recommendedBuyPrice.price,
+                      (currentPrice - recommendedBuyPrice.price) as Cents,
                       currency,
                     )
                   } above`} target
@@ -196,15 +241,204 @@ export default function PricingOverview(
           )}
         </div>
 
-        {/* Reasoning (collapsible) */}
+        {/* Calculation Details (collapsible) */}
         <details class="collapse collapse-arrow bg-base-200 mt-4">
           <summary class="collapse-title text-sm font-medium">
-            Why this price?
+            📊 How is this price calculated?
           </summary>
-          <div class="collapse-content">
-            <p class="text-sm text-base-content/80">
-              {recommendedBuyPrice.reasoning}
-            </p>
+          <div class="collapse-content space-y-3">
+            {/* Reasoning */}
+            <div>
+              <p class="text-xs font-semibold text-base-content/60 mb-1">
+                PRICING STRATEGY
+              </p>
+              <p class="text-sm text-base-content/80">
+                {recommendedBuyPrice.reasoning}
+              </p>
+            </div>
+
+            {/* Step-by-Step Calculation */}
+            {recommendedBuyPrice.breakdown && (
+              <>
+                <div class="divider my-2"></div>
+                <div>
+                  <p class="text-xs font-semibold text-base-content/60 mb-3">
+                    STEP-BY-STEP CALCULATION
+                  </p>
+
+                  {/* Step 1: Intrinsic Value */}
+                  <div class="bg-base-300 p-3 rounded-lg mb-3">
+                    <div class="flex items-start gap-2 mb-2">
+                      <span class="text-success font-mono font-bold">
+                        Step 1
+                      </span>
+                      <div class="flex-1">
+                        <strong>Calculate Intrinsic Value</strong>
+                      </div>
+                    </div>
+                    <div class="ml-12 text-sm space-y-1">
+                      <div class="text-base-content/70">
+                        Using:
+                        {recommendedBuyPrice.breakdown.inputs.msrp && (
+                          <div>
+                            • MSRP: {formatPriceFromDollars(
+                              recommendedBuyPrice.breakdown.inputs.msrp,
+                              currency,
+                            )}
+                          </div>
+                        )}
+                        {recommendedBuyPrice.breakdown.inputs
+                          .bricklinkAvgPrice && (
+                          <div>
+                            • Bricklink Avg: {formatPriceFromDollars(
+                              recommendedBuyPrice.breakdown.inputs
+                                .bricklinkAvgPrice,
+                              currency,
+                            )}
+                          </div>
+                        )}
+                        {recommendedBuyPrice.breakdown.inputs.retirementStatus &&
+                          (
+                            <div>
+                              • Status:{" "}
+                              {recommendedBuyPrice.breakdown.inputs
+                                .retirementStatus}
+                            </div>
+                          )}
+                        {recommendedBuyPrice.breakdown.inputs.demandScore !==
+                            undefined && (
+                          <div>
+                            • Demand Score:{" "}
+                            {recommendedBuyPrice.breakdown.inputs.demandScore.toFixed(
+                              0,
+                            )}
+                            /100
+                          </div>
+                        )}
+                        {recommendedBuyPrice.breakdown.inputs.qualityScore !==
+                            undefined && (
+                          <div>
+                            • Quality Score:{" "}
+                            {recommendedBuyPrice.breakdown.inputs.qualityScore.toFixed(
+                              0,
+                            )}
+                            /100
+                          </div>
+                        )}
+                      </div>
+                      <div class="font-bold text-success mt-2">
+                        = {formatPriceFromDollars(
+                          recommendedBuyPrice.breakdown.intrinsicValue,
+                          currency,
+                        )}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Step 2: Margin of Safety */}
+                  <div class="bg-base-300 p-3 rounded-lg mb-3">
+                    <div class="flex items-start gap-2 mb-2">
+                      <span class="text-success font-mono font-bold">
+                        Step 2
+                      </span>
+                      <div class="flex-1">
+                        <strong>Apply Margin of Safety</strong>
+                      </div>
+                    </div>
+                    <div class="ml-12 text-sm space-y-1">
+                      <div class="text-base-content/70">
+                        Base margin:{" "}
+                        {(recommendedBuyPrice.breakdown.baseMargin * 100).toFixed(
+                          0,
+                        )}%
+                        {recommendedBuyPrice.breakdown.marginAdjustments.length >
+                            0 && (
+                          <div class="mt-2">
+                            Adjustments:
+                            {recommendedBuyPrice.breakdown.marginAdjustments.map((
+                              adj,
+                              i,
+                            ) => (
+                              <div key={i} class="ml-4">
+                                • {adj.reason}:{" "}
+                                {adj.value > 0 ? "+" : ""}
+                                {(adj.value * 100).toFixed(1)}%
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                      <div class="font-bold text-success mt-2">
+                        Final margin:{" "}
+                        {(recommendedBuyPrice.breakdown.adjustedMargin * 100).toFixed(
+                          1,
+                        )}%
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Step 3: Target Price */}
+                  <div class="bg-base-300 p-3 rounded-lg">
+                    <div class="flex items-start gap-2 mb-2">
+                      <span class="text-success font-mono font-bold">
+                        Step 3
+                      </span>
+                      <div class="flex-1">
+                        <strong>Calculate Target Buy Price</strong>
+                      </div>
+                    </div>
+                    <div class="ml-12 text-sm space-y-1">
+                      <div class="font-mono text-base-content/70">
+                        {formatPriceFromDollars(
+                          recommendedBuyPrice.breakdown.intrinsicValue,
+                          currency,
+                        )}{" "}
+                        × (1 - {(recommendedBuyPrice.breakdown.adjustedMargin *
+                          100).toFixed(1)}%)
+                      </div>
+                      <div class="font-mono text-base-content/70">
+                        = {formatPriceFromDollars(
+                          recommendedBuyPrice.breakdown.intrinsicValue,
+                          currency,
+                        )}{" "}
+                        × {(1 - recommendedBuyPrice.breakdown.adjustedMargin).toFixed(
+                          3,
+                        )}
+                      </div>
+                      <div class="font-bold text-success text-lg mt-2">
+                        = {formatPriceFromDollars(
+                          recommendedBuyPrice.price,
+                          currency,
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </>
+            )}
+
+            {/* Confidence indicator */}
+            <div class="divider my-2"></div>
+            <div>
+              <p class="text-xs font-semibold text-base-content/60 mb-1">
+                DATA CONFIDENCE
+              </p>
+              <div class="flex items-center gap-2">
+                <progress
+                  class="progress progress-success w-full"
+                  value={recommendedBuyPrice.confidence * 100}
+                  max="100"
+                >
+                </progress>
+                <span class="text-sm font-medium">
+                  {Math.round(recommendedBuyPrice.confidence * 100)}%
+                </span>
+              </div>
+              <p class="text-xs text-base-content/60 mt-1">
+                Based on availability of pricing data, market metrics, and
+                quality scores
+              </p>
+            </div>
           </div>
         </details>
       </div>

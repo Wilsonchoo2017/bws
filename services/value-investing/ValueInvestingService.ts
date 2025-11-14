@@ -17,6 +17,7 @@ import type { Product } from "../../db/schema.ts";
 import type { AnalysisService } from "../analysis/AnalysisService.ts";
 import type { ProductRecommendation } from "../analysis/types.ts";
 import type { ValueInvestingProduct } from "../../types/value-investing.ts";
+import { asCents, centsToDollars, dollarsToCents, type Cents } from "../../types/price.ts";
 
 /**
  * Type guard for retirement status
@@ -179,14 +180,18 @@ export class ValueInvestingService {
 
     // If recommendation already has a buy price, use it directly
     if (analysis.recommendedBuyPrice) {
+      // IMPORTANT: product.price is in CENTS (from database)
+      // analysis.recommendedBuyPrice.price is in DOLLARS (from ValueCalculator)
+      const currentPriceCents = asCents(product.price!);
+      const targetPriceCents = dollarsToCents(analysis.recommendedBuyPrice.price);
+      const intrinsicValueCents = dollarsToCents(analysis.recommendedBuyPrice.price / (1 - 0.25)); // Estimate intrinsic value assuming 25% margin
+
       const valueMetrics = {
-        currentPrice: product.price!,
-        targetPrice: analysis.recommendedBuyPrice.price,
-        intrinsicValue: analysis.recommendedBuyPrice.price / (1 - 0.25), // Estimate intrinsic value assuming 25% margin
-        marginOfSafety: ((analysis.recommendedBuyPrice.price - product.price!) /
-          analysis.recommendedBuyPrice.price) * 100,
-        expectedROI: ((analysis.recommendedBuyPrice.price - product.price!) /
-          product.price!) * 100,
+        currentPrice: currentPriceCents,
+        targetPrice: targetPriceCents,
+        intrinsicValue: intrinsicValueCents,
+        marginOfSafety: ((targetPriceCents - currentPriceCents) / targetPriceCents) * 100,
+        expectedROI: ((targetPriceCents - currentPriceCents) / currentPriceCents) * 100,
         timeHorizon: analysis.timeHorizon || "Unknown",
       };
 
@@ -198,7 +203,7 @@ export class ValueInvestingService {
         legoSetNumber: product.legoSetNumber,
         source: product.source,
         brand: product.brand!,
-        currentPrice: product.price!,
+        currentPrice: currentPriceCents,  // Now consistently in cents
         currency: product.currency || "MYR",
         valueMetrics,
         strategy: analysis.strategy || "Unknown",

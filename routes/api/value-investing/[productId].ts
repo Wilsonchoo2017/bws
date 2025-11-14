@@ -12,6 +12,7 @@ import { db } from "../../../db/client.ts";
 import { products } from "../../../db/schema.ts";
 import { AnalysisService } from "../../../services/analysis/AnalysisService.ts";
 import { ValueInvestingService } from "../../../services/value-investing/ValueInvestingService.ts";
+import { asCents, dollarsToCents } from "../../../types/price.ts";
 
 export const handler: Handlers = {
   async GET(_req, ctx) {
@@ -35,15 +36,35 @@ export const handler: Handlers = {
         );
       }
 
-      // Use ValueInvestingService to get the complete analysis
+      // Get the product analysis directly from AnalysisService
       const analysisService = new AnalysisService();
-      const valueService = new ValueInvestingService(analysisService);
 
-      const { opportunities } = await valueService.getValueOpportunities([product]);
+      const analysisResults = await analysisService.analyzeProducts([product.productId]);
+      const analysis = analysisResults.get(product.productId);
 
-      if (opportunities.length === 0) {
+      if (!analysis) {
         return new Response(
-          JSON.stringify({ error: "Insufficient data for value analysis" }),
+          JSON.stringify({ error: "No analysis available for this product" }),
+          {
+            status: 404,
+            headers: { "Content-Type": "application/json" },
+          },
+        );
+      }
+
+      // Check if we have enough data for value analysis
+      if (!analysis.recommendedBuyPrice) {
+        return new Response(
+          JSON.stringify({
+            error: "Insufficient data for value analysis",
+            analysis: {
+              action: analysis.action,
+              risks: analysis.risks,
+              opportunities: analysis.opportunities,
+              strategy: analysis.strategy,
+              reasoning: analysis.overall.reasoning,
+            }
+          }),
           {
             status: 400,
             headers: { "Content-Type": "application/json" },
@@ -51,16 +72,31 @@ export const handler: Handlers = {
         );
       }
 
-      const valueProduct = opportunities[0];
+      // Calculate value metrics from the analysis
+      // IMPORTANT: product.price is in CENTS (from database)
+      // analysis.recommendedBuyPrice.price is in DOLLARS (from ValueCalculator)
+      // All prices in API response should be in CENTS for consistency
+      const currentPriceCents = asCents(product.price!);
+      const targetPriceCents = dollarsToCents(analysis.recommendedBuyPrice.price);
+      const intrinsicValueCents = dollarsToCents(analysis.recommendedBuyPrice.price / (1 - 0.25)); // Estimate intrinsic value assuming 25% margin
+
+      const valueMetrics = {
+        currentPrice: currentPriceCents,
+        targetPrice: targetPriceCents,
+        intrinsicValue: intrinsicValueCents,
+        marginOfSafety: ((targetPriceCents - currentPriceCents) / targetPriceCents) * 100,
+        expectedROI: ((targetPriceCents - currentPriceCents) / currentPriceCents) * 100,
+        timeHorizon: analysis.timeHorizon || "Unknown",
+      };
 
       // Return the intrinsic value data formatted for the IntrinsicValueCard
       const response = {
-        valueMetrics: valueProduct.valueMetrics,
-        action: valueProduct.action,
-        risks: valueProduct.risks,
-        opportunities: valueProduct.opportunities,
+        valueMetrics,
+        action: analysis.action,
+        risks: analysis.risks || [],
+        opportunities: analysis.opportunities || [],
         analyzedAt: new Date().toISOString(),
-        currency: valueProduct.currency,
+        currency: product.currency || "MYR",
       };
 
       return new Response(JSON.stringify(response), {

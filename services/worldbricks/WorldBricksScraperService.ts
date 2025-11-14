@@ -33,6 +33,9 @@ import {
   type RedisCircuitBreaker,
 } from "../../utils/RedisCircuitBreaker.ts";
 import { scraperLogger } from "../../utils/logger.ts";
+import { rawDataService } from "../raw-data/index.ts";
+import { db } from "../../db/client.ts";
+import { scrapeSessions } from "../../db/schema.ts";
 
 /**
  * Result of a scraping operation
@@ -98,6 +101,19 @@ export class WorldBricksScraperService {
     let lastError: Error | null = null;
     let retries = 0;
     let targetUrl: string | null = url || null;
+    let scrapeSessionId: number | null = null;
+
+    // Create scrape session if saveToDb is true
+    if (saveToDb) {
+      const [session] = await db.insert(scrapeSessions).values({
+        source: "worldbricks",
+        sourceUrl: url || `https://www.worldbricks.com search for ${setNumber}`,
+        productsFound: 0,
+        productsStored: 0,
+        status: "success",
+      }).returning();
+      scrapeSessionId = session.id;
+    }
 
     // Retry loop with exponential backoff
     for (let attempt = 1; attempt <= RETRY_CONFIG.MAX_RETRIES; attempt++) {
@@ -143,6 +159,18 @@ export class WorldBricksScraperService {
             );
           }
 
+          // Save raw HTML for search results if saveToDb is true
+          if (saveToDb && scrapeSessionId) {
+            await rawDataService.saveRawData({
+              scrapeSessionId,
+              source: "worldbricks",
+              sourceUrl: searchUrl,
+              rawHtml: searchResponse.html,
+              contentType: "text/html",
+              httpStatus: searchResponse.status,
+            });
+          }
+
           // Parse search results to find product URL
           targetUrl = parseSearchResults(searchResponse.html, setNumber);
 
@@ -181,6 +209,18 @@ export class WorldBricksScraperService {
           throw new Error(
             `Failed to fetch WorldBricks page: HTTP ${response.status}`,
           );
+        }
+
+        // Save raw HTML for product page if saveToDb is true
+        if (saveToDb && scrapeSessionId) {
+          await rawDataService.saveRawData({
+            scrapeSessionId,
+            source: "worldbricks",
+            sourceUrl: targetUrl,
+            rawHtml: response.html,
+            contentType: "text/html",
+            httpStatus: response.status,
+          });
         }
 
         // Validate that it's a valid WorldBricks product page

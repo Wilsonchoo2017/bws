@@ -18,6 +18,8 @@ export interface ToysRUsProduct {
   brand: string | null;
   price: number | null; // in cents
   priceBeforeDiscount: number | null; // in cents
+  discountPercentage: number | null;
+  promotionalBadges: string[];
   image: string | null;
   sku: string | null;
   categoryNumber: string | null;
@@ -139,11 +141,25 @@ export function extractPrice(element: Element): number | null {
  * Extract before discount price
  */
 export function extractPriceBeforeDiscount(element: Element): number | null {
+  // Try to get the value from del.old .value span (most specific)
+  const delOld = element.querySelector("del.old .value");
+  if (delOld) {
+    const content = delOld.getAttribute("content");
+    if (content) {
+      try {
+        return parsePriceToCents(content);
+      } catch {
+        // Continue to fallback selectors
+      }
+    }
+  }
+
+  // Fallback to other selectors
   const selectors = [
     ".price-standard",
     ".list-price",
-    ".strike-through",
-    ".price .strike-through",
+    ".strike-through .value",
+    ".price .strike-through .value",
   ];
 
   for (const selector of selectors) {
@@ -238,6 +254,78 @@ export function generateProductId(
 }
 
 /**
+ * Normalizes badge text to simple tag format
+ * Converts to lowercase and removes all non-alphanumeric characters
+ * Same normalization as Shopee for consistency
+ * @param badge - Raw badge text
+ * @returns Normalized tag string
+ */
+export function normalizeBadgeToTag(badge: string): string {
+  return badge.toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+/**
+ * Extract promotional badges from ToysRUs product overlay
+ * Looks for overlay badges like "members sale price"
+ * @param element - DOM element for the product
+ * @returns Array of normalized badge tags
+ */
+export function extractPromotionalBadges(element: Element): string[] {
+  const badges: string[] = [];
+
+  // Extract product overlay badge (e.g., "members sale price")
+  const overlayLabel = element.querySelector(
+    ".product-overlay .inner .label, .product-overlay-wrapper .product-overlay .label",
+  );
+
+  if (overlayLabel?.textContent) {
+    const text = overlayLabel.textContent.trim();
+    if (text) {
+      const normalized = normalizeBadgeToTag(text);
+      if (normalized && !badges.includes(normalized)) {
+        badges.push(normalized);
+      }
+    }
+  }
+
+  // Check promotions div (may contain promotional text in future)
+  const promotionsDiv = element.querySelector(".promotions");
+  if (promotionsDiv?.textContent?.trim()) {
+    const promoText = promotionsDiv.textContent.trim();
+    if (promoText) {
+      const normalized = normalizeBadgeToTag(promoText);
+      if (normalized && !badges.includes(normalized)) {
+        badges.push(normalized);
+      }
+    }
+  }
+
+  return badges;
+}
+
+/**
+ * Calculate discount percentage from current price and price before discount
+ * @param currentPrice - Current price in cents
+ * @param priceBeforeDiscount - Original price in cents
+ * @returns Discount percentage (e.g., 15.5 for 15.5%) or null
+ */
+export function calculateDiscountPercentage(
+  currentPrice: number | null,
+  priceBeforeDiscount: number | null,
+): number | null {
+  if (
+    currentPrice === null || priceBeforeDiscount === null ||
+    priceBeforeDiscount <= currentPrice
+  ) {
+    return null;
+  }
+
+  const discount = ((priceBeforeDiscount - currentPrice) / priceBeforeDiscount) *
+    100;
+  return Math.round(discount * 100) / 100; // Round to 2 decimal places
+}
+
+/**
  * Parse a single product item element
  * Orchestrates all extraction functions with hybrid approach
  */
@@ -255,6 +343,11 @@ export function parseProductItem(element: Element): ToysRUsProduct | null {
     const image = extractImage(element);
     const productUrl = extractProductUrl(element);
     const legoSetNumber = name ? extractLegoSetNumber(name) : null;
+    const promotionalBadges = extractPromotionalBadges(element);
+    const discountPercentage = calculateDiscountPercentage(
+      price,
+      priceBeforeDiscount,
+    );
 
     // Generate product ID
     const productId = generateProductId(
@@ -269,6 +362,8 @@ export function parseProductItem(element: Element): ToysRUsProduct | null {
       brand,
       price,
       priceBeforeDiscount,
+      discountPercentage,
+      promotionalBadges,
       image,
       sku: metadataProduct?.sku || pid,
       categoryNumber: metadataProduct?.categoryNumber || null,
