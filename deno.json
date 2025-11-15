@@ -4,7 +4,7 @@
     "check": "deno fmt --check && deno lint && deno check **/*.ts && deno check **/*.tsx",
     "cli": "echo \"import '\\$fresh/src/dev/cli.ts'\" | deno run --unstable -A -",
     "manifest": "deno task cli manifest $(pwd)",
-    "start": "deno run -A --watch=static/,routes/ --watch-exclude=static/images/ --watch-exclude=logs/ --watch-exclude=**/*.log dev.ts",
+    "start": "DENO_ENV=development IMAGE_STORAGE_PATH=static/images/products deno run -A --watch=static/,routes/ --watch-exclude=static/images/,logs/,'**/*.log' dev.ts",
     "build": "deno run -A dev.ts build",
     "preview": "deno run -A main.ts",
     "update": "deno run -A -r https://fresh.deno.dev/update .",

@@ -23,7 +23,7 @@ export default function ValueInvestingDashboard(
   const maxDistanceFromIntrinsic = useSignal<number>(50); // ±50% from intrinsic value
   const sortBy = useSignal<string>("bestValue"); // Default: furthest below intrinsic first
   const selectedVouchers = useSignal<VoucherTemplate[]>([]);
-  const _voucherMode = useSignal<"original" | "voucher" | "both">("both");
+  const voucherMode = useSignal<"original" | "voucher" | "both">("both");
 
   /**
    * Memoized voucher-enhanced products

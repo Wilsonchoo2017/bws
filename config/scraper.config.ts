@@ -138,8 +138,8 @@ export const BROWSER_CONFIG = {
   PAGE_TIMEOUT: 60000,
   /** Enable JavaScript */
   JAVASCRIPT_ENABLED: true,
-  /** Enable images loading (set to false to speed up) */
-  IMAGES_ENABLED: true,
+  /** Enable images loading (disabled in dev mode for faster scraping, enabled in production) */
+  IMAGES_ENABLED: Deno.env.get("DENO_ENV") !== "development",
 } as const;
 
 /**
@@ -211,6 +211,8 @@ export const QUEUE_CONFIG = {
   LOCK_DURATION: 300000, // 5 minutes (BrickLink scraping takes ~20-60s with rate limiting: 10-30s × 2 requests + processing)
   /** Lock renewal interval (renew lock every 30s to prevent stalling) */
   LOCK_RENEW_TIME: 30000, // 30 seconds
+  /** Stalled job check interval (how often worker checks for stalled jobs) - BullMQ default is 30000ms */
+  STALLED_INTERVAL: 30000, // 30 seconds (default)
 } as const;
 
 /**

@@ -1,37 +1,151 @@
 version: '3.8'
 
 services:
+  # Caddy reverse proxy for Tailscale access
+  caddy:
+    image: caddy:2-alpine
+    container_name: bws-caddy
+    restart: unless-stopped
+    ports:
+      - "8001:8001"  # Tailscale access port
+    volumes:
+      - ./Caddyfile.prod:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+      - caddy_logs:/var/log/caddy
+    networks:
+      - bws-network
+    depends_on:
+      app:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8001/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+        reservations:
+          cpus: '0.1'
+          memory: 64M
+
+  # Main Deno/Fresh application
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      cache_from:
+        - type=registry,ref=bws-app:buildcache
+    container_name: bws-app
+    restart: unless-stopped
+    expose:
+      - "8000"  # Only expose internally to Docker network
+    environment:
+      - PORT=8000
+      - DATABASE_URL=postgresql://postgres:${POSTGRES_PASSWORD:-postgres}@postgres:5432/bws
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_PASSWORD=${REDIS_PASSWORD:-}
+      - REDIS_DB=0
+      - REBRICKABLE_API_KEY=${REBRICKABLE_API_KEY:-}
+      - BRICKLINK_CONSUMER_KEY=${BRICKLINK_CONSUMER_KEY:-}
+      - BRICKLINK_CONSUMER_SECRET=${BRICKLINK_CONSUMER_SECRET:-}
+      - BRICKLINK_TOKEN_VALUE=${BRICKLINK_TOKEN_VALUE:-}
+      - BRICKLINK_TOKEN_SECRET=${BRICKLINK_TOKEN_SECRET:-}
+      - NODE_ENV=production
+      - DENO_ENV=production
+      - TZ=Asia/Kuala_Lumpur
+      - IMAGE_STORAGE_PATH=/app/static/images/products  # Path for image downloads inside container
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - bws-network
+    volumes:
+      - ./logs:/app/logs  # Mount logs directory
+      - ./static/images:/app/static/images  # Mount images directory for persistent storage
+    healthcheck:
+      test: ["CMD", "deno", "run", "--allow-net", "-A", "-c", "fetch('http://localhost:8000').then(() => Deno.exit(0)).catch(() => Deno.exit(1))"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+
   postgres:
     image: postgres:15-alpine
     container_name: bws-postgres
+    restart: unless-stopped
     environment:
       POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
       POSTGRES_DB: bws
-    ports:
-      - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    networks:
+      - bws-network
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres"]
       interval: 5s
       timeout: 5s
       retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 1G
+        reservations:
+          cpus: '0.25'
+          memory: 256M
 
-  pgadmin:
-    image: dpage/pgadmin4:latest
-    container_name: bws-pgadmin
-    environment:
-      PGADMIN_DEFAULT_EMAIL: admin@bws.local
-      PGADMIN_DEFAULT_PASSWORD: admin
-      PGADMIN_CONFIG_SERVER_MODE: 'False'
-    ports:
-      - "5050:80"
-    depends_on:
-      - postgres
+  redis:
+    image: redis:7-alpine
+    container_name: bws-redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:-}
     volumes:
-      - pgadmin_data:/var/lib/pgadmin
+      - redis_data:/data
+    networks:
+      - bws-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "--no-auth-warning", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+        reservations:
+          cpus: '0.1'
+          memory: 64M
+
+networks:
+  bws-network:
+    driver: bridge
 
 volumes:
   postgres_data:
-  pgadmin_data:
+    driver: local
+  redis_data:
+    driver: local
+  caddy_data:
+    driver: local
+  caddy_config:
+    driver: local
+  caddy_logs:
+    driver: local

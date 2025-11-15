@@ -10,7 +10,7 @@ export const IMAGE_CONFIG = {
    */
   STORAGE: {
     TYPE: "local" as const, // local | supabase | r2
-    LOCAL_BASE_DIR: "static/images/products",
+    LOCAL_BASE_DIR: Deno.env.get("IMAGE_STORAGE_PATH") || "static/images/products",
     PUBLIC_PATH: "/images/products",
   },
 

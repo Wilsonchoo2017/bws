@@ -1,4 +1,5 @@
 import type { Cents } from "./price.ts";
+import type { VoucherTemplate } from "./voucher.ts";
 
 /**
  * Value metrics for investment analysis (API/Display layer)
@@ -16,6 +17,28 @@ export interface ValueMetrics {
   expectedROI: number;         // Percentage (theoretical)
   realizedROI?: number;        // Percentage (after transaction costs)
   timeHorizon: string;
+}
+
+/**
+ * Extended value metrics that include voucher-adjusted calculations
+ * Used for voucher simulation on the /buy page
+ */
+export interface VoucherEnhancedMetrics extends ValueMetrics {
+  // Original metrics (base values without vouchers)
+  originalPrice: Cents;
+  originalExpectedROI: number;
+  originalMarginOfSafety: number;
+
+  // Voucher-adjusted metrics
+  voucherDiscountedPrice: Cents;
+  voucherSavings: Cents;
+  voucherEnhancedROI: number;
+  voucherEnhancedMarginOfSafety: number;
+
+  // Comparison metrics
+  roiImprovement: number; // Percentage point improvement
+  worthItWithVoucher: boolean; // Whether deal becomes good with voucher
+  optimalVoucherOrder: VoucherTemplate[]; // Best order to apply vouchers
 }
 
 /**

@@ -3,10 +3,13 @@
  * Run this script after updating the LOCK_DURATION configuration
  */
 
-import "$std/dotenv/load.ts";
+import { load } from "$std/dotenv/mod.ts";
 import { Queue } from "bullmq";
 import { Redis } from "ioredis";
 import { QUEUE_CONFIG, REDIS_CONFIG } from "../config/scraper.config.ts";
+
+// Load environment variables with allowEmptyValues
+await load({ export: true, allowEmptyValues: true });
 
 async function clearFailedJobs() {
   console.log("🧹 Clearing failed/stalled jobs from queue...\n");

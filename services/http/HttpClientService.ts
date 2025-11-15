@@ -12,7 +12,7 @@
  * abstractions (interfaces) rather than concrete implementations.
  */
 
-import puppeteer, { Browser, Page } from "../../lib/puppeteer.ts";
+import puppeteer, { Browser, Page, HTTPRequest } from "../../lib/puppeteer.ts";
 import {
   BROWSER_CONFIG,
   getRandomAcceptLanguage,
@@ -121,6 +121,20 @@ export class HttpClientService {
       "Sec-Fetch-User": "?1",
       "Cache-Control": "max-age=0",
     });
+
+    // Block images if disabled in config (for faster dev scraping)
+    if (!BROWSER_CONFIG.IMAGES_ENABLED) {
+      await page.setRequestInterception(true);
+      page.on("request", (request: HTTPRequest) => {
+        const resourceType = request.resourceType();
+        if (resourceType === "image" || resourceType === "stylesheet" || resourceType === "font") {
+          request.abort();
+        } else {
+          request.continue();
+        }
+      });
+      console.log("🚫 Image loading disabled for faster scraping");
+    }
 
     // Remove automation indicators
     await page.evaluateOnNewDocument(() => {

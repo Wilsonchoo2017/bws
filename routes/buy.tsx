@@ -2,7 +2,7 @@ import { Handlers, PageProps } from "$fresh/server.ts";
 import { Head } from "$fresh/runtime.ts";
 import { db } from "../db/client.ts";
 import { bricklinkItems, products, vouchers } from "../db/schema.ts";
-import { and, eq, gt, isNotNull, lte, or, sql } from "drizzle-orm";
+import { and, eq, gt, isNotNull, or, sql } from "drizzle-orm";
 import { AnalysisService } from "../services/analysis/AnalysisService.ts";
 import { ValueInvestingService } from "../services/value-investing/ValueInvestingService.ts";
 import type { ValueInvestingProduct } from "../types/value-investing.ts";
@@ -31,22 +31,27 @@ export const handler: Handlers<BuyPageData> = {
         async () => {
           // Step 1: Fetch active vouchers
           const now = new Date();
-          const activeVouchers = await db
+          const activeVouchersRaw = await db
             .select()
             .from(vouchers)
-            .where(
-              and(
-                eq(vouchers.isActive, true),
-                or(
-                  isNotNull(vouchers.startDate) === false,
-                  lte(vouchers.startDate, now.toISOString())
-                ),
-                or(
-                  isNotNull(vouchers.endDate) === false,
-                  gt(vouchers.endDate, now.toISOString())
-                )
-              )
-            );
+            .where(eq(vouchers.isActive, true));
+
+          // Filter by date in-memory to avoid complex SQL date comparisons
+          const activeVouchers = activeVouchersRaw.filter((v) => {
+            const startDate = v.startDate ? new Date(v.startDate) : null;
+            const endDate = v.endDate ? new Date(v.endDate) : null;
+
+            const isStarted = !startDate || startDate <= now;
+            const isNotExpired = !endDate || endDate > now;
+
+            return isStarted && isNotExpired;
+          }).map((v) => ({
+            ...v,
+            createdAt: v.createdAt.toISOString(),
+            updatedAt: v.updatedAt.toISOString(),
+            startDate: v.startDate ? v.startDate.toISOString() : null,
+            endDate: v.endDate ? v.endDate.toISOString() : null,
+          })) as Voucher[];
 
           // Step 2: Fetch all active products with Bricklink data
           const allProducts = await db
@@ -122,12 +127,12 @@ export const handler: Handlers<BuyPageData> = {
           if (allProducts.length === 0) {
             return {
               products: [],
-              strategies: [],
+              availableVouchers: activeVouchers,
               error: "No active products found",
             };
           }
 
-          // Step 2: Use ValueInvestingService to get opportunities
+          // Step 3: Use ValueInvestingService to get opportunities
           const analysisService = new AnalysisService();
           const valueService = new ValueInvestingService(analysisService);
 
@@ -138,10 +143,12 @@ export const handler: Handlers<BuyPageData> = {
             totalProducts: stats.totalProducts,
             includedOpportunities: stats.includedOpportunities,
             skipped: stats.skipped,
+            activeVouchers: activeVouchers.length,
           });
 
           return {
             products: opportunities,
+            availableVouchers: activeVouchers,
           };
         },
         CACHE_TTL,
@@ -167,6 +174,7 @@ export const handler: Handlers<BuyPageData> = {
 
       return ctx.render({
         products: [],
+        availableVouchers: [],
         error: error instanceof Error
           ? error.message
           : "Failed to load value investing opportunities. Please try again later.",
@@ -205,6 +213,7 @@ export default function BuyPage({ data }: PageProps<BuyPageData>) {
             : (
               <ValueInvestingDashboard
                 products={data.products}
+                availableVouchers={data.availableVouchers}
               />
             )}
         </div>

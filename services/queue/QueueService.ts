@@ -146,6 +146,7 @@ export class QueueService {
           concurrency: QUEUE_CONFIG.WORKER_CONCURRENCY,
           lockDuration: QUEUE_CONFIG.LOCK_DURATION,
           lockRenewTime: QUEUE_CONFIG.LOCK_RENEW_TIME,
+          stalledInterval: QUEUE_CONFIG.STALLED_INTERVAL,
         },
       );
 

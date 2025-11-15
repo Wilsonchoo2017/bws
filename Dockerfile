@@ -10,31 +10,36 @@ RUN apk add --no-cache \
     ca-certificates \
     ttf-freefont \
     nodejs \
-    npm
+    npm \
+    curl
 
 # Set Puppeteer environment variables to use system Chromium
 ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true \
     PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium-browser \
-    DENO_DIR=/deno-dir
+    DENO_DIR=/deno-dir \
+    NODE_ENV=production \
+    DENO_ENV=production
 
-# Create app directory
+# Create app directory and deno-dir
 WORKDIR /app
 
+# Create logs directory
+RUN mkdir -p /app/logs
+
 # Copy dependency files first for better caching
-COPY deno.json deno.lock ./
+COPY deno.json ./
+COPY deno.lock* ./
 
 # Cache dependencies
-RUN deno cache --lock=deno.lock \
-    --node-modules-dir=auto \
-    deps.ts || true
+RUN deno install --node-modules-dir=auto || true
 
 # Copy application code
 COPY . .
 
 # Cache main application and dependencies
-RUN deno cache --lock=deno.lock \
+RUN deno cache --lock=deno.lock --lock-write \
     --node-modules-dir=auto \
-    main.ts
+    main.ts || deno cache --node-modules-dir=auto main.ts
 
 # Create non-root user for security
 RUN addgroup -g 1001 -S deno && \
@@ -47,9 +52,9 @@ USER deno
 # Expose application port
 EXPOSE 8000
 
-# Health check
+# Health check - simplified version that works without external file
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
-    CMD deno run --allow-net --allow-env check_health.ts || exit 1
+    CMD curl -f http://localhost:8000/ || exit 1
 
 # Run the application with necessary permissions
 CMD ["deno", "run", "--allow-all", "main.ts"]

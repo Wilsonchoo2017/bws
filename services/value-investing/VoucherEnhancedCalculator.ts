@@ -1,5 +1,5 @@
 import type { Cents } from "../../types/price.ts";
-import type { ValueMetrics } from "../../types/value-investing.ts";
+import type { ValueMetrics, VoucherEnhancedMetrics } from "../../types/value-investing.ts";
 import type { VoucherTemplate } from "../../types/voucher.ts";
 import {
   findOptimalVoucherOrder,
@@ -7,26 +7,8 @@ import {
 import type { TaggedCartItem } from "../../types/voucher.ts";
 import { ValueCalculator } from "./ValueCalculator.ts";
 
-/**
- * Extended value metrics that include voucher-adjusted calculations
- */
-export interface VoucherEnhancedMetrics extends ValueMetrics {
-  // Original metrics (base values without vouchers)
-  originalPrice: Cents;
-  originalExpectedROI: number;
-  originalMarginOfSafety: number;
-
-  // Voucher-adjusted metrics
-  voucherDiscountedPrice: Cents;
-  voucherSavings: Cents;
-  voucherEnhancedROI: number;
-  voucherEnhancedMarginOfSafety: number;
-
-  // Comparison metrics
-  roiImprovement: number; // Percentage point improvement
-  worthItWithVoucher: boolean; // Whether deal becomes good with voucher
-  optimalVoucherOrder: VoucherTemplate[]; // Best order to apply vouchers
-}
+// Re-export for convenience
+export type { VoucherEnhancedMetrics };
 
 /**
  * Input for calculating voucher-enhanced metrics

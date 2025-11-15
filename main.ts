@@ -4,7 +4,7 @@
 /// <reference lib="dom.asynciterable" />
 /// <reference lib="deno.ns" />
 
-import "$std/dotenv/load.ts";
+import { load } from "$std/dotenv/mod.ts";
 
 import { start } from "$fresh/server.ts";
 import manifest from "./fresh.gen.ts";
@@ -18,6 +18,9 @@ import { closeRateLimiter } from "./services/rate-limiter/RateLimiterService.ts"
 import { closeFileLockManager } from "./utils/FileLockManager.ts";
 import { closeHttpClient } from "./services/http/HttpClientService.ts";
 import { closeDb } from "./db/client.ts";
+
+// Load environment variables with allowEmptyValues
+await load({ export: true, allowEmptyValues: true });
 
 // Initialize BullMQ queue service for background scraping jobs
 await initializeQueue();

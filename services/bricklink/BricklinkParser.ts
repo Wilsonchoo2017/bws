@@ -17,6 +17,7 @@ import {
   DOMParser,
   type HTMLDocument,
 } from "https://deno.land/x/deno_dom@v0.1.45/deno-dom-wasm.ts";
+import { scraperLogger as logger } from "../../utils/logger.ts";
 
 /**
  * Price data structure
@@ -463,6 +464,17 @@ export function parsePastSales(html: string): PastSaleTransaction[] {
     throw new Error("Failed to parse Past Sales HTML");
   }
 
+  logger.info("Parsing past sales from HTML", {
+    htmlSize: html.length,
+  });
+
+  // Check for "(Unavailable)" indicator in HTML
+  if (html.includes("(Unavailable)") || html.includes("Unavailable")) {
+    logger.info("Past sales data marked as unavailable by BrickLink", {
+      status: "UNAVAILABLE",
+    });
+  }
+
   const transactions: PastSaleTransaction[] = [];
 
   // Look for the "Past Sales" section
@@ -472,7 +484,14 @@ export function parsePastSales(html: string): PastSaleTransaction[] {
   // Strategy: Find all tables and look for one that contains sale dates and prices
   const tables = doc.querySelectorAll("table");
 
+  logger.info("Scanning HTML for sales tables", {
+    tablesFound: tables.length,
+  });
+
+  let tableIndex = 0;
   for (const table of tables) {
+    tableIndex++;
+
     // @ts-ignore - deno_dom types issue with Node vs Element
     const rows = table.querySelectorAll("tr");
 
@@ -485,15 +504,38 @@ export function parsePastSales(html: string): PastSaleTransaction[] {
       headerText.includes("sold") ||
       headerText.includes("price");
 
-    if (!isSalesTable) continue;
+    if (!isSalesTable) {
+      logger.debug(`Table ${tableIndex}: No match`, {
+        reason: "headers don't contain 'date', 'sold', or 'price'",
+        headerText: headerText.substring(0, 100),
+      });
+      continue;
+    }
+
+    logger.info(`Table ${tableIndex}: Matched sales table`, {
+      headerText: headerText.substring(0, 100),
+      rowCount: rows.length - 1, // excluding header
+    });
 
     // Parse data rows (skip header)
+    let rowsParsed = 0;
+    let rowsSkipped = 0;
+    let rowsAdded = 0;
+
     for (let i = 1; i < rows.length; i++) {
       const row = rows[i];
       // @ts-ignore - deno_dom types issue with Node vs Element
       const cells = row.querySelectorAll("td");
 
-      if (cells.length < 2) continue;
+      if (cells.length < 2) {
+        rowsSkipped++;
+        logger.debug(`  Row ${i}: SKIPPED - insufficient cells`, {
+          cellCount: cells.length,
+        });
+        continue;
+      }
+
+      rowsParsed++;
 
       try {
         // Extract data from cells
@@ -502,10 +544,15 @@ export function parsePastSales(html: string): PastSaleTransaction[] {
         let conditionText = "";
         let priceText = "";
         let locationText = "";
+        let quantityText = "";
+
+        // Collect all cell texts for logging
+        const cellTexts: string[] = [];
 
         // Try to identify columns by content patterns
         for (const cell of cells) {
           const text = cell.textContent?.trim() || "";
+          cellTexts.push(text);
 
           // Date pattern: MM/DD/YYYY or similar
           if (/\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4}/.test(text) && !dateText) {
@@ -520,6 +567,9 @@ export function parsePastSales(html: string): PastSaleTransaction[] {
             /[A-Z]{2,3}\s*\$?\s*[\d,\.]+/.test(text) && !priceText
           ) {
             priceText = text;
+          } // Quantity: Just a number
+          else if (/^\d+$/.test(text) && !quantityText) {
+            quantityText = text;
           } // Location: Country code or name
           else if (
             /^[A-Z]{2}$/.test(text) || text.length > 2 && !locationText
@@ -528,14 +578,41 @@ export function parsePastSales(html: string): PastSaleTransaction[] {
           }
         }
 
+        // Check for "(Unavailable)" in row
+        const rowText = cellTexts.join(" ");
+        if (rowText.includes("(Unavailable)") || rowText.includes("Unavailable")) {
+          rowsSkipped++;
+          logger.debug(`  Row ${i}: SKIPPED - "(Unavailable)" detected`, {
+            rowText: rowText.substring(0, 100),
+          });
+          continue;
+        }
+
         // Skip if we don't have minimum required data
-        if (!dateText || !priceText) continue;
+        if (!dateText || !priceText) {
+          rowsSkipped++;
+          logger.debug(`  Row ${i}: SKIPPED - missing required data`, {
+            dateExtracted: dateText || null,
+            conditionExtracted: conditionText || null,
+            priceExtracted: priceText || null,
+            locationExtracted: locationText || null,
+            quantityExtracted: quantityText || null,
+            cellTexts: cellTexts.join(" | "),
+          });
+          continue;
+        }
 
         // Parse date
         const dateParts = dateText.match(
           /(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{2,4})/,
         );
-        if (!dateParts) continue;
+        if (!dateParts) {
+          rowsSkipped++;
+          logger.debug(`  Row ${i}: SKIPPED - date parsing failed`, {
+            dateText,
+          });
+          continue;
+        }
 
         let month = parseInt(dateParts[1]);
         let day = parseInt(dateParts[2]);
@@ -556,7 +633,13 @@ export function parsePastSales(html: string): PastSaleTransaction[] {
 
         // Parse price
         const priceMatch = priceText.match(/([A-Z]{2,3})\s*\$?\s*([\d,\.]+)/);
-        if (!priceMatch) continue;
+        if (!priceMatch) {
+          rowsSkipped++;
+          logger.debug(`  Row ${i}: SKIPPED - price parsing failed`, {
+            priceText,
+          });
+          continue;
+        }
 
         const currency = priceMatch[1].toUpperCase();
         const amount = parseFloat(priceMatch[2].replace(/,/g, ""));
@@ -565,6 +648,9 @@ export function parsePastSales(html: string): PastSaleTransaction[] {
         const condition = (conditionText === "new" ? "new" : "used") as
           | "new"
           | "used";
+
+        // Parse quantity if available
+        const quantity = quantityText ? parseInt(quantityText) : undefined;
 
         // Create transaction object
         const transaction: PastSaleTransaction = {
@@ -580,17 +666,44 @@ export function parsePastSales(html: string): PastSaleTransaction[] {
           transaction.seller_location = locationText;
         }
 
+        if (quantity) {
+          transaction.quantity = quantity;
+        }
+
         transactions.push(transaction);
+        rowsAdded++;
+
+        logger.debug(`  Row ${i}: ✓ ADDED`, {
+          date: dateText,
+          condition: conditionText || "(default: used)",
+          price: priceText,
+          location: locationText || null,
+          quantity: quantityText || null,
+        });
       } catch (error) {
         // Skip malformed rows
-        console.warn(`Failed to parse Past Sales row: ${error.message}`);
+        rowsSkipped++;
+        logger.warn(`  Row ${i}: SKIPPED - parsing error`, {
+          error: error.message,
+        });
         continue;
       }
     }
 
+    logger.info(`Table ${tableIndex} parsing complete`, {
+      rowsParsed,
+      rowsSkipped,
+      rowsAdded,
+      transactionsFound: transactions.length,
+    });
+
     // If we found transactions, we've found the right table
     if (transactions.length > 0) break;
   }
+
+  logger.info("Past sales parsing complete", {
+    totalTransactionsFound: transactions.length,
+  });
 
   return transactions;
 }

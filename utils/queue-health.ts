@@ -66,8 +66,8 @@ interface QueueStats {
 
 // Thresholds (milliseconds)
 const THRESHOLDS = {
-  STUCK_JOB_WARNING: 10 * 60 * 1000, // 10 minutes
-  STUCK_JOB_ERROR: 15 * 60 * 1000, // 15 minutes
+  STUCK_JOB_WARNING: 5 * 60 * 1000, // 5 minutes (default BullMQ stall detection is 2x stalledInterval = 60s)
+  STUCK_JOB_ERROR: 10 * 60 * 1000, // 10 minutes (reduced from 15 minutes to match defaults)
   STALE_COMPLETION_WARNING: 60 * 60 * 1000, // 1 hour
   WAITING_NOT_PROCESSING: 5 * 60 * 1000, // 5 minutes
   HIGH_FAILURE_RATE: 50, // 50%
@@ -223,7 +223,7 @@ function checkForErrors(
     issues.push({
       severity: "error",
       message:
-        `${criticallyStuckJobs.length} job(s) have been active for more than 15 minutes. This may indicate a critical failure.`,
+        `${criticallyStuckJobs.length} job(s) have been active for more than 10 minutes. This may indicate a critical failure.`,
     });
   }
 
@@ -280,7 +280,7 @@ function checkForWarnings(
     issues.push({
       severity: "warning",
       message:
-        `${stuckJobs.length} job(s) have been active for more than 10 minutes (oldest: ${oldestMinutes}min). They may be stuck.`,
+        `${stuckJobs.length} job(s) have been active for more than 5 minutes (oldest: ${oldestMinutes}min). They may be stuck.`,
     });
   }
 

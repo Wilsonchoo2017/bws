@@ -1,0 +1,42 @@
+# Caddyfile for Tailscale development setup
+# Single port access: http://yees-mac-mini:8001 or http://<tailscale-ip>:8001
+# All requests route through Caddy on port 8001
+# Fresh/Deno app runs on localhost:8000
+
+:8001 {
+	# Handle preflight OPTIONS requests first
+	@options method OPTIONS
+	handle @options {
+		header Access-Control-Allow-Origin "*"
+		header Access-Control-Allow-Methods "GET, POST, PUT, DELETE, OPTIONS, PATCH"
+		header Access-Control-Allow-Headers "Content-Type, Authorization, Accept, Origin, X-Requested-With"
+		header Access-Control-Max-Age "86400"
+		respond 204
+	}
+
+	# WebSocket support for Fresh hot reload
+	@websockets {
+		header Connection *Upgrade*
+		header Upgrade websocket
+	}
+	handle @websockets {
+		header Access-Control-Allow-Origin "*"
+		reverse_proxy localhost:8000
+	}
+
+	# All other requests
+	handle {
+		# Add CORS headers to all responses
+		header Access-Control-Allow-Origin "*"
+		header Access-Control-Allow-Methods "GET, POST, PUT, DELETE, OPTIONS, PATCH"
+		header Access-Control-Allow-Headers "Content-Type, Authorization, Accept, Origin, X-Requested-With"
+		header Access-Control-Expose-Headers "*"
+
+		reverse_proxy localhost:8000
+	}
+
+	log {
+		output stdout
+		level INFO
+	}
+}

@@ -3,10 +3,13 @@
 import dev from "$fresh/dev.ts";
 import config from "./fresh.config.ts";
 
-import "$std/dotenv/load.ts";
+import { load } from "$std/dotenv/mod.ts";
 import { initializeQueue } from "./services/queue/init.ts";
 import { getScheduler } from "./services/scheduler/SchedulerService.ts";
 import { getMissingDataDetector } from "./services/missing-data/MissingDataDetectorService.ts";
+
+// Load environment variables with allowEmptyValues
+await load({ export: true, allowEmptyValues: true });
 
 // Initialize BullMQ queue service for background scraping jobs
 await initializeQueue();

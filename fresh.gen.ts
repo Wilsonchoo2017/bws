@@ -33,6 +33,7 @@ import * as $api_shopee_items from "./routes/api/shopee-items.ts";
 import * as $api_tags from "./routes/api/tags.ts";
 import * as $api_tags_cleanup_expired from "./routes/api/tags/cleanup-expired.ts";
 import * as $api_value_investing_productId_ from "./routes/api/value-investing/[productId].ts";
+import * as $api_vouchers from "./routes/api/vouchers.ts";
 import * as $bricklink_items from "./routes/bricklink-items.tsx";
 import * as $buy from "./routes/buy.tsx";
 import * as $cart from "./routes/cart.tsx";
@@ -42,6 +43,7 @@ import * as $products from "./routes/products.tsx";
 import * as $products_id_ from "./routes/products/[id].tsx";
 import * as $queue from "./routes/queue.tsx";
 import * as $tags from "./routes/tags.tsx";
+import * as $vouchers from "./routes/vouchers.tsx";
 import * as $BricklinkProductsList from "./islands/BricklinkProductsList.tsx";
 import * as $CartManager from "./islands/CartManager.tsx";
 import * as $Counter from "./islands/Counter.tsx";
@@ -56,6 +58,9 @@ import * as $Sidebar from "./islands/Sidebar.tsx";
 import * as $TagManager from "./islands/TagManager.tsx";
 import * as $UnifiedParser from "./islands/UnifiedParser.tsx";
 import * as $ValueInvestingDashboard from "./islands/ValueInvestingDashboard.tsx";
+import * as $VoucherEditModal from "./islands/VoucherEditModal.tsx";
+import * as $VoucherSelector from "./islands/VoucherSelector.tsx";
+import * as $VouchersList from "./islands/VouchersList.tsx";
 import * as $components_ErrorBoundary from "./islands/components/ErrorBoundary.tsx";
 import * as $components_IntrinsicValueProgressBar from "./islands/components/IntrinsicValueProgressBar.tsx";
 import * as $components_QueueHealthBanner from "./islands/components/QueueHealthBanner.tsx";
@@ -100,6 +105,7 @@ const manifest = {
     "./routes/api/tags/cleanup-expired.ts": $api_tags_cleanup_expired,
     "./routes/api/value-investing/[productId].ts":
       $api_value_investing_productId_,
+    "./routes/api/vouchers.ts": $api_vouchers,
     "./routes/bricklink-items.tsx": $bricklink_items,
     "./routes/buy.tsx": $buy,
     "./routes/cart.tsx": $cart,
@@ -109,6 +115,7 @@ const manifest = {
     "./routes/products/[id].tsx": $products_id_,
     "./routes/queue.tsx": $queue,
     "./routes/tags.tsx": $tags,
+    "./routes/vouchers.tsx": $vouchers,
   },
   islands: {
     "./islands/BricklinkProductsList.tsx": $BricklinkProductsList,
@@ -125,6 +132,9 @@ const manifest = {
     "./islands/TagManager.tsx": $TagManager,
     "./islands/UnifiedParser.tsx": $UnifiedParser,
     "./islands/ValueInvestingDashboard.tsx": $ValueInvestingDashboard,
+    "./islands/VoucherEditModal.tsx": $VoucherEditModal,
+    "./islands/VoucherSelector.tsx": $VoucherSelector,
+    "./islands/VouchersList.tsx": $VouchersList,
     "./islands/components/ErrorBoundary.tsx": $components_ErrorBoundary,
     "./islands/components/IntrinsicValueProgressBar.tsx":
       $components_IntrinsicValueProgressBar,
