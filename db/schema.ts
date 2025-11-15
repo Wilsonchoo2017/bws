@@ -43,6 +43,7 @@ export const bricklinkItems = pgTable(
     itemType: varchar("item_type", { length: 10 }).notNull(),
     title: text("title"),
     weight: varchar("weight", { length: 50 }),
+    yearReleased: integer("year_released"),
 
     // Image fields
     imageUrl: text("image_url"),
@@ -78,6 +79,10 @@ export const bricklinkItems = pgTable(
     // Index for image download status
     imageStatusIdx: index("idx_bricklink_image_status").on(
       table.imageDownloadStatus,
+    ),
+    // Index for filtering by release year
+    yearReleasedIdx: index("idx_bricklink_year_released").on(
+      table.yearReleased,
     ),
   }),
 );

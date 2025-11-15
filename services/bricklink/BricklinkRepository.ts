@@ -289,6 +289,7 @@ export class BricklinkRepository {
       itemType: string;
       title: string | null;
       weight: string | null;
+      yearReleased?: number | null;
       imageUrl?: string | null;
       localImagePath?: string | null;
       imageDownloadStatus?: string;
@@ -309,6 +310,7 @@ export class BricklinkRepository {
     const updateFields: Partial<typeof bricklinkItems.$inferInsert> = {
       title: data.title,
       weight: data.weight,
+      yearReleased: data.yearReleased,
       sixMonthNew: data.sixMonthNew,
       sixMonthUsed: data.sixMonthUsed,
       currentNew: data.currentNew,
@@ -338,6 +340,7 @@ export class BricklinkRepository {
         itemType: data.itemType,
         title: data.title,
         weight: data.weight,
+        yearReleased: data.yearReleased || null,
         imageUrl: data.imageUrl || null,
         localImagePath: data.localImagePath || null,
         imageDownloadedAt: data.localImagePath ? now : null,

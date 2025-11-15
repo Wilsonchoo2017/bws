@@ -59,6 +59,7 @@ export interface BricklinkData {
   item_type: string;
   title: string | null;
   weight: string | null;
+  year_released: number | null;
   image_url: string | null;
   six_month_new: PricingBox | null;
   six_month_used: PricingBox | null;
@@ -190,6 +191,7 @@ export function extractPriceBox(boxText: string): PricingBox | null {
 export function parseItemInfo(html: string): {
   title: string | null;
   weight: string | null;
+  year_released: number | null;
   image_url: string | null;
 } {
   const parser = new DOMParser();
@@ -206,10 +208,40 @@ export function parseItemInfo(html: string): {
   const weightElem = doc.querySelector("span#item-weight-info");
   const weight = weightElem?.textContent?.trim() || null;
 
+  // Extract year released
+  const year_released = extractYearReleased(html);
+
   // Extract image URL
   const image_url = extractImageUrl(doc);
 
-  return { title, weight, image_url };
+  return { title, weight, year_released, image_url };
+}
+
+/**
+ * Extract year released from Bricklink item page HTML
+ * Pure function - no side effects
+ *
+ * Pattern: Year Released: <a ...>2023</a>
+ */
+export function extractYearReleased(html: string): number | null {
+  try {
+    // Pattern: Year Released: <a ...>2023</a>
+    const yearMatch = html.match(/Year Released:.*?(\d{4})/i);
+    if (yearMatch && yearMatch[1]) {
+      const year = parseInt(yearMatch[1], 10);
+      // Validate year is reasonable (between 1949 and current year + 2)
+      const currentYear = new Date().getFullYear();
+      if (year >= 1949 && year <= currentYear + 2) {
+        return year;
+      }
+    }
+    return null;
+  } catch (error) {
+    logger.error("Failed to extract year released", {
+      error: (error as Error).message,
+    });
+    return null;
+  }
 }
 
 /**

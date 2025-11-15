@@ -118,7 +118,9 @@ export class BricklinkScraperService extends BaseScraperService {
           }
 
           // Parse item info
-          const { title, weight, image_url } = parseItemInfo(itemResponse.html);
+          const { title, weight, year_released, image_url } = parseItemInfo(
+            itemResponse.html,
+          );
 
           // Build price guide URL
           const priceGuideUrl = buildPriceGuideUrl(itemType, itemId);
@@ -184,6 +186,7 @@ export class BricklinkScraperService extends BaseScraperService {
             item_type: itemType,
             title,
             weight,
+            year_released,
             image_url,
             ...pricingData,
           };
@@ -293,6 +296,7 @@ export class BricklinkScraperService extends BaseScraperService {
             itemType: data.item_type,
             title: data.title,
             weight: data.weight,
+            yearReleased: data.year_released,
             imageUrl: data.image_url,
             localImagePath,
             imageDownloadStatus,
