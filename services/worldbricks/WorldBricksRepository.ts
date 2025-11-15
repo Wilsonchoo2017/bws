@@ -228,6 +228,41 @@ export class WorldBricksRepository {
   }
 
   /**
+   * Find products with LEGO set numbers that don't have WorldBricks entries yet
+   * This is used to discover new sets that need initial scraping
+   *
+   * Returns array of objects with setNumber from products table
+   */
+  async findProductsWithoutWorldBricksEntries(): Promise<
+    Array<{ setNumber: string }>
+  > {
+    const results = await db
+      .select({
+        setNumber: products.legoSetNumber,
+      })
+      .from(products)
+      .leftJoin(
+        worldbricksSets,
+        eq(products.legoSetNumber, worldbricksSets.setNumber),
+      )
+      .where(
+        and(
+          // Product must have a LEGO set number
+          sql`${products.legoSetNumber} IS NOT NULL`,
+          // Product must be active
+          eq(products.watchStatus, "active"),
+          // No corresponding WorldBricks entry exists
+          isNull(worldbricksSets.setNumber),
+        ),
+      );
+
+    // Filter out nulls and return unique set numbers
+    return results
+      .filter((r) => r.setNumber !== null)
+      .map((r) => ({ setNumber: r.setNumber! }));
+  }
+
+  /**
    * Find sets that need scraping based on schedule and retirement status
    *
    * Rules:

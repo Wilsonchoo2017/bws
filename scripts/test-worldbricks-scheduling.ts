@@ -18,8 +18,24 @@ try {
   const repository = getWorldBricksRepository();
   const scheduler = getScheduler();
 
-  // Test 1: Check findSetsNeedingScraping logic
-  console.log("\n📋 Test 1: Finding sets that need scraping...");
+  // Test 1: Check findProductsWithoutWorldBricksEntries logic
+  console.log(
+    "\n📋 Test 1: Finding products without WorldBricks entries...",
+  );
+  const newProducts = await repository.findProductsWithoutWorldBricksEntries();
+  console.log(
+    `✅ Found ${newProducts.length} products without WorldBricks entries`,
+  );
+
+  if (newProducts.length > 0) {
+    console.log("\n📦 Sample products (first 5):");
+    newProducts.slice(0, 5).forEach((product, idx) => {
+      console.log(`   ${idx + 1}. Set ${product.setNumber}`);
+    });
+  }
+
+  // Test 2: Check findSetsNeedingScraping logic
+  console.log("\n📋 Test 2: Finding sets that need scraping...");
   const setsNeeded = await repository.findSetsNeedingScraping();
   console.log(`✅ Found ${setsNeeded.length} sets needing scraping`);
 
@@ -35,8 +51,8 @@ try {
     });
   }
 
-  // Test 2: Preview what the scheduler would do
-  console.log("\n📋 Test 2: Preview scheduler run...");
+  // Test 3: Preview what the scheduler would do
+  console.log("\n📋 Test 3: Preview scheduler run...");
   const result = await scheduler.runWorldBricks();
 
   console.log(`\n📊 Scheduler Results:`);
@@ -45,13 +61,24 @@ try {
   console.log(`   - Jobs Enqueued: ${result.jobsEnqueued}`);
   console.log(`   - Errors: ${result.errors.length}`);
 
+  if (result.breakdown) {
+    console.log(`\n📊 Priority Breakdown:`);
+    console.log(
+      `   - HIGH priority (new sets): ${result.breakdown.highPriority}`,
+    );
+    console.log(`   - MEDIUM priority: ${result.breakdown.mediumPriority}`);
+    console.log(
+      `   - NORMAL priority (scheduled): ${result.breakdown.normalPriority}`,
+    );
+  }
+
   if (result.errors.length > 0) {
     console.log("\n❌ Errors:");
     result.errors.forEach((error) => console.log(`   - ${error}`));
   }
 
-  // Test 3: Verify database schema
-  console.log("\n📋 Test 3: Verify database schema changes...");
+  // Test 4: Verify database schema
+  console.log("\n📋 Test 4: Verify database schema changes...");
   const stats = await repository.getStats();
   console.log(`✅ Database stats:`);
   console.log(`   - Total WorldBricks sets: ${stats.total}`);

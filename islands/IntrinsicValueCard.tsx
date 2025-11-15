@@ -8,14 +8,37 @@ import { useEffect } from "preact/hooks";
 import type { Cents } from "../types/price.ts";
 
 interface ValueMetrics {
-  currentPrice: Cents;         // Branded Cents type
-  targetPrice: Cents;           // Branded Cents type
-  intrinsicValue: Cents;        // Branded Cents type
-  realizedValue?: Cents;        // Branded Cents type
-  marginOfSafety: number;       // Percentage
-  expectedROI: number;          // Percentage
-  realizedROI?: number;         // Percentage
+  currentPrice: Cents; // Branded Cents type
+  targetPrice: Cents; // Branded Cents type
+  intrinsicValue: Cents; // Branded Cents type
+  realizedValue?: Cents; // Branded Cents type
+  marginOfSafety: number; // Percentage
+  expectedROI: number; // Percentage
+  realizedROI?: number; // Percentage
   timeHorizon: string;
+}
+
+interface BreakdownInputs {
+  msrp?: number;
+  bricklinkAvgPrice?: number;
+  retirementStatus?: string;
+  demandScore?: number;
+  qualityScore?: number;
+  priceToPieceRatio?: number;
+  theme?: string;
+}
+
+interface MarginAdjustment {
+  reason: string;
+  value: number;
+}
+
+interface CalculationBreakdown {
+  intrinsicValue: Cents;
+  baseMargin: number;
+  adjustedMargin: number;
+  marginAdjustments: MarginAdjustment[];
+  inputs: BreakdownInputs;
 }
 
 interface IntrinsicValueData {
@@ -25,6 +48,9 @@ interface IntrinsicValueData {
   opportunities: string[];
   analyzedAt: string;
   currency: string;
+  breakdown?: CalculationBreakdown;
+  reasoning?: string;
+  confidence?: number;
 }
 
 interface IntrinsicValueCardProps {
@@ -95,8 +121,17 @@ export default function IntrinsicValueCard(
 
   if (!data.value) return null;
 
-  const { valueMetrics, action, risks, opportunities, analyzedAt, currency } =
-    data.value;
+  const {
+    valueMetrics,
+    action,
+    risks,
+    opportunities,
+    analyzedAt,
+    currency,
+    breakdown,
+    reasoning,
+    confidence,
+  } = data.value;
 
   const formatCurrency = (amountInCents: Cents) => {
     return new Intl.NumberFormat("en-US", {
@@ -192,9 +227,7 @@ export default function IntrinsicValueCard(
           </div>
         );
       default:
-        return (
-          <div class="badge badge-ghost badge-lg">INSUFFICIENT DATA</div>
-        );
+        return <div class="badge badge-ghost badge-lg">INSUFFICIENT DATA</div>;
     }
   };
 
@@ -356,6 +389,183 @@ export default function IntrinsicValueCard(
               </div>
             )}
           </>
+        )}
+
+        {/* Calculation Details (collapsible) */}
+        {breakdown && (
+          <details class="collapse collapse-arrow bg-base-200 mt-4">
+            <summary class="collapse-title text-sm font-medium">
+              📊 How is this value calculated?
+            </summary>
+            <div class="collapse-content space-y-3">
+              {/* Reasoning */}
+              {reasoning && (
+                <div>
+                  <p class="text-xs font-semibold text-base-content/60 mb-1">
+                    PRICING STRATEGY
+                  </p>
+                  <p class="text-sm text-base-content/80">
+                    {reasoning}
+                  </p>
+                </div>
+              )}
+
+              {/* Step-by-Step Calculation */}
+              <div class="divider my-2"></div>
+              <div>
+                <p class="text-xs font-semibold text-base-content/60 mb-3">
+                  STEP-BY-STEP CALCULATION
+                </p>
+
+                {/* Step 1: Intrinsic Value */}
+                <div class="bg-base-300 p-3 rounded-lg mb-3">
+                  <div class="flex items-start gap-2 mb-2">
+                    <span class="text-success font-mono font-bold">
+                      Step 1
+                    </span>
+                    <div class="flex-1">
+                      <strong>Calculate Intrinsic Value</strong>
+                    </div>
+                  </div>
+                  <div class="ml-12 text-sm space-y-1">
+                    <div class="text-base-content/70">
+                      Using:
+                      {breakdown.inputs.msrp && (
+                        <div>
+                          • MSRP:{" "}
+                          {formatCurrency(breakdown.inputs.msrp as Cents)}
+                        </div>
+                      )}
+                      {breakdown.inputs.bricklinkAvgPrice && (
+                        <div>
+                          • Bricklink Avg: {formatCurrency(
+                            breakdown.inputs.bricklinkAvgPrice as Cents,
+                          )}
+                        </div>
+                      )}
+                      {breakdown.inputs.retirementStatus && (
+                        <div>
+                          • Status: {breakdown.inputs.retirementStatus}
+                        </div>
+                      )}
+                      {breakdown.inputs.demandScore !== undefined && (
+                        <div>
+                          • Demand Score:{" "}
+                          {breakdown.inputs.demandScore.toFixed(0)}/100
+                        </div>
+                      )}
+                      {breakdown.inputs.qualityScore !== undefined && (
+                        <div>
+                          • Quality Score:{" "}
+                          {breakdown.inputs.qualityScore.toFixed(0)}/100
+                        </div>
+                      )}
+                      {breakdown.inputs.priceToPieceRatio !== undefined && (
+                        <div>
+                          • Price/Piece: ${breakdown.inputs.priceToPieceRatio
+                            .toFixed(
+                              3,
+                            )}
+                        </div>
+                      )}
+                      {breakdown.inputs.theme && (
+                        <div>
+                          • Theme: {breakdown.inputs.theme}
+                        </div>
+                      )}
+                    </div>
+                    <div class="font-bold text-success mt-2">
+                      = {formatCurrency(breakdown.intrinsicValue)}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Step 2: Margin of Safety */}
+                <div class="bg-base-300 p-3 rounded-lg mb-3">
+                  <div class="flex items-start gap-2 mb-2">
+                    <span class="text-success font-mono font-bold">
+                      Step 2
+                    </span>
+                    <div class="flex-1">
+                      <strong>Apply Margin of Safety</strong>
+                    </div>
+                  </div>
+                  <div class="ml-12 text-sm space-y-1">
+                    <div class="text-base-content/70">
+                      Base margin: {(breakdown.baseMargin * 100).toFixed(0)}%
+                      {breakdown.marginAdjustments.length > 0 && (
+                        <div class="mt-2">
+                          Adjustments:
+                          {breakdown.marginAdjustments.map((adj, i) => (
+                            <div key={i} class="ml-4">
+                              • {adj.reason}: {adj.value > 0 ? "+" : ""}
+                              {(adj.value * 100).toFixed(1)}%
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                    <div class="font-bold text-success mt-2">
+                      Final margin:{" "}
+                      {(breakdown.adjustedMargin * 100).toFixed(1)}%
+                    </div>
+                  </div>
+                </div>
+
+                {/* Step 3: Target Price */}
+                <div class="bg-base-300 p-3 rounded-lg">
+                  <div class="flex items-start gap-2 mb-2">
+                    <span class="text-success font-mono font-bold">
+                      Step 3
+                    </span>
+                    <div class="flex-1">
+                      <strong>Calculate Target Buy Price</strong>
+                    </div>
+                  </div>
+                  <div class="ml-12 text-sm space-y-1">
+                    <div class="font-mono text-base-content/70">
+                      {formatCurrency(breakdown.intrinsicValue)} × (1 -{" "}
+                      {(breakdown.adjustedMargin * 100).toFixed(1)}%)
+                    </div>
+                    <div class="font-mono text-base-content/70">
+                      = {formatCurrency(breakdown.intrinsicValue)} ×{" "}
+                      {(1 - breakdown.adjustedMargin).toFixed(3)}
+                    </div>
+                    <div class="font-bold text-success text-lg mt-2">
+                      = {formatCurrency(valueMetrics.targetPrice)}
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Confidence indicator */}
+              {confidence !== undefined && (
+                <>
+                  <div class="divider my-2"></div>
+                  <div>
+                    <p class="text-xs font-semibold text-base-content/60 mb-1">
+                      DATA CONFIDENCE
+                    </p>
+                    <div class="flex items-center gap-2">
+                      <progress
+                        class="progress progress-success w-full"
+                        value={confidence * 100}
+                        max="100"
+                      >
+                      </progress>
+                      <span class="text-sm font-medium">
+                        {Math.round(confidence * 100)}%
+                      </span>
+                    </div>
+                    <p class="text-xs text-base-content/60 mt-1">
+                      Based on availability of pricing data, market metrics, and
+                      quality scores
+                    </p>
+                  </div>
+                </>
+              )}
+            </div>
+          </details>
         )}
 
         {/* Analysis Timestamp */}

@@ -120,6 +120,10 @@ export interface PricingData {
 }
 
 export interface DemandData {
+  // Calculated demand score (0-100) from DemandCalculator
+  demandScore?: number;
+  demandScoreConfidence?: number; // 0-1
+
   // Retail sales metrics (Shopee) - minimal weight for investment analysis
   unitsSold?: number;
   lifetimeSold?: number;
@@ -199,6 +203,10 @@ export interface AvailabilityData {
 }
 
 export interface QualityData {
+  // Calculated quality score (0-100) from QualityCalculator
+  qualityScore?: number;
+  qualityScoreConfidence?: number; // 0-1
+
   // Ratings
   avgStarRating?: number;
   ratingCount?: number;

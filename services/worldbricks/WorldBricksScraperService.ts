@@ -104,7 +104,7 @@ export class WorldBricksScraperService extends BaseScraperService {
               source: "worldbricks",
             });
 
-            const searchResponse = await this.httpClient.fetch({
+            const searchResponse = await this.httpClient.simpleFetch({
               url: searchUrl,
               timeout: 30000,
             });
@@ -148,7 +148,7 @@ export class WorldBricksScraperService extends BaseScraperService {
             url: targetUrl,
             source: "worldbricks",
           });
-          const response = await this.httpClient.fetch({
+          const response = await this.httpClient.simpleFetch({
             url: targetUrl,
             timeout: 30000,
           });

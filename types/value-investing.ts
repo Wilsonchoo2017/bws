@@ -137,6 +137,7 @@ export interface IntrinsicValueInputs {
   // Liquidity metrics for liquidity multiplier
   salesVelocity?: number; // Transactions per day
   avgDaysBetweenSales?: number; // Days between sales (liquidity indicator)
+  timesSold?: number; // Total number of sales in observation period (for zero sales penalty)
   // Volatility metric for risk-adjusted valuation
   priceVolatility?: number; // Coefficient of variation (0-1+)
   // Saturation metrics for market oversupply detection

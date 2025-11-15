@@ -19,7 +19,7 @@ if (!DATABASE_URL) {
 const client = new Client(DATABASE_URL);
 await client.connect();
 
-async function decompressHtml(compressedBase64: string): Promise<string> {
+function decompressHtml(compressedBase64: string): string {
   try {
     // Decode base64
     const compressed = base64Decode(compressedBase64);

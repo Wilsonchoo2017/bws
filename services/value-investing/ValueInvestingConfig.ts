@@ -52,19 +52,22 @@ export const VALUE_INVESTING_CONFIG = {
      * Liquidity multiplier based on sales velocity and time between sales
      * High liquidity = easier to sell = premium
      * Low liquidity = harder to sell = discount
+     * ENHANCED: Stricter penalties for dead/very slow moving inventory
      */
     LIQUIDITY_MULTIPLIER: {
-      MIN: 0.85, // 15% discount for very illiquid assets
+      MIN: 0.60, // 40% discount for dead/very illiquid assets (increased from 0.85)
       MAX: 1.10, // 10% premium for highly liquid assets
       DEFAULT: 1.0, // No adjustment when data unavailable
       // Sales velocity thresholds (transactions per day)
       VELOCITY_HIGH: 0.5, // 1 sale every 2 days = high liquidity
       VELOCITY_MEDIUM: 0.1, // 1 sale every 10 days = medium
       VELOCITY_LOW: 0.033, // 1 sale every 30 days = low
+      VELOCITY_DEAD: 0.01, // 1 sale every 100 days = dead inventory
       // Days between sales thresholds (alternative metric)
       DAYS_FAST: 7, // Sales within 7 days = high liquidity
       DAYS_MEDIUM: 30, // Sales within 30 days = medium
       DAYS_SLOW: 90, // Sales within 90 days = low
+      DAYS_VERY_SLOW: 180, // Sales > 180 days apart = very slow
     },
 
     /**
@@ -137,25 +140,42 @@ export const VALUE_INVESTING_CONFIG = {
     /**
      * Market saturation detection and penalty
      * High supply + low demand = oversaturated market
+     * ENHANCED: More aggressive penalties for extreme oversaturation
      */
     SATURATION_PENALTY: {
       // Quantity thresholds (total units available for sale)
       QTY_LOW: 50, // < 50 units = healthy supply
       QTY_MEDIUM: 200, // 50-200 = moderate supply
-      QTY_HIGH: 500, // > 500 = oversupply risk
+      QTY_HIGH: 500, // 500-1000 = oversupply risk
+      QTY_EXTREME: 1000, // > 1000 = extreme oversupply
 
       // Lots thresholds (number of competing sellers)
       LOTS_LOW: 10, // < 10 sellers = healthy
       LOTS_MEDIUM: 30, // 10-30 sellers = competitive
-      LOTS_HIGH: 50, // > 50 sellers = saturated
+      LOTS_HIGH: 50, // 50-100 = saturated
+      LOTS_EXTREME: 100, // > 100 sellers = extreme saturation
 
-      // Saturation discount multiplier
-      MIN: 0.80, // 20% discount for severely saturated markets
+      // Saturation discount multiplier (enhanced range)
+      MIN: 0.50, // 50% discount for extremely saturated markets (increased from 0.80)
       MAX: 1.0, // No discount for healthy supply
 
       // Velocity-to-supply ratio (low ratio = oversupply)
       HEALTHY_RATIO: 0.01, // 1% of inventory sells per day = healthy
       POOR_RATIO: 0.001, // 0.1% of inventory sells per day = saturated
+    },
+
+    /**
+     * Zero sales penalty - CRITICAL for dead inventory
+     * Items with confirmed zero sales get heavily penalized
+     * Prevents overvaluing inventory nobody wants
+     */
+    ZERO_SALES_PENALTY: {
+      MULTIPLIER: 0.50, // 50% discount for zero sales in observation period
+      MIN_SALES_THRESHOLD: 1, // Must have at least 1 sale to avoid penalty
+      GRACE_PERIOD_DAYS: 90, // Only apply penalty if 90+ days with zero sales
+      // Compounding with demand score
+      LOW_DEMAND_THRESHOLD: 30, // Demand score < 30 compounds with zero sales
+      COMPOUND_MULTIPLIER: 0.60, // Additional 40% discount if low demand + zero sales
     },
   },
 

@@ -327,6 +327,59 @@ export class HttpClientService {
   }
 
   /**
+   * Simple HTTP fetch without browser automation (for sites that block Puppeteer)
+   * Uses native fetch with browser-like headers
+   */
+  async simpleFetch(options: HttpRequestOptions): Promise<HttpResponse> {
+    const userAgent = getRandomUserAgent();
+    const acceptLanguage = getRandomAcceptLanguage();
+
+    try {
+      console.log(`🌐 Simple fetch (no browser): ${options.url}`);
+
+      const response = await fetch(options.url, {
+        headers: {
+          "User-Agent": userAgent,
+          "Accept":
+            "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+          "Accept-Language": acceptLanguage,
+          "Accept-Encoding": "gzip, deflate, br",
+          "DNT": "1",
+          "Connection": "keep-alive",
+          "Upgrade-Insecure-Requests": "1",
+          "Sec-Fetch-Dest": "document",
+          "Sec-Fetch-Mode": "navigate",
+          "Sec-Fetch-Site": "none",
+          "Sec-Fetch-User": "?1",
+          "Cache-Control": "max-age=0",
+        },
+        redirect: "follow",
+      });
+
+      if (!response.ok && response.status !== 200) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+
+      const html = await response.text();
+      const status = response.status;
+      const finalUrl = response.url;
+
+      console.log(
+        `✅ Successfully fetched (simple): ${finalUrl} (Status: ${status})`,
+      );
+
+      return {
+        html,
+        status,
+        url: finalUrl,
+      };
+    } catch (error) {
+      console.error(`❌ Simple fetch failed for ${options.url}:`, error);
+      throw new Error(`HTTP request failed: ${error.message}`);
+    }
+  }
+
+  /**
    * Close the browser instance
    */
   async close(): Promise<void> {

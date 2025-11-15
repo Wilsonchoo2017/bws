@@ -59,20 +59,60 @@ getMissingDataDetector().run().then((result) => {
   console.error("❌ Initial missing data detection failed:", error);
 });
 
+// Run all schedulers immediately on startup
+console.log(
+  "🚀 Running initial scheduler check (Bricklink, Reddit, WorldBricks)...",
+);
+getScheduler().runAll().then((result) => {
+  const totalJobsEnqueued = result.bricklink.jobsEnqueued +
+    result.reddit.jobsEnqueued +
+    result.worldbricks.jobsEnqueued;
+  const allErrors = [
+    ...result.bricklink.errors,
+    ...result.reddit.errors,
+    ...result.worldbricks.errors,
+  ];
+
+  console.log(
+    `✅ Initial scheduler run complete: ${totalJobsEnqueued} jobs enqueued, ${allErrors.length} errors`,
+  );
+  console.log(`   - Bricklink: ${result.bricklink.jobsEnqueued} jobs`);
+  console.log(`   - Reddit: ${result.reddit.jobsEnqueued} jobs`);
+  console.log(`   - WorldBricks: ${result.worldbricks.jobsEnqueued} jobs`);
+  lastSchedulerRun = new Date();
+}).catch((error) => {
+  console.error("❌ Initial scheduler run failed:", error);
+});
+
 // Set up periodic checks (every hour)
 setInterval(async () => {
   // Check if daily scheduler should run (at 2 AM)
   if (shouldRunDailyScheduler(lastSchedulerRun)) {
-    console.log("🕐 Running daily Bricklink scheduler...");
+    console.log(
+      "🕐 Running daily schedulers (Bricklink, Reddit, WorldBricks)...",
+    );
     try {
       const scheduler = getScheduler();
-      const result = await scheduler.run();
+      const result = await scheduler.runAll();
+
+      const totalJobsEnqueued = result.bricklink.jobsEnqueued +
+        result.reddit.jobsEnqueued +
+        result.worldbricks.jobsEnqueued;
+      const allErrors = [
+        ...result.bricklink.errors,
+        ...result.reddit.errors,
+        ...result.worldbricks.errors,
+      ];
+
       console.log(
-        `✅ Scheduler completed: ${result.jobsEnqueued} jobs enqueued, ${result.errors.length} errors`,
+        `✅ All schedulers completed: ${totalJobsEnqueued} jobs enqueued, ${allErrors.length} errors`,
       );
+      console.log(`   - Bricklink: ${result.bricklink.jobsEnqueued} jobs`);
+      console.log(`   - Reddit: ${result.reddit.jobsEnqueued} jobs`);
+      console.log(`   - WorldBricks: ${result.worldbricks.jobsEnqueued} jobs`);
       lastSchedulerRun = new Date();
     } catch (error) {
-      console.error("❌ Scheduler failed:", error);
+      console.error("❌ Schedulers failed:", error);
     }
   }
 
@@ -93,7 +133,9 @@ setInterval(async () => {
 }, 60 * 60 * 1000); // Check every hour
 
 console.log("✅ Automatic schedulers configured:");
-console.log("   - Bricklink scheduler: Daily at 2 AM");
-console.log("   - Missing data detector: Every 6 hours");
+console.log(
+  "   - Bricklink, Reddit, WorldBricks schedulers: On startup + Daily at 2 AM",
+);
+console.log("   - Missing data detector: On startup + Every 6 hours");
 
 await dev(import.meta.url, "./main.ts", config);

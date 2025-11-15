@@ -302,6 +302,11 @@ export class SchedulerService {
       jobsEnqueued: 0,
       errors: [],
       timestamp: new Date(),
+      breakdown: {
+        highPriority: 0,
+        mediumPriority: 0,
+        normalPriority: 0,
+      },
     };
 
     try {
@@ -319,20 +324,42 @@ export class SchedulerService {
         return result;
       }
 
-      // Find sets that need scraping (linked to products, not retired/retiring, due for scrape)
-      const setsNeeded = await worldBricksRepository.findSetsNeedingScraping();
-      result.itemsFound = setsNeeded.length;
-
+      // PRIORITY 1: Find products without WorldBricks entries (HIGH priority - initial scraping)
+      console.log("🔍 Checking for products without WorldBricks entries...");
+      const newProducts = await worldBricksRepository
+        .findProductsWithoutWorldBricksEntries();
       console.log(
-        `📋 Found ${setsNeeded.length} WorldBricks sets needing scraping`,
+        `📋 Found ${newProducts.length} products without WorldBricks entries`,
       );
 
-      if (setsNeeded.length === 0) {
-        console.log("✅ No WorldBricks sets need scraping at this time");
-        return result;
+      for (const product of newProducts) {
+        try {
+          await queueService.addWorldBricksJob({
+            setNumber: product.setNumber,
+            saveToDb: true,
+            priority: JobPriority.HIGH,
+          });
+
+          result.jobsEnqueued++;
+          result.breakdown!.highPriority++;
+          console.log(
+            `✅ Enqueued HIGH priority WorldBricks job for new set ${product.setNumber}`,
+          );
+        } catch (error) {
+          const errorMsg =
+            `Failed to enqueue HIGH priority WorldBricks job for ${product.setNumber}: ${error.message}`;
+          console.error(`❌ ${errorMsg}`);
+          result.errors.push(errorMsg);
+        }
       }
 
-      // Enqueue jobs for each set
+      // PRIORITY 2: Find sets that need re-scraping (NORMAL priority - scheduled updates)
+      console.log("🔍 Checking for sets needing scheduled scraping...");
+      const setsNeeded = await worldBricksRepository.findSetsNeedingScraping();
+      console.log(
+        `📋 Found ${setsNeeded.length} WorldBricks sets needing scheduled scraping`,
+      );
+
       for (const set of setsNeeded) {
         try {
           await queueService.addWorldBricksJob({
@@ -342,19 +369,28 @@ export class SchedulerService {
           });
 
           result.jobsEnqueued++;
+          result.breakdown!.normalPriority++;
           console.log(
-            `✅ Enqueued WorldBricks job for set ${set.setNumber}`,
+            `✅ Enqueued NORMAL priority WorldBricks job for set ${set.setNumber}`,
           );
         } catch (error) {
           const errorMsg =
-            `Failed to enqueue WorldBricks job for ${set.setNumber}: ${error.message}`;
+            `Failed to enqueue NORMAL priority WorldBricks job for ${set.setNumber}: ${error.message}`;
           console.error(`❌ ${errorMsg}`);
           result.errors.push(errorMsg);
         }
       }
 
+      result.itemsFound = newProducts.length + setsNeeded.length;
+
       console.log(
         `✅ WorldBricks scheduler run complete: ${result.jobsEnqueued}/${result.itemsFound} jobs enqueued`,
+      );
+      console.log(
+        `   - HIGH priority (new sets): ${result.breakdown!.highPriority}`,
+      );
+      console.log(
+        `   - NORMAL priority (scheduled): ${result.breakdown!.normalPriority}`,
       );
     } catch (error) {
       console.error("❌ WorldBricks scheduler run failed:", error);

@@ -32,6 +32,10 @@ import type {
 } from "./repositories/IRepository.ts";
 
 import { BricklinkDataValidator } from "../bricklink/BricklinkDataValidator.ts";
+import type { QueueService } from "../queue/QueueService.ts";
+import { JobPriority } from "../queue/QueueService.ts";
+import { DemandCalculator } from "../value-investing/DemandCalculator.ts";
+import { QualityCalculator } from "../value-investing/QualityCalculator.ts";
 
 export class DataAggregationService {
   constructor(
@@ -40,6 +44,7 @@ export class DataAggregationService {
     private redditRepo: IRedditRepository,
     private retirementRepo: IRetirementRepository,
     private worldBricksRepo: IWorldBricksRepository,
+    private queueService?: QueueService, // Optional for backward compatibility
   ) {}
 
   /**
@@ -79,6 +84,27 @@ export class DataAggregationService {
         : Promise.resolve(null),
     ]);
 
+    // AUTO-QUEUE: If WorldBricks data is missing, queue scraping job (fire-and-forget)
+    if (product.legoSetNumber && !worldBricksData && this.queueService) {
+      try {
+        const baseSetNumber = asBaseSetNumber(product.legoSetNumber);
+        await this.queueService.addWorldBricksJob({
+          setNumber: baseSetNumber,
+          saveToDb: true,
+          priority: JobPriority.HIGH, // High priority for analysis path
+        });
+        console.log(
+          `[DataAggregation] Auto-queued WorldBricks scraping for set ${baseSetNumber}`,
+        );
+      } catch (error) {
+        // Log but don't fail the analysis if queueing fails
+        console.warn(
+          `[DataAggregation] Failed to queue WorldBricks job for ${product.legoSetNumber}:`,
+          error,
+        );
+      }
+    }
+
     // Validate Bricklink data completeness (prerequisite for recommendations)
     const validation = BricklinkDataValidator.validateCompleteness(
       bricklinkData,
@@ -105,7 +131,7 @@ export class DataAggregationService {
         retirementData,
         worldBricksData,
       ),
-      quality: this.buildQualityData(product, retirementData, worldBricksData),
+      quality: this.buildQualityData(product, retirementData, worldBricksData, bricklinkData),
     };
   }
 
@@ -235,6 +261,7 @@ export class DataAggregationService {
           product,
           retirementData,
           worldBricksData,
+          bricklinkData,
         ),
       };
 
@@ -302,6 +329,8 @@ export class DataAggregationService {
     };
 
     // Add market-driven metrics from past sales statistics
+    let demandData: DemandData;
+
     if (pastSalesStats && pastSalesStats.totalTransactions > 0) {
       const newMetrics = pastSalesStats.new;
       const usedMetrics = pastSalesStats.used;
@@ -313,7 +342,7 @@ export class DataAggregationService {
         ? newMetrics.transactionCount / totalWeight
         : 0;
 
-      return {
+      demandData = {
         ...baseData,
         // Total metrics
         bricklinkPastSalesCount: pastSalesStats.totalTransactions,
@@ -367,9 +396,18 @@ export class DataAggregationService {
         // Condition weighting
         bricklinkNewConditionWeight: newWeight,
       };
+    } else {
+      demandData = baseData;
     }
 
-    return baseData;
+    // Calculate demand score using DemandCalculator
+    const demandScoreResult = this.calculateDemandScore(demandData, bricklinkData, pastSalesStats);
+    if (demandScoreResult) {
+      demandData.demandScore = demandScoreResult.score;
+      demandData.demandScoreConfidence = demandScoreResult.confidence;
+    }
+
+    return demandData;
   }
 
   /**
@@ -415,8 +453,9 @@ export class DataAggregationService {
     product: Product,
     retirementData: BrickrankerRetirementItem | null,
     worldBricksData: WorldBricksSet | null,
+    bricklinkData: BricklinkItem | null,
   ): QualityData {
-    return {
+    const qualityData: QualityData = {
       avgStarRating: this.safeNumber(product.avgStarRating)
         ? this.safeNumber(product.avgStarRating)! / 10
         : undefined,
@@ -431,6 +470,110 @@ export class DataAggregationService {
       legoSetNumber: product.legoSetNumber || undefined,
       partsCount: worldBricksData?.partsCount || undefined, // NEW: For PPD calculation
     };
+
+    // Calculate quality score using QualityCalculator
+    const qualityScoreResult = this.calculateQualityScore(qualityData, worldBricksData, product, bricklinkData);
+    if (qualityScoreResult) {
+      qualityData.qualityScore = qualityScoreResult.score;
+      qualityData.qualityScoreConfidence = qualityScoreResult.confidence;
+    }
+
+    return qualityData;
+  }
+
+  /**
+   * Calculate demand score using DemandCalculator
+   * @returns Demand score and confidence, or null if insufficient data
+   */
+  private calculateDemandScore(
+    demandData: DemandData,
+    _bricklinkData: BricklinkItem | null,
+    pastSalesStats: PastSalesStatistics | null,
+  ): { score: number; confidence: number } | null {
+    try {
+      // Extract data for DemandCalculator
+      const timesSold = demandData.bricklinkSixMonthNewTimesSold ??
+                        demandData.bricklinkTimesSold;
+      const salesVelocity = demandData.bricklinkSalesVelocity;
+      const availableLots = demandData.bricklinkCurrentNewLots;
+      const availableQty = demandData.bricklinkCurrentNewQty;
+
+      // Need at least some data to calculate
+      if (!timesSold && !salesVelocity && !availableLots) {
+        return null;
+      }
+
+      // Calculate observation days from past sales stats
+      const observationDays = pastSalesStats?.totalDays ?? 180; // Default to 6 months
+
+      // Get price data for price momentum
+      const currentPrice = demandData.bricklinkCurrentNewAvg;
+      const firstPrice = pastSalesStats?.new.minPrice ?? demandData.bricklinkSixMonthNewMin;
+      const lastPrice = pastSalesStats?.new.maxPrice ?? demandData.bricklinkCurrentNewAvg;
+
+      const result = DemandCalculator.calculate({
+        timesSold,
+        observationDays,
+        salesVelocity,
+        currentPrice,
+        firstPrice,
+        lastPrice,
+        availableLots,
+        availableQty,
+      });
+
+      return {
+        score: result.score,
+        confidence: result.confidence,
+      };
+    } catch (error) {
+      console.warn(`[DataAggregationService] Failed to calculate demand score:`, error);
+      return null;
+    }
+  }
+
+  /**
+   * Calculate quality score using QualityCalculator
+   * @returns Quality score and confidence, or null if insufficient data
+   */
+  private calculateQualityScore(
+    qualityData: QualityData,
+    worldBricksData: WorldBricksSet | null,
+    _product: Product,
+    bricklinkData: BricklinkItem | null,
+  ): { score: number; confidence: number } | null {
+    try {
+      // Extract data for QualityCalculator
+      const partsCount = worldBricksData?.partsCount ?? undefined;
+      const msrp = undefined; // TODO: WorldBricks doesn't have MSRP yet
+      const theme = qualityData.theme;
+
+      // Extract availability from BrickLink data (currentNew is JSONB)
+      const currentNew = bricklinkData?.currentNew as { lots?: number; qty?: number } | null | undefined;
+      const availableLots = currentNew?.lots;
+      const availableQty = currentNew?.qty;
+
+      // Need at least some data to calculate
+      if (!partsCount && !theme) {
+        return null;
+      }
+
+      const result = QualityCalculator.calculate({
+        partsCount,
+        msrp,
+        theme,
+        availableLots,
+        availableQty,
+      });
+
+      return {
+        score: result.score,
+        confidence: result.confidence,
+      };
+    } catch (error) {
+      console.warn(`[DataAggregationService] Failed to calculate quality score:`, error);
+      return null;
+    }
   }
 
   // ============================================================================

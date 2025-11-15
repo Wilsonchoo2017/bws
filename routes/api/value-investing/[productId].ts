@@ -38,7 +38,9 @@ export const handler: Handlers = {
       // Get the product analysis directly from AnalysisService
       const analysisService = new AnalysisService();
 
-      const analysisResults = await analysisService.analyzeProducts([product.productId]);
+      const analysisResults = await analysisService.analyzeProducts([
+        product.productId,
+      ]);
       const analysis = analysisResults.get(product.productId);
 
       if (!analysis) {
@@ -62,7 +64,7 @@ export const handler: Handlers = {
               opportunities: analysis.opportunities,
               strategy: analysis.strategy,
               reasoning: analysis.overall.reasoning,
-            }
+            },
           }),
           {
             status: 400,
@@ -77,19 +79,27 @@ export const handler: Handlers = {
       // - analysis.recommendedBuyPrice.price is in CENTS (from ValueCalculator)
       // - IntrinsicValueCard expects all prices in CENTS (converts to dollars for display)
       const currentPriceCents: Cents = asCents(product.price!);
-      const targetPriceCents: Cents = asCents(analysis.recommendedBuyPrice.price);
+      const targetPriceCents: Cents = asCents(
+        analysis.recommendedBuyPrice.price,
+      );
 
       // Calculate intrinsic value from breakdown if available, otherwise estimate
-      const intrinsicValueCents: Cents = analysis.recommendedBuyPrice.breakdown?.intrinsicValue
-        ? asCents(analysis.recommendedBuyPrice.breakdown.intrinsicValue)
-        : asCents(Math.round(analysis.recommendedBuyPrice.price / (1 - 0.25))); // Estimate assuming 25% margin
+      const intrinsicValueCents: Cents =
+        analysis.recommendedBuyPrice.breakdown?.intrinsicValue
+          ? asCents(analysis.recommendedBuyPrice.breakdown.intrinsicValue)
+          : asCents(
+            Math.round(analysis.recommendedBuyPrice.price / (1 - 0.25)),
+          ); // Estimate assuming 25% margin
 
       const valueMetrics = {
         currentPrice: currentPriceCents,
         targetPrice: targetPriceCents,
         intrinsicValue: intrinsicValueCents,
-        marginOfSafety: ((intrinsicValueCents - currentPriceCents) / intrinsicValueCents) * 100,
-        expectedROI: ((intrinsicValueCents - currentPriceCents) / currentPriceCents) * 100,
+        marginOfSafety:
+          ((intrinsicValueCents - currentPriceCents) / intrinsicValueCents) *
+          100,
+        expectedROI:
+          ((intrinsicValueCents - currentPriceCents) / currentPriceCents) * 100,
         timeHorizon: analysis.timeHorizon || "Unknown",
       };
 
@@ -101,6 +111,10 @@ export const handler: Handlers = {
         opportunities: analysis.opportunities || [],
         analyzedAt: new Date().toISOString(),
         currency: product.currency || "MYR",
+        // Include calculation breakdown for formula display
+        breakdown: analysis.recommendedBuyPrice.breakdown,
+        reasoning: analysis.recommendedBuyPrice.reasoning,
+        confidence: analysis.recommendedBuyPrice.confidence,
       };
 
       return new Response(JSON.stringify(response), {
@@ -121,14 +135,18 @@ export const handler: Handlers = {
         : "Unknown error";
 
       // Check if error is due to incomplete Bricklink data
-      const isBricklinkDataError = errorMessage.includes("Complete Bricklink sales data is required");
+      const isBricklinkDataError = errorMessage.includes(
+        "Complete Bricklink sales data is required",
+      );
       const statusCode = isBricklinkDataError ? 422 : 500;
 
       return new Response(
         JSON.stringify({
           error: errorMessage,
           productId,
-          code: isBricklinkDataError ? "INCOMPLETE_BRICKLINK_DATA" : "INTERNAL_ERROR",
+          code: isBricklinkDataError
+            ? "INCOMPLETE_BRICKLINK_DATA"
+            : "INTERNAL_ERROR",
         }),
         {
           status: statusCode,

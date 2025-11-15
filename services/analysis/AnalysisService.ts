@@ -24,6 +24,9 @@ import { RedditRepository } from "./repositories/RedditRepository.ts";
 import { RetirementRepository } from "./repositories/RetirementRepository.ts";
 import { WorldBricksRepository } from "./repositories/WorldBricksRepository.ts";
 
+// Queue service for auto-enrichment
+import { QueueService } from "../queue/QueueService.ts";
+
 import type { ProductRecommendation } from "./types.ts";
 
 export class AnalysisService {
@@ -32,7 +35,7 @@ export class AnalysisService {
   private productRepo: ProductRepository;
   private defaultStrategy = "Investment Focus";
 
-  constructor() {
+  constructor(queueService?: QueueService) {
     // Initialize repositories (Dependency Injection)
     this.productRepo = new ProductRepository();
     const bricklinkRepo = new BricklinkRepository();
@@ -40,13 +43,14 @@ export class AnalysisService {
     const retirementRepo = new RetirementRepository();
     const worldBricksRepo = new WorldBricksRepository();
 
-    // Initialize data aggregation service with repositories
+    // Initialize data aggregation service with repositories + queue service
     this.dataAggregationService = new DataAggregationService(
       this.productRepo,
       bricklinkRepo,
       redditRepo,
       retirementRepo,
       worldBricksRepo,
+      queueService, // Enable auto-queueing of missing WorldBricks data
     );
 
     // Initialize analyzers
@@ -158,5 +162,26 @@ export class AnalysisService {
   }
 }
 
-// Export singleton instance
-export const analysisService = new AnalysisService();
+// Export singleton instance with QueueService for auto-enrichment
+import { getQueueService } from "../queue/QueueService.ts";
+
+// Lazy initialization to avoid circular dependencies
+let analysisServiceInstance: AnalysisService | null = null;
+
+export function getAnalysisService(): AnalysisService {
+  if (!analysisServiceInstance) {
+    try {
+      // Try to get QueueService for auto-enrichment
+      const queueService = getQueueService();
+      analysisServiceInstance = new AnalysisService(queueService);
+    } catch (error) {
+      // Fall back to no queue service if not available
+      console.warn("[AnalysisService] QueueService not available, auto-enrichment disabled:", error);
+      analysisServiceInstance = new AnalysisService();
+    }
+  }
+  return analysisServiceInstance;
+}
+
+// Export singleton instance (backward compatibility)
+export const analysisService = getAnalysisService();

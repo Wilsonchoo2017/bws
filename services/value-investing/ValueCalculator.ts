@@ -105,7 +105,8 @@ export class ValueCalculator {
   /**
    * Calculate liquidity multiplier based on sales velocity and days between sales
    * High liquidity = easier to sell = premium (up to 1.10x)
-   * Low liquidity = harder to sell = discount (down to 0.85x)
+   * Low liquidity = harder to sell = discount (down to 0.60x)
+   * ENHANCED: Stricter penalties for dead/very slow inventory
    */
   private static calculateLiquidityMultiplier(
     salesVelocity?: number,
@@ -125,9 +126,9 @@ export class ValueCalculator {
     let liquidityScore = 50; // Default to neutral
 
     if (
-      salesVelocity !== undefined && salesVelocity !== null && salesVelocity > 0
+      salesVelocity !== undefined && salesVelocity !== null && salesVelocity >= 0
     ) {
-      // Map sales velocity to 0-100 score
+      // Map sales velocity to 0-100 score with enhanced tiers
       if (salesVelocity >= config.VELOCITY_HIGH) {
         liquidityScore = 90; // Very high liquidity
       } else if (salesVelocity >= config.VELOCITY_MEDIUM) {
@@ -138,9 +139,13 @@ export class ValueCalculator {
         // Linear interpolation between low and medium
         liquidityScore = 40 + ((salesVelocity - config.VELOCITY_LOW) /
               (config.VELOCITY_MEDIUM - config.VELOCITY_LOW)) * 25;
+      } else if (salesVelocity >= config.VELOCITY_DEAD) {
+        // Linear interpolation between dead and low
+        liquidityScore = 15 + ((salesVelocity - config.VELOCITY_DEAD) /
+              (config.VELOCITY_LOW - config.VELOCITY_DEAD)) * 25;
       } else {
-        // Very low liquidity
-        liquidityScore = 10 + (salesVelocity / config.VELOCITY_LOW) * 30;
+        // Dead inventory (< 0.01 sales/day = < 1 sale per 100 days)
+        liquidityScore = Math.max(0, (salesVelocity / config.VELOCITY_DEAD) * 15);
       }
     } else if (
       avgDaysBetweenSales !== undefined && avgDaysBetweenSales !== null
@@ -156,16 +161,20 @@ export class ValueCalculator {
         // Linear interpolation between medium and slow
         liquidityScore = 40 + (1 - (avgDaysBetweenSales - config.DAYS_MEDIUM) /
                 (config.DAYS_SLOW - config.DAYS_MEDIUM)) * 25;
+      } else if (avgDaysBetweenSales <= config.DAYS_VERY_SLOW) {
+        // Linear interpolation between slow and very slow
+        liquidityScore = 15 + (1 - (avgDaysBetweenSales - config.DAYS_SLOW) /
+                (config.DAYS_VERY_SLOW - config.DAYS_SLOW)) * 25;
       } else {
-        // Very low liquidity
+        // Very slow (> 180 days between sales)
         liquidityScore = Math.max(
-          10,
-          40 * (config.DAYS_SLOW / avgDaysBetweenSales),
+          0,
+          15 * (config.DAYS_VERY_SLOW / avgDaysBetweenSales),
         );
       }
     }
 
-    // Convert 0-100 score to multiplier range (0.85 - 1.10)
+    // Convert 0-100 score to multiplier range (0.60 - 1.10)
     const range = config.MAX - config.MIN;
     const multiplier = config.MIN + (liquidityScore / 100) * range;
 
@@ -204,7 +213,7 @@ export class ValueCalculator {
   /**
    * Calculate market saturation discount
    * High supply + low sales = oversaturated market = discount
-   *
+   * ENHANCED: More aggressive penalties for extreme oversaturation
    * CRITICAL: Prevents overvaluing sets with no real buyers
    */
   private static calculateSaturationDiscount(
@@ -224,40 +233,49 @@ export class ValueCalculator {
 
     let saturationScore = 0; // 0 = healthy, 100 = saturated
 
-    // Factor 1: Quantity available (40% weight)
+    // Factor 1: Quantity available (30% weight, reduced from 40%)
     if (
       availableQty !== undefined && availableQty !== null && availableQty > 0
     ) {
-      if (availableQty >= config.QTY_HIGH) {
-        saturationScore += 40; // Severe oversupply
+      if (availableQty >= config.QTY_EXTREME) {
+        saturationScore += 30; // Extreme oversupply
+      } else if (availableQty >= config.QTY_HIGH) {
+        // Linear interpolation between high and extreme
+        saturationScore += 22 + ((availableQty - config.QTY_HIGH) /
+              (config.QTY_EXTREME - config.QTY_HIGH)) * 8;
       } else if (availableQty >= config.QTY_MEDIUM) {
-        // Linear interpolation
-        saturationScore += 20 + ((availableQty - config.QTY_MEDIUM) /
-              (config.QTY_HIGH - config.QTY_MEDIUM)) * 20;
+        // Linear interpolation between medium and high
+        saturationScore += 12 + ((availableQty - config.QTY_MEDIUM) /
+              (config.QTY_HIGH - config.QTY_MEDIUM)) * 10;
       } else if (availableQty >= config.QTY_LOW) {
-        // Linear interpolation
+        // Linear interpolation between low and medium
         saturationScore += ((availableQty - config.QTY_LOW) /
-          (config.QTY_MEDIUM - config.QTY_LOW)) * 20;
+          (config.QTY_MEDIUM - config.QTY_LOW)) * 12;
       }
       // else: healthy supply, no points
     }
 
-    // Factor 2: Number of competing sellers (30% weight)
+    // Factor 2: Number of competing sellers (20% weight, reduced from 30%)
     if (
       availableLots !== undefined && availableLots !== null && availableLots > 0
     ) {
-      if (availableLots >= config.LOTS_HIGH) {
-        saturationScore += 30; // Too many sellers
+      if (availableLots >= config.LOTS_EXTREME) {
+        saturationScore += 20; // Extreme seller count
+      } else if (availableLots >= config.LOTS_HIGH) {
+        // Linear interpolation between high and extreme
+        saturationScore += 15 + ((availableLots - config.LOTS_HIGH) /
+              (config.LOTS_EXTREME - config.LOTS_HIGH)) * 5;
       } else if (availableLots >= config.LOTS_MEDIUM) {
-        saturationScore += 15 + ((availableLots - config.LOTS_MEDIUM) /
-              (config.LOTS_HIGH - config.LOTS_MEDIUM)) * 15;
+        saturationScore += 8 + ((availableLots - config.LOTS_MEDIUM) /
+              (config.LOTS_HIGH - config.LOTS_MEDIUM)) * 7;
       } else if (availableLots >= config.LOTS_LOW) {
         saturationScore += ((availableLots - config.LOTS_LOW) /
-          (config.LOTS_MEDIUM - config.LOTS_LOW)) * 15;
+          (config.LOTS_MEDIUM - config.LOTS_LOW)) * 8;
       }
     }
 
-    // Factor 3: Velocity-to-supply ratio (30% weight)
+    // Factor 3: Velocity-to-supply ratio (50% weight, increased from 30%)
+    // This is the MOST IMPORTANT indicator of dead inventory
     if (
       salesVelocity !== undefined && salesVelocity !== null &&
       availableQty !== undefined && availableQty !== null &&
@@ -266,20 +284,63 @@ export class ValueCalculator {
       const velocityRatio = salesVelocity / availableQty;
 
       if (velocityRatio <= config.POOR_RATIO) {
-        saturationScore += 30; // Inventory not moving
+        saturationScore += 50; // Inventory not moving AT ALL
       } else if (velocityRatio < config.HEALTHY_RATIO) {
         // Linear interpolation
-        saturationScore += 30 * (1 - (velocityRatio - config.POOR_RATIO) /
+        saturationScore += 50 * (1 - (velocityRatio - config.POOR_RATIO) /
             (config.HEALTHY_RATIO - config.POOR_RATIO));
       }
       // else: healthy turnover, no points
     }
 
-    // Convert saturation score (0-100) to discount multiplier (0.80-1.0)
+    // Convert saturation score (0-100) to discount multiplier (0.50-1.0)
     const range = config.MAX - config.MIN;
     const discount = config.MAX - (saturationScore / 100) * range;
 
     return Math.max(config.MIN, Math.min(config.MAX, discount));
+  }
+
+  /**
+   * Calculate zero sales penalty
+   * CRITICAL: Items with ZERO sales get heavily penalized
+   * This prevents overvaluing dead inventory that nobody is buying
+   *
+   * Returns a severe discount multiplier (0.50x default) when:
+   * - Item has zero sales in the observation period
+   * - Observation period is long enough (90+ days)
+   * - Optionally compounds with low demand score
+   */
+  private static calculateZeroSalesPenalty(
+    timesSold?: number,
+    demandScore?: number,
+  ): number {
+    const config = CONFIG.INTRINSIC_VALUE.ZERO_SALES_PENALTY;
+
+    // No data = no penalty (benefit of doubt)
+    if (timesSold === undefined || timesSold === null) {
+      return 1.0;
+    }
+
+    // Has sales = no penalty
+    if (timesSold >= config.MIN_SALES_THRESHOLD) {
+      return 1.0;
+    }
+
+    // ZERO SALES DETECTED - apply base penalty
+    let penalty = config.MULTIPLIER; // 0.50 = 50% discount
+
+    // Compound with low demand score if applicable
+    // If item has zero sales AND low demand, it's truly dead inventory
+    if (
+      demandScore !== undefined &&
+      demandScore !== null &&
+      demandScore < config.LOW_DEMAND_THRESHOLD
+    ) {
+      // Multiplicative compounding: 0.50 × 0.60 = 0.30 (70% total discount)
+      penalty = penalty * config.COMPOUND_MULTIPLIER;
+    }
+
+    return penalty;
   }
 
   /**
@@ -454,15 +515,19 @@ export class ValueCalculator {
   /**
    * Calculate intrinsic value using FUNDAMENTAL VALUE APPROACH
    * 1. Base value = MSRP/Retail (replacement cost) - NOT market price
-   * 2. Apply multipliers for retirement, quality, demand, etc.
-   * 3. Apply discounts for risk (volatility, saturation)
+   * 2. Apply multipliers for retirement, quality, demand, theme, PPD
+   * 3. Apply discounts for risk (liquidity, volatility, saturation, zero sales)
    *
    * CRITICAL FIX: Using MSRP as base avoids circular reasoning
    * Market price is what you PAY, intrinsic value is what it's WORTH
-   * 2. Quality adjustments (retirement status, demand, quality)
-   * 3. Liquidity adjustment (sales velocity, time between sales)
-   * 4. Volatility discount (risk-adjusted valuation)
-   * 5. Time-decayed retirement premium (appreciation curve)
+   *
+   * Calculation steps:
+   * 1. Base value (MSRP > Retail > Bricklink discounted)
+   * 2. Quality multipliers (retirement, theme, PPD, quality, demand)
+   * 3. Liquidity multiplier (sales velocity, time between sales)
+   * 4. Risk discounts (volatility, saturation, zero sales penalty)
+   *
+   * ENHANCED: Zero sales penalty heavily punishes dead inventory
    *
    * @returns Intrinsic value in CENTS (Cents branded type)
    */
@@ -482,6 +547,7 @@ export class ValueCalculator {
       yearsPostRetirement,
       salesVelocity,
       avgDaysBetweenSales,
+      timesSold,
       priceVolatility,
       availableQty,
       availableLots,
@@ -570,6 +636,13 @@ export class ValueCalculator {
     // NEW: Parts-per-dollar quality score
     const ppdScore = this.calculatePPDScore(partsCount, msrp);
 
+    // CRITICAL: Zero sales penalty (dead inventory detection)
+    // Items with zero sales get heavily penalized
+    const zeroSalesPenalty = this.calculateZeroSalesPenalty(
+      timesSold,
+      inputs.demandScore,
+    );
+
     // Calculate intrinsic value with all factors
     // Structure: Base × Positive Multipliers × Risk Discounts
     const intrinsicValue = baseValue *
@@ -580,7 +653,8 @@ export class ValueCalculator {
       demandMultiplier * // Market demand
       liquidityMultiplier * // Ease of selling
       volatilityDiscount * // Price stability
-      saturationDiscount; // Market oversupply
+      saturationDiscount * // Market oversupply
+      zeroSalesPenalty; // Dead inventory penalty (CRITICAL)
 
     // Guard against NaN or negative values
     if (isNaN(intrinsicValue) || intrinsicValue < 0) {
