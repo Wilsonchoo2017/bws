@@ -83,7 +83,6 @@ export const QUALITY_CALCULATOR_CONFIG = {
       "Friends",
       "Jurassic World",
     ],
-
     // All others: 25 points (default)
   },
 
@@ -126,11 +125,12 @@ export const QUALITY_CALCULATOR_CONFIG = {
 
   /**
    * Default values when data is missing
+   * Philosophy: "Bad until proven" - assume worst case when data is missing
    */
   DEFAULTS: {
-    SCORE: 50, // Neutral score
-    CONFIDENCE: 0.30, // Low confidence (30%)
-    THEME_SCORE: 25, // Default theme score (unknown theme)
+    SCORE: 0, // Pessimistic score - missing data is bad
+    CONFIDENCE: 0.0, // No confidence (0%)
+    THEME_SCORE: 0, // Default theme score (unknown theme)
   },
 };
 

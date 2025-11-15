@@ -1,6 +1,6 @@
-import { useSignal, useComputed } from "@preact/signals";
+import { useComputed, useSignal } from "@preact/signals";
 import type { VoucherTemplate } from "../types/voucher.ts";
-import { VoucherType, DiscountType } from "../types/voucher.ts";
+import { DiscountType, VoucherType } from "../types/voucher.ts";
 import type { Voucher } from "../hooks/useVoucherList.ts";
 
 export interface VoucherSelectorProps {
@@ -36,14 +36,20 @@ function convertToVoucherTemplate(voucher: Voucher): VoucherTemplate {
 function formatDiscount(voucher: Voucher): string {
   if (voucher.tieredDiscounts && voucher.tieredDiscounts.length > 0) {
     const tiers = voucher.tieredDiscounts
-      .map((t) => `RM${(t.discount / 100).toFixed(0)} off RM${(t.minSpend / 100).toFixed(0)}`)
+      .map((t) =>
+        `RM${(t.discount / 100).toFixed(0)} off RM${
+          (t.minSpend / 100).toFixed(0)
+        }`
+      )
       .join(", ");
     return `Tiered: ${tiers}`;
   }
 
   if (voucher.discountType === "percentage") {
     const pct = voucher.discountValue / 100;
-    const cap = voucher.maxDiscount ? ` (max RM${(voucher.maxDiscount / 100).toFixed(0)})` : "";
+    const cap = voucher.maxDiscount
+      ? ` (max RM${(voucher.maxDiscount / 100).toFixed(0)})`
+      : "";
     return `${pct}% off${cap}`;
   } else {
     return `RM${(voucher.discountValue / 100).toFixed(2)} off`;
@@ -143,10 +149,14 @@ export default function VoucherSelector({
           <button
             onClick={() => isExpanded.value = !isExpanded.value}
             class="text-gray-600 hover:text-gray-800 transition-colors"
-            aria-label={isExpanded.value ? "Collapse voucher selector" : "Expand voucher selector"}
+            aria-label={isExpanded.value
+              ? "Collapse voucher selector"
+              : "Expand voucher selector"}
           >
             <svg
-              class={`w-5 h-5 transition-transform ${isExpanded.value ? "rotate-90" : ""}`}
+              class={`w-5 h-5 transition-transform ${
+                isExpanded.value ? "rotate-90" : ""
+              }`}
               fill="none"
               stroke="currentColor"
               viewBox="0 0 24 24"
@@ -187,12 +197,14 @@ export default function VoucherSelector({
               type="text"
               placeholder="Search vouchers..."
               value={searchQuery.value}
-              onInput={(e) => searchQuery.value = (e.target as HTMLInputElement).value}
+              onInput={(e) =>
+                searchQuery.value = (e.target as HTMLInputElement).value}
               class="flex-1 px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent"
             />
             <select
               value={filterType.value}
-              onChange={(e) => filterType.value = (e.target as HTMLSelectElement).value}
+              onChange={(e) =>
+                filterType.value = (e.target as HTMLSelectElement).value}
               class="px-3 py-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-transparent"
             >
               <option value="all">All Types</option>
@@ -204,96 +216,112 @@ export default function VoucherSelector({
 
           {/* Info message */}
           <p class="text-sm text-gray-600">
-            Select up to {maxSelections} vouchers to simulate discounts on value investing opportunities below.
-            The system will automatically find the optimal order to maximize your savings.
+            Select up to {maxSelections}{" "}
+            vouchers to simulate discounts on value investing opportunities
+            below. The system will automatically find the optimal order to
+            maximize your savings.
           </p>
 
           {/* Voucher List */}
           <div class="space-y-2 max-h-96 overflow-y-auto">
-            {filteredVouchers.value.length === 0 ? (
-              <div class="text-center py-8 text-gray-500">
-                {availableVouchers.length === 0
-                  ? "No active vouchers available"
-                  : "No vouchers match your search"}
-              </div>
-            ) : (
-              filteredVouchers.value.map((voucher) => {
-                const selected = isSelected(voucher.id);
-                return (
-                  <button
-                    key={voucher.id}
-                    onClick={() => toggleVoucher(voucher)}
-                    disabled={!selected && selectedVouchers.length >= maxSelections}
-                    class={`w-full text-left p-3 rounded-lg border-2 transition-all ${
-                      selected
-                        ? "border-blue-500 bg-blue-50"
-                        : "border-gray-200 hover:border-gray-300 bg-white"
-                    } ${
-                      !selected && selectedVouchers.length >= maxSelections
-                        ? "opacity-50 cursor-not-allowed"
-                        : "cursor-pointer"
-                    }`}
-                  >
-                    <div class="flex items-start justify-between gap-2">
-                      <div class="flex-1 min-w-0">
-                        <div class="flex items-center gap-2 mb-1">
-                          <span class={`px-2 py-0.5 text-xs font-medium rounded ${getTypeBadgeClass(voucher.voucherType)}`}>
-                            {voucher.voucherType}
-                          </span>
-                          {voucher.platform && (
-                            <span class="text-xs text-gray-500">
-                              {voucher.platform}
+            {filteredVouchers.value.length === 0
+              ? (
+                <div class="text-center py-8 text-gray-500">
+                  {availableVouchers.length === 0
+                    ? "No active vouchers available"
+                    : "No vouchers match your search"}
+                </div>
+              )
+              : (
+                filteredVouchers.value.map((voucher) => {
+                  const selected = isSelected(voucher.id);
+                  return (
+                    <button
+                      key={voucher.id}
+                      onClick={() => toggleVoucher(voucher)}
+                      disabled={!selected &&
+                        selectedVouchers.length >= maxSelections}
+                      class={`w-full text-left p-3 rounded-lg border-2 transition-all ${
+                        selected
+                          ? "border-blue-500 bg-blue-50"
+                          : "border-gray-200 hover:border-gray-300 bg-white"
+                      } ${
+                        !selected && selectedVouchers.length >= maxSelections
+                          ? "opacity-50 cursor-not-allowed"
+                          : "cursor-pointer"
+                      }`}
+                    >
+                      <div class="flex items-start justify-between gap-2">
+                        <div class="flex-1 min-w-0">
+                          <div class="flex items-center gap-2 mb-1">
+                            <span
+                              class={`px-2 py-0.5 text-xs font-medium rounded ${
+                                getTypeBadgeClass(voucher.voucherType)
+                              }`}
+                            >
+                              {voucher.voucherType}
                             </span>
+                            {voucher.platform && (
+                              <span class="text-xs text-gray-500">
+                                {voucher.platform}
+                              </span>
+                            )}
+                          </div>
+                          <h4 class="font-medium text-gray-900 truncate">
+                            {voucher.name}
+                          </h4>
+                          <div class="flex items-center gap-2 mt-1 text-sm">
+                            <span class="text-green-600 font-medium">
+                              {formatDiscount(voucher)}
+                            </span>
+                            {voucher.minPurchase && (
+                              <span class="text-gray-500">
+                                • {formatMinPurchase(voucher.minPurchase)}
+                              </span>
+                            )}
+                          </div>
+                          {voucher.description && (
+                            <p class="text-xs text-gray-600 mt-1 line-clamp-2">
+                              {voucher.description}
+                            </p>
                           )}
                         </div>
-                        <h4 class="font-medium text-gray-900 truncate">
-                          {voucher.name}
-                        </h4>
-                        <div class="flex items-center gap-2 mt-1 text-sm">
-                          <span class="text-green-600 font-medium">
-                            {formatDiscount(voucher)}
-                          </span>
-                          {voucher.minPurchase && (
-                            <span class="text-gray-500">
-                              • {formatMinPurchase(voucher.minPurchase)}
-                            </span>
-                          )}
+                        <div class="flex-shrink-0">
+                          {selected
+                            ? (
+                              <svg
+                                class="w-6 h-6 text-blue-600"
+                                fill="currentColor"
+                                viewBox="0 0 20 20"
+                              >
+                                <path
+                                  fillRule="evenodd"
+                                  d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z"
+                                  clipRule="evenodd"
+                                />
+                              </svg>
+                            )
+                            : (
+                              <svg
+                                class="w-6 h-6 text-gray-300"
+                                fill="none"
+                                stroke="currentColor"
+                                viewBox="0 0 24 24"
+                              >
+                                <circle
+                                  cx="12"
+                                  cy="12"
+                                  r="10"
+                                  strokeWidth="2"
+                                />
+                              </svg>
+                            )}
                         </div>
-                        {voucher.description && (
-                          <p class="text-xs text-gray-600 mt-1 line-clamp-2">
-                            {voucher.description}
-                          </p>
-                        )}
                       </div>
-                      <div class="flex-shrink-0">
-                        {selected ? (
-                          <svg
-                            class="w-6 h-6 text-blue-600"
-                            fill="currentColor"
-                            viewBox="0 0 20 20"
-                          >
-                            <path
-                              fillRule="evenodd"
-                              d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z"
-                              clipRule="evenodd"
-                            />
-                          </svg>
-                        ) : (
-                          <svg
-                            class="w-6 h-6 text-gray-300"
-                            fill="none"
-                            stroke="currentColor"
-                            viewBox="0 0 24 24"
-                          >
-                            <circle cx="12" cy="12" r="10" strokeWidth="2" />
-                          </svg>
-                        )}
-                      </div>
-                    </div>
-                  </button>
-                );
-              })
-            )}
+                    </button>
+                  );
+                })
+              )}
           </div>
 
           {/* Selection limit warning */}

@@ -84,7 +84,9 @@ export function centsFromString(priceStr: string): Cents | null {
  */
 export function asCents(value: number): Cents {
   if (!isValidCents(value)) {
-    throw new Error(`Invalid cents value: ${value}. Must be a non-negative integer.`);
+    throw new Error(
+      `Invalid cents value: ${value}. Must be a non-negative integer.`,
+    );
   }
   return value as Cents;
 }
@@ -130,7 +132,7 @@ export function isValidCents(value: unknown): value is Cents {
     typeof value === "number" &&
     isFinite(value) &&
     value >= 0 &&
-    Math.round(value) === value  // Must be an integer
+    Math.round(value) === value // Must be an integer
   );
 }
 
@@ -149,7 +151,10 @@ export function isValidDollars(value: unknown): value is Dollars {
  * @param context - Optional context for error message
  * @throws Error if value is not valid cents
  */
-export function assertCents(value: unknown, context?: string): asserts value is Cents {
+export function assertCents(
+  value: unknown,
+  context?: string,
+): asserts value is Cents {
   if (!isValidCents(value)) {
     const msg = context
       ? `Expected valid cents in ${context}, got: ${value}`
@@ -164,7 +169,10 @@ export function assertCents(value: unknown, context?: string): asserts value is 
  * @param context - Optional context for error message
  * @throws Error if value is not valid dollars
  */
-export function assertDollars(value: unknown, context?: string): asserts value is Dollars {
+export function assertDollars(
+  value: unknown,
+  context?: string,
+): asserts value is Dollars {
   if (!isValidDollars(value)) {
     const msg = context
       ? `Expected valid dollars in ${context}, got: ${value}`
@@ -273,7 +281,9 @@ export function subtractCents(a: Cents, b: Cents): Cents {
   assertCents(b, "subtractCents second argument");
   const result = a - b;
   if (result < 0) {
-    throw new Error(`Subtraction would result in negative price: ${a} - ${b} = ${result}`);
+    throw new Error(
+      `Subtraction would result in negative price: ${a} - ${b} = ${result}`,
+    );
   }
   return asCents(result);
 }

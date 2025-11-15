@@ -18,6 +18,7 @@ import {
   type BricklinkItem,
   bricklinkItems,
   products,
+  redditSearchResults,
 } from "../../db/schema.ts";
 import { and, eq, isNotNull, or, sql } from "drizzle-orm";
 import { getQueueService, JobPriority } from "../queue/QueueService.ts";
@@ -323,6 +324,36 @@ export class MissingDataDetectorService {
       )
       .where(
         sql`${products.legoSetNumber} IS NOT NULL AND ${bricklinkItems.itemId} IS NULL`,
+      );
+
+    return missingProducts;
+  }
+
+  /**
+   * Find products with LEGO set numbers that don't have corresponding Reddit search results
+   * Similar to BrickLink missing data detection
+   */
+  async findProductsMissingRedditData(): Promise<
+    Array<{
+      productId: string;
+      legoSetNumber: string | null;
+      name: string | null;
+    }>
+  > {
+    // Use LEFT JOIN to find products without matching Reddit search results in a single query
+    const missingProducts = await db
+      .select({
+        productId: products.productId,
+        legoSetNumber: products.legoSetNumber,
+        name: products.name,
+      })
+      .from(products)
+      .leftJoin(
+        redditSearchResults,
+        eq(products.legoSetNumber, redditSearchResults.legoSetNumber),
+      )
+      .where(
+        sql`${products.legoSetNumber} IS NOT NULL AND ${redditSearchResults.id} IS NULL`,
       );
 
     return missingProducts;

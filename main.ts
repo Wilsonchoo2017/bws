@@ -9,7 +9,7 @@ import { load } from "$std/dotenv/mod.ts";
 import { start } from "$fresh/server.ts";
 import manifest from "./fresh.gen.ts";
 import config from "./fresh.config.ts";
-import { initializeQueue, getQueueService } from "./services/queue/init.ts";
+import { getQueueService, initializeQueue } from "./services/queue/init.ts";
 import { getScheduler } from "./services/scheduler/SchedulerService.ts";
 import { getMissingDataDetector } from "./services/missing-data/MissingDataDetectorService.ts";
 import { logger } from "./utils/logger.ts";

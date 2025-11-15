@@ -70,7 +70,8 @@ export default function VoucherEditModal({
               type="text"
               class="input input-bordered w-full"
               value={form.name}
-              onInput={(e) => actions.setName((e.target as HTMLInputElement).value)}
+              onInput={(e) =>
+                actions.setName((e.target as HTMLInputElement).value)}
               placeholder="e.g., Shopee 11.11 15% off"
               required
             />
@@ -84,7 +85,8 @@ export default function VoucherEditModal({
             <textarea
               class="textarea textarea-bordered w-full"
               value={form.description}
-              onInput={(e) => actions.setDescription((e.target as HTMLTextAreaElement).value)}
+              onInput={(e) =>
+                actions.setDescription((e.target as HTMLTextAreaElement).value)}
               placeholder="Optional description"
               rows={2}
             />
@@ -101,7 +103,10 @@ export default function VoucherEditModal({
                 value={form.voucherType}
                 onChange={(e) =>
                   actions.setVoucherType(
-                    (e.target as HTMLSelectElement).value as "platform" | "shop" | "item_tag"
+                    (e.target as HTMLSelectElement).value as
+                      | "platform"
+                      | "shop"
+                      | "item_tag",
                   )}
               >
                 <option value="platform">Platform</option>
@@ -119,7 +124,9 @@ export default function VoucherEditModal({
                 value={form.discountType}
                 onChange={(e) =>
                   actions.setDiscountType(
-                    (e.target as HTMLSelectElement).value as "percentage" | "fixed"
+                    (e.target as HTMLSelectElement).value as
+                      | "percentage"
+                      | "fixed",
                   )}
               >
                 <option value="percentage">Percentage</option>
@@ -132,7 +139,8 @@ export default function VoucherEditModal({
           <div class="form-control">
             <label class="label">
               <span class="label-text">
-                Discount Value * {form.discountType === "percentage" ? "(%)" : "(RM)"}
+                Discount Value *{" "}
+                {form.discountType === "percentage" ? "(%)" : "(RM)"}
               </span>
             </label>
             <input
@@ -140,8 +148,11 @@ export default function VoucherEditModal({
               step={form.discountType === "percentage" ? "1" : "0.01"}
               class="input input-bordered w-full"
               value={form.discountValue}
-              onInput={(e) => actions.setDiscountValue((e.target as HTMLInputElement).value)}
-              placeholder={form.discountType === "percentage" ? "e.g., 15" : "e.g., 10.00"}
+              onInput={(e) =>
+                actions.setDiscountValue((e.target as HTMLInputElement).value)}
+              placeholder={form.discountType === "percentage"
+                ? "e.g., 15"
+                : "e.g., 10.00"}
               required
             />
           </div>
@@ -155,7 +166,8 @@ export default function VoucherEditModal({
               <select
                 class="select select-bordered w-full"
                 value={form.platform}
-                onChange={(e) => actions.setPlatform((e.target as HTMLSelectElement).value)}
+                onChange={(e) =>
+                  actions.setPlatform((e.target as HTMLSelectElement).value)}
                 required
               >
                 <option value="">Select platform</option>
@@ -176,7 +188,8 @@ export default function VoucherEditModal({
                   type="number"
                   class="input input-bordered w-full"
                   value={form.shopId}
-                  onInput={(e) => actions.setShopId((e.target as HTMLInputElement).value)}
+                  onInput={(e) =>
+                    actions.setShopId((e.target as HTMLInputElement).value)}
                   placeholder="e.g., 123456"
                   required
                 />
@@ -189,7 +202,8 @@ export default function VoucherEditModal({
                   type="text"
                   class="input input-bordered w-full"
                   value={form.shopName}
-                  onInput={(e) => actions.setShopName((e.target as HTMLInputElement).value)}
+                  onInput={(e) =>
+                    actions.setShopName((e.target as HTMLInputElement).value)}
                   placeholder="Optional"
                 />
               </div>
@@ -208,7 +222,9 @@ export default function VoucherEditModal({
                 size={5}
                 value={form.requiredTagIds}
                 onChange={(e) => {
-                  const selected = Array.from((e.target as HTMLSelectElement).selectedOptions)
+                  const selected = Array.from(
+                    (e.target as HTMLSelectElement).selectedOptions,
+                  )
                     .map((opt) => opt.value);
                   actions.setRequiredTagIds(selected);
                 }}
@@ -220,7 +236,9 @@ export default function VoucherEditModal({
                 ))}
               </select>
               <label class="label">
-                <span class="label-text-alt">Hold Ctrl/Cmd to select multiple</span>
+                <span class="label-text-alt">
+                  Hold Ctrl/Cmd to select multiple
+                </span>
               </label>
             </div>
           )}
@@ -236,7 +254,8 @@ export default function VoucherEditModal({
                 step="0.01"
                 class="input input-bordered w-full"
                 value={form.minPurchase}
-                onInput={(e) => actions.setMinPurchase((e.target as HTMLInputElement).value)}
+                onInput={(e) =>
+                  actions.setMinPurchase((e.target as HTMLInputElement).value)}
                 placeholder="Optional"
               />
             </div>
@@ -249,7 +268,8 @@ export default function VoucherEditModal({
                 step="0.01"
                 class="input input-bordered w-full"
                 value={form.maxDiscount}
-                onInput={(e) => actions.setMaxDiscount((e.target as HTMLInputElement).value)}
+                onInput={(e) =>
+                  actions.setMaxDiscount((e.target as HTMLInputElement).value)}
                 placeholder="Optional cap"
               />
             </div>
@@ -265,7 +285,8 @@ export default function VoucherEditModal({
                 type="date"
                 class="input input-bordered w-full"
                 value={form.startDate}
-                onInput={(e) => actions.setStartDate((e.target as HTMLInputElement).value)}
+                onInput={(e) =>
+                  actions.setStartDate((e.target as HTMLInputElement).value)}
               />
             </div>
             <div class="form-control">
@@ -276,7 +297,8 @@ export default function VoucherEditModal({
                 type="date"
                 class="input input-bordered w-full"
                 value={form.endDate}
-                onInput={(e) => actions.setEndDate((e.target as HTMLInputElement).value)}
+                onInput={(e) =>
+                  actions.setEndDate((e.target as HTMLInputElement).value)}
               />
             </div>
           </div>
@@ -288,7 +310,8 @@ export default function VoucherEditModal({
                 type="checkbox"
                 class="checkbox"
                 checked={form.isActive}
-                onChange={(e) => actions.setIsActive((e.target as HTMLInputElement).checked)}
+                onChange={(e) =>
+                  actions.setIsActive((e.target as HTMLInputElement).checked)}
               />
               <span class="label-text">Active</span>
             </label>

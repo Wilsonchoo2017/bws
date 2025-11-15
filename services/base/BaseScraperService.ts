@@ -22,6 +22,7 @@ import { db } from "../../db/client.ts";
 import { scrapeSessions } from "../../db/schema.ts";
 import { rawDataService } from "../raw-data/index.ts";
 import { MaintenanceError } from "../../types/errors/MaintenanceError.ts";
+import { SetNotFoundError } from "../../types/errors/SetNotFoundError.ts";
 
 /**
  * Options for retry logic
@@ -44,6 +45,7 @@ export type ScraperSource =
   | "bricklink"
   | "worldbricks"
   | "brickranker"
+  | "reddit"
   | "self";
 
 /**
@@ -142,6 +144,22 @@ export abstract class BaseScraperService {
               estimatedEndTime: error.getEstimatedEndTime(),
               url,
               source,
+              ...context,
+            },
+          );
+          // Re-throw immediately without retrying or counting toward circuit breaker
+          throw error;
+        }
+
+        // Handle set not found errors - permanent failure, no retry needed
+        if (SetNotFoundError.isSetNotFoundError(error)) {
+          scraperLogger.warn(
+            `Set not found (permanent failure): ${error.message}`,
+            {
+              attempt,
+              setNumber: error.setNumber,
+              source: error.source,
+              url,
               ...context,
             },
           );

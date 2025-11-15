@@ -29,6 +29,8 @@ import {
 } from "./WorldBricksParser.ts";
 import { scraperLogger } from "../../utils/logger.ts";
 import { BaseScraperService } from "../base/BaseScraperService.ts";
+import { getRandomUserAgent } from "../../config/scraper.config.ts";
+import { SetNotFoundError } from "../../types/errors/SetNotFoundError.ts";
 
 /**
  * Result of a scraping operation
@@ -90,6 +92,10 @@ export class WorldBricksScraperService extends BaseScraperService {
     try {
       const data = await this.withRetryLogic(
         async (_attempt) => {
+          // Use consistent user agent for this scraping session
+          const sessionUserAgent = getRandomUserAgent();
+          let searchUrl: string | null = null;
+
           // If no explicit URL provided, use search to find it
           if (!targetUrl) {
             scraperLogger.info("Searching for set on WorldBricks", {
@@ -97,16 +103,26 @@ export class WorldBricksScraperService extends BaseScraperService {
               source: "worldbricks",
             });
 
-            const searchUrl = constructSearchUrl(setNumber);
+            searchUrl = constructSearchUrl(setNumber);
             scraperLogger.info("Fetching WorldBricks search results", {
               setNumber,
               url: searchUrl,
               source: "worldbricks",
             });
 
+            // Rate limit search request with WorldBricks-specific config
+            if (!skipRateLimit) {
+              await this.rateLimiter.waitForNextRequest({
+                domain: "worldbricks.com",
+                minDelayMs: 60000, // 1 minute (from WORLDBRICKS_CONFIG)
+                maxDelayMs: 180000, // 3 minutes (from WORLDBRICKS_CONFIG)
+              });
+            }
+
             const searchResponse = await this.httpClient.simpleFetch({
               url: searchUrl,
               timeout: 30000,
+              userAgent: sessionUserAgent,
             });
 
             if (searchResponse.status !== 200) {
@@ -130,8 +146,10 @@ export class WorldBricksScraperService extends BaseScraperService {
             targetUrl = parseSearchResults(searchResponse.html, setNumber);
 
             if (!targetUrl) {
-              throw new Error(
+              throw new SetNotFoundError(
                 `Could not find set ${setNumber} in WorldBricks search results`,
+                setNumber,
+                "worldbricks",
               );
             }
 
@@ -148,9 +166,30 @@ export class WorldBricksScraperService extends BaseScraperService {
             url: targetUrl,
             source: "worldbricks",
           });
+
+          // Rate limit product page request with WorldBricks-specific config
+          if (!skipRateLimit) {
+            await this.rateLimiter.waitForNextRequest({
+              domain: "worldbricks.com",
+              minDelayMs: 60000, // 1 minute (from WORLDBRICKS_CONFIG)
+              maxDelayMs: 180000, // 3 minutes (from WORLDBRICKS_CONFIG)
+            });
+          }
+
+          // Add random jitter (2-5 seconds) for more natural timing
+          const jitter = 2000 + Math.floor(Math.random() * 3000);
+          scraperLogger.info("Adding jitter before product page request", {
+            jitterMs: jitter,
+            jitterSeconds: Math.ceil(jitter / 1000),
+            source: "worldbricks",
+          });
+          await this.delay(jitter);
+
           const response = await this.httpClient.simpleFetch({
             url: targetUrl,
             timeout: 30000,
+            userAgent: sessionUserAgent,
+            referer: searchUrl || undefined, // Add Referer if we came from search
           });
 
           if (response.status !== 200) {
@@ -345,5 +384,4 @@ export class WorldBricksScraperService extends BaseScraperService {
       throw error;
     }
   }
-
 }

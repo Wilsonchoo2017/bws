@@ -106,7 +106,8 @@ export default function AnalysisDemoPage(
               <ul class="list-disc list-inside space-y-1">
                 <li>
                   <strong>Intrinsic Value:</strong>{" "}
-                  The true worth based on MSRP, retirement status, demand, quality, and market conditions
+                  The true worth based on MSRP, retirement status, demand,
+                  quality, and market conditions
                 </li>
                 <li>
                   <strong>Target Price:</strong>{" "}

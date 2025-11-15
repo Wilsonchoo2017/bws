@@ -31,6 +31,7 @@ export const productSourceEnum = pgEnum("product_source", [
   "bricklink",
   "worldbricks",
   "brickranker",
+  "reddit",
   "self",
 ]);
 
@@ -510,7 +511,9 @@ export const scrapeRawData = pgTable(
   },
   (table) => ({
     // Index for scrape session lookup
-    scrapeSessionIdIdx: index("idx_scrape_raw_data_session_id").on(table.scrapeSessionId),
+    scrapeSessionIdIdx: index("idx_scrape_raw_data_session_id").on(
+      table.scrapeSessionId,
+    ),
 
     // Index for source filtering
     sourceIdx: index("idx_scrape_raw_data_source").on(table.source),

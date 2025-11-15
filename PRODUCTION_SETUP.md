@@ -1,27 +1,28 @@
 # Production Deployment Guide
 
-Complete guide for deploying BWS (Bricklink Worth Scraper) to production with Docker, including Caddy reverse proxy for Tailscale access.
+Complete guide for deploying BWS (Bricklink Worth Scraper) to production with
+Docker, including Caddy reverse proxy for Tailscale access.
 
 ## Architecture Overview
 
 ```
-                    Tailscale Network
-                          ↓
-                  Caddy (:8001)
-                          ↓
-              BWS App (:8000) ←→ Redis (:6379)
-                          ↓
-                   PostgreSQL (:5432)
+      Tailscale Network
+            ↓
+    Caddy (:8001)
+            ↓
+BWS App (:8000) ←→ Redis (:6379)
+            ↓
+     PostgreSQL (:5432)
 ```
 
 ## Services
 
-| Service | Container Name | Internal Port | External Port | Purpose |
-|---------|---------------|---------------|---------------|---------|
-| Caddy | bws-caddy | 8001 | 8001 | Reverse proxy for Tailscale access |
-| App | bws-app | 8000 | - | Deno/Fresh application |
-| PostgreSQL | bws-postgres | 5432 | - | Database |
-| Redis | bws-redis | 6379 | - | Queue service for BullMQ |
+| Service    | Container Name | Internal Port | External Port | Purpose                            |
+| ---------- | -------------- | ------------- | ------------- | ---------------------------------- |
+| Caddy      | bws-caddy      | 8001          | 8001          | Reverse proxy for Tailscale access |
+| App        | bws-app        | 8000          | -             | Deno/Fresh application             |
+| PostgreSQL | bws-postgres   | 5432          | -             | Database                           |
+| Redis      | bws-redis      | 6379          | -             | Queue service for BullMQ           |
 
 ## Prerequisites
 
@@ -59,6 +60,7 @@ BRICKLINK_TOKEN_SECRET=<your-secret>
 ```
 
 **Security Tips:**
+
 - Use strong, unique passwords (20+ characters)
 - Never commit `.env.production` to git
 - Consider using a secrets manager in production
@@ -105,7 +107,8 @@ Once deployed, access your application through Tailscale:
 
 ### CORS Support
 
-Caddy is configured with full CORS support, allowing web access from any origin with proper headers.
+Caddy is configured with full CORS support, allowing web access from any origin
+with proper headers.
 
 ## Service Management
 
@@ -202,7 +205,8 @@ gunzip -c backup.sql.gz | docker exec -i bws-postgres psql -U postgres bws
 
 ### Redis Backup
 
-Redis is configured with AOF (Append Only File) persistence, so data is automatically persisted in the `redis_data` volume.
+Redis is configured with AOF (Append Only File) persistence, so data is
+automatically persisted in the `redis_data` volume.
 
 ```bash
 # Manual backup
@@ -349,6 +353,7 @@ volumes:
 ```
 
 Example optimizations:
+
 ```ini
 shared_buffers = 256MB
 effective_cache_size = 1GB
@@ -368,15 +373,15 @@ maintenance_work_mem = 64MB
 
 ## Development vs Production
 
-| Aspect | Development | Production |
-|--------|-------------|------------|
-| Compose File | `docker-compose.dev.yml` | `docker-compose.prod.yml` |
-| Caddyfile | `Caddyfile` | `Caddyfile.prod` |
-| Port Exposure | Direct ports | Only Caddy |
-| Logging | Stdout | File + Stdout |
-| Restart Policy | `unless-stopped` | `unless-stopped` |
-| Resource Limits | None | Enforced |
-| Health Checks | Basic | Comprehensive |
+| Aspect          | Development              | Production                |
+| --------------- | ------------------------ | ------------------------- |
+| Compose File    | `docker-compose.dev.yml` | `docker-compose.prod.yml` |
+| Caddyfile       | `Caddyfile`              | `Caddyfile.prod`          |
+| Port Exposure   | Direct ports             | Only Caddy                |
+| Logging         | Stdout                   | File + Stdout             |
+| Restart Policy  | `unless-stopped`         | `unless-stopped`          |
+| Resource Limits | None                     | Enforced                  |
+| Health Checks   | Basic                    | Comprehensive             |
 
 ## Next Steps
 

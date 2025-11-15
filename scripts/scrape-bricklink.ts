@@ -22,7 +22,8 @@ async function main() {
   }
 
   const itemType = "S"; // Assuming sets - could be made configurable
-  const url = `https://www.bricklink.com/v2/catalog/catalogitem.page?${itemType}=${itemId}`;
+  const url =
+    `https://www.bricklink.com/v2/catalog/catalogitem.page?${itemType}=${itemId}`;
 
   scraperLogger.info(`Starting scrape for BrickLink item: ${itemId}`);
   scraperLogger.info(`URL: ${url}`);

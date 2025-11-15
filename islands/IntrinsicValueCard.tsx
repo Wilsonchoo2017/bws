@@ -41,6 +41,67 @@ interface CalculationBreakdown {
   inputs: BreakdownInputs;
 }
 
+interface QualityScoreBreakdown {
+  components: {
+    ppdScore: { score: number; weightedScore: number; notes: string };
+    complexityScore: { score: number; weightedScore: number; notes: string };
+    themePremium: { score: number; weightedScore: number; notes: string };
+    scarcityScore: { score: number; weightedScore: number; notes: string };
+  };
+  dataQuality: {
+    hasParts: boolean;
+    hasMsrp: boolean;
+    hasTheme: boolean;
+    hasAvailability: boolean;
+  };
+}
+
+interface DemandScoreBreakdown {
+  components: {
+    salesVelocity: {
+      score: number;
+      weight: number;
+      weightedScore: number;
+      confidence: number;
+      notes?: string;
+    };
+    priceMomentum: {
+      score: number;
+      weight: number;
+      weightedScore: number;
+      confidence: number;
+      notes?: string;
+    };
+    marketDepth: {
+      score: number;
+      weight: number;
+      weightedScore: number;
+      confidence: number;
+      notes?: string;
+    };
+    supplyDemandRatio: {
+      score: number;
+      weight: number;
+      weightedScore: number;
+      confidence: number;
+      notes?: string;
+    };
+    velocityConsistency: {
+      score: number;
+      weight: number;
+      weightedScore: number;
+      confidence: number;
+      notes?: string;
+    };
+  };
+  dataQuality: {
+    hasSalesData: boolean;
+    hasPriceData: boolean;
+    hasMarketDepth: boolean;
+    observationPeriod: number;
+  };
+}
+
 interface IntrinsicValueData {
   valueMetrics: ValueMetrics;
   action: "strong_buy" | "buy" | "hold" | "pass" | "insufficient_data";
@@ -51,6 +112,8 @@ interface IntrinsicValueData {
   breakdown?: CalculationBreakdown;
   reasoning?: string;
   confidence?: number;
+  qualityScoreBreakdown?: QualityScoreBreakdown;
+  demandScoreBreakdown?: DemandScoreBreakdown;
 }
 
 interface IntrinsicValueCardProps {
@@ -64,6 +127,8 @@ export default function IntrinsicValueCard(
   const error = useSignal<string | null>(null);
   const data = useSignal<IntrinsicValueData | null>(null);
   const showDetails = useSignal(false);
+  const showQualityBreakdown = useSignal(false);
+  const showDemandBreakdown = useSignal(false);
 
   // Fetch intrinsic value data
   useEffect(() => {
@@ -131,7 +196,30 @@ export default function IntrinsicValueCard(
     breakdown,
     reasoning,
     confidence,
+    qualityScoreBreakdown,
+    demandScoreBreakdown,
   } = data.value;
+
+  // Helper: Calculate data completeness percentage
+  const calculateQualityCompleteness = () => {
+    if (!qualityScoreBreakdown) return 0;
+    const { hasParts, hasMsrp, hasTheme, hasAvailability } =
+      qualityScoreBreakdown.dataQuality;
+    const total = 4;
+    const available =
+      [hasParts, hasMsrp, hasTheme, hasAvailability].filter(Boolean).length;
+    return Math.round((available / total) * 100);
+  };
+
+  const calculateDemandCompleteness = () => {
+    if (!demandScoreBreakdown) return 0;
+    const { hasSalesData, hasPriceData, hasMarketDepth } =
+      demandScoreBreakdown.dataQuality;
+    const total = 3;
+    const available =
+      [hasSalesData, hasPriceData, hasMarketDepth].filter(Boolean).length;
+    return Math.round((available / total) * 100);
+  };
 
   const formatCurrency = (amountInCents: Cents) => {
     return new Intl.NumberFormat("en-US", {
@@ -338,6 +426,472 @@ export default function IntrinsicValueCard(
               )}
             </div>
           </div>
+        )}
+
+        {/* Quality Score Breakdown */}
+        {qualityScoreBreakdown && (
+          <>
+            <button
+              class="btn btn-outline btn-block btn-sm"
+              onClick={() =>
+                showQualityBreakdown.value = !showQualityBreakdown.value}
+            >
+              {showQualityBreakdown.value
+                ? "▲ Hide Quality Score Breakdown"
+                : "▼ Show Quality Score Breakdown"}
+              {calculateQualityCompleteness() < 100 && (
+                <span class="badge badge-warning badge-sm ml-2">
+                  ⚠️ Incomplete Data
+                </span>
+              )}
+            </button>
+
+            {showQualityBreakdown.value && (
+              <div class="space-y-4 pt-4 border-t border-base-300">
+                {/* Data Completeness Bar */}
+                <div>
+                  <div class="flex items-center justify-between mb-2">
+                    <p class="text-xs font-semibold text-base-content/60">
+                      DATA COMPLETENESS
+                    </p>
+                    <span class="text-sm font-medium">
+                      {calculateQualityCompleteness()}%
+                    </span>
+                  </div>
+                  <progress
+                    class={`progress w-full ${
+                      calculateQualityCompleteness() === 100
+                        ? "progress-success"
+                        : calculateQualityCompleteness() >= 50
+                        ? "progress-warning"
+                        : "progress-error"
+                    }`}
+                    value={calculateQualityCompleteness()}
+                    max="100"
+                  >
+                  </progress>
+                  {calculateQualityCompleteness() < 100 && (
+                    <p class="text-xs text-base-content/60 mt-1">
+                      Missing: {[
+                        !qualityScoreBreakdown.dataQuality.hasParts &&
+                        "Parts Count",
+                        !qualityScoreBreakdown.dataQuality.hasMsrp && "MSRP",
+                        !qualityScoreBreakdown.dataQuality.hasTheme && "Theme",
+                        !qualityScoreBreakdown.dataQuality.hasAvailability &&
+                        "Availability",
+                      ].filter(Boolean).join(", ")}
+                    </p>
+                  )}
+                </div>
+
+                {/* Component Scores */}
+                <div class="space-y-3">
+                  <p class="text-xs font-semibold text-base-content/60">
+                    COMPONENT BREAKDOWN
+                  </p>
+
+                  {/* PPD Score */}
+                  <div class="bg-base-200 p-3 rounded-lg">
+                    <div class="flex items-center justify-between mb-1">
+                      <span class="text-sm font-medium">
+                        Parts-Per-Dollar (40% weight)
+                      </span>
+                      <span class="text-sm font-bold">
+                        {qualityScoreBreakdown.components.ppdScore.score}/100
+                      </span>
+                    </div>
+                    <div class="flex items-center gap-2">
+                      <progress
+                        class="progress progress-primary flex-1"
+                        value={qualityScoreBreakdown.components.ppdScore.score}
+                        max="100"
+                      >
+                      </progress>
+                      <span class="text-xs text-base-content/60">
+                        →{" "}
+                        {qualityScoreBreakdown.components.ppdScore.weightedScore
+                          .toFixed(1)} pts
+                      </span>
+                    </div>
+                    <p class="text-xs text-base-content/60 mt-1">
+                      {qualityScoreBreakdown.components.ppdScore.notes}
+                    </p>
+                  </div>
+
+                  {/* Complexity Score */}
+                  <div class="bg-base-200 p-3 rounded-lg">
+                    <div class="flex items-center justify-between mb-1">
+                      <span class="text-sm font-medium">
+                        Build Complexity (30% weight)
+                      </span>
+                      <span class="text-sm font-bold">
+                        {qualityScoreBreakdown.components.complexityScore
+                          .score}/100
+                      </span>
+                    </div>
+                    <div class="flex items-center gap-2">
+                      <progress
+                        class="progress progress-primary flex-1"
+                        value={qualityScoreBreakdown.components.complexityScore
+                          .score}
+                        max="100"
+                      >
+                      </progress>
+                      <span class="text-xs text-base-content/60">
+                        → {qualityScoreBreakdown.components.complexityScore
+                          .weightedScore.toFixed(1)} pts
+                      </span>
+                    </div>
+                    <p class="text-xs text-base-content/60 mt-1">
+                      {qualityScoreBreakdown.components.complexityScore.notes}
+                    </p>
+                  </div>
+
+                  {/* Theme Premium */}
+                  <div class="bg-base-200 p-3 rounded-lg">
+                    <div class="flex items-center justify-between mb-1">
+                      <span class="text-sm font-medium">
+                        Theme Premium (20% weight)
+                      </span>
+                      <span class="text-sm font-bold">
+                        {qualityScoreBreakdown.components.themePremium
+                          .score}/100
+                      </span>
+                    </div>
+                    <div class="flex items-center gap-2">
+                      <progress
+                        class="progress progress-primary flex-1"
+                        value={qualityScoreBreakdown.components.themePremium
+                          .score}
+                        max="100"
+                      >
+                      </progress>
+                      <span class="text-xs text-base-content/60">
+                        → {qualityScoreBreakdown.components.themePremium
+                          .weightedScore.toFixed(1)} pts
+                      </span>
+                    </div>
+                    <p class="text-xs text-base-content/60 mt-1">
+                      {qualityScoreBreakdown.components.themePremium.notes}
+                    </p>
+                  </div>
+
+                  {/* Scarcity Score */}
+                  <div class="bg-base-200 p-3 rounded-lg">
+                    <div class="flex items-center justify-between mb-1">
+                      <span class="text-sm font-medium">
+                        Scarcity (10% weight)
+                      </span>
+                      <span class="text-sm font-bold">
+                        {qualityScoreBreakdown.components.scarcityScore
+                          .score}/100
+                      </span>
+                    </div>
+                    <div class="flex items-center gap-2">
+                      <progress
+                        class="progress progress-primary flex-1"
+                        value={qualityScoreBreakdown.components.scarcityScore
+                          .score}
+                        max="100"
+                      >
+                      </progress>
+                      <span class="text-xs text-base-content/60">
+                        → {qualityScoreBreakdown.components.scarcityScore
+                          .weightedScore.toFixed(1)} pts
+                      </span>
+                    </div>
+                    <p class="text-xs text-base-content/60 mt-1">
+                      {qualityScoreBreakdown.components.scarcityScore.notes}
+                    </p>
+                  </div>
+
+                  {/* Total */}
+                  <div class="bg-success/10 border-2 border-success p-3 rounded-lg">
+                    <div class="flex items-center justify-between">
+                      <span class="text-sm font-bold text-success">
+                        Total Quality Score
+                      </span>
+                      <span class="text-lg font-bold text-success">
+                        {Math.round(
+                          qualityScoreBreakdown.components.ppdScore
+                            .weightedScore +
+                            qualityScoreBreakdown.components.complexityScore
+                              .weightedScore +
+                            qualityScoreBreakdown.components.themePremium
+                              .weightedScore +
+                            qualityScoreBreakdown.components.scarcityScore
+                              .weightedScore,
+                        )}/100
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+          </>
+        )}
+
+        {/* Demand Score Breakdown */}
+        {demandScoreBreakdown && (
+          <>
+            <button
+              class="btn btn-outline btn-block btn-sm"
+              onClick={() =>
+                showDemandBreakdown.value = !showDemandBreakdown.value}
+            >
+              {showDemandBreakdown.value
+                ? "▲ Hide Demand Score Breakdown"
+                : "▼ Show Demand Score Breakdown"}
+              {calculateDemandCompleteness() < 100 && (
+                <span class="badge badge-warning badge-sm ml-2">
+                  ⚠️ Incomplete Data
+                </span>
+              )}
+            </button>
+
+            {showDemandBreakdown.value && (
+              <div class="space-y-4 pt-4 border-t border-base-300">
+                {/* Data Completeness Bar */}
+                <div>
+                  <div class="flex items-center justify-between mb-2">
+                    <p class="text-xs font-semibold text-base-content/60">
+                      DATA COMPLETENESS
+                    </p>
+                    <span class="text-sm font-medium">
+                      {calculateDemandCompleteness()}%
+                    </span>
+                  </div>
+                  <progress
+                    class={`progress w-full ${
+                      calculateDemandCompleteness() === 100
+                        ? "progress-success"
+                        : calculateDemandCompleteness() >= 50
+                        ? "progress-warning"
+                        : "progress-error"
+                    }`}
+                    value={calculateDemandCompleteness()}
+                    max="100"
+                  >
+                  </progress>
+                  {calculateDemandCompleteness() < 100 && (
+                    <p class="text-xs text-base-content/60 mt-1">
+                      Missing: {[
+                        !demandScoreBreakdown.dataQuality.hasSalesData &&
+                        "Sales Data",
+                        !demandScoreBreakdown.dataQuality.hasPriceData &&
+                        "Price History",
+                        !demandScoreBreakdown.dataQuality.hasMarketDepth &&
+                        "Market Depth",
+                      ].filter(Boolean).join(", ")}
+                    </p>
+                  )}
+                  <p class="text-xs text-base-content/60 mt-1">
+                    Observation Period:{" "}
+                    {demandScoreBreakdown.dataQuality.observationPeriod} days
+                  </p>
+                </div>
+
+                {/* Component Scores */}
+                <div class="space-y-3">
+                  <p class="text-xs font-semibold text-base-content/60">
+                    COMPONENT BREAKDOWN
+                  </p>
+
+                  {/* Sales Velocity */}
+                  <div class="bg-base-200 p-3 rounded-lg">
+                    <div class="flex items-center justify-between mb-1">
+                      <span class="text-sm font-medium">
+                        Sales Velocity
+                        ({(demandScoreBreakdown.components.salesVelocity
+                          .weight * 100).toFixed(0)}% weight)
+                      </span>
+                      <span class="text-sm font-bold">
+                        {demandScoreBreakdown.components.salesVelocity.score
+                          .toFixed(0)}/100
+                      </span>
+                    </div>
+                    <div class="flex items-center gap-2">
+                      <progress
+                        class="progress progress-info flex-1"
+                        value={demandScoreBreakdown.components.salesVelocity
+                          .score}
+                        max="100"
+                      >
+                      </progress>
+                      <span class="text-xs text-base-content/60">
+                        → {demandScoreBreakdown.components.salesVelocity
+                          .weightedScore.toFixed(1)} pts
+                      </span>
+                    </div>
+                    {demandScoreBreakdown.components.salesVelocity.notes && (
+                      <p class="text-xs text-base-content/60 mt-1">
+                        {demandScoreBreakdown.components.salesVelocity.notes}
+                      </p>
+                    )}
+                  </div>
+
+                  {/* Price Momentum */}
+                  <div class="bg-base-200 p-3 rounded-lg">
+                    <div class="flex items-center justify-between mb-1">
+                      <span class="text-sm font-medium">
+                        Price Momentum
+                        ({(demandScoreBreakdown.components.priceMomentum
+                          .weight * 100).toFixed(0)}% weight)
+                      </span>
+                      <span class="text-sm font-bold">
+                        {demandScoreBreakdown.components.priceMomentum.score
+                          .toFixed(0)}/100
+                      </span>
+                    </div>
+                    <div class="flex items-center gap-2">
+                      <progress
+                        class="progress progress-info flex-1"
+                        value={demandScoreBreakdown.components.priceMomentum
+                          .score}
+                        max="100"
+                      >
+                      </progress>
+                      <span class="text-xs text-base-content/60">
+                        → {demandScoreBreakdown.components.priceMomentum
+                          .weightedScore.toFixed(1)} pts
+                      </span>
+                    </div>
+                    {demandScoreBreakdown.components.priceMomentum.notes && (
+                      <p class="text-xs text-base-content/60 mt-1">
+                        {demandScoreBreakdown.components.priceMomentum.notes}
+                      </p>
+                    )}
+                  </div>
+
+                  {/* Market Depth */}
+                  <div class="bg-base-200 p-3 rounded-lg">
+                    <div class="flex items-center justify-between mb-1">
+                      <span class="text-sm font-medium">
+                        Market Depth
+                        ({(demandScoreBreakdown.components.marketDepth.weight *
+                          100).toFixed(0)}% weight)
+                      </span>
+                      <span class="text-sm font-bold">
+                        {demandScoreBreakdown.components.marketDepth.score
+                          .toFixed(0)}/100
+                      </span>
+                    </div>
+                    <div class="flex items-center gap-2">
+                      <progress
+                        class="progress progress-info flex-1"
+                        value={demandScoreBreakdown.components.marketDepth
+                          .score}
+                        max="100"
+                      >
+                      </progress>
+                      <span class="text-xs text-base-content/60">
+                        → {demandScoreBreakdown.components.marketDepth
+                          .weightedScore.toFixed(1)} pts
+                      </span>
+                    </div>
+                    {demandScoreBreakdown.components.marketDepth.notes && (
+                      <p class="text-xs text-base-content/60 mt-1">
+                        {demandScoreBreakdown.components.marketDepth.notes}
+                      </p>
+                    )}
+                  </div>
+
+                  {/* Supply/Demand Ratio */}
+                  <div class="bg-base-200 p-3 rounded-lg">
+                    <div class="flex items-center justify-between mb-1">
+                      <span class="text-sm font-medium">
+                        Supply/Demand Ratio
+                        ({(demandScoreBreakdown.components.supplyDemandRatio
+                          .weight * 100).toFixed(0)}% weight)
+                      </span>
+                      <span class="text-sm font-bold">
+                        {demandScoreBreakdown.components.supplyDemandRatio.score
+                          .toFixed(0)}/100
+                      </span>
+                    </div>
+                    <div class="flex items-center gap-2">
+                      <progress
+                        class="progress progress-info flex-1"
+                        value={demandScoreBreakdown.components.supplyDemandRatio
+                          .score}
+                        max="100"
+                      >
+                      </progress>
+                      <span class="text-xs text-base-content/60">
+                        → {demandScoreBreakdown.components.supplyDemandRatio
+                          .weightedScore.toFixed(1)} pts
+                      </span>
+                    </div>
+                    {demandScoreBreakdown.components.supplyDemandRatio.notes &&
+                      (
+                        <p class="text-xs text-base-content/60 mt-1">
+                          {demandScoreBreakdown.components.supplyDemandRatio
+                            .notes}
+                        </p>
+                      )}
+                  </div>
+
+                  {/* Velocity Consistency */}
+                  <div class="bg-base-200 p-3 rounded-lg">
+                    <div class="flex items-center justify-between mb-1">
+                      <span class="text-sm font-medium">
+                        Velocity Consistency
+                        ({(demandScoreBreakdown.components.velocityConsistency
+                          .weight * 100).toFixed(0)}% weight)
+                      </span>
+                      <span class="text-sm font-bold">
+                        {demandScoreBreakdown.components.velocityConsistency
+                          .score.toFixed(0)}/100
+                      </span>
+                    </div>
+                    <div class="flex items-center gap-2">
+                      <progress
+                        class="progress progress-info flex-1"
+                        value={demandScoreBreakdown.components
+                          .velocityConsistency.score}
+                        max="100"
+                      >
+                      </progress>
+                      <span class="text-xs text-base-content/60">
+                        → {demandScoreBreakdown.components.velocityConsistency
+                          .weightedScore.toFixed(1)} pts
+                      </span>
+                    </div>
+                    {demandScoreBreakdown.components.velocityConsistency
+                      .notes && (
+                      <p class="text-xs text-base-content/60 mt-1">
+                        {demandScoreBreakdown.components.velocityConsistency
+                          .notes}
+                      </p>
+                    )}
+                  </div>
+
+                  {/* Total */}
+                  <div class="bg-info/10 border-2 border-info p-3 rounded-lg">
+                    <div class="flex items-center justify-between">
+                      <span class="text-sm font-bold text-info">
+                        Total Demand Score
+                      </span>
+                      <span class="text-lg font-bold text-info">
+                        {Math.round(
+                          demandScoreBreakdown.components.salesVelocity
+                            .weightedScore +
+                            demandScoreBreakdown.components.priceMomentum
+                              .weightedScore +
+                            demandScoreBreakdown.components.marketDepth
+                              .weightedScore +
+                            demandScoreBreakdown.components.supplyDemandRatio
+                              .weightedScore +
+                            demandScoreBreakdown.components.velocityConsistency
+                              .weightedScore,
+                        )}/100
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+          </>
         )}
 
         {/* Opportunities and Risks Toggle */}

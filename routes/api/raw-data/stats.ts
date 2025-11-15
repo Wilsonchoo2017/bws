@@ -22,7 +22,9 @@ export const handler = async (
       | "brickranker"
       | null;
 
-    const stats = await rawDataService.getCompressionAnalytics(source || undefined);
+    const stats = await rawDataService.getCompressionAnalytics(
+      source || undefined,
+    );
 
     // Format bytes to human-readable format
     const formatBytes = (bytes: number): string => {

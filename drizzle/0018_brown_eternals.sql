@@ -1,0 +1,1 @@
+ALTER TYPE "public"."product_source" ADD VALUE 'reddit' BEFORE 'self';

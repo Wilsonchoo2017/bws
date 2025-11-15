@@ -1,7 +1,7 @@
 import { FreshContext } from "$fresh/server.ts";
 import { desc, eq, sql } from "drizzle-orm";
 import { db } from "../../db/client.ts";
-import { productTags, products } from "../../db/schema.ts";
+import { products, productTags } from "../../db/schema.ts";
 
 export const handler = async (
   req: Request,
@@ -21,7 +21,9 @@ export const handler = async (
           const productsWithTag = await db
             .select({ count: sql<number>`count(*)` })
             .from(products)
-            .where(sql`${products.tags} @> ${JSON.stringify([{ tagId: tag.id }])}`);
+            .where(
+              sql`${products.tags} @> ${JSON.stringify([{ tagId: tag.id }])}`,
+            );
 
           return {
             ...tag,
@@ -132,7 +134,8 @@ export const handler = async (
         .where(sql`${products.tags} @> ${JSON.stringify([{ tagId: id }])}`);
 
       for (const product of allProducts) {
-        const currentTags = (product.tags as Array<{ tagId: string; addedAt: string }>) || [];
+        const currentTags =
+          (product.tags as Array<{ tagId: string; addedAt: string }>) || [];
         const updatedTags = currentTags.filter((t) => t.tagId !== id);
 
         await db

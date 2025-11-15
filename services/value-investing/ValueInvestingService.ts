@@ -175,17 +175,24 @@ export class ValueInvestingService {
     if (analysis.recommendedBuyPrice) {
       // IMPORTANT: Both product.price and analysis.recommendedBuyPrice.price are now in CENTS
       const currentPriceCents: Cents = asCents(product.price!);
-      const targetPriceCents: Cents = asCents(analysis.recommendedBuyPrice.price);
-      const intrinsicValueCents: Cents = analysis.recommendedBuyPrice.breakdown?.intrinsicValue
-        ? asCents(analysis.recommendedBuyPrice.breakdown.intrinsicValue)
-        : asCents(Math.round(analysis.recommendedBuyPrice.price / (1 - 0.25))); // Estimate intrinsic value assuming 25% margin
+      const targetPriceCents: Cents = asCents(
+        analysis.recommendedBuyPrice.price,
+      );
+      const intrinsicValueCents: Cents =
+        analysis.recommendedBuyPrice.breakdown?.intrinsicValue
+          ? asCents(analysis.recommendedBuyPrice.breakdown.intrinsicValue)
+          : asCents(
+            Math.round(analysis.recommendedBuyPrice.price / (1 - 0.25)),
+          ); // Estimate intrinsic value assuming 25% margin
 
       const valueMetrics = {
         currentPrice: currentPriceCents,
         targetPrice: targetPriceCents,
         intrinsicValue: intrinsicValueCents,
-        marginOfSafety: ((targetPriceCents - currentPriceCents) / targetPriceCents) * 100,
-        expectedROI: ((targetPriceCents - currentPriceCents) / currentPriceCents) * 100,
+        marginOfSafety:
+          ((targetPriceCents - currentPriceCents) / targetPriceCents) * 100,
+        expectedROI:
+          ((targetPriceCents - currentPriceCents) / currentPriceCents) * 100,
         timeHorizon: analysis.timeHorizon || "Unknown",
       };
 
@@ -197,7 +204,7 @@ export class ValueInvestingService {
         legoSetNumber: product.legoSetNumber,
         source: product.source,
         brand: product.brand!,
-        currentPrice: currentPriceCents,  // Now consistently in cents
+        currentPrice: currentPriceCents, // Now consistently in cents
         currency: product.currency || "MYR",
         valueMetrics,
         strategy: analysis.strategy || "Unknown",

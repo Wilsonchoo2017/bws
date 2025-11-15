@@ -116,7 +116,8 @@ export default function TagSelector({
 
       {selectedTagIds.length > 0 && (
         <div class="text-xs text-base-content/60">
-          {selectedTagIds.length} tag{selectedTagIds.length !== 1 ? "s" : ""}{" "}
+          {selectedTagIds.length} tag{selectedTagIds.length !== 1 ? "s" : ""}
+          {" "}
           selected
         </div>
       )}

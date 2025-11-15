@@ -1,7 +1,10 @@
 import { FreshContext } from "$fresh/server.ts";
 import { eq, sql } from "drizzle-orm";
 import { db } from "../../../../db/client.ts";
-import { products, productTags as productTagsTable } from "../../../../db/schema.ts";
+import {
+  products,
+  productTags as productTagsTable,
+} from "../../../../db/schema.ts";
 
 export const handler = async (
   req: Request,
@@ -32,7 +35,8 @@ export const handler = async (
         );
       }
 
-      const productTags = (product[0].tags as Array<{ tagId: string; addedAt: string }>) || [];
+      const productTags =
+        (product[0].tags as Array<{ tagId: string; addedAt: string }>) || [];
 
       // Fetch full tag details
       if (productTags.length === 0) {

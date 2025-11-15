@@ -1,6 +1,6 @@
 {
-  "id": "a2a97d5e-31cf-4674-9775-ece1722f4ace",
-  "prevId": "0144db4a-9799-4542-ba2c-8d4b42e3a816",
+  "id": "cf6bb698-246c-4913-9de7-ce19f8f81e8c",
+  "prevId": "a2a97d5e-31cf-4674-9775-ece1722f4ace",
   "version": "7",
   "dialect": "postgresql",
   "tables": {
@@ -2669,6 +2669,7 @@
         "bricklink",
         "worldbricks",
         "brickranker",
+        "reddit",
         "self"
       ]
     },

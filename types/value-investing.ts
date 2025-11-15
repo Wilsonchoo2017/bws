@@ -9,13 +9,13 @@ import type { VoucherTemplate } from "./voucher.ts";
  * - All price fields are in cents for consistency with database
  */
 export interface ValueMetrics {
-  currentPrice: Cents;        // Current market price in cents
-  targetPrice: Cents;          // Recommended buy price in cents
-  intrinsicValue: Cents;       // Calculated intrinsic value in cents
-  realizedValue?: Cents;       // After transaction costs in cents
-  marginOfSafety: number;      // Percentage (e.g., 25 = 25%)
-  expectedROI: number;         // Percentage (theoretical)
-  realizedROI?: number;        // Percentage (after transaction costs)
+  currentPrice: Cents; // Current market price in cents
+  targetPrice: Cents; // Recommended buy price in cents
+  intrinsicValue: Cents; // Calculated intrinsic value in cents
+  realizedValue?: Cents; // After transaction costs in cents
+  marginOfSafety: number; // Percentage (e.g., 25 = 25%)
+  expectedROI: number; // Percentage (theoretical)
+  realizedROI?: number; // Percentage (after transaction costs)
   timeHorizon: string;
 }
 
@@ -50,13 +50,13 @@ export interface VoucherEnhancedMetrics extends ValueMetrics {
  * - TODO: Rename interface to ValueMetricsInternal for clarity
  */
 export interface ValueMetricsInDollars {
-  currentPrice: Cents;         // Current market price in CENTS
-  targetPrice: Cents;           // Recommended buy price in CENTS
-  intrinsicValue: Cents;        // Calculated intrinsic value in CENTS
-  realizedValue?: Cents;        // After transaction costs in CENTS
-  marginOfSafety: number;       // Percentage (e.g., 25 = 25%)
-  expectedROI: number;          // Percentage (theoretical)
-  realizedROI?: number;         // Percentage (after transaction costs)
+  currentPrice: Cents; // Current market price in CENTS
+  targetPrice: Cents; // Recommended buy price in CENTS
+  intrinsicValue: Cents; // Calculated intrinsic value in CENTS
+  realizedValue?: Cents; // After transaction costs in CENTS
+  marginOfSafety: number; // Percentage (e.g., 25 = 25%)
+  expectedROI: number; // Percentage (theoretical)
+  realizedROI?: number; // Percentage (after transaction costs)
   timeHorizon: string;
 }
 
@@ -106,9 +106,9 @@ export interface ValueInvestingProduct {
  */
 export interface ValueInvestingFilters {
   strategy?: string;
-  minROI?: number;           // Percentage
-  maxPrice?: Cents;          // Maximum price in cents
-  minPrice?: Cents;          // Minimum price in cents
+  minROI?: number; // Percentage
+  maxPrice?: Cents; // Maximum price in cents
+  minPrice?: Cents; // Minimum price in cents
   actionTypes?: Array<"strong_buy" | "buy">;
 }
 
@@ -121,12 +121,12 @@ export interface ValueInvestingFilters {
 export interface IntrinsicValueInputs {
   // FUNDAMENTAL VALUE INPUTS (Replacement cost - TRUE intrinsic value)
   // All prices in CENTS for precision
-  msrp?: Cents;               // Original manufacturer's suggested retail price (CENTS)
+  msrp?: Cents; // Original manufacturer's suggested retail price (CENTS)
   currentRetailPrice?: Cents; // Current retail price if still available (CENTS)
   // Market prices (for comparison, NOT base value) (CENTS)
   bricklinkAvgPrice?: Cents;
   bricklinkMaxPrice?: Cents;
-  historicalPriceData?: Cents[];  // Historical prices (CENTS)
+  historicalPriceData?: Cents[]; // Historical prices (CENTS)
   // Retirement data
   retirementStatus?: "active" | "retiring_soon" | "retired";
   yearsPostRetirement?: number; // For time-decayed retirement premium

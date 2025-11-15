@@ -86,13 +86,19 @@ export class DemandCalculator {
     const validation = DataValidator.validateDemandInput(input);
     if (!validation.isValid || !validation.data) {
       // Return default score with low confidence if validation fails
-      console.warn("[DemandCalculator] Validation failed:", validation.warnings);
+      console.warn(
+        "[DemandCalculator] Validation failed:",
+        validation.warnings,
+      );
       return this.createDefaultScore(input, validation.warnings);
     }
 
     // Log warnings if any
     if (validation.warnings.length > 0) {
-      console.warn("[DemandCalculator] Validation warnings:", validation.warnings);
+      console.warn(
+        "[DemandCalculator] Validation warnings:",
+        validation.warnings,
+      );
     }
 
     // Use sanitized data for calculations
@@ -102,20 +108,22 @@ export class DemandCalculator {
     const salesVelocity = this.calculateSalesVelocityScore(sanitizedInput);
     const priceMomentum = this.calculatePriceMomentumScore(sanitizedInput);
     const marketDepth = this.calculateMarketDepthScore(sanitizedInput);
-    const supplyDemandRatio = this.calculateSupplyDemandRatioScore(sanitizedInput);
-    const velocityConsistency = this.calculateVelocityConsistencyScore(sanitizedInput);
+    const supplyDemandRatio = this.calculateSupplyDemandRatioScore(
+      sanitizedInput,
+    );
+    const velocityConsistency = this.calculateVelocityConsistencyScore(
+      sanitizedInput,
+    );
 
     // Calculate weighted overall score
-    const overallScore =
-      salesVelocity.weightedScore +
+    const overallScore = salesVelocity.weightedScore +
       priceMomentum.weightedScore +
       marketDepth.weightedScore +
       supplyDemandRatio.weightedScore +
       velocityConsistency.weightedScore;
 
     // Calculate overall confidence (average of component confidences weighted by their weights)
-    const overallConfidence =
-      salesVelocity.confidence * salesVelocity.weight +
+    const overallConfidence = salesVelocity.confidence * salesVelocity.weight +
       priceMomentum.confidence * priceMomentum.weight +
       marketDepth.confidence * marketDepth.weight +
       supplyDemandRatio.confidence * supplyDemandRatio.weight +
@@ -123,9 +131,11 @@ export class DemandCalculator {
 
     // Data quality assessment
     const observationDays = sanitizedInput.observationDays ?? 180;
-    const hasSalesData = (sanitizedInput.timesSold ?? 0) > 0 || (sanitizedInput.salesVelocity ?? 0) > 0;
+    const hasSalesData = (sanitizedInput.timesSold ?? 0) > 0 ||
+      (sanitizedInput.salesVelocity ?? 0) > 0;
     const hasPriceData = (sanitizedInput.historicalPrices?.length ?? 0) > 0 ||
-      (sanitizedInput.firstPrice !== undefined && sanitizedInput.lastPrice !== undefined);
+      (sanitizedInput.firstPrice !== undefined &&
+        sanitizedInput.lastPrice !== undefined);
     const hasMarketDepth = sanitizedInput.availableLots !== undefined;
 
     return {
@@ -160,7 +170,9 @@ export class DemandCalculator {
     let velocity: number;
     if (input.salesVelocity !== undefined && input.salesVelocity !== null) {
       velocity = input.salesVelocity;
-    } else if (input.timesSold !== undefined && input.observationDays !== undefined) {
+    } else if (
+      input.timesSold !== undefined && input.observationDays !== undefined
+    ) {
       velocity = input.timesSold / input.observationDays;
     } else {
       // No data - return default
@@ -181,24 +193,26 @@ export class DemandCalculator {
       score = 100;
     } else if (velocity >= CONFIG.SALES_VELOCITY.GOOD) {
       score = 75 + ((velocity - CONFIG.SALES_VELOCITY.GOOD) /
-        (CONFIG.SALES_VELOCITY.EXCELLENT - CONFIG.SALES_VELOCITY.GOOD)) * 25;
+            (CONFIG.SALES_VELOCITY.EXCELLENT - CONFIG.SALES_VELOCITY.GOOD)) *
+          25;
     } else if (velocity >= CONFIG.SALES_VELOCITY.FAIR) {
       score = 50 + ((velocity - CONFIG.SALES_VELOCITY.FAIR) /
-        (CONFIG.SALES_VELOCITY.GOOD - CONFIG.SALES_VELOCITY.FAIR)) * 25;
+            (CONFIG.SALES_VELOCITY.GOOD - CONFIG.SALES_VELOCITY.FAIR)) * 25;
     } else if (velocity >= CONFIG.SALES_VELOCITY.POOR) {
       score = 25 + ((velocity - CONFIG.SALES_VELOCITY.POOR) /
-        (CONFIG.SALES_VELOCITY.FAIR - CONFIG.SALES_VELOCITY.POOR)) * 25;
+            (CONFIG.SALES_VELOCITY.FAIR - CONFIG.SALES_VELOCITY.POOR)) * 25;
     } else if (velocity >= CONFIG.SALES_VELOCITY.DEAD) {
       score = 10 + ((velocity - CONFIG.SALES_VELOCITY.DEAD) /
-        (CONFIG.SALES_VELOCITY.POOR - CONFIG.SALES_VELOCITY.DEAD)) * 15;
+            (CONFIG.SALES_VELOCITY.POOR - CONFIG.SALES_VELOCITY.DEAD)) * 15;
     } else {
       score = Math.max(0, (velocity / CONFIG.SALES_VELOCITY.DEAD) * 10);
     }
 
     // Reduce confidence if insufficient sales data
-    const salesCount = input.timesSold ?? (velocity * (input.observationDays ?? 180));
+    const salesCount = input.timesSold ??
+      (velocity * (input.observationDays ?? 180));
     if (salesCount < CONFIG.MIN_DATA_REQUIREMENTS.MIN_SALES_FOR_VELOCITY) {
-      confidence *= (1 - CONFIG.CONFIDENCE_PENALTIES.INSUFFICIENT_SALES);
+      confidence *= 1 - CONFIG.CONFIDENCE_PENALTIES.INSUFFICIENT_SALES;
     }
 
     return {
@@ -222,8 +236,10 @@ export class DemandCalculator {
     // Calculate price change percentage
     let priceChange: number | undefined;
 
-    if (input.firstPrice !== undefined && input.lastPrice !== undefined &&
-      input.firstPrice > 0) {
+    if (
+      input.firstPrice !== undefined && input.lastPrice !== undefined &&
+      input.firstPrice > 0
+    ) {
       priceChange = (input.lastPrice - input.firstPrice) / input.firstPrice;
     } else if (input.historicalPrices && input.historicalPrices.length >= 2) {
       const first = input.historicalPrices[0];
@@ -250,16 +266,19 @@ export class DemandCalculator {
       score = 100;
     } else if (priceChange >= CONFIG.PRICE_MOMENTUM.MODERATE_UP) {
       score = 75 + ((priceChange - CONFIG.PRICE_MOMENTUM.MODERATE_UP) /
-        (CONFIG.PRICE_MOMENTUM.STRONG_UP - CONFIG.PRICE_MOMENTUM.MODERATE_UP)) * 25;
+            (CONFIG.PRICE_MOMENTUM.STRONG_UP -
+              CONFIG.PRICE_MOMENTUM.MODERATE_UP)) * 25;
     } else if (priceChange >= -CONFIG.PRICE_MOMENTUM.STABLE) {
       // Stable range: -2% to +2%
       score = 50 + (priceChange / CONFIG.PRICE_MOMENTUM.STABLE) * 25;
     } else if (priceChange >= CONFIG.PRICE_MOMENTUM.MODERATE_DOWN) {
       score = 25 + ((priceChange - CONFIG.PRICE_MOMENTUM.MODERATE_DOWN) /
-        (CONFIG.PRICE_MOMENTUM.STABLE - CONFIG.PRICE_MOMENTUM.MODERATE_DOWN)) * 25;
+            (CONFIG.PRICE_MOMENTUM.STABLE -
+              CONFIG.PRICE_MOMENTUM.MODERATE_DOWN)) * 25;
     } else if (priceChange >= CONFIG.PRICE_MOMENTUM.STRONG_DOWN) {
       score = ((priceChange - CONFIG.PRICE_MOMENTUM.STRONG_DOWN) /
-        (CONFIG.PRICE_MOMENTUM.MODERATE_DOWN - CONFIG.PRICE_MOMENTUM.STRONG_DOWN)) * 25;
+        (CONFIG.PRICE_MOMENTUM.MODERATE_DOWN -
+          CONFIG.PRICE_MOMENTUM.STRONG_DOWN)) * 25;
     } else {
       score = 0; // Very strong decline
     }
@@ -268,7 +287,7 @@ export class DemandCalculator {
     const salesCount = input.timesSold ?? 0;
     let confidence = 1.0;
     if (salesCount < CONFIG.MIN_DATA_REQUIREMENTS.MIN_SALES_FOR_MOMENTUM) {
-      confidence *= (1 - CONFIG.CONFIDENCE_PENALTIES.INSUFFICIENT_SALES);
+      confidence *= 1 - CONFIG.CONFIDENCE_PENALTIES.INSUFFICIENT_SALES;
     }
 
     return {
@@ -307,16 +326,19 @@ export class DemandCalculator {
       score = 100;
     } else if (lots <= CONFIG.MARKET_DEPTH.LIMITED) {
       score = 75 + ((CONFIG.MARKET_DEPTH.LIMITED - lots) /
-        (CONFIG.MARKET_DEPTH.LIMITED - CONFIG.MARKET_DEPTH.SCARCE)) * 25;
+            (CONFIG.MARKET_DEPTH.LIMITED - CONFIG.MARKET_DEPTH.SCARCE)) * 25;
     } else if (lots <= CONFIG.MARKET_DEPTH.COMPETITIVE) {
       score = 50 + ((CONFIG.MARKET_DEPTH.COMPETITIVE - lots) /
-        (CONFIG.MARKET_DEPTH.COMPETITIVE - CONFIG.MARKET_DEPTH.LIMITED)) * 25;
+            (CONFIG.MARKET_DEPTH.COMPETITIVE - CONFIG.MARKET_DEPTH.LIMITED)) *
+          25;
     } else if (lots <= CONFIG.MARKET_DEPTH.SATURATED) {
       score = 25 + ((CONFIG.MARKET_DEPTH.SATURATED - lots) /
-        (CONFIG.MARKET_DEPTH.SATURATED - CONFIG.MARKET_DEPTH.COMPETITIVE)) * 25;
+            (CONFIG.MARKET_DEPTH.SATURATED - CONFIG.MARKET_DEPTH.COMPETITIVE)) *
+          25;
     } else if (lots <= CONFIG.MARKET_DEPTH.OVERSATURATED) {
       score = ((CONFIG.MARKET_DEPTH.OVERSATURATED - lots) /
-        (CONFIG.MARKET_DEPTH.OVERSATURATED - CONFIG.MARKET_DEPTH.SATURATED)) * 25;
+        (CONFIG.MARKET_DEPTH.OVERSATURATED - CONFIG.MARKET_DEPTH.SATURATED)) *
+        25;
     } else {
       score = 0; // Extremely oversaturated
     }
@@ -361,16 +383,20 @@ export class DemandCalculator {
       score = 100;
     } else if (ratio >= CONFIG.SUPPLY_DEMAND_RATIO.GOOD) {
       score = 75 + ((ratio - CONFIG.SUPPLY_DEMAND_RATIO.GOOD) /
-        (CONFIG.SUPPLY_DEMAND_RATIO.EXCELLENT - CONFIG.SUPPLY_DEMAND_RATIO.GOOD)) * 25;
+            (CONFIG.SUPPLY_DEMAND_RATIO.EXCELLENT -
+              CONFIG.SUPPLY_DEMAND_RATIO.GOOD)) * 25;
     } else if (ratio >= CONFIG.SUPPLY_DEMAND_RATIO.FAIR) {
       score = 50 + ((ratio - CONFIG.SUPPLY_DEMAND_RATIO.FAIR) /
-        (CONFIG.SUPPLY_DEMAND_RATIO.GOOD - CONFIG.SUPPLY_DEMAND_RATIO.FAIR)) * 25;
+            (CONFIG.SUPPLY_DEMAND_RATIO.GOOD -
+              CONFIG.SUPPLY_DEMAND_RATIO.FAIR)) * 25;
     } else if (ratio >= CONFIG.SUPPLY_DEMAND_RATIO.POOR) {
       score = 25 + ((ratio - CONFIG.SUPPLY_DEMAND_RATIO.POOR) /
-        (CONFIG.SUPPLY_DEMAND_RATIO.FAIR - CONFIG.SUPPLY_DEMAND_RATIO.POOR)) * 25;
+            (CONFIG.SUPPLY_DEMAND_RATIO.FAIR -
+              CONFIG.SUPPLY_DEMAND_RATIO.POOR)) * 25;
     } else if (ratio >= CONFIG.SUPPLY_DEMAND_RATIO.STAGNANT) {
       score = 10 + ((ratio - CONFIG.SUPPLY_DEMAND_RATIO.STAGNANT) /
-        (CONFIG.SUPPLY_DEMAND_RATIO.POOR - CONFIG.SUPPLY_DEMAND_RATIO.STAGNANT)) * 15;
+            (CONFIG.SUPPLY_DEMAND_RATIO.POOR -
+              CONFIG.SUPPLY_DEMAND_RATIO.STAGNANT)) * 15;
     } else {
       score = Math.max(0, (ratio / CONFIG.SUPPLY_DEMAND_RATIO.STAGNANT) * 10);
     }
@@ -394,7 +420,11 @@ export class DemandCalculator {
     const weight = CONFIG.WEIGHTS.VELOCITY_CONSISTENCY;
 
     // Need timestamp data for consistency calculation
-    if (!input.salesTimestamps || input.salesTimestamps.length < CONFIG.MIN_DATA_REQUIREMENTS.MIN_SALES_FOR_CONSISTENCY) {
+    if (
+      !input.salesTimestamps ||
+      input.salesTimestamps.length <
+        CONFIG.MIN_DATA_REQUIREMENTS.MIN_SALES_FOR_CONSISTENCY
+    ) {
       return {
         score: CONFIG.DEFAULTS.SCORE,
         weight,
@@ -407,13 +437,16 @@ export class DemandCalculator {
     // Calculate days between sales
     const daysBetween: number[] = [];
     for (let i = 1; i < input.salesTimestamps.length; i++) {
-      const diff = input.salesTimestamps[i].getTime() - input.salesTimestamps[i - 1].getTime();
+      const diff = input.salesTimestamps[i].getTime() -
+        input.salesTimestamps[i - 1].getTime();
       daysBetween.push(diff / (1000 * 60 * 60 * 24)); // Convert ms to days
     }
 
     // Calculate coefficient of variation (std dev / mean)
     const mean = daysBetween.reduce((a, b) => a + b, 0) / daysBetween.length;
-    const variance = daysBetween.reduce((sum, val) => sum + Math.pow(val - mean, 2), 0) / daysBetween.length;
+    const variance =
+      daysBetween.reduce((sum, val) => sum + Math.pow(val - mean, 2), 0) /
+      daysBetween.length;
     const stdDev = Math.sqrt(variance);
     const cv = mean > 0 ? stdDev / mean : 1.0;
 
@@ -424,16 +457,20 @@ export class DemandCalculator {
       score = 100;
     } else if (cv <= CONFIG.VELOCITY_CONSISTENCY.STEADY) {
       score = 75 + ((CONFIG.VELOCITY_CONSISTENCY.STEADY - cv) /
-        (CONFIG.VELOCITY_CONSISTENCY.STEADY - CONFIG.VELOCITY_CONSISTENCY.VERY_STEADY)) * 25;
+            (CONFIG.VELOCITY_CONSISTENCY.STEADY -
+              CONFIG.VELOCITY_CONSISTENCY.VERY_STEADY)) * 25;
     } else if (cv <= CONFIG.VELOCITY_CONSISTENCY.MODERATE) {
       score = 50 + ((CONFIG.VELOCITY_CONSISTENCY.MODERATE - cv) /
-        (CONFIG.VELOCITY_CONSISTENCY.MODERATE - CONFIG.VELOCITY_CONSISTENCY.STEADY)) * 25;
+            (CONFIG.VELOCITY_CONSISTENCY.MODERATE -
+              CONFIG.VELOCITY_CONSISTENCY.STEADY)) * 25;
     } else if (cv <= CONFIG.VELOCITY_CONSISTENCY.SPORADIC) {
       score = 25 + ((CONFIG.VELOCITY_CONSISTENCY.SPORADIC - cv) /
-        (CONFIG.VELOCITY_CONSISTENCY.SPORADIC - CONFIG.VELOCITY_CONSISTENCY.MODERATE)) * 25;
+            (CONFIG.VELOCITY_CONSISTENCY.SPORADIC -
+              CONFIG.VELOCITY_CONSISTENCY.MODERATE)) * 25;
     } else if (cv <= CONFIG.VELOCITY_CONSISTENCY.ERRATIC) {
       score = 10 + ((CONFIG.VELOCITY_CONSISTENCY.ERRATIC - cv) /
-        (CONFIG.VELOCITY_CONSISTENCY.ERRATIC - CONFIG.VELOCITY_CONSISTENCY.SPORADIC)) * 15;
+            (CONFIG.VELOCITY_CONSISTENCY.ERRATIC -
+              CONFIG.VELOCITY_CONSISTENCY.SPORADIC)) * 15;
     } else {
       score = Math.max(0, 10 * (CONFIG.VELOCITY_CONSISTENCY.ERRATIC / cv));
     }

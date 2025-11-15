@@ -2,7 +2,10 @@
 
 ## Introduction
 
-BWS (Bricklink Warehouse System) is a comprehensive LEGO price tracking and investment analysis platform. It scrapes data from multiple sources, stores it in PostgreSQL, and provides intelligent analysis for LEGO investment opportunities.
+BWS (Bricklink Warehouse System) is a comprehensive LEGO price tracking and
+investment analysis platform. It scrapes data from multiple sources, stores it
+in PostgreSQL, and provides intelligent analysis for LEGO investment
+opportunities.
 
 ## High-Level Architecture
 
@@ -78,14 +81,17 @@ graph TB
 
 ### 1. Frontend Layer (Fresh.js)
 
-**Technology**: Fresh 1.7.3 (Deno web framework) + Preact + TailwindCSS + DaisyUI
+**Technology**: Fresh 1.7.3 (Deno web framework) + Preact + TailwindCSS +
+DaisyUI
 
 **Routes** (`routes/`):
+
 - `/` - Home page with product listings
 - `/api/*` - RESTful API endpoints
 - `/analysis-demo` - Analysis system demo
 
 **Islands** (`islands/`): Interactive components with client-side JavaScript
+
 - `ProductAnalysisCard` - Analysis results with strategy selector
 - `PricingOverview` - Pricing comparison display
 
@@ -94,6 +100,7 @@ graph TB
 **Location**: `routes/api/`
 
 **Endpoints** (see [API Reference](../api/api-reference.md)):
+
 - Scraping: `/api/scrape-bricklink`, `/api/parse-shopee`, `/api/parse-toysrus`
 - Analysis: `/api/analysis/:productId`, `/api/analysis/batch`
 - Queue: `/api/scrape-queue-status`, `/api/scrape-scheduler`
@@ -104,6 +111,7 @@ graph TB
 **Location**: `services/`
 
 #### Scraper Services
+
 - **BricklinkScraperService**: Scrapes Bricklink with anti-bot protection
 - **ShopeeParserService**: Parses Shopee HTML for product data
 - **ToysRUsScraperService**: Scrapes ToysRUs Singapore
@@ -111,12 +119,14 @@ graph TB
 - **WorldBricksScraperService**: Extracts release years and parts count
 
 #### Analysis Service
+
 - **AnalysisService**: Orchestrates multi-dimensional analysis
 - **RecommendationEngine**: Generates buy/hold/pass recommendations
 - **Analyzers**: Pricing, Demand, Availability, Quality
 - **Strategies**: Investment Focus, Quick Flip, Bargain Hunter
 
 #### Supporting Services
+
 - **QueueService**: BullMQ job queue for background processing
 - **SchedulerService**: Automated interval-based scraping
 - **RateLimiterService**: Conservative rate limiting (2-5 min delays)
@@ -128,6 +138,7 @@ graph TB
 **Location**: `db/`
 
 **Components**:
+
 - **Repositories**: Clean data access pattern (Repository pattern)
   - `BricklinkRepository`
   - `ShopeeRepository`
@@ -279,6 +290,7 @@ erDiagram
 ## Technology Stack
 
 ### Backend
+
 - **Runtime**: Deno 1.37+
 - **Framework**: Fresh.js 1.7.3
 - **Database**: PostgreSQL 15
@@ -287,11 +299,13 @@ erDiagram
 - **Scraping**: Puppeteer (Chromium automation)
 
 ### Frontend
+
 - **UI Framework**: Preact
 - **Styling**: TailwindCSS + DaisyUI
 - **Islands**: Fresh.js Islands for interactivity
 
 ### DevOps
+
 - **Containerization**: Docker + Docker Compose
 - **Database Migrations**: Drizzle Kit
 - **Version Control**: Git
@@ -300,7 +314,8 @@ erDiagram
 
 ### SOLID Principles
 
-The codebase follows SOLID principles throughout (see [.claude/CLAUDE.md](.claude/CLAUDE.md)):
+The codebase follows SOLID principles throughout (see
+[.claude/CLAUDE.md](.claude/CLAUDE.md)):
 
 - **Single Responsibility**: Each service/class has one clear purpose
 - **Open/Closed**: Services open for extension, closed for modification
@@ -335,6 +350,7 @@ graph LR
 ```
 
 **Features**:
+
 - 30+ rotating user agents
 - Random viewport sizes
 - Request header randomization
@@ -348,12 +364,14 @@ See [Scraper Architecture](./scraper-architecture.md) for details.
 ## Scaling Considerations
 
 ### Current Configuration
+
 - Single worker processing queue
 - Max 15 requests/hour per domain
 - 2-5 minute delays
 - Conservative and safe
 
 ### Future Scaling Options
+
 1. **Horizontal Scaling**: Multiple worker instances
 2. **Distributed Queue**: Redis Cluster for queue
 3. **Database**: Read replicas, connection pooling
@@ -363,12 +381,14 @@ See [Scraper Architecture](./scraper-architecture.md) for details.
 ## Monitoring & Observability
 
 ### Current Monitoring
+
 - Queue status endpoint: `/api/scrape-queue-status`
 - Job monitoring through BullMQ
 - Database query logging
 - Error tracking with circuit breaker
 
 ### Future Enhancements
+
 - [ ] Health check endpoints
 - [ ] Prometheus metrics export
 - [ ] Grafana dashboards
@@ -378,6 +398,7 @@ See [Scraper Architecture](./scraper-architecture.md) for details.
 ## Security
 
 ### Current Measures
+
 - Environment variable configuration
 - No hardcoded credentials
 - SQL injection prevention (parameterized queries via Drizzle)
@@ -385,6 +406,7 @@ See [Scraper Architecture](./scraper-architecture.md) for details.
 - Input validation
 
 ### Production Recommendations
+
 - Use strong passwords in production
 - Enable Redis authentication
 - Use TLS/SSL for database connections
@@ -396,6 +418,8 @@ See [Scraper Architecture](./scraper-architecture.md) for details.
 
 - [Scraper Architecture](./scraper-architecture.md) - Detailed scraper design
 - [API Reference](../api/api-reference.md) - Complete API documentation
-- [Database Setup](../getting-started/database-setup.md) - Database configuration
+- [Database Setup](../getting-started/database-setup.md) - Database
+  configuration
 - [Deployment Guide](../getting-started/deployment.md) - Production deployment
-- [Analysis System](../../services/analysis/README.md) - Analysis service details
+- [Analysis System](../../services/analysis/README.md) - Analysis service
+  details

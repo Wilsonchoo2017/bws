@@ -1,6 +1,7 @@
 # Tailscale Access Setup for BWS
 
-This setup allows you to access your BWS (Bricklink Worth Scraper) application through Tailscale using **Tailscale Serve**.
+This setup allows you to access your BWS (Bricklink Worth Scraper) application
+through Tailscale using **Tailscale Serve**.
 
 ## Architecture
 
@@ -14,7 +15,8 @@ Tailscale Serve (HTTPS)
 
 ### Option 1: Use Tailscale Serve (Simplest - Currently Active)
 
-Tailscale Serve provides built-in HTTPS and handles all the proxying for you - no Caddy needed!
+Tailscale Serve provides built-in HTTPS and handles all the proxying for you -
+no Caddy needed!
 
 1. **Start your Deno/Fresh app:**
    ```bash
@@ -51,14 +53,14 @@ Tailscale Serve provides built-in HTTPS and handles all the proxying for you - n
    deno task dev
    ```
 
-3. **Access via Tailscale:**
-   Same as Option 1
+3. **Access via Tailscale:** Same as Option 1
 
 ## Configuration Details
 
 ### Caddyfile
 
 The `Caddyfile` configures:
+
 - **Port 8001**: External access port (Tailscale)
 - **Reverse proxy**: Routes to `localhost:8000` (Fresh/Deno app)
 - **CORS headers**: Full CORS support for web access
@@ -68,6 +70,7 @@ The `Caddyfile` configures:
 ### CORS Configuration
 
 The setup includes comprehensive CORS headers to prevent cross-origin errors:
+
 - `Access-Control-Allow-Origin: *`
 - `Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS, PATCH`
 - `Access-Control-Allow-Headers: Content-Type, Authorization, Accept, Origin, X-Requested-With`
@@ -75,17 +78,18 @@ The setup includes comprehensive CORS headers to prevent cross-origin errors:
 
 ## Ports Reference
 
-| Service | Port/URL | Access |
-|---------|----------|--------|
-| Fresh/Deno App | 8000 | Local only |
-| Tailscale Serve | https://yees-mac-mini.tail83c2f.ts.net:8125 | Tailnet only (HTTPS) |
-| Caddy Proxy (optional) | 8001 | Tailscale access (HTTP) |
-| PostgreSQL | 5432 | Local only |
-| Redis | 6379 | Local only |
+| Service                | Port/URL                                    | Access                  |
+| ---------------------- | ------------------------------------------- | ----------------------- |
+| Fresh/Deno App         | 8000                                        | Local only              |
+| Tailscale Serve        | https://yees-mac-mini.tail83c2f.ts.net:8125 | Tailnet only (HTTPS)    |
+| Caddy Proxy (optional) | 8001                                        | Tailscale access (HTTP) |
+| PostgreSQL             | 5432                                        | Local only              |
+| Redis                  | 6379                                        | Local only              |
 
 ## Testing
 
 ### Test Tailscale Serve
+
 ```bash
 # Check Tailscale Serve status
 tailscale serve status
@@ -98,11 +102,13 @@ curl -I https://yees-mac-mini.tail83c2f.ts.net:8125/
 ```
 
 ### Test Caddy Configuration (if using Caddy)
+
 ```bash
 caddy validate --config Caddyfile
 ```
 
 ### Test Local Access
+
 ```bash
 # Direct to app
 curl http://localhost:8000/
@@ -114,19 +120,23 @@ curl https://yees-mac-mini.tail83c2f.ts.net:8125/
 ## Managing Services
 
 ### Stop Tailscale Serve
+
 ```bash
 tailscale serve --https=8125 off
 ```
 
 ### View all Tailscale Serve configurations
+
 ```bash
 tailscale serve status
 ```
 
 ### Stop Caddy (if running locally)
+
 Press `Ctrl+C` in the terminal running Caddy
 
 ### Stop Docker services
+
 ```bash
 docker compose -f docker-compose.dev.yml down
 ```
@@ -134,16 +144,19 @@ docker compose -f docker-compose.dev.yml down
 ## Troubleshooting
 
 ### CORS Errors
+
 - Ensure Caddy is running and properly configured
 - Check that the `Caddyfile` includes CORS headers in all `handle` blocks
 - Verify preflight OPTIONS requests are being handled
 
 ### Connection Refused
+
 - Ensure your Deno app is running on port 8000
 - Check that Caddy is running on port 8001
 - Verify firewall settings allow port 8001
 
 ### WebSocket Issues (Hot Reload Not Working)
+
 - Ensure the `@websockets` matcher is properly configured
 - Check browser console for WebSocket connection errors
 - Verify that CORS headers are applied to WebSocket upgrades
@@ -161,7 +174,11 @@ Tailscale Serve is the recommended approach because:
 ### Active Configuration
 
 Currently configured:
-- **BWS**: `https://yees-mac-mini.tail83c2f.ts.net:8125` → `http://localhost:8000`
+
+- **BWS**: `https://yees-mac-mini.tail83c2f.ts.net:8125` →
+  `http://localhost:8000`
 - **Morass**: `https://yees-mac-mini.tail83c2f.ts.net` → `http://localhost:3010`
-- **Radarr**: `https://yees-mac-mini.tail83c2f.ts.net:8123/radarr` → `http://localhost:7878/radarr`
-- **Sonarr**: `https://yees-mac-mini.tail83c2f.ts.net:8124/sonarr` → `http://localhost:8989/sonarr`
+- **Radarr**: `https://yees-mac-mini.tail83c2f.ts.net:8123/radarr` →
+  `http://localhost:7878/radarr`
+- **Sonarr**: `https://yees-mac-mini.tail83c2f.ts.net:8124/sonarr` →
+  `http://localhost:8989/sonarr`

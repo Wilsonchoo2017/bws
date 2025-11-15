@@ -16,25 +16,44 @@ export const handler = {
   async POST(_req: Request, _ctx: FreshContext): Promise<Response> {
     try {
       const scheduler = getScheduler();
-      const result = await scheduler.run();
+      const results = await scheduler.runAll();
 
-      if (!result.success) {
+      // Check if any scheduler failed
+      const hasFailures = !results.bricklink.success ||
+        !results.reddit.success ||
+        !results.worldbricks.success;
+
+      if (hasFailures) {
+        const allErrors = [
+          ...results.bricklink.errors,
+          ...results.reddit.errors,
+          ...results.worldbricks.errors,
+        ];
         return createJsonResponse(
           {
-            error: `Scheduler run failed: ${result.errors.join(", ")}`,
+            error: `Scheduler run had failures: ${allErrors.join(", ")}`,
+            results,
           },
           500,
         );
       }
 
+      // Calculate totals
+      const totalItemsFound = results.bricklink.itemsFound +
+        results.reddit.itemsFound +
+        results.worldbricks.itemsFound;
+      const totalJobsEnqueued = results.bricklink.jobsEnqueued +
+        results.reddit.jobsEnqueued +
+        results.worldbricks.jobsEnqueued;
+
       return createJsonResponse({
-        message: "Scheduler run completed successfully",
-        result: {
-          itemsFound: result.itemsFound,
-          jobsEnqueued: result.jobsEnqueued,
-          errors: result.errors,
-          timestamp: result.timestamp,
+        message: "All schedulers completed successfully",
+        summary: {
+          totalItemsFound,
+          totalJobsEnqueued,
+          timestamp: new Date(),
         },
+        results,
       });
     } catch (error) {
       console.error("Error running scheduler:", error);
@@ -53,14 +72,11 @@ export const handler = {
   async GET(_req: Request, _ctx: FreshContext): Promise<Response> {
     try {
       const scheduler = getScheduler();
-      const preview = await scheduler.preview();
+      const preview = await scheduler.previewAll();
 
       return createJsonResponse({
         message: "Preview of items needing scraping",
-        preview: {
-          count: preview.count,
-          items: preview.items,
-        },
+        preview,
       });
     } catch (error) {
       console.error("Error getting scheduler preview:", error);

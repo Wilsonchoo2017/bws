@@ -36,8 +36,14 @@ function decompressHtml(compressedBase64: string): string {
   }
 }
 
-function findTables(html: string): Array<{ index: number; preview: string; hasPrice: boolean; hasSales: boolean }> {
-  const tables: Array<{ index: number; preview: string; hasPrice: boolean; hasSales: boolean }> = [];
+function findTables(
+  html: string,
+): Array<
+  { index: number; preview: string; hasPrice: boolean; hasSales: boolean }
+> {
+  const tables: Array<
+    { index: number; preview: string; hasPrice: boolean; hasSales: boolean }
+  > = [];
   const tableRegex = /<table[^>]*>([\s\S]*?)<\/table>/gi;
   let match;
   let index = 0;
@@ -48,7 +54,9 @@ function findTables(html: string): Array<{ index: number; preview: string; hasPr
 
     // Check for indicators of sales data
     const hasPrice = /price|cost|\$|USD/i.test(tableContent);
-    const hasSales = /sold|sale|transaction|date|qty|quantity/i.test(tableContent);
+    const hasSales = /sold|sale|transaction|date|qty|quantity/i.test(
+      tableContent,
+    );
 
     tables.push({
       index: index++,
@@ -61,7 +69,10 @@ function findTables(html: string): Array<{ index: number; preview: string; hasPr
   return tables;
 }
 
-function extractSalesTableStructure(html: string, tableIndex: number): string | null {
+function extractSalesTableStructure(
+  html: string,
+  tableIndex: number,
+): string | null {
   const tableRegex = /<table[^>]*>([\s\S]*?)<\/table>/gi;
   let match;
   let index = 0;
@@ -89,7 +100,7 @@ async function main() {
      FROM scrape_raw_data
      WHERE scrape_session_id = 27
      AND source = 'bricklink'
-     ORDER BY scraped_at`
+     ORDER BY scraped_at`,
   );
 
   if (result.rows.length === 0) {
@@ -133,7 +144,8 @@ async function main() {
         // Extract and display structure
         const structure = extractSalesTableStructure(html, table.index);
         if (structure) {
-          const structureFile = `/tmp/bricklink_${record.id}_table_${table.index}.html`;
+          const structureFile =
+            `/tmp/bricklink_${record.id}_table_${table.index}.html`;
           await Deno.writeTextFile(structureFile, structure);
           console.log(`  Saved table structure to: ${structureFile}`);
 
@@ -150,12 +162,30 @@ async function main() {
     console.log("\n\nSearching for sales data patterns:");
 
     const patterns = [
-      { name: "Past Sales link/section", regex: /past\s+sales|sold\s+listings|sales\s+history/i },
-      { name: "Price column headers", regex: /<th[^>]*>.*?(price|cost|total).*?<\/th>/i },
-      { name: "Date column headers", regex: /<th[^>]*>.*?(date|when|time).*?<\/th>/i },
-      { name: "Quantity column headers", regex: /<th[^>]*>.*?(qty|quantity|amount).*?<\/th>/i },
-      { name: "Table with 'soldDetail' class", regex: /<table[^>]*soldDetail[^>]*>/i },
-      { name: "Table with 'pcipgSoldItems' id", regex: /<table[^>]*id=['"]*pcipgSoldItems[^>]*>/i },
+      {
+        name: "Past Sales link/section",
+        regex: /past\s+sales|sold\s+listings|sales\s+history/i,
+      },
+      {
+        name: "Price column headers",
+        regex: /<th[^>]*>.*?(price|cost|total).*?<\/th>/i,
+      },
+      {
+        name: "Date column headers",
+        regex: /<th[^>]*>.*?(date|when|time).*?<\/th>/i,
+      },
+      {
+        name: "Quantity column headers",
+        regex: /<th[^>]*>.*?(qty|quantity|amount).*?<\/th>/i,
+      },
+      {
+        name: "Table with 'soldDetail' class",
+        regex: /<table[^>]*soldDetail[^>]*>/i,
+      },
+      {
+        name: "Table with 'pcipgSoldItems' id",
+        regex: /<table[^>]*id=['"]*pcipgSoldItems[^>]*>/i,
+      },
     ];
 
     for (const pattern of patterns) {
@@ -169,7 +199,9 @@ async function main() {
         const end = Math.min(html.length, match.index + 500);
         const context = html.substring(start, end);
 
-        const contextFile = `/tmp/bricklink_${record.id}_${pattern.name.replace(/\s+/g, "_")}.html`;
+        const contextFile = `/tmp/bricklink_${record.id}_${
+          pattern.name.replace(/\s+/g, "_")
+        }.html`;
         await Deno.writeTextFile(contextFile, context);
         console.log(`    Context saved to: ${contextFile}`);
       } else {

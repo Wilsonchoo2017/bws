@@ -84,7 +84,9 @@ export class AvailabilityAnalyzer extends BaseAnalyzer<AvailabilityData> {
             new Date(data.expectedRetirementDate),
           );
           retirementRawValue = `~${Math.round(daysUntil / 30)} months`;
-          retirementCalc = `Expected retirement in ${Math.round(daysUntil / 30)} months`;
+          retirementCalc = `Expected retirement in ${
+            Math.round(daysUntil / 30)
+          } months`;
           reasons.push(`Retiring in ${Math.round(daysUntil / 30)} months`);
         } else {
           retirementCalc = "Marked as retiring soon (no specific date)";
@@ -102,7 +104,8 @@ export class AvailabilityAnalyzer extends BaseAnalyzer<AvailabilityData> {
         score: retirementScore,
         rawValue: retirementRawValue,
         calculation: retirementCalc,
-        reasoning: "HIGHEST priority for investment. Closer to retirement = higher urgency. Score: 0-30d=95-100, 30-90d=80-95, 90-180d=60-80, 180-365d=40-60, >365d=20-40.",
+        reasoning:
+          "HIGHEST priority for investment. Closer to retirement = higher urgency. Score: 0-30d=95-100, 30-90d=80-95, 90-180d=60-80, 180-365d=40-60, >365d=20-40.",
       });
     } else {
       missingData.push("Retirement timing data");
@@ -139,7 +142,8 @@ export class AvailabilityAnalyzer extends BaseAnalyzer<AvailabilityData> {
         score: stockScore,
         rawValue: data.currentStock,
         calculation: stockCalc,
-        reasoning: "Lower stock = higher scarcity = better for investment. Score inversely proportional to stock level: 0=100, 1-5=90-100, 5-20=70-90, 20-100=40-70, >500=0-20.",
+        reasoning:
+          "Lower stock = higher scarcity = better for investment. Score inversely proportional to stock level: 0=100, 1-5=90-100, 5-20=70-90, 20-100=40-70, >500=0-20.",
       });
     } else {
       missingData.push("Current stock data");
@@ -157,7 +161,8 @@ export class AvailabilityAnalyzer extends BaseAnalyzer<AvailabilityData> {
         score: 100,
         rawValue: "Delisted",
         calculation: "Product already delisted/retired from platform",
-        reasoning: "Delisted products score highest (100) as they're no longer available for purchase, increasing scarcity value.",
+        reasoning:
+          "Delisted products score highest (100) as they're no longer available for purchase, increasing scarcity value.",
       });
     } else {
       scores.push({ score: 30, weight: 0.2 }); // Lower score if still available
@@ -169,7 +174,8 @@ export class AvailabilityAnalyzer extends BaseAnalyzer<AvailabilityData> {
         score: 30,
         rawValue: "Active",
         calculation: "Product still active on platform",
-        reasoning: "Active products score lower (30) as they're still purchasable, reducing scarcity urgency.",
+        reasoning:
+          "Active products score lower (30) as they're still purchasable, reducing scarcity urgency.",
       });
     }
 
@@ -186,7 +192,8 @@ export class AvailabilityAnalyzer extends BaseAnalyzer<AvailabilityData> {
 
     // Build formula string
     const formula = components.length > 0
-      ? components.map((c) => `${c.name} (${(c.weight * 100).toFixed(0)}%)`).join(" + ")
+      ? components.map((c) => `${c.name} (${(c.weight * 100).toFixed(0)}%)`)
+        .join(" + ")
       : "Insufficient data";
 
     // Build breakdown

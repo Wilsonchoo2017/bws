@@ -424,7 +424,9 @@ export class BricklinkRepository {
 
     // Validation: Ensure price is valid
     if (cents < 0 || !isFinite(cents)) {
-      console.warn(`[BricklinkRepository] Invalid price: ${priceData.amount} → ${cents} cents`);
+      console.warn(
+        `[BricklinkRepository] Invalid price: ${priceData.amount} → ${cents} cents`,
+      );
       return undefined;
     }
 

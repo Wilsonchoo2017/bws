@@ -612,7 +612,9 @@ export function parsePastSales(html: string): PastSaleTransaction[] {
 
         // Check for "(Unavailable)" in row
         const rowText = cellTexts.join(" ");
-        if (rowText.includes("(Unavailable)") || rowText.includes("Unavailable")) {
+        if (
+          rowText.includes("(Unavailable)") || rowText.includes("Unavailable")
+        ) {
           rowsSkipped++;
           logger.debug(`  Row ${i}: SKIPPED - "(Unavailable)" detected`, {
             rowText: rowText.substring(0, 100),

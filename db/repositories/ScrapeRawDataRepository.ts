@@ -39,6 +39,7 @@ export interface SaveRawDataInput {
     | "bricklink"
     | "worldbricks"
     | "brickranker"
+    | "reddit"
     | "self";
   sourceUrl: string;
   rawHtml: string;

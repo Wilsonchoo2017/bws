@@ -4,7 +4,7 @@
  * Responsibilities (Single Responsibility Principle):
  * - Orchestrate Reddit search workflow
  * - Coordinate between HTTP client and repository
- * - Handle errors and retries
+ * - Handle errors and retries with circuit breaker
  * - Manage rate limiting
  *
  * This service follows SOLID principles:
@@ -15,14 +15,12 @@
  * - DIP: Depends on abstractions (injected dependencies)
  */
 
+import type { HttpClientService } from "../http/HttpClientService.ts";
 import type { RateLimiterService } from "../rate-limiter/RateLimiterService.ts";
 import type { RedditRepository } from "./RedditRepository.ts";
-import {
-  calculateBackoff,
-  REDDIT_INTERVALS,
-  RETRY_CONFIG,
-} from "../../config/scraper.config.ts";
+import { REDDIT_INTERVALS } from "../../config/scraper.config.ts";
 import { scraperLogger } from "../../utils/logger.ts";
+import { BaseScraperService } from "../base/BaseScraperService.ts";
 
 /**
  * Reddit post interface
@@ -78,12 +76,16 @@ export interface SearchOptions {
 
 /**
  * RedditSearchService - Orchestrates the entire search workflow
+ * Extends BaseScraperService for consistent retry logic and circuit breaker
  */
-export class RedditSearchService {
+export class RedditSearchService extends BaseScraperService {
   constructor(
-    private rateLimiter: RateLimiterService,
+    private httpClient: HttpClientService,
+    rateLimiter: RateLimiterService,
     private repository: RedditRepository,
-  ) {}
+  ) {
+    super(rateLimiter, "reddit");
+  }
 
   /**
    * Search Reddit for a LEGO set
@@ -91,99 +93,71 @@ export class RedditSearchService {
   async search(options: SearchOptions): Promise<SearchResult> {
     const { setNumber, subreddit = "lego", saveToDb = false } = options;
 
-    let lastError: Error | null = null;
-    let retries = 0;
-
-    // Retry loop with exponential backoff
-    for (let attempt = 1; attempt <= RETRY_CONFIG.MAX_RETRIES; attempt++) {
-      try {
-        retries = attempt - 1;
-
-        scraperLogger.info("Starting Reddit search attempt", {
-          setNumber,
-          subreddit,
-          attempt,
-          maxRetries: RETRY_CONFIG.MAX_RETRIES,
-          source: "reddit",
-        });
-
-        // Rate limiting
-        await this.rateLimiter.waitForNextRequest({
-          domain: "reddit.com",
-        });
-
-        // Search Reddit
-        const posts = await this.searchRedditAPI(setNumber, subreddit);
-
-        scraperLogger.info("Reddit search completed successfully", {
-          setNumber,
-          subreddit,
-          postsFound: posts.length,
-          source: "reddit",
-        });
-
-        // Save to database if requested
-        let saved = false;
-        if (saveToDb) {
-          await this.saveToDatabase(setNumber, subreddit, posts);
-          saved = true;
-        }
-
-        return {
-          success: true,
-          setNumber,
-          subreddit,
-          totalPosts: posts.length,
-          posts,
-          retries,
-          saved,
-        };
-      } catch (error) {
-        lastError = error as Error;
-        scraperLogger.error("Reddit search attempt failed", {
-          setNumber,
-          subreddit,
-          attempt,
-          maxRetries: RETRY_CONFIG.MAX_RETRIES,
-          error: error.message,
-          stack: error.stack,
-          source: "reddit",
-        });
-
-        // If not the last attempt, wait with exponential backoff
-        if (attempt < RETRY_CONFIG.MAX_RETRIES) {
-          const backoffDelay = calculateBackoff(attempt);
-          scraperLogger.info("Waiting before retry with exponential backoff", {
-            setNumber,
-            subreddit,
-            backoffMs: backoffDelay,
-            backoffSeconds: backoffDelay / 1000,
-            nextAttempt: attempt + 1,
-            source: "reddit",
-          });
-          await this.delay(backoffDelay);
-        }
-      }
+    // Create scrape session if saveToDb is true
+    if (saveToDb) {
+      await this.createScrapeSession({
+        source: "reddit" as const,
+        sourceUrl:
+          `https://www.reddit.com/r/${subreddit}/search?q=${setNumber}`,
+      });
     }
 
-    // All retries failed
-    scraperLogger.error("All Reddit search attempts failed", {
-      setNumber,
-      subreddit,
-      totalAttempts: RETRY_CONFIG.MAX_RETRIES,
-      finalError: lastError?.message || "Unknown error",
-      source: "reddit",
-    });
+    try {
+      const result = await this.withRetryLogic(
+        async (_attempt) => {
+          // Search Reddit
+          const posts = await this.searchRedditAPI(setNumber, subreddit);
 
-    return {
-      success: false,
-      error: lastError?.message || "Unknown error",
-      retries: RETRY_CONFIG.MAX_RETRIES,
-    };
+          scraperLogger.info("Reddit search completed successfully", {
+            setNumber,
+            subreddit,
+            postsFound: posts.length,
+            source: "reddit",
+          });
+
+          // Save to database if requested
+          let saved = false;
+          if (saveToDb) {
+            await this.saveToDatabase(setNumber, subreddit, posts);
+            saved = true;
+          }
+
+          return {
+            success: true,
+            setNumber,
+            subreddit,
+            totalPosts: posts.length,
+            posts,
+            saved,
+          };
+        },
+        {
+          url: `https://www.reddit.com/r/${subreddit}/search?q=${setNumber}`,
+          skipRateLimit: false,
+          domain: "reddit.com",
+          source: "reddit",
+          context: { setNumber, subreddit },
+        },
+      );
+
+      return result;
+    } catch (error) {
+      scraperLogger.error("Reddit search failed after all retries", {
+        setNumber,
+        subreddit,
+        error: (error as Error).message,
+        source: "reddit",
+      });
+
+      return {
+        success: false,
+        error: (error as Error).message || "Unknown error",
+      };
+    }
   }
 
   /**
-   * Search Reddit API
+   * Search Reddit API using HttpClientService for consistent anti-bot protection
    */
   private async searchRedditAPI(
     setNumber: string,
@@ -193,18 +167,24 @@ export class RedditSearchService {
       encodeURIComponent(setNumber)
     }&restrict_sr=on&limit=100&sort=relevance`;
 
-    const headers = {
-      "User-Agent":
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/117.0.0.0 Safari/537.36",
-    };
+    scraperLogger.info("Fetching Reddit search results", {
+      setNumber,
+      subreddit,
+      url: searchUrl,
+      source: "reddit",
+    });
 
-    const response = await fetch(searchUrl, { headers });
+    const response = await this.httpClient.simpleFetch({
+      url: searchUrl,
+      timeout: 30000,
+    });
 
-    if (!response.ok) {
-      throw new Error(`Reddit API error: ${response.statusText}`);
+    if (response.status !== 200) {
+      throw new Error(`Reddit API error: HTTP ${response.status}`);
     }
 
-    const data: RedditSearchResponse = await response.json();
+    // Parse JSON response
+    const data: RedditSearchResponse = JSON.parse(response.html);
 
     return data.data.children.map((child) => ({
       id: child.data.id,
@@ -274,21 +254,15 @@ export class RedditSearchService {
       throw new Error(`Database save failed: ${error.message}`);
     }
   }
-
-  /**
-   * Delay helper
-   */
-  private delay(ms: number): Promise<void> {
-    return new Promise((resolve) => setTimeout(resolve, ms));
-  }
 }
 
 /**
  * Factory function to create RedditSearchService with dependencies
  */
 export function createRedditSearchService(
+  httpClient: HttpClientService,
   rateLimiter: RateLimiterService,
   repository: RedditRepository,
 ): RedditSearchService {
-  return new RedditSearchService(rateLimiter, repository);
+  return new RedditSearchService(httpClient, rateLimiter, repository);
 }

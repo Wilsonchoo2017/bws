@@ -5,7 +5,7 @@
 
 import { gunzip } from "https://deno.land/x/compress@v0.4.5/gzip/gzip.ts";
 import { extractYearReleased } from "../services/bricklink/BricklinkParser.ts";
-import { db, closeDb } from "../db/client.ts";
+import { closeDb, db } from "../db/client.ts";
 import { scrapeRawData } from "../db/schema.ts";
 import { eq } from "drizzle-orm";
 
@@ -30,8 +30,9 @@ async function main() {
       try {
         // Decompress HTML
         const compressedData = sample.rawHtmlCompressed;
-        const decoded = Uint8Array.from(atob(compressedData), (c) =>
-          c.charCodeAt(0)
+        const decoded = Uint8Array.from(
+          atob(compressedData),
+          (c) => c.charCodeAt(0),
         );
         const decompressed = gunzip(decoded);
         const html = new TextDecoder().decode(decompressed);

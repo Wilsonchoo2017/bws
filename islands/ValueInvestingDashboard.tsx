@@ -16,7 +16,8 @@ interface ValueInvestingDashboardProps {
 }
 
 export default function ValueInvestingDashboard(
-  { products: initialProducts, availableVouchers }: ValueInvestingDashboardProps,
+  { products: initialProducts, availableVouchers }:
+    ValueInvestingDashboardProps,
 ) {
   const products = useSignal<ValueInvestingProduct[]>(initialProducts);
   const minROI = useSignal<number>(0);
@@ -29,19 +30,22 @@ export default function ValueInvestingDashboard(
    * Memoized voucher-enhanced products
    * Calculates voucher-adjusted metrics for each product
    */
-  const productsWithVouchers = useMemo<Array<{
-    product: ValueInvestingProduct;
-    voucherMetrics: VoucherEnhancedMetrics;
-  }>>(() => {
+  const productsWithVouchers = useMemo<
+    Array<{
+      product: ValueInvestingProduct;
+      voucherMetrics: VoucherEnhancedMetrics;
+    }>
+  >(() => {
     return products.value.map((product) => {
-      const voucherMetrics = VoucherEnhancedCalculator.calculateVoucherEnhancedMetrics({
-        productId: product.productId,
-        legoSetNumber: product.legoSetNumber || undefined,
-        currentPrice: product.currentPrice,
-        tags: undefined, // TODO: Add tags to product data if needed
-        valueMetrics: product.valueMetrics,
-        selectedVouchers: selectedVouchers.value,
-      });
+      const voucherMetrics = VoucherEnhancedCalculator
+        .calculateVoucherEnhancedMetrics({
+          productId: product.productId,
+          legoSetNumber: product.legoSetNumber || undefined,
+          currentPrice: product.currentPrice,
+          tags: undefined, // TODO: Add tags to product data if needed
+          valueMetrics: product.valueMetrics,
+          selectedVouchers: selectedVouchers.value,
+        });
 
       return {
         product,
@@ -77,7 +81,8 @@ export default function ValueInvestingDashboard(
         ? voucherMetrics.voucherDiscountedPrice
         : product.currentPrice;
 
-      const distancePercent = ((priceToCheck - intrinsicValue) / intrinsicValue) * 100;
+      const distancePercent =
+        ((priceToCheck - intrinsicValue) / intrinsicValue) * 100;
       return Math.abs(distancePercent) <= maxDistanceFromIntrinsic.value;
     });
 
@@ -141,7 +146,6 @@ export default function ValueInvestingDashboard(
     selectedVouchers.value,
   ]);
 
-
   return (
     <ErrorBoundary>
       <div class="space-y-6">
@@ -149,7 +153,10 @@ export default function ValueInvestingDashboard(
         <div class="flex flex-col gap-2">
           <h1 class="text-3xl font-bold">Buy Opportunities</h1>
           <p class="text-base-content/70">
-            Find products close to their intrinsic value{selectedVouchers.value.length > 0 ? " (with voucher simulation)" : ""}
+            Find products close to their intrinsic
+            value{selectedVouchers.value.length > 0
+              ? " (with voucher simulation)"
+              : ""}
           </p>
         </div>
 
@@ -289,8 +296,11 @@ export default function ValueInvestingDashboard(
                     <tbody>
                       {filteredProducts.map(({ product, voucherMetrics }) => {
                         const hasVouchers = selectedVouchers.value.length > 0;
-                        const showBothPrices = hasVouchers && voucherMode.value === "both";
-                        const useVoucherPrice = hasVouchers && (voucherMode.value === "voucher" || voucherMode.value === "both");
+                        const showBothPrices = hasVouchers &&
+                          voucherMode.value === "both";
+                        const useVoucherPrice = hasVouchers &&
+                          (voucherMode.value === "voucher" ||
+                            voucherMode.value === "both");
 
                         return (
                           <tr key={product.id} class="hover">
@@ -325,16 +335,25 @@ export default function ValueInvestingDashboard(
                                   <span class="text-xs opacity-60">
                                     {showBothPrices ? "Original:" : "Current:"}
                                   </span>
-                                  <span class={`badge font-mono ${showBothPrices ? "badge-ghost line-through opacity-60" : "badge-neutral"}`}>
+                                  <span
+                                    class={`badge font-mono ${
+                                      showBothPrices
+                                        ? "badge-ghost line-through opacity-60"
+                                        : "badge-neutral"
+                                    }`}
+                                  >
                                     {formatCurrency(
                                       product.currentPrice,
                                       product.currency,
                                     )}
                                   </span>
                                 </div>
-                                {useVoucherPrice && voucherMetrics.voucherSavings > 0 && (
+                                {useVoucherPrice &&
+                                  voucherMetrics.voucherSavings > 0 && (
                                   <div class="flex items-center gap-2">
-                                    <span class="text-xs opacity-60">With Voucher:</span>
+                                    <span class="text-xs opacity-60">
+                                      With Voucher:
+                                    </span>
                                     <span class="badge badge-success font-mono font-bold">
                                       {formatCurrency(
                                         voucherMetrics.voucherDiscountedPrice,
@@ -342,12 +361,17 @@ export default function ValueInvestingDashboard(
                                       )}
                                     </span>
                                     <span class="text-xs text-success">
-                                      (-{formatCurrency(voucherMetrics.voucherSavings, product.currency)})
+                                      (-{formatCurrency(
+                                        voucherMetrics.voucherSavings,
+                                        product.currency,
+                                      )})
                                     </span>
                                   </div>
                                 )}
                                 <div class="flex items-center gap-2">
-                                  <span class="text-xs opacity-60">Intrinsic:</span>
+                                  <span class="text-xs opacity-60">
+                                    Intrinsic:
+                                  </span>
                                   <span class="badge badge-info font-mono">
                                     {formatCurrency(
                                       product.valueMetrics.intrinsicValue,
@@ -359,52 +383,76 @@ export default function ValueInvestingDashboard(
                             </td>
                             <td class="min-w-[300px]">
                               <IntrinsicValueProgressBar
-                                currentPriceCents={useVoucherPrice ? voucherMetrics.voucherDiscountedPrice : product.currentPrice}
-                                intrinsicValueCents={product.valueMetrics.intrinsicValue}
+                                currentPriceCents={useVoucherPrice
+                                  ? voucherMetrics.voucherDiscountedPrice
+                                  : product.currentPrice}
+                                intrinsicValueCents={product.valueMetrics
+                                  .intrinsicValue}
                               />
-                              {showBothPrices && voucherMetrics.voucherSavings > 0 && (
+                              {showBothPrices &&
+                                voucherMetrics.voucherSavings > 0 && (
                                 <div class="text-xs text-gray-500 mt-1">
-                                  Margin: {formatPercentage(voucherMetrics.originalMarginOfSafety)} → {formatPercentage(voucherMetrics.voucherEnhancedMarginOfSafety)}
+                                  Margin: {formatPercentage(
+                                    voucherMetrics.originalMarginOfSafety,
+                                  )} → {formatPercentage(
+                                    voucherMetrics
+                                      .voucherEnhancedMarginOfSafety,
+                                  )}
                                 </div>
                               )}
                             </td>
                             <td>
                               <div class="flex flex-col gap-1">
-                                {showBothPrices ? (
-                                  <>
-                                    <span class="badge badge-ghost font-mono line-through opacity-60">
-                                      {formatPercentage(product.valueMetrics.expectedROI)}
-                                    </span>
-                                    {voucherMetrics.voucherSavings > 0 && (
-                                      <span
-                                        class={`badge font-mono font-bold ${
-                                          voucherMetrics.voucherEnhancedROI > 0
-                                            ? "badge-success"
-                                            : "badge-error"
-                                        }`}
-                                      >
-                                        {formatPercentage(voucherMetrics.voucherEnhancedROI)}
-                                        {voucherMetrics.roiImprovement > 0 && (
-                                          <span class="ml-1 text-xs">
-                                            (+{formatPercentage(voucherMetrics.roiImprovement)}pp)
-                                          </span>
+                                {showBothPrices
+                                  ? (
+                                    <>
+                                      <span class="badge badge-ghost font-mono line-through opacity-60">
+                                        {formatPercentage(
+                                          product.valueMetrics.expectedROI,
                                         )}
                                       </span>
-                                    )}
-                                  </>
-                                ) : (
-                                  <span
-                                    class={`badge font-mono font-bold ${
-                                      (useVoucherPrice ? voucherMetrics.voucherEnhancedROI : product.valueMetrics.expectedROI) > 0
-                                        ? "badge-success"
-                                        : "badge-error"
-                                    }`}
-                                  >
-                                    {formatPercentage(
-                                      useVoucherPrice ? voucherMetrics.voucherEnhancedROI : product.valueMetrics.expectedROI,
-                                    )}
-                                  </span>
-                                )}
+                                      {voucherMetrics.voucherSavings > 0 && (
+                                        <span
+                                          class={`badge font-mono font-bold ${
+                                            voucherMetrics.voucherEnhancedROI >
+                                                0
+                                              ? "badge-success"
+                                              : "badge-error"
+                                          }`}
+                                        >
+                                          {formatPercentage(
+                                            voucherMetrics.voucherEnhancedROI,
+                                          )}
+                                          {voucherMetrics.roiImprovement > 0 &&
+                                            (
+                                              <span class="ml-1 text-xs">
+                                                (+{formatPercentage(
+                                                  voucherMetrics.roiImprovement,
+                                                )}pp)
+                                              </span>
+                                            )}
+                                        </span>
+                                      )}
+                                    </>
+                                  )
+                                  : (
+                                    <span
+                                      class={`badge font-mono font-bold ${
+                                        (useVoucherPrice
+                                            ? voucherMetrics.voucherEnhancedROI
+                                            : product.valueMetrics
+                                              .expectedROI) > 0
+                                          ? "badge-success"
+                                          : "badge-error"
+                                      }`}
+                                    >
+                                      {formatPercentage(
+                                        useVoucherPrice
+                                          ? voucherMetrics.voucherEnhancedROI
+                                          : product.valueMetrics.expectedROI,
+                                      )}
+                                    </span>
+                                  )}
                               </div>
                             </td>
                           </tr>

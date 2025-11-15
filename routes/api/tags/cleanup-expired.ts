@@ -1,7 +1,7 @@
 import { FreshContext } from "$fresh/server.ts";
 import { sql } from "drizzle-orm";
 import { db } from "../../../db/client.ts";
-import { productTags, products } from "../../../db/schema.ts";
+import { products, productTags } from "../../../db/schema.ts";
 
 export const handler = async (
   req: Request,
@@ -43,7 +43,8 @@ export const handler = async (
     for (const product of allProducts) {
       if (!product.tags) continue;
 
-      const currentTags = (product.tags as Array<{ tagId: string; addedAt: string }>) || [];
+      const currentTags =
+        (product.tags as Array<{ tagId: string; addedAt: string }>) || [];
       const filteredTags = currentTags.filter(
         (t) => !expiredTagIds.includes(t.tagId),
       );

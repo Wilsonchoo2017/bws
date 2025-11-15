@@ -56,8 +56,14 @@ const withoutWorldBricks: IntrinsicValueInputs = {
   partsCount: undefined, // NO parts data
 };
 
-const valueWithoutWB = ValueCalculator.calculateIntrinsicValue(withoutWorldBricks);
-console.log(`Input: Retired set, yearReleased: 2018 (estimated ~${2025 - 2018 - 3} years post-retirement)`);
+const valueWithoutWB = ValueCalculator.calculateIntrinsicValue(
+  withoutWorldBricks,
+);
+console.log(
+  `Input: Retired set, yearReleased: 2018 (estimated ~${
+    2025 - 2018 - 3
+  } years post-retirement)`,
+);
 console.log(`Retirement Multiplier: 1.15x (legacy default)`);
 console.log(`PPD Score: 1.0x (no parts data)`);
 console.log(`→ Intrinsic Value: ${formatCents(valueWithoutWB)}`);
@@ -78,12 +84,19 @@ const withWorldBricks: IntrinsicValueInputs = {
 const valueWithWB = ValueCalculator.calculateIntrinsicValue(withWorldBricks);
 console.log(`Input: yearRetired: 2022 → ${2025 - 2022} years post-retirement`);
 console.log(`Retirement Multiplier: 1.15x (year 2-5 bracket)`);
-console.log(`PPD Score: ${(4000 / (400 / 100)).toFixed(2)} PPD = 1.10x (${4000} parts / $400)`);
+console.log(
+  `PPD Score: ${
+    (4000 / (400 / 100)).toFixed(2)
+  } PPD = 1.10x (${4000} parts / $400)`,
+);
 console.log(`→ Intrinsic Value: ${formatCents(valueWithWB)}`);
 console.log();
 
-const improvement1 = ((valueWithWB - valueWithoutWB) / valueWithoutWB * 100).toFixed(1);
-console.log(`📈 Improvement: ${improvement1}% increase in accuracy with WorldBricks data`);
+const improvement1 = ((valueWithWB - valueWithoutWB) / valueWithoutWB * 100)
+  .toFixed(1);
+console.log(
+  `📈 Improvement: ${improvement1}% increase in accuracy with WorldBricks data`,
+);
 console.log();
 
 // ============================================================================
@@ -96,9 +109,21 @@ console.log("-".repeat(80));
 console.log();
 
 const testYears = [
-  { years: 0, label: "Just Retired (0-1yr)", expectedMultiplier: "0.95x (market flooded)" },
-  { years: 1, label: "Stabilization (1-2yr)", expectedMultiplier: "1.00x (baseline)" },
-  { years: 3, label: "Early Appreciation (2-5yr)", expectedMultiplier: "1.15x" },
+  {
+    years: 0,
+    label: "Just Retired (0-1yr)",
+    expectedMultiplier: "0.95x (market flooded)",
+  },
+  {
+    years: 1,
+    label: "Stabilization (1-2yr)",
+    expectedMultiplier: "1.00x (baseline)",
+  },
+  {
+    years: 3,
+    label: "Early Appreciation (2-5yr)",
+    expectedMultiplier: "1.15x",
+  },
   { years: 7, label: "Scarcity Premium (5-10yr)", expectedMultiplier: "1.40x" },
   { years: 12, label: "Vintage Status (10+ yr)", expectedMultiplier: "2.00x" },
 ];
@@ -118,7 +143,11 @@ testYears.forEach(({ years, label, expectedMultiplier }) => {
   };
 
   const value = ValueCalculator.calculateIntrinsicValue(input);
-  console.log(`${label.padEnd(30)} | ${formatCents(value).padEnd(15)} | ${expectedMultiplier}`);
+  console.log(
+    `${label.padEnd(30)} | ${
+      formatCents(value).padEnd(15)
+    } | ${expectedMultiplier}`,
+  );
 });
 
 console.log();
@@ -154,9 +183,19 @@ testPPD.forEach(({ parts, msrp, label: _label }) => {
 
   const value = ValueCalculator.calculateIntrinsicValue(input);
   const ppd = parts / msrp;
-  const multiplier = ppd >= 10 ? "1.10x" : ppd >= 8 ? "1.05x" : ppd >= 6 ? "1.00x" : "0.95x";
+  const multiplier = ppd >= 10
+    ? "1.10x"
+    : ppd >= 8
+    ? "1.05x"
+    : ppd >= 6
+    ? "1.00x"
+    : "0.95x";
 
-  console.log(`${String(parts).padEnd(11)} | $${msrp}  | ${ppd.toFixed(2).padEnd(9)} | ${multiplier.padEnd(10)} | ${formatCents(value)}`);
+  console.log(
+    `${String(parts).padEnd(11)} | $${msrp}  | ${ppd.toFixed(2).padEnd(9)} | ${
+      multiplier.padEnd(10)
+    } | ${formatCents(value)}`,
+  );
 });
 
 console.log();
@@ -172,7 +211,9 @@ console.log();
 
 console.log("✅ Auto-Queue Implementation:");
 console.log("  - Location: services/analysis/DataAggregationService.ts:85-104");
-console.log("  - Trigger: When product.legoSetNumber exists BUT worldBricksData is null");
+console.log(
+  "  - Trigger: When product.legoSetNumber exists BUT worldBricksData is null",
+);
 console.log("  - Priority: HIGH (immediate scraping for analysis path)");
 console.log("  - Action: Fire-and-forget queue job (doesn't block analysis)");
 console.log();
@@ -203,9 +244,17 @@ console.log("=".repeat(80));
 console.log();
 
 console.log("🎯 Data Accuracy Improvements:");
-console.log(`  1. Retirement Multiplier: ±${(2.00 - 0.95) * 100}% range (0.95x - 2.0x)`);
-console.log(`  2. PPD Quality Score: ±${(1.10 - 0.95) * 100}% range (0.95x - 1.10x)`);
-console.log(`  3. Combined Impact: Up to ${((2.0 * 1.10) - (0.95 * 0.95 - 1)) * 100}% difference in intrinsic value`);
+console.log(
+  `  1. Retirement Multiplier: ±${(2.00 - 0.95) * 100}% range (0.95x - 2.0x)`,
+);
+console.log(
+  `  2. PPD Quality Score: ±${(1.10 - 0.95) * 100}% range (0.95x - 1.10x)`,
+);
+console.log(
+  `  3. Combined Impact: Up to ${
+    ((2.0 * 1.10) - (0.95 * 0.95 - 1)) * 100
+  }% difference in intrinsic value`,
+);
 console.log();
 
 console.log("⚡ Operational Benefits:");

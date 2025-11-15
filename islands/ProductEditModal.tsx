@@ -49,7 +49,9 @@ export default function ProductEditModal(
       "";
 
     // Initialize tags from product
-    const productTags = product.tags as Array<{ tagId: string; addedAt: string }> | null;
+    const productTags = product.tags as
+      | Array<{ tagId: string; addedAt: string }>
+      | null;
     editSelectedTagIds.value = productTags
       ? productTags.map((t) => t.tagId)
       : [];

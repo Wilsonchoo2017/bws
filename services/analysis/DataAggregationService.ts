@@ -131,7 +131,12 @@ export class DataAggregationService {
         retirementData,
         worldBricksData,
       ),
-      quality: this.buildQualityData(product, retirementData, worldBricksData, bricklinkData),
+      quality: this.buildQualityData(
+        product,
+        retirementData,
+        worldBricksData,
+        bricklinkData,
+      ),
     };
   }
 
@@ -401,10 +406,18 @@ export class DataAggregationService {
     }
 
     // Calculate demand score using DemandCalculator
-    const demandScoreResult = this.calculateDemandScore(demandData, bricklinkData, pastSalesStats);
+    const demandScoreResult = this.calculateDemandScore(
+      demandData,
+      bricklinkData,
+      pastSalesStats,
+    );
     if (demandScoreResult) {
       demandData.demandScore = demandScoreResult.score;
       demandData.demandScoreConfidence = demandScoreResult.confidence;
+      demandData.demandScoreBreakdown = {
+        components: demandScoreResult.components,
+        dataQuality: demandScoreResult.dataQuality,
+      };
     }
 
     return demandData;
@@ -472,10 +485,19 @@ export class DataAggregationService {
     };
 
     // Calculate quality score using QualityCalculator
-    const qualityScoreResult = this.calculateQualityScore(qualityData, worldBricksData, product, bricklinkData);
+    const qualityScoreResult = this.calculateQualityScore(
+      qualityData,
+      worldBricksData,
+      product,
+      bricklinkData,
+    );
     if (qualityScoreResult) {
       qualityData.qualityScore = qualityScoreResult.score;
       qualityData.qualityScoreConfidence = qualityScoreResult.confidence;
+      qualityData.qualityScoreBreakdown = {
+        components: qualityScoreResult.components,
+        dataQuality: qualityScoreResult.dataQuality,
+      };
     }
 
     return qualityData;
@@ -483,17 +505,63 @@ export class DataAggregationService {
 
   /**
    * Calculate demand score using DemandCalculator
-   * @returns Demand score and confidence, or null if insufficient data
+   * @returns Demand score with full breakdown, or null if insufficient data
    */
   private calculateDemandScore(
     demandData: DemandData,
     _bricklinkData: BricklinkItem | null,
     pastSalesStats: PastSalesStatistics | null,
-  ): { score: number; confidence: number } | null {
+  ): {
+    score: number;
+    confidence: number;
+    components: {
+      salesVelocity: {
+        score: number;
+        weight: number;
+        weightedScore: number;
+        confidence: number;
+        notes?: string;
+      };
+      priceMomentum: {
+        score: number;
+        weight: number;
+        weightedScore: number;
+        confidence: number;
+        notes?: string;
+      };
+      marketDepth: {
+        score: number;
+        weight: number;
+        weightedScore: number;
+        confidence: number;
+        notes?: string;
+      };
+      supplyDemandRatio: {
+        score: number;
+        weight: number;
+        weightedScore: number;
+        confidence: number;
+        notes?: string;
+      };
+      velocityConsistency: {
+        score: number;
+        weight: number;
+        weightedScore: number;
+        confidence: number;
+        notes?: string;
+      };
+    };
+    dataQuality: {
+      hasSalesData: boolean;
+      hasPriceData: boolean;
+      hasMarketDepth: boolean;
+      observationPeriod: number;
+    };
+  } | null {
     try {
       // Extract data for DemandCalculator
       const timesSold = demandData.bricklinkSixMonthNewTimesSold ??
-                        demandData.bricklinkTimesSold;
+        demandData.bricklinkTimesSold;
       const salesVelocity = demandData.bricklinkSalesVelocity;
       const availableLots = demandData.bricklinkCurrentNewLots;
       const availableQty = demandData.bricklinkCurrentNewQty;
@@ -508,8 +576,10 @@ export class DataAggregationService {
 
       // Get price data for price momentum
       const currentPrice = demandData.bricklinkCurrentNewAvg;
-      const firstPrice = pastSalesStats?.new.minPrice ?? demandData.bricklinkSixMonthNewMin;
-      const lastPrice = pastSalesStats?.new.maxPrice ?? demandData.bricklinkCurrentNewAvg;
+      const firstPrice = pastSalesStats?.new.minPrice ??
+        demandData.bricklinkSixMonthNewMin;
+      const lastPrice = pastSalesStats?.new.maxPrice ??
+        demandData.bricklinkCurrentNewAvg;
 
       const result = DemandCalculator.calculate({
         timesSold,
@@ -525,23 +595,43 @@ export class DataAggregationService {
       return {
         score: result.score,
         confidence: result.confidence,
+        components: result.components,
+        dataQuality: result.dataQuality,
       };
     } catch (error) {
-      console.warn(`[DataAggregationService] Failed to calculate demand score:`, error);
+      console.warn(
+        `[DataAggregationService] Failed to calculate demand score:`,
+        error,
+      );
       return null;
     }
   }
 
   /**
    * Calculate quality score using QualityCalculator
-   * @returns Quality score and confidence, or null if insufficient data
+   * @returns Quality score with full breakdown, or null if insufficient data
    */
   private calculateQualityScore(
     qualityData: QualityData,
     worldBricksData: WorldBricksSet | null,
     _product: Product,
     bricklinkData: BricklinkItem | null,
-  ): { score: number; confidence: number } | null {
+  ): {
+    score: number;
+    confidence: number;
+    components: {
+      ppdScore: { score: number; weightedScore: number; notes: string };
+      complexityScore: { score: number; weightedScore: number; notes: string };
+      themePremium: { score: number; weightedScore: number; notes: string };
+      scarcityScore: { score: number; weightedScore: number; notes: string };
+    };
+    dataQuality: {
+      hasParts: boolean;
+      hasMsrp: boolean;
+      hasTheme: boolean;
+      hasAvailability: boolean;
+    };
+  } | null {
     try {
       // Extract data for QualityCalculator
       const partsCount = worldBricksData?.partsCount ?? undefined;
@@ -549,7 +639,10 @@ export class DataAggregationService {
       const theme = qualityData.theme;
 
       // Extract availability from BrickLink data (currentNew is JSONB)
-      const currentNew = bricklinkData?.currentNew as { lots?: number; qty?: number } | null | undefined;
+      const currentNew = bricklinkData?.currentNew as
+        | { lots?: number; qty?: number }
+        | null
+        | undefined;
       const availableLots = currentNew?.lots;
       const availableQty = currentNew?.qty;
 
@@ -569,9 +662,14 @@ export class DataAggregationService {
       return {
         score: result.score,
         confidence: result.confidence,
+        components: result.components,
+        dataQuality: result.dataQuality,
       };
     } catch (error) {
-      console.warn(`[DataAggregationService] Failed to calculate quality score:`, error);
+      console.warn(
+        `[DataAggregationService] Failed to calculate quality score:`,
+        error,
+      );
       return null;
     }
   }

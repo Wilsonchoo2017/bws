@@ -12,7 +12,7 @@
  * abstractions (interfaces) rather than concrete implementations.
  */
 
-import puppeteer, { Browser, Page, HTTPRequest } from "../../lib/puppeteer.ts";
+import puppeteer, { Browser, HTTPRequest, Page } from "../../lib/puppeteer.ts";
 import {
   BROWSER_CONFIG,
   getRandomAcceptLanguage,
@@ -30,6 +30,8 @@ export interface HttpRequestOptions {
   timeout?: number;
   javascript?: boolean;
   headers?: Record<string, string>;
+  userAgent?: string; // Optional: Use specific user agent instead of random
+  referer?: string; // Optional: Set Referer header
 }
 
 /**
@@ -127,7 +129,10 @@ export class HttpClientService {
       await page.setRequestInterception(true);
       page.on("request", (request: HTTPRequest) => {
         const resourceType = request.resourceType();
-        if (resourceType === "image" || resourceType === "stylesheet" || resourceType === "font") {
+        if (
+          resourceType === "image" || resourceType === "stylesheet" ||
+          resourceType === "font"
+        ) {
           request.abort();
         } else {
           request.continue();
@@ -173,8 +178,10 @@ export class HttpClientService {
             ? Promise.resolve({
               state: "granted",
             })
+            : originalQuery
             // @ts-ignore: Type mismatch between browser and Deno types
-            : originalQuery ? originalQuery(parameters) : Promise.resolve({ state: "granted" })
+            ? originalQuery(parameters)
+            : Promise.resolve({ state: "granted" })
         );
       }
     });
@@ -331,28 +338,40 @@ export class HttpClientService {
    * Uses native fetch with browser-like headers
    */
   async simpleFetch(options: HttpRequestOptions): Promise<HttpResponse> {
-    const userAgent = getRandomUserAgent();
+    const userAgent = options.userAgent || getRandomUserAgent();
     const acceptLanguage = getRandomAcceptLanguage();
 
     try {
       console.log(`🌐 Simple fetch (no browser): ${options.url}`);
 
+      // Build headers with optional Referer and custom Sec-Fetch-Site
+      const headers: Record<string, string> = {
+        "User-Agent": userAgent,
+        "Accept":
+          "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+        "Accept-Language": acceptLanguage,
+        "Accept-Encoding": "gzip, deflate, br",
+        "Connection": "keep-alive",
+        "Upgrade-Insecure-Requests": "1",
+        "Sec-Fetch-Dest": "document",
+        "Sec-Fetch-Mode": "navigate",
+        "Sec-Fetch-Site": options.referer ? "same-origin" : "none",
+        "Sec-Fetch-User": "?1",
+        "Cache-Control": "max-age=0",
+      };
+
+      // Add Referer if provided
+      if (options.referer) {
+        headers["Referer"] = options.referer;
+      }
+
+      // Merge with custom headers if provided
+      if (options.headers) {
+        Object.assign(headers, options.headers);
+      }
+
       const response = await fetch(options.url, {
-        headers: {
-          "User-Agent": userAgent,
-          "Accept":
-            "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
-          "Accept-Language": acceptLanguage,
-          "Accept-Encoding": "gzip, deflate, br",
-          "DNT": "1",
-          "Connection": "keep-alive",
-          "Upgrade-Insecure-Requests": "1",
-          "Sec-Fetch-Dest": "document",
-          "Sec-Fetch-Mode": "navigate",
-          "Sec-Fetch-Site": "none",
-          "Sec-Fetch-User": "?1",
-          "Cache-Control": "max-age=0",
-        },
+        headers,
         redirect: "follow",
       });
 

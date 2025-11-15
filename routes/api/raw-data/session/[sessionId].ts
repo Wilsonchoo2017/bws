@@ -52,7 +52,9 @@ export const handler = async (
             scrapedAt: item.scrapedAt,
             rawHtmlSize: item.rawHtmlSize,
             compressedSize: item.compressedSize,
-            compressionRatio: (item.compressedSize / item.rawHtmlSize).toFixed(3),
+            compressionRatio: (item.compressedSize / item.rawHtmlSize).toFixed(
+              3,
+            ),
             rawHtml: item.rawHtml,
           })),
         },

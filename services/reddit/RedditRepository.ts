@@ -286,6 +286,51 @@ export class RedditRepository {
   }
 
   /**
+   * Update next_scrape_at after a successful scrape (by set number and subreddit)
+   * Similar to BrickLink/WorldBricks pattern
+   */
+  async updateNextScrapeAt(
+    setNumber: string,
+    subreddit: string,
+  ): Promise<void> {
+    const now = new Date();
+
+    // Find the existing search result to get its interval
+    const existing = await db.select()
+      .from(redditSearchResults)
+      .where(
+        and(
+          eq(redditSearchResults.legoSetNumber, setNumber),
+          eq(redditSearchResults.subreddit, subreddit),
+        ),
+      )
+      .limit(1);
+
+    if (existing.length === 0) {
+      return; // No existing search result to update
+    }
+
+    const intervalDays = existing[0].scrapeIntervalDays || 30; // Default 30 days
+    const nextScrape = new Date(
+      now.getTime() + intervalDays * 24 * 60 * 60 * 1000,
+    );
+
+    await db.update(redditSearchResults)
+      .set({
+        lastScrapedAt: now,
+        nextScrapeAt: nextScrape,
+        searchedAt: now,
+        updatedAt: now,
+      })
+      .where(
+        and(
+          eq(redditSearchResults.legoSetNumber, setNumber),
+          eq(redditSearchResults.subreddit, subreddit),
+        ),
+      );
+  }
+
+  /**
    * Update watch status for a search result
    */
   async updateWatchStatus(

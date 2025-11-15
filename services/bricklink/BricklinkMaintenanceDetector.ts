@@ -64,8 +64,7 @@ export class BricklinkMaintenanceDetector {
     }
 
     // Apply safety buffer: multiply by factor and add fixed buffer
-    const safeDuration =
-      durationMs * MAINTENANCE_CONFIG.SAFETY_MULTIPLIER +
+    const safeDuration = durationMs * MAINTENANCE_CONFIG.SAFETY_MULTIPLIER +
       MAINTENANCE_CONFIG.SAFETY_BUFFER_MS;
 
     console.log(

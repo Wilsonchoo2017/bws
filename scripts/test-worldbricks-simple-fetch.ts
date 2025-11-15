@@ -40,7 +40,9 @@ async function main() {
       console.log(`   Designer: ${result.data.designer}`);
       console.log(`   Parts Count: ${result.data.parts_count}`);
       console.log(`   Dimensions: ${result.data.dimensions}`);
-      console.log(`   Description: ${result.data.description?.substring(0, 100)}...`);
+      console.log(
+        `   Description: ${result.data.description?.substring(0, 100)}...`,
+      );
     } else {
       console.error("\n❌ FAILED:", result.error);
     }

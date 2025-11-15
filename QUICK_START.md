@@ -31,6 +31,7 @@ tailscale serve --bg --https=8125 8000
 ```
 
 Access from any device on your Tailnet:
+
 - **HTTPS URL**: `https://yees-mac-mini.tail83c2f.ts.net:8125`
 
 ### Disable Tailscale Serve
@@ -221,6 +222,8 @@ curl http://localhost:8000
 
 1. ✅ Set up development environment
 2. ✅ Configure Tailscale access
-3. 📖 Read [PRODUCTION_SETUP.md](./PRODUCTION_SETUP.md) for production deployment
-4. 📖 Read [TAILSCALE_SETUP.md](./TAILSCALE_SETUP.md) for detailed Tailscale configuration
+3. 📖 Read [PRODUCTION_SETUP.md](./PRODUCTION_SETUP.md) for production
+   deployment
+4. 📖 Read [TAILSCALE_SETUP.md](./TAILSCALE_SETUP.md) for detailed Tailscale
+   configuration
 5. 🔧 Configure external API keys for Rebrickable and Bricklink

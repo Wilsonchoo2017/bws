@@ -90,7 +90,7 @@ export interface PricingData {
   // Retail pricing (Shopee/ToysRUs) - CENTS
   currentRetailPrice?: Cents;
   originalRetailPrice?: Cents;
-  discountPercentage?: number;  // Percentage (0-100)
+  discountPercentage?: number; // Percentage (0-100)
 
   // Resale pricing (Bricklink) - CENTS
   bricklink?: {
@@ -123,6 +123,51 @@ export interface DemandData {
   // Calculated demand score (0-100) from DemandCalculator
   demandScore?: number;
   demandScoreConfidence?: number; // 0-1
+  demandScoreBreakdown?: {
+    components: {
+      salesVelocity: {
+        score: number;
+        weight: number;
+        weightedScore: number;
+        confidence: number;
+        notes?: string;
+      };
+      priceMomentum: {
+        score: number;
+        weight: number;
+        weightedScore: number;
+        confidence: number;
+        notes?: string;
+      };
+      marketDepth: {
+        score: number;
+        weight: number;
+        weightedScore: number;
+        confidence: number;
+        notes?: string;
+      };
+      supplyDemandRatio: {
+        score: number;
+        weight: number;
+        weightedScore: number;
+        confidence: number;
+        notes?: string;
+      };
+      velocityConsistency: {
+        score: number;
+        weight: number;
+        weightedScore: number;
+        confidence: number;
+        notes?: string;
+      };
+    };
+    dataQuality: {
+      hasSalesData: boolean;
+      hasPriceData: boolean;
+      hasMarketDepth: boolean;
+      observationPeriod: number;
+    };
+  };
 
   // Retail sales metrics (Shopee) - minimal weight for investment analysis
   unitsSold?: number;
@@ -206,6 +251,20 @@ export interface QualityData {
   // Calculated quality score (0-100) from QualityCalculator
   qualityScore?: number;
   qualityScoreConfidence?: number; // 0-1
+  qualityScoreBreakdown?: {
+    components: {
+      ppdScore: { score: number; weightedScore: number; notes: string };
+      complexityScore: { score: number; weightedScore: number; notes: string };
+      themePremium: { score: number; weightedScore: number; notes: string };
+      scarcityScore: { score: number; weightedScore: number; notes: string };
+    };
+    dataQuality: {
+      hasParts: boolean;
+      hasMsrp: boolean;
+      hasTheme: boolean;
+      hasAvailability: boolean;
+    };
+  };
 
   // Ratings
   avgStarRating?: number;

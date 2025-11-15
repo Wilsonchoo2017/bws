@@ -218,7 +218,7 @@ export class SchedulerService {
   }
 
   /**
-   * Run the Reddit scheduler for automated searches
+   * Run the Reddit scheduler for automated searches with priority support
    */
   async runReddit(): Promise<SchedulerResult> {
     const result: SchedulerResult = {
@@ -227,6 +227,11 @@ export class SchedulerService {
       jobsEnqueued: 0,
       errors: [],
       timestamp: new Date(),
+      breakdown: {
+        highPriority: 0,
+        mediumPriority: 0,
+        normalPriority: 0,
+      },
     };
 
     try {
@@ -234,6 +239,7 @@ export class SchedulerService {
 
       const redditRepository = getRedditRepository();
       const queueService = getQueueService();
+      const missingDataDetector = getMissingDataDetector();
 
       // Check if queue is ready
       if (!queueService.isReady()) {
@@ -244,21 +250,55 @@ export class SchedulerService {
         return result;
       }
 
-      // Find searches that need to be updated
+      // PRIORITY 1: Check for missing Reddit data using the detector service
+      console.log("🔍 Running missing Reddit data detection...");
+      const missingProducts = await missingDataDetector
+        .findProductsMissingRedditData();
+      console.log(
+        `📋 Found ${missingProducts.length} products missing Reddit data`,
+      );
+
+      for (const product of missingProducts) {
+        try {
+          const setNumber = product.legoSetNumber;
+          if (!setNumber) {
+            console.warn(
+              `⚠️ Skipping product ${product.productId} - no set number`,
+            );
+            continue;
+          }
+
+          await queueService.addRedditSearchJob({
+            setNumber: asBaseSetNumber(setNumber),
+            subreddit: "lego", // Default subreddit
+            saveToDb: true,
+            priority: JobPriority.HIGH,
+          });
+
+          result.itemsFound++;
+          result.jobsEnqueued++;
+          result.breakdown!.highPriority++;
+          console.log(
+            `✅ [HIGH] Enqueued Reddit search for missing data: ${setNumber}`,
+          );
+        } catch (error) {
+          const errorMsg =
+            `Failed to enqueue Reddit search for ${product.legoSetNumber}: ${error.message}`;
+          console.error(`❌ ${errorMsg}`);
+          result.errors.push(errorMsg);
+        }
+      }
+
+      // PRIORITY 2: Find searches that need to be updated (NORMAL priority)
       const searchesNeeded = await redditRepository
         .findSearchesNeedingScraping();
-      result.itemsFound = searchesNeeded.length;
+      result.itemsFound += searchesNeeded.length;
 
       console.log(
         `📋 Found ${searchesNeeded.length} Reddit searches needing update`,
       );
 
-      if (searchesNeeded.length === 0) {
-        console.log("✅ No Reddit searches need updating at this time");
-        return result;
-      }
-
-      // Enqueue jobs for each search
+      // Enqueue jobs for each scheduled search
       for (const search of searchesNeeded) {
         try {
           await queueService.addRedditSearchJob({
@@ -269,8 +309,9 @@ export class SchedulerService {
           });
 
           result.jobsEnqueued++;
+          result.breakdown!.normalPriority++;
           console.log(
-            `✅ Enqueued Reddit search job for ${search.legoSetNumber}`,
+            `✅ [NORMAL] Enqueued Reddit search job for ${search.legoSetNumber}`,
           );
         } catch (error) {
           const errorMsg =
@@ -282,6 +323,15 @@ export class SchedulerService {
 
       console.log(
         `✅ Reddit scheduler run complete: ${result.jobsEnqueued}/${result.itemsFound} jobs enqueued`,
+      );
+      console.log(
+        `   - HIGH priority: ${result.breakdown!.highPriority}`,
+      );
+      console.log(
+        `   - MEDIUM priority: ${result.breakdown!.mediumPriority}`,
+      );
+      console.log(
+        `   - NORMAL priority: ${result.breakdown!.normalPriority}`,
       );
     } catch (error) {
       console.error("❌ Reddit scheduler run failed:", error);
@@ -511,6 +561,55 @@ export class SchedulerService {
         totalPosts: search.totalPosts,
       })),
       count: searches.length,
+    };
+  }
+
+  /**
+   * Get sets that will be scraped in the next WorldBricks run (preview)
+   */
+  async previewWorldBricks(): Promise<{
+    sets: Array<{
+      setNumber: string;
+      lastScrapedAt: Date | null;
+      nextScrapeAt: Date | null;
+      scrapeIntervalDays: number;
+    }>;
+    count: number;
+  }> {
+    const worldBricksRepository = getWorldBricksRepository();
+    const sets = await worldBricksRepository.findSetsNeedingScraping();
+
+    return {
+      sets: sets.map((set) => ({
+        setNumber: set.setNumber,
+        lastScrapedAt: set.lastScrapedAt,
+        nextScrapeAt: set.nextScrapeAt,
+        scrapeIntervalDays: set.scrapeIntervalDays || 90, // Default 90 days
+      })),
+      count: sets.length,
+    };
+  }
+
+  /**
+   * Preview all schedulers
+   */
+  async previewAll(): Promise<{
+    bricklink: Awaited<ReturnType<SchedulerService["previewBricklink"]>>;
+    reddit: Awaited<ReturnType<SchedulerService["previewReddit"]>>;
+    worldbricks: Awaited<ReturnType<SchedulerService["previewWorldBricks"]>>;
+    count: number;
+  }> {
+    const [bricklink, reddit, worldbricks] = await Promise.all([
+      this.previewBricklink(),
+      this.previewReddit(),
+      this.previewWorldBricks(),
+    ]);
+
+    return {
+      bricklink,
+      reddit,
+      worldbricks,
+      count: bricklink.count + reddit.count + worldbricks.count,
     };
   }
 

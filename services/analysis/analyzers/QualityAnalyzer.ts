@@ -52,7 +52,9 @@ export class QualityAnalyzer extends BaseAnalyzer<QualityData> {
       dataPoints.avgStarRating = data.avgStarRating;
       dataPoints.ratingCount = data.ratingCount;
 
-      let ratingCalc = `${data.avgStarRating.toFixed(1)}/5 stars from ${data.ratingCount} reviews`;
+      let ratingCalc = `${
+        data.avgStarRating.toFixed(1)
+      }/5 stars from ${data.ratingCount} reviews`;
       let penalty = "";
 
       if (data.ratingCount < 5) {
@@ -98,9 +100,12 @@ export class QualityAnalyzer extends BaseAnalyzer<QualityData> {
         name: "Product Ratings",
         weight: 0.57,
         score: ratingScore,
-        rawValue: `${data.avgStarRating.toFixed(1)}/5 (${data.ratingCount} reviews)`,
+        rawValue: `${
+          data.avgStarRating.toFixed(1)
+        }/5 (${data.ratingCount} reviews)`,
         calculation: ratingCalc,
-        reasoning: "Customer satisfaction indicator. Base score = (avgRating / 5) * 100. Penalties for low review counts to ensure confidence. Realistic rating distribution gets +5% bonus.",
+        reasoning:
+          "Customer satisfaction indicator. Base score = (avgRating / 5) * 100. Penalties for low review counts to ensure confidence. Realistic rating distribution gets +5% bonus.",
       });
     } else {
       missingData.push("Product ratings data");
@@ -117,7 +122,10 @@ export class QualityAnalyzer extends BaseAnalyzer<QualityData> {
       if (data.brand.toLowerCase().includes("lego")) {
         reasons.push("Official LEGO product");
         brandCalc = "Official LEGO brand (score: 100)";
-      } else if (data.brand.toLowerCase().includes("brick") || data.brand.toLowerCase().includes("block")) {
+      } else if (
+        data.brand.toLowerCase().includes("brick") ||
+        data.brand.toLowerCase().includes("block")
+      ) {
         brandCalc = "Third-party brick brand (score: 60)";
       } else {
         brandCalc = "Generic/unknown brand (score: 40)";
@@ -129,7 +137,8 @@ export class QualityAnalyzer extends BaseAnalyzer<QualityData> {
         score: brandScore,
         rawValue: data.brand,
         calculation: brandCalc,
-        reasoning: "Brand verification. Official LEGO = 100, brick/block brands = 60, unknown brands = 40. Authenticity affects collectability and value retention.",
+        reasoning:
+          "Brand verification. Official LEGO = 100, brick/block brands = 60, unknown brands = 40. Authenticity affects collectability and value retention.",
       });
     } else {
       missingData.push("Brand information");
@@ -167,7 +176,8 @@ export class QualityAnalyzer extends BaseAnalyzer<QualityData> {
         score: 80,
         rawValue: `${data.legoSetNumber} (${data.theme})`,
         calculation: metadataCalc,
-        reasoning: "Complete metadata indicates legitimate LEGO set. Having set number + theme data scores 80. Premium themes (Star Wars, Harry Potter, etc.) noted for collectability.",
+        reasoning:
+          "Complete metadata indicates legitimate LEGO set. Having set number + theme data scores 80. Premium themes (Star Wars, Harry Potter, etc.) noted for collectability.",
       });
     } else {
       missingData.push("LEGO set metadata");
@@ -186,7 +196,8 @@ export class QualityAnalyzer extends BaseAnalyzer<QualityData> {
 
     // Build formula string
     const formula = components.length > 0
-      ? components.map((c) => `${c.name} (${(c.weight * 100).toFixed(0)}%)`).join(" + ")
+      ? components.map((c) => `${c.name} (${(c.weight * 100).toFixed(0)}%)`)
+        .join(" + ")
       : "Insufficient data";
 
     // Build breakdown

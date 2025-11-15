@@ -51,7 +51,9 @@ const healthyValue = ValueCalculator.calculateIntrinsicValue(healthyItem);
 console.log(`Market Price: ${formatCents(healthyItem.bricklinkAvgPrice!)}`);
 console.log(`Sales in 6mo: ${healthyItem.timesSold}`);
 console.log(`Sales Velocity: ${healthyItem.salesVelocity}/day`);
-console.log(`Supply: ${healthyItem.availableQty} units, ${healthyItem.availableLots} sellers`);
+console.log(
+  `Supply: ${healthyItem.availableQty} units, ${healthyItem.availableLots} sellers`,
+);
 console.log(`Demand Score: ${healthyItem.demandScore}`);
 console.log(`→ Intrinsic Value: ${formatCents(healthyValue)}`);
 console.log();
@@ -75,7 +77,9 @@ const deadValue = ValueCalculator.calculateIntrinsicValue(deadItem);
 console.log(`Market Price: ${formatCents(deadItem.bricklinkAvgPrice!)}`);
 console.log(`Sales in 6mo: ${deadItem.timesSold} ⚠️`);
 console.log(`Sales Velocity: ${deadItem.salesVelocity}/day`);
-console.log(`Supply: ${deadItem.availableQty} units, ${deadItem.availableLots} sellers`);
+console.log(
+  `Supply: ${deadItem.availableQty} units, ${deadItem.availableLots} sellers`,
+);
 console.log(`Demand Score: ${deadItem.demandScore}`);
 console.log(`→ Intrinsic Value: ${formatCents(deadValue)}`);
 console.log(`→ Zero Sales Penalty Applied: 0.50x (50% discount)`);
@@ -96,11 +100,17 @@ const extremelyDeadItem: IntrinsicValueInputs = {
   demandScore: 25, // LOW demand (< 30 threshold)
 };
 
-const extremelyDeadValue = ValueCalculator.calculateIntrinsicValue(extremelyDeadItem);
-console.log(`Market Price: ${formatCents(extremelyDeadItem.bricklinkAvgPrice!)}`);
+const extremelyDeadValue = ValueCalculator.calculateIntrinsicValue(
+  extremelyDeadItem,
+);
+console.log(
+  `Market Price: ${formatCents(extremelyDeadItem.bricklinkAvgPrice!)}`,
+);
 console.log(`Sales in 6mo: ${extremelyDeadItem.timesSold} 🚨`);
 console.log(`Sales Velocity: ${extremelyDeadItem.salesVelocity}/day`);
-console.log(`Supply: ${extremelyDeadItem.availableQty} units, ${extremelyDeadItem.availableLots} sellers`);
+console.log(
+  `Supply: ${extremelyDeadItem.availableQty} units, ${extremelyDeadItem.availableLots} sellers`,
+);
 console.log(`Demand Score: ${extremelyDeadItem.demandScore} (LOW)`);
 console.log(`→ Intrinsic Value: ${formatCents(extremelyDeadValue)}`);
 console.log(`→ Zero Sales Penalty: 0.50x × 0.60x (compound) = 0.30x total`);
@@ -125,10 +135,14 @@ const slowValue = ValueCalculator.calculateIntrinsicValue(slowItem);
 console.log(`Market Price: ${formatCents(slowItem.bricklinkAvgPrice!)}`);
 console.log(`Sales in 6mo: ${slowItem.timesSold}`);
 console.log(`Sales Velocity: ${slowItem.salesVelocity}/day`);
-console.log(`Supply: ${slowItem.availableQty} units, ${slowItem.availableLots} sellers`);
+console.log(
+  `Supply: ${slowItem.availableQty} units, ${slowItem.availableLots} sellers`,
+);
 console.log(`Demand Score: ${slowItem.demandScore}`);
 console.log(`→ Intrinsic Value: ${formatCents(slowValue)}`);
-console.log(`→ No zero sales penalty (has 1 sale), but severe liquidity penalty`);
+console.log(
+  `→ No zero sales penalty (has 1 sale), but severe liquidity penalty`,
+);
 console.log();
 
 // Summary comparison
@@ -137,21 +151,54 @@ console.log("SUMMARY COMPARISON");
 console.log("=".repeat(80));
 console.log();
 
-const healthyDiscount = ((1 - healthyValue / healthyItem.bricklinkAvgPrice!) * 100).toFixed(1);
-const deadDiscount = ((1 - deadValue / deadItem.bricklinkAvgPrice!) * 100).toFixed(1);
-const extremeDiscount = ((1 - extremelyDeadValue / extremelyDeadItem.bricklinkAvgPrice!) * 100).toFixed(1);
-const slowDiscount = ((1 - slowValue / slowItem.bricklinkAvgPrice!) * 100).toFixed(1);
+const healthyDiscount =
+  ((1 - healthyValue / healthyItem.bricklinkAvgPrice!) * 100).toFixed(1);
+const deadDiscount = ((1 - deadValue / deadItem.bricklinkAvgPrice!) * 100)
+  .toFixed(1);
+const extremeDiscount =
+  ((1 - extremelyDeadValue / extremelyDeadItem.bricklinkAvgPrice!) * 100)
+    .toFixed(1);
+const slowDiscount = ((1 - slowValue / slowItem.bricklinkAvgPrice!) * 100)
+  .toFixed(1);
 
-console.log(`1. Healthy (30 sales):          ${formatCents(healthyValue).padEnd(10)} (${healthyDiscount}% vs market)`);
-console.log(`2. Dead (0 sales):              ${formatCents(deadValue).padEnd(10)} (${deadDiscount}% vs market) ⚠️`);
-console.log(`3. Extremely Dead (0 + low demand): ${formatCents(extremelyDeadValue).padEnd(10)} (${extremeDiscount}% vs market) 🚨`);
-console.log(`4. Very Slow (1 sale):          ${formatCents(slowValue).padEnd(10)} (${slowDiscount}% vs market) ⚠️`);
+console.log(
+  `1. Healthy (30 sales):          ${
+    formatCents(healthyValue).padEnd(10)
+  } (${healthyDiscount}% vs market)`,
+);
+console.log(
+  `2. Dead (0 sales):              ${
+    formatCents(deadValue).padEnd(10)
+  } (${deadDiscount}% vs market) ⚠️`,
+);
+console.log(
+  `3. Extremely Dead (0 + low demand): ${
+    formatCents(extremelyDeadValue).padEnd(10)
+  } (${extremeDiscount}% vs market) 🚨`,
+);
+console.log(
+  `4. Very Slow (1 sale):          ${
+    formatCents(slowValue).padEnd(10)
+  } (${slowDiscount}% vs market) ⚠️`,
+);
 console.log();
 
 console.log("Key Insights:");
-console.log(`- Dead item value is ${((healthyValue / deadValue) - 1) * 100}% LOWER than healthy`);
-console.log(`- Extremely dead is ${((healthyValue / extremelyDeadValue) - 1) * 100}% LOWER than healthy`);
-console.log(`- Zero sales penalty is BRUTAL: ${((1 - deadValue / healthyValue) * 100).toFixed(1)}% reduction`);
+console.log(
+  `- Dead item value is ${
+    ((healthyValue / deadValue) - 1) * 100
+  }% LOWER than healthy`,
+);
+console.log(
+  `- Extremely dead is ${
+    ((healthyValue / extremelyDeadValue) - 1) * 100
+  }% LOWER than healthy`,
+);
+console.log(
+  `- Zero sales penalty is BRUTAL: ${
+    ((1 - deadValue / healthyValue) * 100).toFixed(1)
+  }% reduction`,
+);
 console.log();
 console.log("✅ Zero sales penalty is working as intended!");
 console.log("=".repeat(80));

@@ -22,9 +22,7 @@ export default function TagBadge({
   if (onClick) {
     // Interactive badge (for selector)
     if (isSelected) {
-      styleClasses = isExpired
-        ? "badge-neutral"
-        : "badge-primary";
+      styleClasses = isExpired ? "badge-neutral" : "badge-primary";
     } else {
       styleClasses = isExpired
         ? "badge-outline badge-neutral opacity-50"
@@ -32,12 +30,12 @@ export default function TagBadge({
     }
   } else {
     // Display-only badge
-    styleClasses = isExpired
-      ? "badge-ghost opacity-60"
-      : "badge-success";
+    styleClasses = isExpired ? "badge-ghost opacity-60" : "badge-success";
   }
 
-  const cursorClass = onClick ? "cursor-pointer hover:scale-105 transition-transform" : "";
+  const cursorClass = onClick
+    ? "cursor-pointer hover:scale-105 transition-transform"
+    : "";
   const opacityClass = isExpired ? "opacity-70" : "";
 
   return (

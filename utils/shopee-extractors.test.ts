@@ -3,7 +3,10 @@
  * Tests WHAT the parser does (outputs), not HOW it does it (implementation)
  */
 
-import { assertEquals, assertExists } from "https://deno.land/std@0.208.0/assert/mod.ts";
+import {
+  assertEquals,
+  assertExists,
+} from "https://deno.land/std@0.208.0/assert/mod.ts";
 import { type Element } from "https://deno.land/x/deno_dom@v0.1.45/deno-dom-wasm.ts";
 import {
   parseHtmlDocument,
@@ -43,11 +46,23 @@ Deno.test("parseShopeeHtml - should extract all products from valid HTML with mu
   assertEquals(product1.lego_set_number, EXPECTED_PRODUCT_1.lego_set_number);
   assertEquals(product1.price, EXPECTED_PRODUCT_1.price);
   assertEquals(product1.price_string, EXPECTED_PRODUCT_1.price_string);
-  assertEquals(product1.discount_percentage, EXPECTED_PRODUCT_1.discount_percentage);
-  assertEquals(product1.price_before_discount, EXPECTED_PRODUCT_1.price_before_discount);
-  assertEquals(product1.promotional_badges, EXPECTED_PRODUCT_1.promotional_badges);
+  assertEquals(
+    product1.discount_percentage,
+    EXPECTED_PRODUCT_1.discount_percentage,
+  );
+  assertEquals(
+    product1.price_before_discount,
+    EXPECTED_PRODUCT_1.price_before_discount,
+  );
+  assertEquals(
+    product1.promotional_badges,
+    EXPECTED_PRODUCT_1.promotional_badges,
+  );
   assertEquals(product1.units_sold, EXPECTED_PRODUCT_1.units_sold);
-  assertEquals(product1.units_sold_string, EXPECTED_PRODUCT_1.units_sold_string);
+  assertEquals(
+    product1.units_sold_string,
+    EXPECTED_PRODUCT_1.units_sold_string,
+  );
   assertEquals(product1.image, EXPECTED_PRODUCT_1.image);
   assertEquals(product1.product_url, EXPECTED_PRODUCT_1.product_url);
   assertEquals(product1.shop_name, EXPECTED_PRODUCT_1.shop_name);
@@ -58,7 +73,10 @@ Deno.test("parseShopeeHtml - should extract all products from valid HTML with mu
   assertEquals(product2.product_name, EXPECTED_PRODUCT_2.product_name);
   assertEquals(product2.price, EXPECTED_PRODUCT_2.price);
   assertEquals(product2.units_sold, EXPECTED_PRODUCT_2.units_sold);
-  assertEquals(product2.promotional_badges, EXPECTED_PRODUCT_2.promotional_badges);
+  assertEquals(
+    product2.promotional_badges,
+    EXPECTED_PRODUCT_2.promotional_badges,
+  );
 });
 
 Deno.test("parseShopeeHtml - should return empty array when HTML contains no products", () => {
@@ -69,7 +87,11 @@ Deno.test("parseShopeeHtml - should return empty array when HTML contains no pro
   const products = parseShopeeHtml(EMPTY_HTML, shopUsername);
 
   // Assert: Should return empty array, not throw error
-  assertEquals(products, [], "Should return empty array for HTML with no products");
+  assertEquals(
+    products,
+    [],
+    "Should return empty array for HTML with no products",
+  );
 });
 
 // ============================================================================
@@ -88,14 +110,34 @@ Deno.test("parseProductItem - should parse product with discount and multiple ba
   // Assert: Verify all expected fields
   assertExists(product, "Should successfully parse the product");
   assertEquals(product!.product_name, EXPECTED_PRODUCT_1.product_name);
-  assertEquals(product!.lego_set_number, "77243", "Should extract LEGO set number from name");
+  assertEquals(
+    product!.lego_set_number,
+    "77243",
+    "Should extract LEGO set number from name",
+  );
   assertEquals(product!.brand, "LEGO", "Should identify LEGO brand");
   assertEquals(product!.price, 12600, "Should convert RM126.00 to 12600 cents");
   assertEquals(product!.discount_percentage, 3, "Should extract 3% discount");
-  assertEquals(product!.price_before_discount, 12990, "Should calculate original price");
-  assertEquals(product!.units_sold, 1000, "Should normalize '1k+' to 1000 units");
-  assertEquals(product!.promotional_badges.length, 3, "Should extract 3 badges including verified");
-  assertEquals(product!.promotional_badges, ["shopeelagimurah", "cod", "verified"], "Should normalize badge text and detect verified flag");
+  assertEquals(
+    product!.price_before_discount,
+    12990,
+    "Should calculate original price",
+  );
+  assertEquals(
+    product!.units_sold,
+    1000,
+    "Should normalize '1k+' to 1000 units",
+  );
+  assertEquals(
+    product!.promotional_badges.length,
+    3,
+    "Should extract 3 badges including verified",
+  );
+  assertEquals(product!.promotional_badges, [
+    "shopeelagimurah",
+    "cod",
+    "verified",
+  ], "Should normalize badge text and detect verified flag");
 });
 
 Deno.test("parseProductItem - should parse product with numeric sold units", () => {
@@ -109,7 +151,11 @@ Deno.test("parseProductItem - should parse product with numeric sold units", () 
 
   // Assert: Focus on the different behavior (numeric sold units)
   assertExists(product);
-  assertEquals(product!.units_sold, 666, "Should parse numeric sold count correctly");
+  assertEquals(
+    product!.units_sold,
+    666,
+    "Should parse numeric sold count correctly",
+  );
   assertEquals(product!.units_sold_string, "666 sold");
   assertEquals(product!.discount_percentage, 6, "Should extract 6% discount");
   assertEquals(product!.price, 12211, "Should convert RM122.11 to cents");
@@ -131,7 +177,11 @@ Deno.test("parseProductItem - should correctly convert prices to cents", () => {
   // Assert: Verify price is in cents (critical for financial calculations)
   assertExists(product);
   assertEquals(product!.price, 12600, "RM126.00 should be 12600 cents");
-  assertEquals(product!.price_string, "126.00", "Should return numeric price portion");
+  assertEquals(
+    product!.price_string,
+    "126.00",
+    "Should return numeric price portion",
+  );
 });
 
 Deno.test("parseProductItem - should calculate price before discount correctly", () => {
@@ -146,7 +196,11 @@ Deno.test("parseProductItem - should calculate price before discount correctly",
   // Assert: Verify discount calculation
   // Original = Current / (1 - discount%) = 12600 / 0.97 ≈ 12990
   assertExists(product);
-  assertEquals(product!.price_before_discount, 12990, "Should calculate original price from discount");
+  assertEquals(
+    product!.price_before_discount,
+    12990,
+    "Should calculate original price from discount",
+  );
   assertEquals(product!.discount_percentage, 3);
 });
 
@@ -165,8 +219,16 @@ Deno.test("parseProductItem - should normalize '1k+' sold units to 1000", () => 
 
   // Assert
   assertExists(product);
-  assertEquals(product!.units_sold, 1000, "Should convert '1k+' to numeric 1000");
-  assertEquals(product!.units_sold_string, "1k+ sold", "Should preserve original text");
+  assertEquals(
+    product!.units_sold,
+    1000,
+    "Should convert '1k+' to numeric 1000",
+  );
+  assertEquals(
+    product!.units_sold_string,
+    "1k+ sold",
+    "Should preserve original text",
+  );
 });
 
 Deno.test("parseProductItem - should handle regular numeric sold counts", () => {
@@ -180,7 +242,11 @@ Deno.test("parseProductItem - should handle regular numeric sold counts", () => 
 
   // Assert
   assertExists(product);
-  assertEquals(product!.units_sold, 666, "Should parse regular numbers correctly");
+  assertEquals(
+    product!.units_sold,
+    666,
+    "Should parse regular numbers correctly",
+  );
   assertEquals(product!.units_sold_string, "666 sold");
 });
 
@@ -199,7 +265,11 @@ Deno.test("parseProductItem - should extract LEGO set number from product name",
 
   // Assert
   assertExists(product);
-  assertEquals(product!.lego_set_number, "77243", "Should extract 5-digit LEGO set number");
+  assertEquals(
+    product!.lego_set_number,
+    "77243",
+    "Should extract 5-digit LEGO set number",
+  );
 });
 
 Deno.test("parseProductItem - should return null when no LEGO set number exists", () => {
@@ -213,7 +283,11 @@ Deno.test("parseProductItem - should return null when no LEGO set number exists"
 
   // Assert
   assertExists(product);
-  assertEquals(product!.lego_set_number, null, "Should return null for products without set numbers");
+  assertEquals(
+    product!.lego_set_number,
+    null,
+    "Should return null for products without set numbers",
+  );
 });
 
 // ============================================================================
@@ -249,7 +323,11 @@ Deno.test("parseProductItem - should handle multiple badge types", () => {
 
   // Assert
   assertExists(product);
-  assertEquals(product!.promotional_badges.length, 3, "Should extract all badges including verified");
+  assertEquals(
+    product!.promotional_badges.length,
+    3,
+    "Should extract all badges including verified",
+  );
   assertEquals(product!.promotional_badges, ["cod", "seashipping", "verified"]);
 });
 
@@ -270,9 +348,21 @@ Deno.test("parseProductItem - should handle minimal product HTML gracefully", ()
   assertExists(product, "Should parse minimal product without errors");
   assertEquals(product!.product_name, "Simple Product Name");
   assertEquals(product!.price, 9999, "Should parse RM99.99 to cents");
-  assertEquals(product!.discount_percentage, null, "Should return null for missing discount");
-  assertEquals(product!.promotional_badges, [], "Should return empty array for missing badges");
-  assertEquals(product!.units_sold, null, "Should return null for missing sold units");
+  assertEquals(
+    product!.discount_percentage,
+    null,
+    "Should return null for missing discount",
+  );
+  assertEquals(
+    product!.promotional_badges,
+    [],
+    "Should return empty array for missing badges",
+  );
+  assertEquals(
+    product!.units_sold,
+    null,
+    "Should return null for missing sold units",
+  );
 });
 
 Deno.test("parseProductItem - should return null for invalid product elements", () => {
@@ -285,7 +375,11 @@ Deno.test("parseProductItem - should return null for invalid product elements", 
   const product = parseProductItem(item as Element, 0, "testshop");
 
   // Assert: Should return null instead of throwing error
-  assertEquals(product, null, "Should return null for elements without product data");
+  assertEquals(
+    product,
+    null,
+    "Should return null for elements without product data",
+  );
 });
 
 // ============================================================================
@@ -328,7 +422,11 @@ Deno.test("parseProductItem - should set shop_name from provided username", () =
 
   // Assert
   assertExists(product);
-  assertEquals(product!.shop_name, shopUsername, "Should use provided shop username");
+  assertEquals(
+    product!.shop_name,
+    shopUsername,
+    "Should use provided shop username",
+  );
 });
 
 // ============================================================================

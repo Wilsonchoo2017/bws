@@ -2,11 +2,13 @@
 
 ## Overview
 
-Your production environment file `.env.production` has been created with secure passwords pre-generated. You need to add your API keys to complete the setup.
+Your production environment file `.env.production` has been created with secure
+passwords pre-generated. You need to add your API keys to complete the setup.
 
 ## Current Status
 
 ✅ **Completed:**
+
 - `.env.production` file created
 - Secure PostgreSQL password generated
 - Secure Redis password generated
@@ -53,16 +55,19 @@ BRICKLINK_TOKEN_SECRET=your_token_secret_here
 ```
 
 ### Using nano editor:
+
 ```bash
 nano .env.production
 ```
 
 ### Using VS Code:
+
 ```bash
 code .env.production
 ```
 
 ### Using vim:
+
 ```bash
 vim .env.production
 ```
@@ -107,7 +112,8 @@ Your `.env.production` file includes these pre-generated secure passwords:
 - **PostgreSQL Password**: `u/j/p42giu+yYlVoCyop3srac1P6xYrKvePrlsHnx6s=`
 - **Redis Password**: `BdrbcLP09Sd+XXdo5KB9WTbOTL/QiAMHDJ7GXNuKx60=`
 
-**Important:** These are strong passwords (32-byte base64 encoded). You can keep them or regenerate new ones:
+**Important:** These are strong passwords (32-byte base64 encoded). You can keep
+them or regenerate new ones:
 
 ```bash
 # Generate new PostgreSQL password
@@ -117,34 +123,35 @@ openssl rand -base64 32
 openssl rand -base64 32
 ```
 
-If you change the passwords, update both the `POSTGRES_PASSWORD` and `DATABASE_URL` variables to match.
+If you change the passwords, update both the `POSTGRES_PASSWORD` and
+`DATABASE_URL` variables to match.
 
 ## Environment Variables Reference
 
 ### Required for Production
 
-| Variable | Description | Status |
-|----------|-------------|--------|
-| `POSTGRES_PASSWORD` | PostgreSQL database password | ✅ Generated |
-| `DATABASE_URL` | Full PostgreSQL connection string | ✅ Configured |
-| `REDIS_PASSWORD` | Redis password | ✅ Generated |
-| `REBRICKABLE_API_KEY` | Rebrickable API access | ⚠️ Required |
-| `BRICKLINK_CONSUMER_KEY` | Bricklink OAuth consumer key | ⚠️ Required |
-| `BRICKLINK_CONSUMER_SECRET` | Bricklink OAuth consumer secret | ⚠️ Required |
-| `BRICKLINK_TOKEN_VALUE` | Bricklink OAuth token | ⚠️ Required |
-| `BRICKLINK_TOKEN_SECRET` | Bricklink OAuth token secret | ⚠️ Required |
+| Variable                    | Description                       | Status        |
+| --------------------------- | --------------------------------- | ------------- |
+| `POSTGRES_PASSWORD`         | PostgreSQL database password      | ✅ Generated  |
+| `DATABASE_URL`              | Full PostgreSQL connection string | ✅ Configured |
+| `REDIS_PASSWORD`            | Redis password                    | ✅ Generated  |
+| `REBRICKABLE_API_KEY`       | Rebrickable API access            | ⚠️ Required   |
+| `BRICKLINK_CONSUMER_KEY`    | Bricklink OAuth consumer key      | ⚠️ Required   |
+| `BRICKLINK_CONSUMER_SECRET` | Bricklink OAuth consumer secret   | ⚠️ Required   |
+| `BRICKLINK_TOKEN_VALUE`     | Bricklink OAuth token             | ⚠️ Required   |
+| `BRICKLINK_TOKEN_SECRET`    | Bricklink OAuth token secret      | ⚠️ Required   |
 
 ### Optional (Pre-configured)
 
-| Variable | Description | Default Value |
-|----------|-------------|---------------|
-| `PORT` | Application port | 8000 |
-| `NODE_ENV` | Node environment | production |
-| `DENO_ENV` | Deno environment | production |
-| `TZ` | Timezone | Asia/Kuala_Lumpur |
-| `REDIS_HOST` | Redis hostname (Docker) | redis |
-| `REDIS_PORT` | Redis port | 6379 |
-| `REDIS_DB` | Redis database number | 0 |
+| Variable     | Description             | Default Value     |
+| ------------ | ----------------------- | ----------------- |
+| `PORT`       | Application port        | 8000              |
+| `NODE_ENV`   | Node environment        | production        |
+| `DENO_ENV`   | Deno environment        | production        |
+| `TZ`         | Timezone                | Asia/Kuala_Lumpur |
+| `REDIS_HOST` | Redis hostname (Docker) | redis             |
+| `REDIS_PORT` | Redis port              | 6379              |
+| `REDIS_DB`   | Redis database number   | 0                 |
 
 ## Quick Start After Configuration
 
@@ -165,6 +172,7 @@ If you change the passwords, update both the `POSTGRES_PASSWORD` and `DATABASE_U
 ### "Missing required environment variables" error
 
 Make sure you've filled in all the API keys in `.env.production`:
+
 ```bash
 cat .env.production | grep -E "API_KEY|CONSUMER|TOKEN"
 ```
@@ -172,6 +180,7 @@ cat .env.production | grep -E "API_KEY|CONSUMER|TOKEN"
 ### Database connection failed
 
 Check that the `DATABASE_URL` matches the `POSTGRES_PASSWORD`:
+
 ```bash
 # The password should appear in both variables
 grep POSTGRES_PASSWORD .env.production
@@ -181,6 +190,7 @@ grep DATABASE_URL .env.production
 ### Redis authentication failed
 
 Verify Redis password is set:
+
 ```bash
 grep REDIS_PASSWORD .env.production
 ```

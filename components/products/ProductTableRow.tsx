@@ -3,9 +3,7 @@ import {
   formatNumber,
   formatPrice,
 } from "../../utils/formatters.ts";
-import {
-  getSoldBadgeColor,
-} from "../../utils/product-helpers.ts";
+import { getSoldBadgeColor } from "../../utils/product-helpers.ts";
 import type { Product } from "../../hooks/useProductList.ts";
 import type { ProductSource } from "../../db/schema.ts";
 
@@ -114,7 +112,9 @@ export function ProductTableRow(
           ? (
             <span
               class="text-warning text-lg cursor-help"
-              title={`Expected retirement: ${product.expectedRetirementDate || "Unknown"}`}
+              title={`Expected retirement: ${
+                product.expectedRetirementDate || "Unknown"
+              }`}
             >
               ✓
             </span>
@@ -137,7 +137,9 @@ export function ProductTableRow(
           ? (
             <span
               class="text-warning text-lg cursor-help"
-              title={`Incomplete Bricklink data. Missing: ${product.bricklinkMissingBoxes.join(", ")}`}
+              title={`Incomplete Bricklink data. Missing: ${
+                product.bricklinkMissingBoxes.join(", ")
+              }`}
             >
               ⚠
             </span>
@@ -155,8 +157,19 @@ export function ProductTableRow(
       {/* Brick Economy Data Availability - Checkmark/X */}
       <td class="text-center">
         {product.hasBrickEconomyData
-          ? <span class="text-success text-lg" title="Brick Economy data available">✓</span>
-          : <span class="text-error text-lg" title="No Brick Economy data">✗</span>}
+          ? (
+            <span
+              class="text-success text-lg"
+              title="Brick Economy data available"
+            >
+              ✓
+            </span>
+          )
+          : (
+            <span class="text-error text-lg" title="No Brick Economy data">
+              ✗
+            </span>
+          )}
       </td>
 
       {/* Units Sold (conditional - not shown for ToysRUs) */}

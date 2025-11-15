@@ -1,4 +1,7 @@
-import { assertEquals, assertThrows } from "https://deno.land/std@0.208.0/assert/mod.ts";
+import {
+  assertEquals,
+  assertThrows,
+} from "https://deno.land/std@0.208.0/assert/mod.ts";
 import { BricklinkMaintenanceDetector } from "../services/bricklink/BricklinkMaintenanceDetector.ts";
 import { MaintenanceError } from "../types/errors/MaintenanceError.ts";
 import { MAINTENANCE_CONFIG } from "../config/scraper.config.ts";
@@ -13,7 +16,9 @@ Deno.test("BricklinkMaintenanceDetector - detects maintenance page", () => {
     </html>
   `;
 
-  const isMaintenancePage = BricklinkMaintenanceDetector.isMaintenancePage(html);
+  const isMaintenancePage = BricklinkMaintenanceDetector.isMaintenancePage(
+    html,
+  );
   assertEquals(isMaintenancePage, true);
 });
 
@@ -27,32 +32,40 @@ Deno.test("BricklinkMaintenanceDetector - does not detect regular page", () => {
     </html>
   `;
 
-  const isMaintenancePage = BricklinkMaintenanceDetector.isMaintenancePage(html);
+  const isMaintenancePage = BricklinkMaintenanceDetector.isMaintenancePage(
+    html,
+  );
   assertEquals(isMaintenancePage, false);
 });
 
 Deno.test("BricklinkMaintenanceDetector - parses maintenance duration (1 minute)", () => {
-  const html = `Daily maintenance is running. The site will be available in 1 minute.`;
+  const html =
+    `Daily maintenance is running. The site will be available in 1 minute.`;
 
-  const durationMs = BricklinkMaintenanceDetector.parseMaintenanceDuration(html);
+  const durationMs = BricklinkMaintenanceDetector.parseMaintenanceDuration(
+    html,
+  );
 
   // 1 minute = 60000ms
   // With safety: 60000 * 1.5 + 60000 = 150000ms
   const expected = 60000 * MAINTENANCE_CONFIG.SAFETY_MULTIPLIER +
-                   MAINTENANCE_CONFIG.SAFETY_BUFFER_MS;
+    MAINTENANCE_CONFIG.SAFETY_BUFFER_MS;
 
   assertEquals(durationMs, expected);
 });
 
 Deno.test("BricklinkMaintenanceDetector - parses maintenance duration (5 minutes)", () => {
-  const html = `Daily maintenance is running. The site will be available in 5 minutes.`;
+  const html =
+    `Daily maintenance is running. The site will be available in 5 minutes.`;
 
-  const durationMs = BricklinkMaintenanceDetector.parseMaintenanceDuration(html);
+  const durationMs = BricklinkMaintenanceDetector.parseMaintenanceDuration(
+    html,
+  );
 
   // 5 minutes = 300000ms
   // With safety: 300000 * 1.5 + 60000 = 510000ms
   const expected = 300000 * MAINTENANCE_CONFIG.SAFETY_MULTIPLIER +
-                   MAINTENANCE_CONFIG.SAFETY_BUFFER_MS;
+    MAINTENANCE_CONFIG.SAFETY_BUFFER_MS;
 
   assertEquals(durationMs, expected);
 });
@@ -60,7 +73,9 @@ Deno.test("BricklinkMaintenanceDetector - parses maintenance duration (5 minutes
 Deno.test("BricklinkMaintenanceDetector - uses default delay when cannot parse", () => {
   const html = `Daily maintenance is running.`;
 
-  const durationMs = BricklinkMaintenanceDetector.parseMaintenanceDuration(html);
+  const durationMs = BricklinkMaintenanceDetector.parseMaintenanceDuration(
+    html,
+  );
 
   assertEquals(durationMs, MAINTENANCE_CONFIG.DEFAULT_DELAY_MS);
 });

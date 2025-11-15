@@ -12,8 +12,8 @@ import {
   type BrickrankerRetirementItem,
   priceHistory,
   type Product,
-  productTags,
   products,
+  productTags,
   shopeeScrapes,
   type WorldbricksSet,
 } from "../../db/schema.ts";
@@ -354,7 +354,9 @@ export default function ProductDetailPage(
                   {/* LEGO Set Number & Watch Status */}
                   <div class="flex items-center gap-2 flex-wrap text-sm">
                     <span class="text-base-content/60">LEGO Set:</span>
-                    <span class="font-semibold">{product.legoSetNumber || "N/A"}</span>
+                    <span class="font-semibold">
+                      {product.legoSetNumber || "N/A"}
+                    </span>
                     <span class="text-base-content/60">•</span>
                     <span class="text-base-content/60">Watch Status:</span>
                     <div
@@ -378,11 +380,13 @@ export default function ProductDetailPage(
                   )}
 
                   {/* Release Year */}
-                  {(worldbricksSet?.yearReleased || brickrankerItem?.yearReleased) && (
+                  {(worldbricksSet?.yearReleased ||
+                    brickrankerItem?.yearReleased) && (
                     <div class="flex items-center gap-2 text-sm">
                       <span class="text-base-content/60">Release Year:</span>
                       <span class="font-semibold text-success">
-                        {worldbricksSet?.yearReleased || brickrankerItem?.yearReleased}
+                        {worldbricksSet?.yearReleased ||
+                          brickrankerItem?.yearReleased}
                       </span>
                     </div>
                   )}
@@ -391,25 +395,39 @@ export default function ProductDetailPage(
                   {(() => {
                     const isRetired = worldbricksSet?.yearRetired;
                     const isRetiringSoon = brickrankerItem?.retiringSoon;
-                    const expectedRetirement = brickrankerItem?.expectedRetirementDate;
+                    const expectedRetirement = brickrankerItem
+                      ?.expectedRetirementDate;
 
                     if (isRetired) {
                       return (
                         <div class="flex items-center gap-2 text-sm">
-                          <span class="text-base-content/60">Retirement Year:</span>
-                          <span class="font-semibold text-error">{worldbricksSet.yearRetired}</span>
+                          <span class="text-base-content/60">
+                            Retirement Year:
+                          </span>
+                          <span class="font-semibold text-error">
+                            {worldbricksSet.yearRetired}
+                          </span>
                           <div class="badge badge-error badge-sm">Retired</div>
                         </div>
                       );
                     } else if (isRetiringSoon && expectedRetirement) {
                       return (
                         <div class="flex items-center gap-2 text-sm">
-                          <span class="text-base-content/60">Expected Retirement:</span>
-                          <span class="font-semibold text-warning">{expectedRetirement}</span>
-                          <div class="badge badge-warning badge-sm">Retiring Soon</div>
+                          <span class="text-base-content/60">
+                            Expected Retirement:
+                          </span>
+                          <span class="font-semibold text-warning">
+                            {expectedRetirement}
+                          </span>
+                          <div class="badge badge-warning badge-sm">
+                            Retiring Soon
+                          </div>
                         </div>
                       );
-                    } else if (worldbricksSet?.yearReleased || brickrankerItem?.yearReleased) {
+                    } else if (
+                      worldbricksSet?.yearReleased ||
+                      brickrankerItem?.yearReleased
+                    ) {
                       return (
                         <div class="flex items-center gap-2 text-sm">
                           <span class="text-base-content/60">Status:</span>
@@ -442,7 +460,6 @@ export default function ProductDetailPage(
             priceBeforeDiscount={product.priceBeforeDiscount ?? undefined}
             currency={product.currency ?? "MYR"}
           />
-
 
           {/* Bricklink Market Data Section */}
           {bricklinkItem && (() => {
@@ -998,7 +1015,6 @@ export default function ProductDetailPage(
               </div>
             );
           })()}
-
 
           {/* LEGO Set Information Section */}
           {worldbricksSet && (

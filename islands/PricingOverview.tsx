@@ -17,8 +17,8 @@ import type { Cents } from "../types/price.ts";
  */
 interface PricingOverviewProps {
   productId: string;
-  currentPrice?: Cents | number;        // CENTS (accepts number from DB)
-  priceBeforeDiscount?: Cents | number;  // CENTS (accepts number from DB)
+  currentPrice?: Cents | number; // CENTS (accepts number from DB)
+  priceBeforeDiscount?: Cents | number; // CENTS (accepts number from DB)
   currency?: string;
 }
 
@@ -27,18 +27,18 @@ interface PricingOverviewProps {
  * All price fields are in CENTS for consistency with database layer
  */
 interface RecommendedBuyPrice {
-  price: Cents;  // CENTS - Target buy price (e.g., 31503 = RM 315.03)
+  price: Cents; // CENTS - Target buy price (e.g., 31503 = RM 315.03)
   reasoning: string;
   confidence: number;
   breakdown?: {
-    intrinsicValue: Cents;  // CENTS - Calculated intrinsic value
-    baseMargin: number;  // Decimal (e.g., 0.25 = 25%)
-    adjustedMargin: number;  // Decimal (e.g., 0.30 = 30%)
+    intrinsicValue: Cents; // CENTS - Calculated intrinsic value
+    baseMargin: number; // Decimal (e.g., 0.25 = 25%)
+    adjustedMargin: number; // Decimal (e.g., 0.30 = 30%)
     marginAdjustments: Array<{ reason: string; value: number }>;
     inputs: {
-      msrp?: Cents;  // CENTS - ValueCalculator now works in cents
-      bricklinkAvgPrice?: Cents;  // CENTS
-      bricklinkMaxPrice?: Cents;  // CENTS
+      msrp?: Cents; // CENTS - ValueCalculator now works in cents
+      bricklinkAvgPrice?: Cents; // CENTS
+      bricklinkMaxPrice?: Cents; // CENTS
       retirementStatus?: string;
       demandScore?: number;
       qualityScore?: number;
@@ -63,7 +63,6 @@ function formatPrice(cents: Cents | number, currency: string = "MYR"): string {
     minimumFractionDigits: 2,
   }).format(cents / 100);
 }
-
 
 /**
  * Compare current price vs recommended price
@@ -290,11 +289,11 @@ export default function PricingOverview(
                             )}
                           </div>
                         )}
-                        {recommendedBuyPrice.breakdown.inputs.retirementStatus &&
+                        {recommendedBuyPrice.breakdown.inputs
+                          .retirementStatus &&
                           (
                             <div>
-                              • Status:{" "}
-                              {recommendedBuyPrice.breakdown.inputs
+                              • Status: {recommendedBuyPrice.breakdown.inputs
                                 .retirementStatus}
                             </div>
                           )}
@@ -302,9 +301,10 @@ export default function PricingOverview(
                             undefined && (
                           <div>
                             • Demand Score:{" "}
-                            {recommendedBuyPrice.breakdown.inputs.demandScore.toFixed(
-                              0,
-                            )}
+                            {recommendedBuyPrice.breakdown.inputs.demandScore
+                              .toFixed(
+                                0,
+                              )}
                             /100
                           </div>
                         )}
@@ -312,9 +312,10 @@ export default function PricingOverview(
                             undefined && (
                           <div>
                             • Quality Score:{" "}
-                            {recommendedBuyPrice.breakdown.inputs.qualityScore.toFixed(
-                              0,
-                            )}
+                            {recommendedBuyPrice.breakdown.inputs.qualityScore
+                              .toFixed(
+                                0,
+                              )}
                             /100
                           </div>
                         )}
@@ -341,31 +342,34 @@ export default function PricingOverview(
                     <div class="ml-12 text-sm space-y-1">
                       <div class="text-base-content/70">
                         Base margin:{" "}
-                        {(recommendedBuyPrice.breakdown.baseMargin * 100).toFixed(
-                          0,
-                        )}%
-                        {recommendedBuyPrice.breakdown.marginAdjustments.length >
+                        {(recommendedBuyPrice.breakdown.baseMargin * 100)
+                          .toFixed(
+                            0,
+                          )}%
+                        {recommendedBuyPrice.breakdown.marginAdjustments
+                              .length >
                             0 && (
                           <div class="mt-2">
                             Adjustments:
-                            {recommendedBuyPrice.breakdown.marginAdjustments.map((
-                              adj,
-                              i,
-                            ) => (
-                              <div key={i} class="ml-4">
-                                • {adj.reason}:{" "}
-                                {adj.value > 0 ? "+" : ""}
-                                {(adj.value * 100).toFixed(1)}%
-                              </div>
-                            ))}
+                            {recommendedBuyPrice.breakdown.marginAdjustments
+                              .map((
+                                adj,
+                                i,
+                              ) => (
+                                <div key={i} class="ml-4">
+                                  • {adj.reason}: {adj.value > 0 ? "+" : ""}
+                                  {(adj.value * 100).toFixed(1)}%
+                                </div>
+                              ))}
                           </div>
                         )}
                       </div>
                       <div class="font-bold text-success mt-2">
                         Final margin:{" "}
-                        {(recommendedBuyPrice.breakdown.adjustedMargin * 100).toFixed(
-                          1,
-                        )}%
+                        {(recommendedBuyPrice.breakdown.adjustedMargin * 100)
+                          .toFixed(
+                            1,
+                          )}%
                       </div>
                     </div>
                   </div>
@@ -385,18 +389,18 @@ export default function PricingOverview(
                         {formatPrice(
                           recommendedBuyPrice.breakdown.intrinsicValue,
                           currency,
-                        )}{" "}
-                        × (1 - {(recommendedBuyPrice.breakdown.adjustedMargin *
+                        )} × (1 -{" "}
+                        {(recommendedBuyPrice.breakdown.adjustedMargin *
                           100).toFixed(1)}%)
                       </div>
                       <div class="font-mono text-base-content/70">
                         = {formatPrice(
                           recommendedBuyPrice.breakdown.intrinsicValue,
                           currency,
-                        )}{" "}
-                        × {(1 - recommendedBuyPrice.breakdown.adjustedMargin).toFixed(
-                          3,
-                        )}
+                        )} × {(1 - recommendedBuyPrice.breakdown.adjustedMargin)
+                          .toFixed(
+                            3,
+                          )}
                       </div>
                       <div class="font-bold text-success text-lg mt-2">
                         = {formatPrice(

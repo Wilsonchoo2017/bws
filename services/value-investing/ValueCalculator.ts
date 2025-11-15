@@ -126,7 +126,8 @@ export class ValueCalculator {
     let liquidityScore = 50; // Default to neutral
 
     if (
-      salesVelocity !== undefined && salesVelocity !== null && salesVelocity >= 0
+      salesVelocity !== undefined && salesVelocity !== null &&
+      salesVelocity >= 0
     ) {
       // Map sales velocity to 0-100 score with enhanced tiers
       if (salesVelocity >= config.VELOCITY_HIGH) {
@@ -145,7 +146,10 @@ export class ValueCalculator {
               (config.VELOCITY_LOW - config.VELOCITY_DEAD)) * 25;
       } else {
         // Dead inventory (< 0.01 sales/day = < 1 sale per 100 days)
-        liquidityScore = Math.max(0, (salesVelocity / config.VELOCITY_DEAD) * 15);
+        liquidityScore = Math.max(
+          0,
+          (salesVelocity / config.VELOCITY_DEAD) * 15,
+        );
       }
     } else if (
       avgDaysBetweenSales !== undefined && avgDaysBetweenSales !== null
@@ -1046,7 +1050,8 @@ export class ValueCalculator {
       const urgencyAdjustment = ((options.availabilityScore - 80) / 20) * 0.05;
       adjustedMargin = Math.max(0.05, adjustedMargin - urgencyAdjustment);
       marginAdjustments.push({
-        reason: `High urgency (availability score ${options.availabilityScore})`,
+        reason:
+          `High urgency (availability score ${options.availabilityScore})`,
         value: -urgencyAdjustment,
       });
     }

@@ -2,7 +2,10 @@
  * Test QualityCalculator - Verify 4-component scoring system
  */
 
-import { QualityCalculator, type QualityCalculatorInput } from "../services/value-investing/QualityCalculator.ts";
+import {
+  QualityCalculator,
+  type QualityCalculatorInput,
+} from "../services/value-investing/QualityCalculator.ts";
 import { asCents } from "../types/price.ts";
 
 console.log("=".repeat(80));
@@ -23,15 +26,47 @@ const excellentQuality: QualityCalculatorInput = {
 
 const excellentResult = QualityCalculator.calculate(excellentQuality);
 const ppd1 = (5544 / 8.5).toFixed(1);
-console.log(`Input: ${excellentQuality.partsCount} pieces, $${excellentQuality.msrp! / 100} MSRP, ${excellentQuality.theme}, ${excellentQuality.availableLots} lots`);
+console.log(
+  `Input: ${excellentQuality.partsCount} pieces, $${
+    excellentQuality.msrp! / 100
+  } MSRP, ${excellentQuality.theme}, ${excellentQuality.availableLots} lots`,
+);
 console.log(`PPD: ${ppd1} (${5544} / $${850})`);
-console.log(`Overall Score: ${excellentResult.score}/100 (Confidence: ${(excellentResult.confidence * 100).toFixed(0)}%)`);
+console.log(
+  `Overall Score: ${excellentResult.score}/100 (Confidence: ${
+    (excellentResult.confidence * 100).toFixed(0)
+  }%)`,
+);
 console.log();
 console.log("Component Breakdown:");
-console.log(`  1. PPD Score (40%):        ${excellentResult.components.ppdScore.score.toFixed(0)}/100 × 0.40 = ${excellentResult.components.ppdScore.weightedScore.toFixed(1)} ${excellentResult.components.ppdScore.notes}`);
-console.log(`  2. Complexity (30%):       ${excellentResult.components.complexityScore.score.toFixed(0)}/100 × 0.30 = ${excellentResult.components.complexityScore.weightedScore.toFixed(1)} ${excellentResult.components.complexityScore.notes}`);
-console.log(`  3. Theme Premium (20%):    ${excellentResult.components.themePremium.score.toFixed(0)}/100 × 0.20 = ${excellentResult.components.themePremium.weightedScore.toFixed(1)} ${excellentResult.components.themePremium.notes}`);
-console.log(`  4. Scarcity (10%):         ${excellentResult.components.scarcityScore.score.toFixed(0)}/100 × 0.10 = ${excellentResult.components.scarcityScore.weightedScore.toFixed(1)} ${excellentResult.components.scarcityScore.notes}`);
+console.log(
+  `  1. PPD Score (40%):        ${
+    excellentResult.components.ppdScore.score.toFixed(0)
+  }/100 × 0.40 = ${
+    excellentResult.components.ppdScore.weightedScore.toFixed(1)
+  } ${excellentResult.components.ppdScore.notes}`,
+);
+console.log(
+  `  2. Complexity (30%):       ${
+    excellentResult.components.complexityScore.score.toFixed(0)
+  }/100 × 0.30 = ${
+    excellentResult.components.complexityScore.weightedScore.toFixed(1)
+  } ${excellentResult.components.complexityScore.notes}`,
+);
+console.log(
+  `  3. Theme Premium (20%):    ${
+    excellentResult.components.themePremium.score.toFixed(0)
+  }/100 × 0.20 = ${
+    excellentResult.components.themePremium.weightedScore.toFixed(1)
+  } ${excellentResult.components.themePremium.notes}`,
+);
+console.log(
+  `  4. Scarcity (10%):         ${
+    excellentResult.components.scarcityScore.score.toFixed(0)
+  }/100 × 0.10 = ${
+    excellentResult.components.scarcityScore.weightedScore.toFixed(1)
+  } ${excellentResult.components.scarcityScore.notes}`,
+);
 console.log();
 
 // Test Case 2: Poor Quality (Small City Set)
@@ -47,15 +82,47 @@ const poorQuality: QualityCalculatorInput = {
 
 const poorResult = QualityCalculator.calculate(poorQuality);
 const ppd2 = (180 / 20).toFixed(1);
-console.log(`Input: ${poorQuality.partsCount} pieces, $${poorQuality.msrp! / 100} MSRP, ${poorQuality.theme}, ${poorQuality.availableLots} lots`);
+console.log(
+  `Input: ${poorQuality.partsCount} pieces, $${
+    poorQuality.msrp! / 100
+  } MSRP, ${poorQuality.theme}, ${poorQuality.availableLots} lots`,
+);
 console.log(`PPD: ${ppd2} (${180} / $${20})`);
-console.log(`Overall Score: ${poorResult.score}/100 (Confidence: ${(poorResult.confidence * 100).toFixed(0)}%)`);
+console.log(
+  `Overall Score: ${poorResult.score}/100 (Confidence: ${
+    (poorResult.confidence * 100).toFixed(0)
+  }%)`,
+);
 console.log();
 console.log("Component Breakdown:");
-console.log(`  1. PPD Score (40%):        ${poorResult.components.ppdScore.score.toFixed(0)}/100 × 0.40 = ${poorResult.components.ppdScore.weightedScore.toFixed(1)} ${poorResult.components.ppdScore.notes}`);
-console.log(`  2. Complexity (30%):       ${poorResult.components.complexityScore.score.toFixed(0)}/100 × 0.30 = ${poorResult.components.complexityScore.weightedScore.toFixed(1)} ${poorResult.components.complexityScore.notes}`);
-console.log(`  3. Theme Premium (20%):    ${poorResult.components.themePremium.score.toFixed(0)}/100 × 0.20 = ${poorResult.components.themePremium.weightedScore.toFixed(1)} ${poorResult.components.themePremium.notes}`);
-console.log(`  4. Scarcity (10%):         ${poorResult.components.scarcityScore.score.toFixed(0)}/100 × 0.10 = ${poorResult.components.scarcityScore.weightedScore.toFixed(1)} ${poorResult.components.scarcityScore.notes}`);
+console.log(
+  `  1. PPD Score (40%):        ${
+    poorResult.components.ppdScore.score.toFixed(0)
+  }/100 × 0.40 = ${
+    poorResult.components.ppdScore.weightedScore.toFixed(1)
+  } ${poorResult.components.ppdScore.notes}`,
+);
+console.log(
+  `  2. Complexity (30%):       ${
+    poorResult.components.complexityScore.score.toFixed(0)
+  }/100 × 0.30 = ${
+    poorResult.components.complexityScore.weightedScore.toFixed(1)
+  } ${poorResult.components.complexityScore.notes}`,
+);
+console.log(
+  `  3. Theme Premium (20%):    ${
+    poorResult.components.themePremium.score.toFixed(0)
+  }/100 × 0.20 = ${
+    poorResult.components.themePremium.weightedScore.toFixed(1)
+  } ${poorResult.components.themePremium.notes}`,
+);
+console.log(
+  `  4. Scarcity (10%):         ${
+    poorResult.components.scarcityScore.score.toFixed(0)
+  }/100 × 0.10 = ${
+    poorResult.components.scarcityScore.weightedScore.toFixed(1)
+  } ${poorResult.components.scarcityScore.notes}`,
+);
 console.log();
 
 // Test Case 3: Missing Data (Insufficient Information)
@@ -70,16 +137,48 @@ const missingData: QualityCalculatorInput = {
 };
 
 const missingResult = QualityCalculator.calculate(missingData);
-console.log(`Input: NO parts, NO MSRP, ${missingData.theme}, ${missingData.availableLots} lots`);
-console.log(`Overall Score: ${missingResult.score}/100 (Confidence: ${(missingResult.confidence * 100).toFixed(0)}%)`);
+console.log(
+  `Input: NO parts, NO MSRP, ${missingData.theme}, ${missingData.availableLots} lots`,
+);
+console.log(
+  `Overall Score: ${missingResult.score}/100 (Confidence: ${
+    (missingResult.confidence * 100).toFixed(0)
+  }%)`,
+);
 console.log();
 console.log("Component Breakdown:");
-console.log(`  1. PPD Score (40%):        ${missingResult.components.ppdScore.score.toFixed(0)}/100 × 0.40 = ${missingResult.components.ppdScore.weightedScore.toFixed(1)} ${missingResult.components.ppdScore.notes}`);
-console.log(`  2. Complexity (30%):       ${missingResult.components.complexityScore.score.toFixed(0)}/100 × 0.30 = ${missingResult.components.complexityScore.weightedScore.toFixed(1)} ${missingResult.components.complexityScore.notes}`);
-console.log(`  3. Theme Premium (20%):    ${missingResult.components.themePremium.score.toFixed(0)}/100 × 0.20 = ${missingResult.components.themePremium.weightedScore.toFixed(1)} ${missingResult.components.themePremium.notes}`);
-console.log(`  4. Scarcity (10%):         ${missingResult.components.scarcityScore.score.toFixed(0)}/100 × 0.10 = ${missingResult.components.scarcityScore.weightedScore.toFixed(1)} ${missingResult.components.scarcityScore.notes}`);
+console.log(
+  `  1. PPD Score (40%):        ${
+    missingResult.components.ppdScore.score.toFixed(0)
+  }/100 × 0.40 = ${
+    missingResult.components.ppdScore.weightedScore.toFixed(1)
+  } ${missingResult.components.ppdScore.notes}`,
+);
+console.log(
+  `  2. Complexity (30%):       ${
+    missingResult.components.complexityScore.score.toFixed(0)
+  }/100 × 0.30 = ${
+    missingResult.components.complexityScore.weightedScore.toFixed(1)
+  } ${missingResult.components.complexityScore.notes}`,
+);
+console.log(
+  `  3. Theme Premium (20%):    ${
+    missingResult.components.themePremium.score.toFixed(0)
+  }/100 × 0.20 = ${
+    missingResult.components.themePremium.weightedScore.toFixed(1)
+  } ${missingResult.components.themePremium.notes}`,
+);
+console.log(
+  `  4. Scarcity (10%):         ${
+    missingResult.components.scarcityScore.score.toFixed(0)
+  }/100 × 0.10 = ${
+    missingResult.components.scarcityScore.weightedScore.toFixed(1)
+  } ${missingResult.components.scarcityScore.notes}`,
+);
 console.log();
-console.log(`Data Quality: Parts=${missingResult.dataQuality.hasParts}, MSRP=${missingResult.dataQuality.hasMsrp}, Theme=${missingResult.dataQuality.hasTheme}, Availability=${missingResult.dataQuality.hasAvailability}`);
+console.log(
+  `Data Quality: Parts=${missingResult.dataQuality.hasParts}, MSRP=${missingResult.dataQuality.hasMsrp}, Theme=${missingResult.dataQuality.hasTheme}, Availability=${missingResult.dataQuality.hasAvailability}`,
+);
 console.log();
 
 // Test Case 4: Medium Quality (Good Value Technic Set)
@@ -95,15 +194,47 @@ const mediumQuality: QualityCalculatorInput = {
 
 const mediumResult = QualityCalculator.calculate(mediumQuality);
 const ppd4 = (1580 / 180).toFixed(1);
-console.log(`Input: ${mediumQuality.partsCount} pieces, $${mediumQuality.msrp! / 100} MSRP, ${mediumQuality.theme}, ${mediumQuality.availableLots} lots`);
+console.log(
+  `Input: ${mediumQuality.partsCount} pieces, $${
+    mediumQuality.msrp! / 100
+  } MSRP, ${mediumQuality.theme}, ${mediumQuality.availableLots} lots`,
+);
 console.log(`PPD: ${ppd4} (${1580} / $${180})`);
-console.log(`Overall Score: ${mediumResult.score}/100 (Confidence: ${(mediumResult.confidence * 100).toFixed(0)}%)`);
+console.log(
+  `Overall Score: ${mediumResult.score}/100 (Confidence: ${
+    (mediumResult.confidence * 100).toFixed(0)
+  }%)`,
+);
 console.log();
 console.log("Component Breakdown:");
-console.log(`  1. PPD Score (40%):        ${mediumResult.components.ppdScore.score.toFixed(0)}/100 × 0.40 = ${mediumResult.components.ppdScore.weightedScore.toFixed(1)} ${mediumResult.components.ppdScore.notes}`);
-console.log(`  2. Complexity (30%):       ${mediumResult.components.complexityScore.score.toFixed(0)}/100 × 0.30 = ${mediumResult.components.complexityScore.weightedScore.toFixed(1)} ${mediumResult.components.complexityScore.notes}`);
-console.log(`  3. Theme Premium (20%):    ${mediumResult.components.themePremium.score.toFixed(0)}/100 × 0.20 = ${mediumResult.components.themePremium.weightedScore.toFixed(1)} ${mediumResult.components.themePremium.notes}`);
-console.log(`  4. Scarcity (10%):         ${mediumResult.components.scarcityScore.score.toFixed(0)}/100 × 0.10 = ${mediumResult.components.scarcityScore.weightedScore.toFixed(1)} ${mediumResult.components.scarcityScore.notes}`);
+console.log(
+  `  1. PPD Score (40%):        ${
+    mediumResult.components.ppdScore.score.toFixed(0)
+  }/100 × 0.40 = ${
+    mediumResult.components.ppdScore.weightedScore.toFixed(1)
+  } ${mediumResult.components.ppdScore.notes}`,
+);
+console.log(
+  `  2. Complexity (30%):       ${
+    mediumResult.components.complexityScore.score.toFixed(0)
+  }/100 × 0.30 = ${
+    mediumResult.components.complexityScore.weightedScore.toFixed(1)
+  } ${mediumResult.components.complexityScore.notes}`,
+);
+console.log(
+  `  3. Theme Premium (20%):    ${
+    mediumResult.components.themePremium.score.toFixed(0)
+  }/100 × 0.20 = ${
+    mediumResult.components.themePremium.weightedScore.toFixed(1)
+  } ${mediumResult.components.themePremium.notes}`,
+);
+console.log(
+  `  4. Scarcity (10%):         ${
+    mediumResult.components.scarcityScore.score.toFixed(0)
+  }/100 × 0.10 = ${
+    mediumResult.components.scarcityScore.weightedScore.toFixed(1)
+  } ${mediumResult.components.scarcityScore.notes}`,
+);
 console.log();
 
 // Test Case 5: PPD Range Test
@@ -135,7 +266,11 @@ ppdTests.forEach(({ parts, msrp, label }) => {
   const result = QualityCalculator.calculate(input);
   const ppd = parts / msrp;
 
-  console.log(`${String(parts).padEnd(5)} | $${msrp}  | ${ppd.toFixed(2).padEnd(9)} | ${label.padEnd(24)} | ${result.score}/100`);
+  console.log(
+    `${String(parts).padEnd(5)} | $${msrp}  | ${ppd.toFixed(2).padEnd(9)} | ${
+      label.padEnd(24)
+    } | ${result.score}/100`,
+  );
 });
 
 console.log();
@@ -146,10 +281,20 @@ console.log("SUMMARY");
 console.log("=".repeat(80));
 console.log();
 console.log("Quality Score Ranges:");
-console.log(`  • Excellent Quality: ${excellentResult.score}/100 (UCS Star Wars, 6.5 PPD, rare)`);
-console.log(`  • Medium Quality:    ${mediumResult.score}/100 (Technic, 8.8 PPD, limited)`);
-console.log(`  • Poor Quality:      ${poorResult.score}/100 (Small City set, 6.0 PPD, abundant)`);
-console.log(`  • Missing Data:      ${missingResult.score}/100 (${(missingResult.confidence * 100).toFixed(0)}% confidence only)`);
+console.log(
+  `  • Excellent Quality: ${excellentResult.score}/100 (UCS Star Wars, 6.5 PPD, rare)`,
+);
+console.log(
+  `  • Medium Quality:    ${mediumResult.score}/100 (Technic, 8.8 PPD, limited)`,
+);
+console.log(
+  `  • Poor Quality:      ${poorResult.score}/100 (Small City set, 6.0 PPD, abundant)`,
+);
+console.log(
+  `  • Missing Data:      ${missingResult.score}/100 (${
+    (missingResult.confidence * 100).toFixed(0)
+  }% confidence only)`,
+);
 console.log();
 console.log("✅ QualityCalculator working correctly!");
 console.log("   - 4 components properly weighted");

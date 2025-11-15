@@ -2,7 +2,7 @@
  * Utility functions for data normalization and conversion
  */
 
-import { centsFromString, type Cents } from "../types/price.ts";
+import { type Cents, centsFromString } from "../types/price.ts";
 
 /**
  * Converts a price string (e.g., "RM 150.50", "RM150.50", "150.50") to cents
@@ -21,7 +21,9 @@ export function parsePriceToCents(priceStr: string): Cents | null {
 
   // Add validation: Parser validation requirement
   if (parsed < 0) {
-    console.warn(`[parsePriceToCents] Invalid negative price: ${priceStr} → ${parsed} cents`);
+    console.warn(
+      `[parsePriceToCents] Invalid negative price: ${priceStr} → ${parsed} cents`,
+    );
     return null;
   }
 

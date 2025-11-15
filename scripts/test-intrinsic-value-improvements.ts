@@ -29,7 +29,10 @@ const test1: IntrinsicValueInputs = {
 
 const intrinsic1 = ValueCalculator.calculateIntrinsicValue(test1);
 const realized1 = ValueCalculator.calculateRealizedValue(intrinsic1);
-const metrics1 = ValueCalculator.calculateValueMetrics(dollarsToCents(90), test1);
+const metrics1 = ValueCalculator.calculateValueMetrics(
+  dollarsToCents(90),
+  test1,
+);
 
 console.log("Inputs:");
 console.log("  Bricklink Avg: $100, Max: $120");
@@ -64,7 +67,10 @@ const test2: IntrinsicValueInputs = {
 
 const intrinsic2 = ValueCalculator.calculateIntrinsicValue(test2);
 const realized2 = ValueCalculator.calculateRealizedValue(intrinsic2);
-const metrics2 = ValueCalculator.calculateValueMetrics(dollarsToCents(90), test2);
+const metrics2 = ValueCalculator.calculateValueMetrics(
+  dollarsToCents(90),
+  test2,
+);
 
 console.log("Inputs:");
 console.log("  Bricklink Avg: $100, Max: $120");

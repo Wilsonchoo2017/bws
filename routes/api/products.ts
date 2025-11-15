@@ -31,10 +31,14 @@ export const handler = async (
     const searchQuery = url.searchParams.get("search") || "";
     const legoSetNumber = url.searchParams.get("legoSetNumber") || "";
     const source = url.searchParams.get("source") || "";
-    const watchStatus = url.searchParams.get("watchStatus") || url.searchParams.get("watch_status") || "";
-    const tagIds = url.searchParams.get("tagIds")?.split(",").filter(Boolean) || [];
+    const watchStatus = url.searchParams.get("watchStatus") ||
+      url.searchParams.get("watch_status") || "";
+    const tagIds = url.searchParams.get("tagIds")?.split(",").filter(Boolean) ||
+      [];
     const sortBy = url.searchParams.get("sortBy") || "updatedAt";
-    const sortOrder = (url.searchParams.get("sortOrder") || "desc") as "asc" | "desc";
+    const sortOrder = (url.searchParams.get("sortOrder") || "desc") as
+      | "asc"
+      | "desc";
     const page = parseInt(url.searchParams.get("page") || "1");
     const limit = parseInt(url.searchParams.get("limit") || "100");
     const offset = (page - 1) * limit;
@@ -46,7 +50,7 @@ export const handler = async (
     if (searchQuery && searchQuery.trim()) {
       const searchTerm = searchQuery.trim().replace(/\s+/g, " ");
       conditions.push(
-        sql`to_tsvector('english', COALESCE(${products.name}, '')) @@ websearch_to_tsquery('english', ${searchTerm})`
+        sql`to_tsvector('english', COALESCE(${products.name}, '')) @@ websearch_to_tsquery('english', ${searchTerm})`,
       );
     }
 
@@ -54,23 +58,42 @@ export const handler = async (
     if (legoSetNumber && legoSetNumber.trim()) {
       const setNumberTerm = legoSetNumber.trim().replace(/\s+/g, "");
       conditions.push(
-        sql`COALESCE(${products.legoSetNumber}, '') ILIKE ${setNumberTerm + "%"}`
+        sql`COALESCE(${products.legoSetNumber}, '') ILIKE ${
+          setNumberTerm + "%"
+        }`,
       );
     }
 
     if (source && source !== "all") {
-      conditions.push(eq(products.source, source as "shopee" | "toysrus" | "brickeconomy" | "bricklink" | "worldbricks" | "brickranker" | "self"));
+      conditions.push(
+        eq(
+          products.source,
+          source as
+            | "shopee"
+            | "toysrus"
+            | "brickeconomy"
+            | "bricklink"
+            | "worldbricks"
+            | "brickranker"
+            | "self",
+        ),
+      );
     }
 
     if (watchStatus) {
-      conditions.push(eq(products.watchStatus, watchStatus as "active" | "paused" | "stopped" | "archived"));
+      conditions.push(
+        eq(
+          products.watchStatus,
+          watchStatus as "active" | "paused" | "stopped" | "archived",
+        ),
+      );
     }
 
     // Filter by tags if specified (using JSONB contains)
     if (tagIds.length > 0) {
       for (const tagId of tagIds) {
         conditions.push(
-          sql`${products.tags} @> ${JSON.stringify([{ tagId }])}`
+          sql`${products.tags} @> ${JSON.stringify([{ tagId }])}`,
         );
       }
     }
@@ -148,9 +171,11 @@ export const handler = async (
     // Fetch tags and enrich products with LEGO data
     const productsWithEnrichedData = await Promise.all(
       productList.map(async (row) => {
-        const { product, worldbricks, brickranker, bricklink, brickEconomy } = row;
+        const { product, worldbricks, brickranker, bricklink, brickEconomy } =
+          row;
 
-        const productTagsList = (product.tags as Array<{ tagId: string; addedAt: string }>) || [];
+        const productTagsList =
+          (product.tags as Array<{ tagId: string; addedAt: string }>) || [];
 
         let tagsData: Array<{
           id: string;
@@ -172,11 +197,15 @@ export const handler = async (
 
           // Add addedAt timestamp to each tag
           tagsData = tags.map((tag) => {
-            const productTag = productTagsList.find((pt) => pt.tagId === tag.id);
+            const productTag = productTagsList.find((pt) =>
+              pt.tagId === tag.id
+            );
             return {
               ...tag,
               addedAt: productTag?.addedAt,
-              isExpired: tag.endDate ? new Date(tag.endDate) < new Date() : false,
+              isExpired: tag.endDate
+                ? new Date(tag.endDate) < new Date()
+                : false,
             };
           });
         }
@@ -187,7 +216,9 @@ export const handler = async (
           : product.priceBeforeDiscount;
 
         // Validate Bricklink data completeness
-        const bricklinkValidation = BricklinkDataValidator.validateCompleteness(bricklink);
+        const bricklinkValidation = BricklinkDataValidator.validateCompleteness(
+          bricklink,
+        );
         const bricklinkDataStatus = !bricklink
           ? "missing"
           : bricklinkValidation.isComplete

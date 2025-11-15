@@ -116,8 +116,12 @@ export function useVoucherForm(): UseVoucherFormReturn {
     platform.value = voucher.platform || "";
     shopId.value = voucher.shopId?.toString() || "";
     shopName.value = voucher.shopName || "";
-    minPurchase.value = voucher.minPurchase ? (voucher.minPurchase / 100).toFixed(2) : "";
-    maxDiscount.value = voucher.maxDiscount ? (voucher.maxDiscount / 100).toFixed(2) : "";
+    minPurchase.value = voucher.minPurchase
+      ? (voucher.minPurchase / 100).toFixed(2)
+      : "";
+    maxDiscount.value = voucher.maxDiscount
+      ? (voucher.maxDiscount / 100).toFixed(2)
+      : "";
     requiredTagIds.value = voucher.requiredTagIds || [];
     isActive.value = voucher.isActive;
     startDate.value = voucher.startDate
@@ -144,7 +148,10 @@ export function useVoucherForm(): UseVoucherFormReturn {
       return "Discount value must be greater than 0";
     }
 
-    if (discountType.value === "percentage" && parseFloat(discountValue.value) > 100) {
+    if (
+      discountType.value === "percentage" &&
+      parseFloat(discountValue.value) > 100
+    ) {
       return "Percentage discount cannot exceed 100%";
     }
 
@@ -185,7 +192,9 @@ export function useVoucherForm(): UseVoucherFormReturn {
       maxDiscount: maxDiscount.value.trim()
         ? Math.round(parseFloat(maxDiscount.value) * 100)
         : null,
-      requiredTagIds: requiredTagIds.value.length > 0 ? requiredTagIds.value : null,
+      requiredTagIds: requiredTagIds.value.length > 0
+        ? requiredTagIds.value
+        : null,
       isActive: isActive.value,
       startDate: startDate.value || null,
       endDate: endDate.value || null,
@@ -218,8 +227,10 @@ export function useVoucherForm(): UseVoucherFormReturn {
     actions: {
       setName: (value: string) => name.value = value,
       setDescription: (value: string) => description.value = value,
-      setVoucherType: (value: "platform" | "shop" | "item_tag") => voucherType.value = value,
-      setDiscountType: (value: "percentage" | "fixed") => discountType.value = value,
+      setVoucherType: (value: "platform" | "shop" | "item_tag") =>
+        voucherType.value = value,
+      setDiscountType: (value: "percentage" | "fixed") =>
+        discountType.value = value,
       setDiscountValue: (value: string) => discountValue.value = value,
       setPlatform: (value: string) => platform.value = value,
       setShopId: (value: string) => shopId.value = value,

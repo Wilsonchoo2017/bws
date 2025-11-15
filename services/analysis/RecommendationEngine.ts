@@ -89,10 +89,14 @@ export class RecommendationEngine {
         price: asCents(recommendedBuyPrice.price),
         reasoning: recommendedBuyPrice.reasoning,
         confidence: recommendedBuyPrice.confidence,
-        breakdown: recommendedBuyPrice.breakdown ? {
-          ...recommendedBuyPrice.breakdown,
-          intrinsicValue: asCents(recommendedBuyPrice.breakdown.intrinsicValue),
-        } : undefined,
+        breakdown: recommendedBuyPrice.breakdown
+          ? {
+            ...recommendedBuyPrice.breakdown,
+            intrinsicValue: asCents(
+              recommendedBuyPrice.breakdown.intrinsicValue,
+            ),
+          }
+          : undefined,
       };
     }
 

@@ -115,6 +115,11 @@ export const handler: Handlers = {
         breakdown: analysis.recommendedBuyPrice.breakdown,
         reasoning: analysis.recommendedBuyPrice.reasoning,
         confidence: analysis.recommendedBuyPrice.confidence,
+        // Include quality and demand score breakdowns
+        qualityScoreBreakdown: analysis.dimensions.quality?.dataPoints
+          .qualityScoreBreakdown,
+        demandScoreBreakdown: analysis.dimensions.demand?.dataPoints
+          .demandScoreBreakdown,
       };
 
       return new Response(JSON.stringify(response), {

@@ -320,7 +320,8 @@ export function calculateDiscountPercentage(
     return null;
   }
 
-  const discount = ((priceBeforeDiscount - currentPrice) / priceBeforeDiscount) *
+  const discount =
+    ((priceBeforeDiscount - currentPrice) / priceBeforeDiscount) *
     100;
   return Math.round(discount * 100) / 100; // Round to 2 decimal places
 }

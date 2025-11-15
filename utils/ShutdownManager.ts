@@ -51,7 +51,10 @@ class ShutdownManager {
    */
   private async shutdown() {
     const timeoutPromise = new Promise((_, reject) => {
-      setTimeout(() => reject(new Error("Shutdown timeout exceeded")), this.shutdownTimeout);
+      setTimeout(
+        () => reject(new Error("Shutdown timeout exceeded")),
+        this.shutdownTimeout,
+      );
     });
 
     try {

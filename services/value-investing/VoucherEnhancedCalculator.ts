@@ -1,9 +1,10 @@
 import type { Cents } from "../../types/price.ts";
-import type { ValueMetrics, VoucherEnhancedMetrics } from "../../types/value-investing.ts";
+import type {
+  ValueMetrics,
+  VoucherEnhancedMetrics,
+} from "../../types/value-investing.ts";
 import type { VoucherTemplate } from "../../types/voucher.ts";
-import {
-  findOptimalVoucherOrder,
-} from "../../utils/voucher.ts";
+import { findOptimalVoucherOrder } from "../../utils/voucher.ts";
 import type { TaggedCartItem } from "../../types/voucher.ts";
 import { ValueCalculator } from "./ValueCalculator.ts";
 
@@ -112,7 +113,14 @@ export class VoucherEnhancedCalculator {
       .filter((v) => v.isValid && v.calculatedDiscount > 0)
       .map((av) => {
         // Reconstruct VoucherTemplate from AppliedVoucher
-        const { calculatedDiscount: _calculatedDiscount, isCapped: _isCapped, originalDiscount: _originalDiscount, isValid: _isValid, validationMessage: _validationMessage, ...template } = av;
+        const {
+          calculatedDiscount: _calculatedDiscount,
+          isCapped: _isCapped,
+          originalDiscount: _originalDiscount,
+          isValid: _isValid,
+          validationMessage: _validationMessage,
+          ...template
+        } = av;
         return template as VoucherTemplate;
       });
 
@@ -200,8 +208,9 @@ export class VoucherEnhancedCalculator {
     if (margin >= 30 || (margin >= 20 && roiImprovement >= 20)) {
       return {
         action: "strong_buy",
-        reasoning:
-          `Excellent deal with vouchers applied. ${margin.toFixed(1)}% margin of safety, ${roiImprovement.toFixed(1)}pp ROI improvement.`,
+        reasoning: `Excellent deal with vouchers applied. ${
+          margin.toFixed(1)
+        }% margin of safety, ${roiImprovement.toFixed(1)}pp ROI improvement.`,
       };
     }
 
@@ -209,8 +218,9 @@ export class VoucherEnhancedCalculator {
     if (margin >= 15) {
       return {
         action: "buy",
-        reasoning:
-          `Good value investing opportunity with vouchers. ${margin.toFixed(1)}% margin of safety.`,
+        reasoning: `Good value investing opportunity with vouchers. ${
+          margin.toFixed(1)
+        }% margin of safety.`,
       };
     }
 
@@ -218,16 +228,18 @@ export class VoucherEnhancedCalculator {
     if (margin >= 5) {
       return {
         action: "hold",
-        reasoning:
-          `Close to worthwhile with vouchers, but margin (${margin.toFixed(1)}%) is below recommended threshold.`,
+        reasoning: `Close to worthwhile with vouchers, but margin (${
+          margin.toFixed(1)
+        }%) is below recommended threshold.`,
       };
     }
 
     // Pass: margin < 5%
     return {
       action: "pass",
-      reasoning:
-        `Not a good deal even with vouchers. Margin of safety (${margin.toFixed(1)}%) is too low.`,
+      reasoning: `Not a good deal even with vouchers. Margin of safety (${
+        margin.toFixed(1)
+      }%) is too low.`,
     };
   }
 }

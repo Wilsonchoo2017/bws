@@ -206,8 +206,12 @@ const holdingCosts2yr = ValueCalculator.calculateHoldingCosts(150, 2);
 console.log(`Sale Price: $${saleValue.toFixed(2)}`);
 console.log();
 console.log("Transaction Costs:");
-console.log(`  Light set (1 lb): $${(realizedLight / 100).toFixed(2)} realized`);
-console.log(`  Heavy set (5 lbs): $${(realizedHeavy / 100).toFixed(2)} realized`);
+console.log(
+  `  Light set (1 lb): $${(realizedLight / 100).toFixed(2)} realized`,
+);
+console.log(
+  `  Heavy set (5 lbs): $${(realizedHeavy / 100).toFixed(2)} realized`,
+);
 console.log(
   `  Cost: -$${(saleValue - realizedLight / 100).toFixed(2)} to -$${
     (saleValue - realizedHeavy / 100).toFixed(2)

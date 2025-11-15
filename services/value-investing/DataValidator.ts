@@ -91,7 +91,9 @@ export class DataValidator {
     // Validate timesSold
     if (input.timesSold !== undefined && input.timesSold !== null) {
       if (input.timesSold < VALIDATION_CONFIG.TIMES_SOLD.MIN) {
-        warnings.push(`timesSold=${input.timesSold} is negative, clamping to 0`);
+        warnings.push(
+          `timesSold=${input.timesSold} is negative, clamping to 0`,
+        );
         sanitized.timesSold = 0;
       } else if (input.timesSold > VALIDATION_CONFIG.TIMES_SOLD.MAX) {
         warnings.push(
@@ -110,7 +112,9 @@ export class DataValidator {
           `observationDays=${input.observationDays} is too short (min ${VALIDATION_CONFIG.OBSERVATION_DAYS.MIN}), rejecting`,
         );
         return { isValid: false, data: null, warnings };
-      } else if (input.observationDays > VALIDATION_CONFIG.OBSERVATION_DAYS.MAX) {
+      } else if (
+        input.observationDays > VALIDATION_CONFIG.OBSERVATION_DAYS.MAX
+      ) {
         warnings.push(
           `observationDays=${input.observationDays} exceeds maximum (${VALIDATION_CONFIG.OBSERVATION_DAYS.MAX}), clamping`,
         );
@@ -123,7 +127,9 @@ export class DataValidator {
     // Validate salesVelocity
     if (input.salesVelocity !== undefined && input.salesVelocity !== null) {
       if (input.salesVelocity < VALIDATION_CONFIG.SALES_VELOCITY.MIN) {
-        warnings.push(`salesVelocity=${input.salesVelocity} is negative, clamping to 0`);
+        warnings.push(
+          `salesVelocity=${input.salesVelocity} is negative, clamping to 0`,
+        );
         sanitized.salesVelocity = 0;
       } else if (input.salesVelocity > VALIDATION_CONFIG.SALES_VELOCITY.MAX) {
         warnings.push(
@@ -141,11 +147,17 @@ export class DataValidator {
       const value = input[field];
       if (value !== undefined && value !== null) {
         if (value < VALIDATION_CONFIG.PRICE.MIN) {
-          warnings.push(`${field}=${value} is below minimum ($${VALIDATION_CONFIG.PRICE.MIN / 100}), rejecting`);
+          warnings.push(
+            `${field}=${value} is below minimum ($${
+              VALIDATION_CONFIG.PRICE.MIN / 100
+            }), rejecting`,
+          );
           // Don't include in sanitized data
         } else if (value > VALIDATION_CONFIG.PRICE.MAX) {
           warnings.push(
-            `${field}=${value} exceeds maximum ($${VALIDATION_CONFIG.PRICE.MAX / 100}), rejecting as bubble pricing`,
+            `${field}=${value} exceeds maximum ($${
+              VALIDATION_CONFIG.PRICE.MAX / 100
+            }), rejecting as bubble pricing`,
           );
           // Don't include in sanitized data
         } else {
@@ -157,7 +169,9 @@ export class DataValidator {
     // Validate availableLots
     if (input.availableLots !== undefined && input.availableLots !== null) {
       if (input.availableLots < VALIDATION_CONFIG.AVAILABLE_LOTS.MIN) {
-        warnings.push(`availableLots=${input.availableLots} is negative, clamping to 0`);
+        warnings.push(
+          `availableLots=${input.availableLots} is negative, clamping to 0`,
+        );
         sanitized.availableLots = 0;
       } else if (input.availableLots > VALIDATION_CONFIG.AVAILABLE_LOTS.MAX) {
         warnings.push(
@@ -172,7 +186,9 @@ export class DataValidator {
     // Validate availableQty
     if (input.availableQty !== undefined && input.availableQty !== null) {
       if (input.availableQty < VALIDATION_CONFIG.AVAILABLE_QTY.MIN) {
-        warnings.push(`availableQty=${input.availableQty} is negative, clamping to 0`);
+        warnings.push(
+          `availableQty=${input.availableQty} is negative, clamping to 0`,
+        );
         sanitized.availableQty = 0;
       } else if (input.availableQty > VALIDATION_CONFIG.AVAILABLE_QTY.MAX) {
         warnings.push(
@@ -185,13 +201,14 @@ export class DataValidator {
     }
 
     // Check if we have enough data to proceed
-    const hasMinimumData =
-      sanitized.timesSold !== undefined ||
+    const hasMinimumData = sanitized.timesSold !== undefined ||
       sanitized.salesVelocity !== undefined ||
       sanitized.availableLots !== undefined;
 
     if (!hasMinimumData) {
-      warnings.push("Insufficient data after validation: need at least timesSold, salesVelocity, or availableLots");
+      warnings.push(
+        "Insufficient data after validation: need at least timesSold, salesVelocity, or availableLots",
+      );
       return { isValid: false, data: null, warnings };
     }
 
@@ -214,7 +231,9 @@ export class DataValidator {
     // Validate partsCount
     if (input.partsCount !== undefined && input.partsCount !== null) {
       if (input.partsCount < VALIDATION_CONFIG.PARTS_COUNT.MIN) {
-        warnings.push(`partsCount=${input.partsCount} is below minimum (1), rejecting`);
+        warnings.push(
+          `partsCount=${input.partsCount} is below minimum (1), rejecting`,
+        );
         // Don't include in sanitized data
       } else if (input.partsCount > VALIDATION_CONFIG.PARTS_COUNT.MAX) {
         warnings.push(
@@ -229,11 +248,17 @@ export class DataValidator {
     // Validate MSRP
     if (input.msrp !== undefined && input.msrp !== null) {
       if (input.msrp < VALIDATION_CONFIG.MSRP.MIN) {
-        warnings.push(`msrp=${input.msrp} is below minimum ($${VALIDATION_CONFIG.MSRP.MIN / 100}), rejecting`);
+        warnings.push(
+          `msrp=${input.msrp} is below minimum ($${
+            VALIDATION_CONFIG.MSRP.MIN / 100
+          }), rejecting`,
+        );
         // Don't include in sanitized data
       } else if (input.msrp > VALIDATION_CONFIG.MSRP.MAX) {
         warnings.push(
-          `msrp=${input.msrp} exceeds maximum ($${VALIDATION_CONFIG.MSRP.MAX / 100}), rejecting as bubble pricing`,
+          `msrp=${input.msrp} exceeds maximum ($${
+            VALIDATION_CONFIG.MSRP.MAX / 100
+          }), rejecting as bubble pricing`,
         );
         // Don't include in sanitized data
       } else {
@@ -249,7 +274,9 @@ export class DataValidator {
     // Validate availableLots (same as demand)
     if (input.availableLots !== undefined && input.availableLots !== null) {
       if (input.availableLots < VALIDATION_CONFIG.AVAILABLE_LOTS.MIN) {
-        warnings.push(`availableLots=${input.availableLots} is negative, clamping to 0`);
+        warnings.push(
+          `availableLots=${input.availableLots} is negative, clamping to 0`,
+        );
         sanitized.availableLots = 0;
       } else if (input.availableLots > VALIDATION_CONFIG.AVAILABLE_LOTS.MAX) {
         warnings.push(
@@ -264,7 +291,9 @@ export class DataValidator {
     // Validate availableQty (same as demand)
     if (input.availableQty !== undefined && input.availableQty !== null) {
       if (input.availableQty < VALIDATION_CONFIG.AVAILABLE_QTY.MIN) {
-        warnings.push(`availableQty=${input.availableQty} is negative, clamping to 0`);
+        warnings.push(
+          `availableQty=${input.availableQty} is negative, clamping to 0`,
+        );
         sanitized.availableQty = 0;
       } else if (input.availableQty > VALIDATION_CONFIG.AVAILABLE_QTY.MAX) {
         warnings.push(
@@ -278,15 +307,23 @@ export class DataValidator {
 
     // Validate optional fields (year released/retired, limited edition)
     if (input.yearReleased !== undefined && input.yearReleased !== null) {
-      if (input.yearReleased < 1949 || input.yearReleased > new Date().getFullYear() + 1) {
-        warnings.push(`yearReleased=${input.yearReleased} is invalid, rejecting`);
+      if (
+        input.yearReleased < 1949 ||
+        input.yearReleased > new Date().getFullYear() + 1
+      ) {
+        warnings.push(
+          `yearReleased=${input.yearReleased} is invalid, rejecting`,
+        );
       } else {
         sanitized.yearReleased = input.yearReleased;
       }
     }
 
     if (input.yearRetired !== undefined && input.yearRetired !== null) {
-      if (input.yearRetired < 1949 || input.yearRetired > new Date().getFullYear() + 10) {
+      if (
+        input.yearRetired < 1949 ||
+        input.yearRetired > new Date().getFullYear() + 10
+      ) {
         warnings.push(`yearRetired=${input.yearRetired} is invalid, rejecting`);
       } else {
         sanitized.yearRetired = input.yearRetired;
@@ -298,10 +335,13 @@ export class DataValidator {
     }
 
     // Check if we have enough data to proceed
-    const hasMinimumData = sanitized.partsCount !== undefined || sanitized.theme !== undefined;
+    const hasMinimumData = sanitized.partsCount !== undefined ||
+      sanitized.theme !== undefined;
 
     if (!hasMinimumData) {
-      warnings.push("Insufficient data after validation: need at least partsCount or theme");
+      warnings.push(
+        "Insufficient data after validation: need at least partsCount or theme",
+      );
       return { isValid: false, data: null, warnings };
     }
 
@@ -329,7 +369,8 @@ export class DataValidator {
     if (currentPrice > firstPrice * 10) {
       return {
         isBubble: true,
-        reason: `Current price (${currentPrice}) is 10x+ higher than first price (${firstPrice})`,
+        reason:
+          `Current price (${currentPrice}) is 10x+ higher than first price (${firstPrice})`,
       };
     }
 
@@ -342,7 +383,9 @@ export class DataValidator {
     if (volatility > 5) {
       return {
         isBubble: true,
-        reason: `Extreme price volatility (${(volatility * 100).toFixed(0)}%) suggests data quality issues`,
+        reason: `Extreme price volatility (${
+          (volatility * 100).toFixed(0)
+        }%) suggests data quality issues`,
       };
     }
 
@@ -368,7 +411,9 @@ export class DataValidator {
     if (avgQtyPerLot > 100) {
       return {
         isUnrealistic: true,
-        reason: `Average ${avgQtyPerLot.toFixed(0)} units per lot is unrealistic`,
+        reason: `Average ${
+          avgQtyPerLot.toFixed(0)
+        } units per lot is unrealistic`,
       };
     }
 

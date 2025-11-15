@@ -20,7 +20,9 @@ export const handler = async (
 
       const offset = (page - 1) * limit;
       const now = new Date();
-      const sevenDaysFromNow = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
+      const sevenDaysFromNow = new Date(
+        now.getTime() + 7 * 24 * 60 * 60 * 1000,
+      );
 
       // Build WHERE conditions
       const conditions = [];
@@ -154,21 +156,30 @@ export const handler = async (
         );
       }
 
-      if (!body.voucherType || !["platform", "shop", "item_tag"].includes(body.voucherType)) {
+      if (
+        !body.voucherType ||
+        !["platform", "shop", "item_tag"].includes(body.voucherType)
+      ) {
         return new Response(
           JSON.stringify({ error: "Missing or invalid 'voucherType' field" }),
           { status: 400, headers: { "Content-Type": "application/json" } },
         );
       }
 
-      if (!body.discountType || !["percentage", "fixed"].includes(body.discountType)) {
+      if (
+        !body.discountType ||
+        !["percentage", "fixed"].includes(body.discountType)
+      ) {
         return new Response(
           JSON.stringify({ error: "Missing or invalid 'discountType' field" }),
           { status: 400, headers: { "Content-Type": "application/json" } },
         );
       }
 
-      if (body.discountValue === undefined || typeof body.discountValue !== "number") {
+      if (
+        body.discountValue === undefined ||
+        typeof body.discountValue !== "number"
+      ) {
         return new Response(
           JSON.stringify({ error: "Missing or invalid 'discountValue' field" }),
           { status: 400, headers: { "Content-Type": "application/json" } },
@@ -221,16 +232,32 @@ export const handler = async (
       if (body.description !== undefined) {
         updates.description = body.description?.trim() || null;
       }
-      if (body.voucherType !== undefined) updates.voucherType = body.voucherType;
-      if (body.discountType !== undefined) updates.discountType = body.discountType;
-      if (body.discountValue !== undefined) updates.discountValue = body.discountValue;
+      if (body.voucherType !== undefined) {
+        updates.voucherType = body.voucherType;
+      }
+      if (body.discountType !== undefined) {
+        updates.discountType = body.discountType;
+      }
+      if (body.discountValue !== undefined) {
+        updates.discountValue = body.discountValue;
+      }
       if (body.platform !== undefined) updates.platform = body.platform;
       if (body.shopId !== undefined) updates.shopId = body.shopId;
-      if (body.shopName !== undefined) updates.shopName = body.shopName?.trim() || null;
-      if (body.minPurchase !== undefined) updates.minPurchase = body.minPurchase;
-      if (body.maxDiscount !== undefined) updates.maxDiscount = body.maxDiscount;
-      if (body.requiredTagIds !== undefined) updates.requiredTagIds = body.requiredTagIds;
-      if (body.tieredDiscounts !== undefined) updates.tieredDiscounts = body.tieredDiscounts;
+      if (body.shopName !== undefined) {
+        updates.shopName = body.shopName?.trim() || null;
+      }
+      if (body.minPurchase !== undefined) {
+        updates.minPurchase = body.minPurchase;
+      }
+      if (body.maxDiscount !== undefined) {
+        updates.maxDiscount = body.maxDiscount;
+      }
+      if (body.requiredTagIds !== undefined) {
+        updates.requiredTagIds = body.requiredTagIds;
+      }
+      if (body.tieredDiscounts !== undefined) {
+        updates.tieredDiscounts = body.tieredDiscounts;
+      }
       if (body.isActive !== undefined) updates.isActive = body.isActive;
       if (body.startDate !== undefined) {
         updates.startDate = body.startDate ? new Date(body.startDate) : null;

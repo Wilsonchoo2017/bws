@@ -165,7 +165,9 @@ export default function QueueDiagnosticsDashboard() {
       }
     } catch (err) {
       console.error("Rescrape trigger error:", err);
-      setError(err instanceof Error ? err.message : "Failed to trigger rescrape");
+      setError(
+        err instanceof Error ? err.message : "Failed to trigger rescrape",
+      );
     } finally {
       setIsTriggeringRescrape(false);
     }
@@ -241,7 +243,9 @@ export default function QueueDiagnosticsDashboard() {
                   onClick={() => setShowRescrapeConfirm(true)}
                   disabled={isLoading || isResetting || isTriggeringRescrape}
                 >
-                  {isTriggeringRescrape && <span class="loading loading-spinner" />}
+                  {isTriggeringRescrape && (
+                    <span class="loading loading-spinner" />
+                  )}
                   {!isTriggeringRescrape && (
                     <svg
                       xmlns="http://www.w3.org/2000/svg"
@@ -538,16 +542,23 @@ export default function QueueDiagnosticsDashboard() {
           <div class="modal-box">
             <h3 class="font-bold text-lg">Trigger Scrape All?</h3>
             <p class="py-4">
-              This will queue scrape jobs for all products that need updates from Bricklink.
-              The scheduler will intelligently prioritize:
+              This will queue scrape jobs for all products that need updates
+              from Bricklink. The scheduler will intelligently prioritize:
             </p>
             <ul class="list-disc list-inside py-2 space-y-1">
-              <li><strong>HIGH priority:</strong> Products missing Bricklink data</li>
-              <li><strong>MEDIUM priority:</strong> Products with incomplete data</li>
-              <li><strong>NORMAL priority:</strong> Products needing refresh</li>
+              <li>
+                <strong>HIGH priority:</strong> Products missing Bricklink data
+              </li>
+              <li>
+                <strong>MEDIUM priority:</strong> Products with incomplete data
+              </li>
+              <li>
+                <strong>NORMAL priority:</strong> Products needing refresh
+              </li>
             </ul>
             <p class="pt-2 text-sm text-base-content/70">
-              Jobs will be processed by the queue worker. This is safe to run and won't reset existing jobs.
+              Jobs will be processed by the queue worker. This is safe to run
+              and won't reset existing jobs.
             </p>
             <div class="modal-action">
               <button
@@ -562,14 +573,17 @@ export default function QueueDiagnosticsDashboard() {
                 onClick={handleTriggerRescrape}
                 disabled={isTriggeringRescrape}
               >
-                {isTriggeringRescrape && <span class="loading loading-spinner" />}
+                {isTriggeringRescrape && (
+                  <span class="loading loading-spinner" />
+                )}
                 Trigger Scrape All
               </button>
             </div>
           </div>
           <div
             class="modal-backdrop"
-            onClick={() => !isTriggeringRescrape && setShowRescrapeConfirm(false)}
+            onClick={() =>
+              !isTriggeringRescrape && setShowRescrapeConfirm(false)}
           />
         </dialog>
       )}

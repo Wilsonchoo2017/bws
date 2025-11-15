@@ -78,13 +78,19 @@ export class QualityCalculator {
     const validation = DataValidator.validateQualityInput(input);
     if (!validation.isValid || !validation.data) {
       // Return default score with low confidence if validation fails
-      console.warn("[QualityCalculator] Validation failed:", validation.warnings);
+      console.warn(
+        "[QualityCalculator] Validation failed:",
+        validation.warnings,
+      );
       return this.createDefaultScore(validation.warnings);
     }
 
     // Log warnings if any
     if (validation.warnings.length > 0) {
-      console.warn("[QualityCalculator] Validation warnings:", validation.warnings);
+      console.warn(
+        "[QualityCalculator] Validation warnings:",
+        validation.warnings,
+      );
     }
 
     // Use sanitized data for calculations
@@ -96,8 +102,7 @@ export class QualityCalculator {
     const scarcityScore = this.calculateScarcityScore(sanitizedInput);
 
     // Sum weighted scores
-    const overallScore =
-      ppdScore.weightedScore +
+    const overallScore = ppdScore.weightedScore +
       complexityScore.weightedScore +
       themePremium.weightedScore +
       scarcityScore.weightedScore;
@@ -107,10 +112,14 @@ export class QualityCalculator {
 
     // Track data quality
     const dataQuality = {
-      hasParts: sanitizedInput.partsCount !== undefined && sanitizedInput.partsCount !== null,
-      hasMsrp: sanitizedInput.msrp !== undefined && sanitizedInput.msrp !== null,
-      hasTheme: sanitizedInput.theme !== undefined && sanitizedInput.theme !== null && sanitizedInput.theme.trim() !== "",
-      hasAvailability: sanitizedInput.availableLots !== undefined && sanitizedInput.availableLots !== null,
+      hasParts: sanitizedInput.partsCount !== undefined &&
+        sanitizedInput.partsCount !== null,
+      hasMsrp: sanitizedInput.msrp !== undefined &&
+        sanitizedInput.msrp !== null,
+      hasTheme: sanitizedInput.theme !== undefined &&
+        sanitizedInput.theme !== null && sanitizedInput.theme.trim() !== "",
+      hasAvailability: sanitizedInput.availableLots !== undefined &&
+        sanitizedInput.availableLots !== null,
     };
 
     return {
@@ -130,7 +139,9 @@ export class QualityCalculator {
    * Component 1: Parts-Per-Dollar (PPD) Score (40% weight)
    * Measures value proposition: higher PPD = better value
    */
-  private static calculatePPDScore(input: QualityCalculatorInput): ComponentScore {
+  private static calculatePPDScore(
+    input: QualityCalculatorInput,
+  ): ComponentScore {
     const weight = CONFIG.WEIGHTS.PPD_SCORE;
 
     // Missing data check
@@ -200,11 +211,16 @@ export class QualityCalculator {
    * Component 2: Complexity Score (30% weight)
    * Based on parts count as complexity indicator
    */
-  private static calculateComplexityScore(input: QualityCalculatorInput): ComponentScore {
+  private static calculateComplexityScore(
+    input: QualityCalculatorInput,
+  ): ComponentScore {
     const weight = CONFIG.WEIGHTS.COMPLEXITY_SCORE;
 
     // Missing data check
-    if (!input.partsCount || input.partsCount < CONFIG.MIN_DATA_REQUIREMENTS.MIN_PARTS_FOR_PPD) {
+    if (
+      !input.partsCount ||
+      input.partsCount < CONFIG.MIN_DATA_REQUIREMENTS.MIN_PARTS_FOR_PPD
+    ) {
       return {
         score: CONFIG.DEFAULTS.SCORE,
         weightedScore: CONFIG.DEFAULTS.SCORE * weight,
@@ -221,31 +237,36 @@ export class QualityCalculator {
       notes = `(massive: ${parts} pieces)`;
     } else if (parts >= CONFIG.COMPLEXITY_SCORE.VERY_LARGE) {
       // 85-100: Linear interpolation
-      const range = CONFIG.COMPLEXITY_SCORE.MASSIVE - CONFIG.COMPLEXITY_SCORE.VERY_LARGE;
+      const range = CONFIG.COMPLEXITY_SCORE.MASSIVE -
+        CONFIG.COMPLEXITY_SCORE.VERY_LARGE;
       const position = (parts - CONFIG.COMPLEXITY_SCORE.VERY_LARGE) / range;
       score = 85 + position * 15;
       notes = `(very large: ${parts} pieces)`;
     } else if (parts >= CONFIG.COMPLEXITY_SCORE.LARGE) {
       // 70-85
-      const range = CONFIG.COMPLEXITY_SCORE.VERY_LARGE - CONFIG.COMPLEXITY_SCORE.LARGE;
+      const range = CONFIG.COMPLEXITY_SCORE.VERY_LARGE -
+        CONFIG.COMPLEXITY_SCORE.LARGE;
       const position = (parts - CONFIG.COMPLEXITY_SCORE.LARGE) / range;
       score = 70 + position * 15;
       notes = `(large: ${parts} pieces)`;
     } else if (parts >= CONFIG.COMPLEXITY_SCORE.MEDIUM) {
       // 55-70
-      const range = CONFIG.COMPLEXITY_SCORE.LARGE - CONFIG.COMPLEXITY_SCORE.MEDIUM;
+      const range = CONFIG.COMPLEXITY_SCORE.LARGE -
+        CONFIG.COMPLEXITY_SCORE.MEDIUM;
       const position = (parts - CONFIG.COMPLEXITY_SCORE.MEDIUM) / range;
       score = 55 + position * 15;
       notes = `(medium: ${parts} pieces)`;
     } else if (parts >= CONFIG.COMPLEXITY_SCORE.MODERATE) {
       // 40-55
-      const range = CONFIG.COMPLEXITY_SCORE.MEDIUM - CONFIG.COMPLEXITY_SCORE.MODERATE;
+      const range = CONFIG.COMPLEXITY_SCORE.MEDIUM -
+        CONFIG.COMPLEXITY_SCORE.MODERATE;
       const position = (parts - CONFIG.COMPLEXITY_SCORE.MODERATE) / range;
       score = 40 + position * 15;
       notes = `(moderate: ${parts} pieces)`;
     } else if (parts >= CONFIG.COMPLEXITY_SCORE.SMALL) {
       // 25-40
-      const range = CONFIG.COMPLEXITY_SCORE.MODERATE - CONFIG.COMPLEXITY_SCORE.SMALL;
+      const range = CONFIG.COMPLEXITY_SCORE.MODERATE -
+        CONFIG.COMPLEXITY_SCORE.SMALL;
       const position = (parts - CONFIG.COMPLEXITY_SCORE.SMALL) / range;
       score = 25 + position * 15;
       notes = `(small: ${parts} pieces)`;
@@ -267,7 +288,9 @@ export class QualityCalculator {
    * Component 3: Theme Premium (20% weight)
    * Certain themes historically appreciate better
    */
-  private static calculateThemePremium(input: QualityCalculatorInput): ComponentScore {
+  private static calculateThemePremium(
+    input: QualityCalculatorInput,
+  ): ComponentScore {
     const weight = CONFIG.WEIGHTS.THEME_PREMIUM;
 
     // Missing data check
@@ -287,18 +310,15 @@ export class QualityCalculator {
     if (CONFIG.THEME_PREMIUM.PREMIUM_THEMES.includes(theme)) {
       score = 100;
       notes = `(premium: ${theme})`;
-    }
-    // Check strong themes (Tier 2: 75 points)
+    } // Check strong themes (Tier 2: 75 points)
     else if (CONFIG.THEME_PREMIUM.STRONG_THEMES.includes(theme)) {
       score = 75;
       notes = `(strong: ${theme})`;
-    }
-    // Check moderate themes (Tier 3: 50 points)
+    } // Check moderate themes (Tier 3: 50 points)
     else if (CONFIG.THEME_PREMIUM.MODERATE_THEMES.includes(theme)) {
       score = 50;
       notes = `(moderate: ${theme})`;
-    }
-    // Default: 25 points (unknown/weak theme)
+    } // Default: 25 points (unknown/weak theme)
     else {
       score = 25;
       notes = `(standard: ${theme})`;
@@ -315,7 +335,9 @@ export class QualityCalculator {
    * Component 4: Scarcity Score (10% weight)
    * Based on available lots (fewer = scarcer)
    */
-  private static calculateScarcityScore(input: QualityCalculatorInput): ComponentScore {
+  private static calculateScarcityScore(
+    input: QualityCalculatorInput,
+  ): ComponentScore {
     const weight = CONFIG.WEIGHTS.SCARCITY_SCORE;
 
     // Missing data check
@@ -354,13 +376,15 @@ export class QualityCalculator {
       notes = `(ultra rare: ${lots}${suffix} lots)`;
     } else if (lots < CONFIG.SCARCITY_SCORE.VERY_RARE) {
       // 85-100
-      const range = CONFIG.SCARCITY_SCORE.VERY_RARE - CONFIG.SCARCITY_SCORE.ULTRA_RARE;
+      const range = CONFIG.SCARCITY_SCORE.VERY_RARE -
+        CONFIG.SCARCITY_SCORE.ULTRA_RARE;
       const position = (lots - CONFIG.SCARCITY_SCORE.ULTRA_RARE) / range;
       score = 100 - position * 15; // Inverse: fewer = higher
       notes = `(very rare: ${lots}${suffix} lots)`;
     } else if (lots < CONFIG.SCARCITY_SCORE.RARE) {
       // 70-85
-      const range = CONFIG.SCARCITY_SCORE.RARE - CONFIG.SCARCITY_SCORE.VERY_RARE;
+      const range = CONFIG.SCARCITY_SCORE.RARE -
+        CONFIG.SCARCITY_SCORE.VERY_RARE;
       const position = (lots - CONFIG.SCARCITY_SCORE.VERY_RARE) / range;
       score = 85 - position * 15;
       notes = `(rare: ${lots}${suffix} lots)`;
@@ -372,13 +396,15 @@ export class QualityCalculator {
       notes = `(limited: ${lots}${suffix} lots)`;
     } else if (lots < CONFIG.SCARCITY_SCORE.COMMON) {
       // 40-55
-      const range = CONFIG.SCARCITY_SCORE.COMMON - CONFIG.SCARCITY_SCORE.LIMITED;
+      const range = CONFIG.SCARCITY_SCORE.COMMON -
+        CONFIG.SCARCITY_SCORE.LIMITED;
       const position = (lots - CONFIG.SCARCITY_SCORE.LIMITED) / range;
       score = 55 - position * 15;
       notes = `(common: ${lots}${suffix} lots)`;
     } else if (lots < CONFIG.SCARCITY_SCORE.ABUNDANT) {
       // 25-40
-      const range = CONFIG.SCARCITY_SCORE.ABUNDANT - CONFIG.SCARCITY_SCORE.COMMON;
+      const range = CONFIG.SCARCITY_SCORE.ABUNDANT -
+        CONFIG.SCARCITY_SCORE.COMMON;
       const position = (lots - CONFIG.SCARCITY_SCORE.COMMON) / range;
       score = 40 - position * 15;
       notes = `(abundant: ${lots}${suffix} lots)`;

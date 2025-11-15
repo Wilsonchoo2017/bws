@@ -39,6 +39,7 @@ import { getWorldBricksRepository } from "../worldbricks/WorldBricksRepository.t
 import { WorldBricksScraperService } from "../worldbricks/WorldBricksScraperService.ts";
 import { queueLogger } from "../../utils/logger.ts";
 import { MaintenanceError } from "../../types/errors/MaintenanceError.ts";
+import { SetNotFoundError } from "../../types/errors/SetNotFoundError.ts";
 
 /**
  * Job priority levels
@@ -48,6 +49,7 @@ export enum JobPriority {
   HIGH = 1, // Missing data - scrape immediately
   MEDIUM = 5, // Incomplete data - re-scrape soon
   NORMAL = 10, // Regular scheduled scrapes
+  LOW = 20, // Set not found - far future retry
 }
 
 /**
@@ -107,6 +109,8 @@ export class QueueService {
   private connection: Redis | null = null;
   private isInitialized = false;
   private bricklinkSemaphoreKey = "bricklink:scrape:lock";
+  private worldbricksSemaphoreKey = "worldbricks:scrape:lock";
+  private redditSemaphoreKey = "reddit:scrape:lock";
 
   /**
    * Initialize the queue service
@@ -247,6 +251,17 @@ export class QueueService {
         } as ScrapeResult;
       }
 
+      // Handle set not found errors - mark as completed, schedule far future retry
+      if (SetNotFoundError.isSetNotFoundError(error)) {
+        await this.handleSetNotFoundError(error, job);
+        // Return success result to mark job as completed (not failed)
+        return {
+          success: false,
+          error: error.message,
+          setNotFound: true,
+        } as ScrapeResult;
+      }
+
       queueLogger.error(`Job processing error for ${job.id}`, {
         jobId: job.id,
         jobType: job.name,
@@ -324,6 +339,69 @@ export class QueueService {
   }
 
   /**
+   * Handle set not found error by scheduling a single retry in 90 days
+   * Search returned 200 OK but no results = set doesn't exist NOW
+   * But databases can add old sets retroactively, so check again in 90 days
+   * No immediate retries - those are skipped by throwing SetNotFoundError
+   */
+  private async handleSetNotFoundError(
+    error: SetNotFoundError,
+    job: Job,
+  ): Promise<void> {
+    const delayMs = 90 * 24 * 60 * 60 * 1000; // 90 days
+
+    queueLogger.warn(
+      `Set not found - scheduling single retry in 90 days (no immediate retries)`,
+      {
+        jobId: job.id,
+        jobType: job.name,
+        setNumber: error.setNumber,
+        source: error.source,
+        errorMessage: error.message,
+        retryDelayDays: 90,
+        rescheduledFor: new Date(Date.now() + delayMs).toISOString(),
+      },
+    );
+
+    try {
+      if (!this.queue) {
+        throw new Error("Queue not initialized");
+      }
+
+      // Schedule single retry in 90 days
+      await this.queue.add(
+        job.name,
+        job.data,
+        {
+          delay: delayMs,
+          priority: JobPriority.LOW,
+          attempts: 1, // Only 1 attempt when it runs in 90 days
+          removeOnComplete: true,
+        },
+      );
+
+      queueLogger.info(
+        `Scheduled 90-day retry for set ${error.setNumber}`,
+        {
+          jobId: job.id,
+          setNumber: error.setNumber,
+          delayDays: 90,
+        },
+      );
+    } catch (rescheduleError) {
+      queueLogger.error(
+        `Failed to schedule 90-day retry`,
+        {
+          jobId: job.id,
+          setNumber: error.setNumber,
+          error: rescheduleError.message,
+        },
+      );
+      // Don't throw - job still marked as handled
+    }
+  }
+
+  /**
    * Acquire a lock for Bricklink scraping (ensures sequential processing)
    * Uses Redis SET NX (set if not exists) with expiration
    */
@@ -365,6 +443,93 @@ export class QueueService {
     if (!this.connection) return;
     await this.connection.del(this.bricklinkSemaphoreKey);
     queueLogger.info("Released Bricklink scraping lock");
+  }
+
+  /**
+   * Acquire a lock for WorldBricks scraping (ensures sequential processing)
+   * Uses Redis SET NX (set if not exists) with expiration
+   */
+  private async acquireWorldBricksLock(
+    timeoutMs: number = 300000,
+  ): Promise<boolean> {
+    if (!this.connection) return false;
+
+    const maxWaitTime = timeoutMs;
+    const startTime = Date.now();
+
+    while (Date.now() - startTime < maxWaitTime) {
+      // Try to acquire lock with 10 minute expiration (longer than expected scrape time with rate limits)
+      const acquired = await this.connection.set(
+        this.worldbricksSemaphoreKey,
+        "locked",
+        "EX",
+        600, // 10 minutes (longer than BrickLink due to 1-3 minute rate limits)
+        "NX", // Only set if not exists
+      );
+
+      if (acquired) {
+        queueLogger.info("Acquired WorldBricks scraping lock");
+        return true;
+      }
+
+      // Wait 1 second before retrying
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+    }
+
+    queueLogger.warn("Failed to acquire WorldBricks lock within timeout");
+    return false;
+  }
+
+  /**
+   * Release the WorldBricks scraping lock
+   */
+  private async releaseWorldBricksLock(): Promise<void> {
+    if (!this.connection) return;
+    await this.connection.del(this.worldbricksSemaphoreKey);
+    queueLogger.info("Released WorldBricks scraping lock");
+  }
+
+  /**
+   * Acquire a distributed lock for Reddit scraping to ensure sequential processing
+   */
+  private async acquireRedditLock(
+    timeoutMs: number = 300000,
+  ): Promise<boolean> {
+    if (!this.connection) return false;
+
+    const maxWaitTime = timeoutMs;
+    const startTime = Date.now();
+
+    while (Date.now() - startTime < maxWaitTime) {
+      // Try to acquire lock with 5 minute expiration (sufficient for Reddit's 5-10s rate limits)
+      const acquired = await this.connection.set(
+        this.redditSemaphoreKey,
+        "locked",
+        "EX",
+        300, // 5 minutes
+        "NX", // Only set if not exists
+      );
+
+      if (acquired) {
+        queueLogger.info("Acquired Reddit scraping lock");
+        return true;
+      }
+
+      // Wait 1 second before retrying
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+    }
+
+    queueLogger.warn("Failed to acquire Reddit lock within timeout");
+    return false;
+  }
+
+  /**
+   * Release the Reddit scraping lock
+   */
+  private async releaseRedditLock(): Promise<void> {
+    if (!this.connection) return;
+    await this.connection.del(this.redditSemaphoreKey);
+    queueLogger.info("Released Reddit scraping lock");
   }
 
   /**
@@ -496,20 +661,49 @@ export class QueueService {
 
   /**
    * Process Reddit search job
+   * Uses a distributed lock to ensure only one Reddit job runs at a time
    */
   private async processRedditSearchJob(
     data: RedditSearchJobData,
   ): Promise<SearchResult> {
-    const rateLimiter = getRateLimiter();
-    const repository = getRedditRepository();
+    // Acquire lock before scraping
+    const lockAcquired = await this.acquireRedditLock();
+    if (!lockAcquired) {
+      throw new Error(
+        "Failed to acquire Reddit scraping lock - another job may be running",
+      );
+    }
 
-    const searchService = createRedditSearchService(rateLimiter, repository);
+    try {
+      const httpClient = getHttpClient();
+      const rateLimiter = getRateLimiter();
+      const repository = getRedditRepository();
 
-    return await searchService.search({
-      setNumber: data.setNumber,
-      subreddit: data.subreddit,
-      saveToDb: data.saveToDb ?? true,
-    });
+      const searchService = createRedditSearchService(
+        httpClient,
+        rateLimiter,
+        repository,
+      );
+
+      const result = await searchService.search({
+        setNumber: data.setNumber,
+        subreddit: data.subreddit,
+        saveToDb: data.saveToDb ?? true,
+      });
+
+      // Update next_scrape_at after successful scrape
+      if (result.success) {
+        await repository.updateNextScrapeAt(
+          data.setNumber,
+          data.subreddit || "lego",
+        );
+      }
+
+      return result;
+    } finally {
+      // Always release the lock, even if scraping failed
+      await this.releaseRedditLock();
+    }
   }
 
   /**
@@ -535,21 +729,30 @@ export class QueueService {
 
   /**
    * Process WorldBricks scrape job
+   * Uses a distributed lock to ensure only one WorldBricks job runs at a time
    */
   private async processWorldBricksJob(
     data: WorldBricksJobData,
   ): Promise<{ success: boolean; setNumber: string }> {
-    const httpClient = getHttpClient();
-    const rateLimiter = getRateLimiter();
-    const repository = getWorldBricksRepository();
-
-    const scraper = new WorldBricksScraperService(
-      httpClient,
-      rateLimiter,
-      repository,
-    );
+    // Acquire lock before scraping
+    const lockAcquired = await this.acquireWorldBricksLock();
+    if (!lockAcquired) {
+      throw new Error(
+        "Failed to acquire WorldBricks scraping lock - another job may be running",
+      );
+    }
 
     try {
+      const httpClient = getHttpClient();
+      const rateLimiter = getRateLimiter();
+      const repository = getWorldBricksRepository();
+
+      const scraper = new WorldBricksScraperService(
+        httpClient,
+        rateLimiter,
+        repository,
+      );
+
       const result = await scraper.scrape({
         setNumber: data.setNumber,
         saveToDb: data.saveToDb ?? true,
@@ -574,6 +777,9 @@ export class QueueService {
         },
       );
       throw error;
+    } finally {
+      // Always release lock, even if scraping failed
+      await this.releaseWorldBricksLock();
     }
   }
 

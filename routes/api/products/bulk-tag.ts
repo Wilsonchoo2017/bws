@@ -1,7 +1,10 @@
 import { FreshContext } from "$fresh/server.ts";
 import { eq, sql } from "drizzle-orm";
 import { db } from "../../../db/client.ts";
-import { products, productTags as productTagsTable } from "../../../db/schema.ts";
+import {
+  products,
+  productTags as productTagsTable,
+} from "../../../db/schema.ts";
 
 export const handler = async (
   req: Request,
@@ -22,14 +25,18 @@ export const handler = async (
 
     if (!Array.isArray(body.productIds) || body.productIds.length === 0) {
       return new Response(
-        JSON.stringify({ error: "productIds array is required and must not be empty" }),
+        JSON.stringify({
+          error: "productIds array is required and must not be empty",
+        }),
         { status: 400, headers: { "Content-Type": "application/json" } },
       );
     }
 
     if (!body.action || !["add", "remove", "replace"].includes(body.action)) {
       return new Response(
-        JSON.stringify({ error: "action must be 'add', 'remove', or 'replace'" }),
+        JSON.stringify({
+          error: "action must be 'add', 'remove', or 'replace'",
+        }),
         { status: 400, headers: { "Content-Type": "application/json" } },
       );
     }
@@ -76,7 +83,8 @@ export const handler = async (
     for (const product of productsToUpdate) {
       let newTags: Array<{ tagId: string; addedAt: string }> = [];
 
-      const currentTags = (product.tags as Array<{ tagId: string; addedAt: string }>) || [];
+      const currentTags =
+        (product.tags as Array<{ tagId: string; addedAt: string }>) || [];
 
       if (body.action === "replace") {
         // Replace all tags

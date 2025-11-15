@@ -132,7 +132,10 @@ export function formatCurrency(
   currency: string = "SGD",
   decimals: number = 2,
 ): string {
-  if (amountInCents === null || amountInCents === undefined || isNaN(amountInCents)) return "N/A";
+  if (
+    amountInCents === null || amountInCents === undefined ||
+    isNaN(amountInCents)
+  ) return "N/A";
   const dollars = amountInCents / 100;
   return `${currency} ${dollars.toFixed(decimals)}`;
 }

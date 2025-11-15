@@ -67,7 +67,9 @@ export class DemandAnalyzer extends BaseAnalyzer<DemandData> {
         reasons.push(
           `Active market (Avg: $${data.bricklinkCurrentNewAvg.toFixed(2)})`,
         );
-        pricingParts.push(`Current avg: $${data.bricklinkCurrentNewAvg.toFixed(2)}`);
+        pricingParts.push(
+          `Current avg: $${data.bricklinkCurrentNewAvg.toFixed(2)}`,
+        );
       }
 
       // Price trend analysis
@@ -122,7 +124,8 @@ export class DemandAnalyzer extends BaseAnalyzer<DemandData> {
         weight: 0.60,
         score: pricingScore,
         calculation: pricingCalc,
-        reasoning: "Primary demand signal. Price trends and market liquidity indicate buying interest. Rising prices + limited lots = strong demand.",
+        reasoning:
+          "Primary demand signal. Price trends and market liquidity indicate buying interest. Rising prices + limited lots = strong demand.",
       });
     } else {
       missingData.push("Bricklink market pricing data");
@@ -153,7 +156,9 @@ export class DemandAnalyzer extends BaseAnalyzer<DemandData> {
         } else {
           reasons.push("Low liquidity");
         }
-        liquidityParts.push(`${data.bricklinkSalesVelocity.toFixed(2)} sales/day`);
+        liquidityParts.push(
+          `${data.bricklinkSalesVelocity.toFixed(2)} sales/day`,
+        );
       }
 
       if (data.bricklinkRecentSales30d !== undefined) {
@@ -167,7 +172,11 @@ export class DemandAnalyzer extends BaseAnalyzer<DemandData> {
       }
 
       if (data.bricklinkAvgDaysBetweenSales !== undefined) {
-        liquidityParts.push(`Avg ${data.bricklinkAvgDaysBetweenSales.toFixed(1)} days between sales`);
+        liquidityParts.push(
+          `Avg ${
+            data.bricklinkAvgDaysBetweenSales.toFixed(1)
+          } days between sales`,
+        );
       }
 
       components.push({
@@ -175,7 +184,8 @@ export class DemandAnalyzer extends BaseAnalyzer<DemandData> {
         weight: 0.25,
         score: liquidityScore,
         calculation: `Based on: ${liquidityParts.join(", ")}`,
-        reasoning: "Market liquidity indicator. Higher sales velocity = easier to buy/sell = more reliable market. Like trading volume in stocks.",
+        reasoning:
+          "Market liquidity indicator. Higher sales velocity = easier to buy/sell = more reliable market. Like trading volume in stocks.",
       });
     } else if (hasLegacyBricklinkData && !hasBricklinkPricing) {
       // Fallback to legacy Bricklink data ONLY if no pricing data (reduced weight)
@@ -206,7 +216,8 @@ export class DemandAnalyzer extends BaseAnalyzer<DemandData> {
         weight: 0.15,
         score: resaleScore,
         calculation: `Based on: ${legacyParts.join(", ")}`,
-        reasoning: "Fallback resale market activity indicator when detailed pricing data is unavailable.",
+        reasoning:
+          "Fallback resale market activity indicator when detailed pricing data is unavailable.",
       });
     } else {
       missingData.push("Bricklink sales velocity data");
@@ -252,7 +263,8 @@ export class DemandAnalyzer extends BaseAnalyzer<DemandData> {
         weight: 0.10,
         score: momentumScore,
         calculation: `Based on: ${momentumParts.join(", ")}`,
-        reasoning: "Technical indicators of market momentum. RSI >70 = overbought, <30 = oversold. Bullish trends + rising volume = strong demand signal.",
+        reasoning:
+          "Technical indicators of market momentum. RSI >70 = overbought, <30 = oversold. Bullish trends + rising volume = strong demand signal.",
       });
     }
 
@@ -288,7 +300,8 @@ export class DemandAnalyzer extends BaseAnalyzer<DemandData> {
         weight: 0.03,
         score: communityScore,
         calculation: `Based on: ${communityParts.join(", ")}`,
-        reasoning: "Social validation from Reddit community. More posts + higher engagement = stronger collector interest and awareness.",
+        reasoning:
+          "Social validation from Reddit community. More posts + higher engagement = stronger collector interest and awareness.",
       });
     }
 
@@ -319,7 +332,8 @@ export class DemandAnalyzer extends BaseAnalyzer<DemandData> {
         weight: 0.02,
         score: salesScore,
         calculation: `Based on: ${retailParts.join(", ")}`,
-        reasoning: "Retail platform sales indicate market awareness and mainstream appeal. High volume suggests broad consumer interest.",
+        reasoning:
+          "Retail platform sales indicate market awareness and mainstream appeal. High volume suggests broad consumer interest.",
       });
     }
 
@@ -344,7 +358,8 @@ export class DemandAnalyzer extends BaseAnalyzer<DemandData> {
 
     // Build formula string
     const formula = components.length > 0
-      ? components.map((c) => `${c.name} (${(c.weight * 100).toFixed(0)}%)`).join(" + ")
+      ? components.map((c) => `${c.name} (${(c.weight * 100).toFixed(0)}%)`)
+        .join(" + ")
       : "Insufficient data";
 
     // Build breakdown

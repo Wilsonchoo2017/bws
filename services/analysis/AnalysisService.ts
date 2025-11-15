@@ -176,7 +176,10 @@ export function getAnalysisService(): AnalysisService {
       analysisServiceInstance = new AnalysisService(queueService);
     } catch (error) {
       // Fall back to no queue service if not available
-      console.warn("[AnalysisService] QueueService not available, auto-enrichment disabled:", error);
+      console.warn(
+        "[AnalysisService] QueueService not available, auto-enrichment disabled:",
+        error,
+      );
       analysisServiceInstance = new AnalysisService();
     }
   }

@@ -18,13 +18,18 @@ export class BricklinkDataValidator {
    * For prerequisite checks, we require ALL four boxes to be populated.
    */
   static validateCompleteness(
-    bricklinkItem: BricklinkItem | null | undefined
+    bricklinkItem: BricklinkItem | null | undefined,
   ): BricklinkDataValidationResult {
     if (!bricklinkItem) {
       return {
         isComplete: false,
-        missingBoxes: ["sixMonthNew", "sixMonthUsed", "currentNew", "currentUsed"],
-        message: "No Bricklink item data exists"
+        missingBoxes: [
+          "sixMonthNew",
+          "sixMonthUsed",
+          "currentNew",
+          "currentUsed",
+        ],
+        message: "No Bricklink item data exists",
       };
     }
 
@@ -33,7 +38,7 @@ export class BricklinkDataValidator {
       { key: "sixMonthNew", value: bricklinkItem.sixMonthNew },
       { key: "sixMonthUsed", value: bricklinkItem.sixMonthUsed },
       { key: "currentNew", value: bricklinkItem.currentNew },
-      { key: "currentUsed", value: bricklinkItem.currentUsed }
+      { key: "currentUsed", value: bricklinkItem.currentUsed },
     ];
 
     for (const box of pricingBoxes) {
@@ -49,7 +54,7 @@ export class BricklinkDataValidator {
       missingBoxes,
       message: isComplete
         ? undefined
-        : `Missing pricing data: ${missingBoxes.join(", ")}`
+        : `Missing pricing data: ${missingBoxes.join(", ")}`,
     };
   }
 
@@ -57,7 +62,7 @@ export class BricklinkDataValidator {
    * Validates an array of Bricklink items and returns which ones are incomplete
    */
   static validateBatch(
-    items: Map<number, BricklinkItem | null>
+    items: Map<number, BricklinkItem | null>,
   ): Map<number, BricklinkDataValidationResult> {
     const results = new Map<number, BricklinkDataValidationResult>();
 

@@ -54,7 +54,11 @@ export function VoucherTableRow({
       shop: "Shop",
       item_tag: "Tag-based",
     };
-    return <span class="badge badge-outline badge-sm">{typeMap[voucher.voucherType]}</span>;
+    return (
+      <span class="badge badge-outline badge-sm">
+        {typeMap[voucher.voucherType]}
+      </span>
+    );
   };
 
   // Format dates
