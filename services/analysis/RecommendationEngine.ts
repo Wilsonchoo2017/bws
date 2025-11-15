@@ -163,6 +163,7 @@ export class RecommendationEngine {
       // FUNDAMENTAL VALUE (MSRP-based)
       msrp: input.pricing.originalRetailPrice, // CRITICAL: Original retail price
       currentRetailPrice: input.pricing.currentRetailPrice,
+      originalRetailPrice: input.pricing.originalRetailPrice, // For deal quality analysis
       // Market prices (for comparison only)
       bricklinkAvgPrice: input.pricing.bricklink?.current.newAvg,
       bricklinkMaxPrice: input.pricing.bricklink?.current.newMax,

@@ -173,6 +173,23 @@ export const MAINTENANCE_CONFIG = {
 } as const;
 
 /**
+ * Rate limit error (403) handling configuration
+ * Progressive backoff: 1 hour -> 6 hours -> 24 hours
+ */
+export const RATE_LIMIT_ERROR_CONFIG = {
+  /** Progressive delay durations for consecutive 403 errors (in milliseconds) */
+  PROGRESSIVE_DELAYS_MS: [
+    3600000, // 1 hour (1st 403)
+    21600000, // 6 hours (2nd consecutive 403)
+    86400000, // 24 hours (3rd+ consecutive 403)
+  ],
+  /** Maximum consecutive 403s to track (after this, use the last delay) */
+  MAX_CONSECUTIVE_COUNT: 3,
+  /** TTL for 403 counter in Redis (reset after 48 hours of no 403s) */
+  COUNTER_TTL_MS: 172800000, // 48 hours
+} as const;
+
+/**
  * Proxy configuration (for future use)
  */
 export const PROXY_CONFIG = {

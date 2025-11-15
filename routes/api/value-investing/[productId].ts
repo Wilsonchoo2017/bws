@@ -12,6 +12,8 @@ import { db } from "../../../db/client.ts";
 import { products } from "../../../db/schema.ts";
 import { AnalysisService } from "../../../services/analysis/AnalysisService.ts";
 import { asCents, type Cents } from "../../../types/price.ts";
+import { ValueCalculator } from "../../../services/value-investing/ValueCalculator.ts";
+import type { IntrinsicValueInputs } from "../../../types/value-investing.ts";
 
 export const handler: Handlers = {
   async GET(_req, ctx) {
@@ -91,6 +93,26 @@ export const handler: Handlers = {
             Math.round(analysis.recommendedBuyPrice.price / (1 - 0.25)),
           ); // Estimate assuming 25% margin
 
+      // Calculate deal quality metrics
+      const dealQualityInputs: IntrinsicValueInputs = {
+        currentRetailPrice: currentPriceCents,
+        originalRetailPrice: product.priceBeforeDiscount
+          ? asCents(product.priceBeforeDiscount)
+          : undefined,
+        bricklinkAvgPrice: analysis.recommendedBuyPrice.breakdown?.inputs
+          .bricklinkAvgPrice
+          ? asCents(analysis.recommendedBuyPrice.breakdown.inputs.bricklinkAvgPrice)
+          : undefined,
+        msrp: analysis.recommendedBuyPrice.breakdown?.inputs.msrp
+          ? asCents(analysis.recommendedBuyPrice.breakdown.inputs.msrp)
+          : undefined,
+      };
+
+      const dealQuality = ValueCalculator.calculateDealQuality(
+        dealQualityInputs,
+        intrinsicValueCents,
+      );
+
       const valueMetrics = {
         currentPrice: currentPriceCents,
         targetPrice: targetPriceCents,
@@ -101,6 +123,16 @@ export const handler: Handlers = {
         expectedROI:
           ((intrinsicValueCents - currentPriceCents) / currentPriceCents) * 100,
         timeHorizon: analysis.timeHorizon || "Unknown",
+        // Deal quality metrics
+        dealQualityScore: dealQuality?.dealQualityScore,
+        dealQualityLabel: dealQuality?.dealQualityLabel,
+        dealRecommendation: dealQuality?.recommendation,
+        retailDiscountPercent: dealQuality?.retailDiscountPercent,
+        priceToMarketRatio: dealQuality?.priceToMarketRatio,
+        priceToValueRatio: dealQuality?.priceToValueRatio,
+        // Include detailed calculation breakdown
+        calculationBreakdown: analysis.recommendedBuyPrice.breakdown
+          ?.calculationBreakdown,
       };
 
       // Return the intrinsic value data formatted for the IntrinsicValueCard
@@ -115,11 +147,12 @@ export const handler: Handlers = {
         breakdown: analysis.recommendedBuyPrice.breakdown,
         reasoning: analysis.recommendedBuyPrice.reasoning,
         confidence: analysis.recommendedBuyPrice.confidence,
-        // Include quality and demand score breakdowns
+        // Include quality, demand, and availability score breakdowns
         qualityScoreBreakdown: analysis.dimensions.quality?.dataPoints
           .qualityScoreBreakdown,
         demandScoreBreakdown: analysis.dimensions.demand?.dataPoints
           .demandScoreBreakdown,
+        availabilityScoreBreakdown: analysis.dimensions.availability?.breakdown,
       };
 
       return new Response(JSON.stringify(response), {

@@ -14,9 +14,9 @@ import type {
 export class InvestmentFocusStrategy extends BaseStrategy {
   constructor() {
     const weights: DimensionWeights = {
-      availability: 0.55, // Highest priority - retirement timing is critical (40% + 15%)
-      demand: 0.35, // Very important - resale market activity (20% + 15%)
-      quality: 0.10, // Moderate priority - LEGO quality and ratings (5% + 5%)
+      demand: 0.45, // Highest priority - no demand means no sale, regardless of price
+      availability: 0.40, // Important - retirement timing creates scarcity
+      quality: 0.15, // Moderate priority - ensures product appeal and collectability
     };
 
     super(
@@ -53,7 +53,7 @@ export class InvestmentFocusStrategy extends BaseStrategy {
       } else if (availabilityData.retiringSoon) {
         recommendation.timeHorizon = "6-12 months post-retirement";
       } else {
-        recommendation.timeHorizon = "18+ months (not retiring soon)";
+        recommendation.timeHorizon = "12-24 months (active set)";
       }
 
       if (

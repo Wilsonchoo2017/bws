@@ -20,6 +20,8 @@ import {
   getRandomViewport,
 } from "../../config/scraper.config.ts";
 import { BricklinkMaintenanceDetector } from "../bricklink/BricklinkMaintenanceDetector.ts";
+import { RateLimitError } from "../../types/errors/RateLimitError.ts";
+import { rateLimitErrorTracker } from "../../utils/RateLimitErrorTracker.ts";
 
 /**
  * Interface for HTTP request options
@@ -226,6 +228,44 @@ export class HttpClientService {
   }
 
   /**
+   * Extract domain from URL for rate limit tracking
+   */
+  private extractDomain(url: string): string {
+    try {
+      const urlObj = new URL(url);
+      return urlObj.hostname;
+    } catch {
+      return "unknown";
+    }
+  }
+
+  /**
+   * Handle 403 Forbidden response by tracking and throwing RateLimitError
+   */
+  private async handle403Error(url: string, status: number): Promise<void> {
+    if (status === 403) {
+      const domain = this.extractDomain(url);
+      const consecutive403Count = await rateLimitErrorTracker.increment(domain);
+      const delayMs = rateLimitErrorTracker.calculateDelay(consecutive403Count);
+
+      throw new RateLimitError(
+        `Rate limit detected (403 Forbidden) for ${domain}. This is consecutive 403 #${consecutive403Count}.`,
+        domain,
+        consecutive403Count,
+        delayMs,
+      );
+    }
+  }
+
+  /**
+   * Reset 403 counter on successful request
+   */
+  private async resetRateLimitCounter(url: string): Promise<void> {
+    const domain = this.extractDomain(url);
+    await rateLimitErrorTracker.reset(domain);
+  }
+
+  /**
    * Fetch a URL with full anti-bot protection
    */
   async fetch(options: HttpRequestOptions): Promise<HttpResponse> {
@@ -272,10 +312,16 @@ export class HttpClientService {
       const status = response.status();
       const finalUrl = page.url();
 
+      // Check for 403 Forbidden (rate limiting)
+      await this.handle403Error(finalUrl, status);
+
       // Check for Bricklink maintenance page (only for bricklink.com domains)
       if (finalUrl.includes("bricklink.com")) {
         BricklinkMaintenanceDetector.checkAndThrow(html);
       }
+
+      // Reset 403 counter on successful request
+      await this.resetRateLimitCounter(finalUrl);
 
       console.log(`✅ Successfully fetched: ${finalUrl} (Status: ${status})`);
 
@@ -286,8 +332,11 @@ export class HttpClientService {
       };
     } catch (error) {
       console.error(`❌ Failed to fetch ${options.url}:`, error);
-      // Re-throw MaintenanceError as-is, don't wrap it
+      // Re-throw special errors as-is, don't wrap them
       if (error.name === "MaintenanceError" || error.isMaintenanceError) {
+        throw error;
+      }
+      if (error.name === "RateLimitError" || error.isRateLimitError) {
         throw error;
       }
       throw new Error(
@@ -375,13 +424,20 @@ export class HttpClientService {
         redirect: "follow",
       });
 
-      if (!response.ok && response.status !== 200) {
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      const status = response.status;
+      const finalUrl = response.url;
+
+      // Check for 403 Forbidden (rate limiting)
+      await this.handle403Error(finalUrl, status);
+
+      if (!response.ok && status !== 200) {
+        throw new Error(`HTTP ${status}: ${response.statusText}`);
       }
 
       const html = await response.text();
-      const status = response.status;
-      const finalUrl = response.url;
+
+      // Reset 403 counter on successful request
+      await this.resetRateLimitCounter(finalUrl);
 
       console.log(
         `✅ Successfully fetched (simple): ${finalUrl} (Status: ${status})`,
@@ -394,6 +450,10 @@ export class HttpClientService {
       };
     } catch (error) {
       console.error(`❌ Simple fetch failed for ${options.url}:`, error);
+      // Re-throw RateLimitError as-is, don't wrap it
+      if (error.name === "RateLimitError" || error.isRateLimitError) {
+        throw error;
+      }
       throw new Error(`HTTP request failed: ${error.message}`);
     }
   }

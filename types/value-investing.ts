@@ -17,6 +17,15 @@ export interface ValueMetrics {
   expectedROI: number; // Percentage (theoretical)
   realizedROI?: number; // Percentage (after transaction costs)
   timeHorizon: string;
+  // Deal quality analysis
+  dealQualityScore?: number; // 0-100 score (85+ = Excellent, 70+ = Very Good, 60+ = Good)
+  dealQualityLabel?: string; // Human-readable label
+  dealRecommendation?: string; // Brief recommendation text
+  retailDiscountPercent?: number; // Discount from original retail/MSRP
+  priceToMarketRatio?: number; // Current retail vs BrickLink market
+  priceToValueRatio?: number; // Current retail vs intrinsic value
+  // Detailed calculation breakdown (optional, for transparency)
+  calculationBreakdown?: IntrinsicValueBreakdown;
 }
 
 /**
@@ -58,6 +67,13 @@ export interface ValueMetricsInDollars {
   expectedROI: number; // Percentage (theoretical)
   realizedROI?: number; // Percentage (after transaction costs)
   timeHorizon: string;
+  // Deal quality analysis
+  dealQualityScore?: number; // 0-100 score
+  dealQualityLabel?: string; // Human-readable label
+  dealRecommendation?: string; // Brief recommendation text
+  retailDiscountPercent?: number; // Discount from original retail/MSRP
+  priceToMarketRatio?: number; // Current retail vs BrickLink market
+  priceToValueRatio?: number; // Current retail vs intrinsic value
 }
 
 /**
@@ -123,6 +139,7 @@ export interface IntrinsicValueInputs {
   // All prices in CENTS for precision
   msrp?: Cents; // Original manufacturer's suggested retail price (CENTS)
   currentRetailPrice?: Cents; // Current retail price if still available (CENTS)
+  originalRetailPrice?: Cents; // Original retail price before discount (for deal quality) (CENTS)
   // Market prices (for comparison, NOT base value) (CENTS)
   bricklinkAvgPrice?: Cents;
   bricklinkMaxPrice?: Cents;
@@ -146,4 +163,81 @@ export interface IntrinsicValueInputs {
   // Set characteristics
   theme?: string; // LEGO theme (Star Wars, Architecture, etc.)
   partsCount?: number; // Number of pieces (for PPD calculation)
+}
+
+/**
+ * Detailed breakdown of intrinsic value calculation
+ * Shows step-by-step how the final intrinsic value is derived
+ */
+export interface IntrinsicValueBreakdown {
+  // Base value information
+  baseValue: Cents;
+  baseValueSource: "msrp" | "currentRetail" | "bricklink" | "none";
+  baseValueExplanation: string;
+
+  // Quality multipliers (increase value)
+  qualityMultipliers: {
+    retirement: {
+      value: number;
+      explanation: string;
+      applied: boolean;
+    };
+    quality: {
+      value: number;
+      score: number;
+      explanation: string;
+    };
+    demand: {
+      value: number;
+      score: number;
+      explanation: string;
+    };
+    theme: {
+      value: number;
+      themeName: string;
+      explanation: string;
+    };
+    partsPerDollar: {
+      value: number;
+      ppdValue?: number;
+      explanation: string;
+    };
+  };
+
+  // Risk discounts (decrease value)
+  riskDiscounts: {
+    liquidity: {
+      value: number;
+      explanation: string;
+      applied: boolean;
+    };
+    volatility: {
+      value: number;
+      volatilityPercent?: number;
+      explanation: string;
+      applied: boolean;
+    };
+    saturation: {
+      value: number;
+      explanation: string;
+      applied: boolean;
+    };
+    zeroSales: {
+      value: number;
+      explanation: string;
+      applied: boolean;
+    };
+  };
+
+  // Intermediate calculation results
+  intermediateValues: {
+    afterQualityMultipliers: Cents;
+    afterRiskDiscounts: Cents;
+  };
+
+  // Final result
+  finalIntrinsicValue: Cents;
+
+  // Combined multiplier (for display)
+  totalMultiplier: number;
 }

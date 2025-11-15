@@ -7,6 +7,10 @@ import {
   VALUE_INVESTING_CONFIG as CONFIG,
 } from "./ValueInvestingConfig.ts";
 import type { Cents } from "../../types/price.ts";
+import {
+  DealQualityCalculator,
+  type DealQualityMetrics,
+} from "./DealQualityCalculator.ts";
 
 // Strategy-specific margin of safety configurations
 export const STRATEGY_MARGINS = {
@@ -674,6 +678,436 @@ export class ValueCalculator {
   }
 
   /**
+   * Calculate intrinsic value WITH detailed breakdown for transparency
+   * Shows step-by-step how each factor affects the final value
+   *
+   * @returns Object containing intrinsic value and detailed breakdown
+   */
+  static calculateIntrinsicValueWithBreakdown(
+    inputs: IntrinsicValueInputs,
+  ): {
+    intrinsicValue: Cents;
+    breakdown: import("../../types/value-investing.ts").IntrinsicValueBreakdown;
+  } {
+    // Validate inputs
+    this.validatePrice(inputs.bricklinkAvgPrice, "bricklinkAvgPrice");
+    this.validatePrice(inputs.bricklinkMaxPrice, "bricklinkMaxPrice");
+    this.validateScore(inputs.demandScore, "demandScore");
+    this.validateScore(inputs.qualityScore, "qualityScore");
+
+    const {
+      msrp,
+      currentRetailPrice,
+      bricklinkAvgPrice,
+      bricklinkMaxPrice,
+      retirementStatus,
+      yearsPostRetirement,
+      salesVelocity,
+      avgDaysBetweenSales,
+      timesSold,
+      priceVolatility,
+      availableQty,
+      availableLots,
+      theme,
+      partsCount,
+    } = inputs;
+
+    // Safe scores with defaults and clamping
+    const demandScore = this.safeScore(
+      inputs.demandScore,
+      CONFIG.INTRINSIC_VALUE.DEMAND_MULTIPLIER.DEFAULT_SCORE,
+    );
+    const qualityScore = this.safeScore(
+      inputs.qualityScore,
+      CONFIG.INTRINSIC_VALUE.QUALITY_MULTIPLIER.DEFAULT_SCORE,
+    );
+
+    // 1. DETERMINE BASE VALUE
+    let baseValue = 0;
+    let baseValueSource: "msrp" | "currentRetail" | "bricklink" | "none" =
+      "none";
+    let baseValueExplanation = "";
+
+    if (msrp && msrp > 0) {
+      baseValue = msrp;
+      baseValueSource = "msrp";
+      baseValueExplanation =
+        `Using MSRP as base value (original retail price: MYR ${(msrp / 100).toFixed(2)})`;
+    } else if (currentRetailPrice && currentRetailPrice > 0) {
+      baseValue = currentRetailPrice;
+      baseValueSource = "currentRetail";
+      baseValueExplanation =
+        `Using current retail price as base value: MYR ${(currentRetailPrice / 100).toFixed(2)}`;
+    } else if (bricklinkAvgPrice && bricklinkMaxPrice) {
+      baseValue = (bricklinkAvgPrice *
+          CONFIG.INTRINSIC_VALUE.BASE_WEIGHTS.AVG_PRICE +
+        bricklinkMaxPrice * CONFIG.INTRINSIC_VALUE.BASE_WEIGHTS.MAX_PRICE) *
+        0.70;
+      baseValueSource = "bricklink";
+      baseValueExplanation =
+        `Using BrickLink market prices with 30% discount: MYR ${(baseValue / 100).toFixed(2)}`;
+    } else if (bricklinkAvgPrice) {
+      baseValue = bricklinkAvgPrice * 0.70;
+      baseValueSource = "bricklink";
+      baseValueExplanation =
+        `Using BrickLink avg price with 30% discount: MYR ${(baseValue / 100).toFixed(2)}`;
+    } else if (bricklinkMaxPrice) {
+      baseValue = bricklinkMaxPrice * 0.50;
+      baseValueSource = "bricklink";
+      baseValueExplanation =
+        `Using BrickLink max price with 50% discount: MYR ${(baseValue / 100).toFixed(2)}`;
+    } else {
+      baseValueExplanation = "No pricing data available";
+    }
+
+    // 2. CALCULATE ALL MULTIPLIERS
+    const retirementMultiplier = this.calculateRetirementMultiplier(
+      retirementStatus,
+      yearsPostRetirement,
+      inputs.demandScore,
+    );
+
+    const qualityRange = CONFIG.INTRINSIC_VALUE.QUALITY_MULTIPLIER.MAX -
+      CONFIG.INTRINSIC_VALUE.QUALITY_MULTIPLIER.MIN;
+    const qualityMultiplier = CONFIG.INTRINSIC_VALUE.QUALITY_MULTIPLIER.MIN +
+      (qualityScore / 100) * qualityRange;
+
+    const demandRange = CONFIG.INTRINSIC_VALUE.DEMAND_MULTIPLIER.MAX -
+      CONFIG.INTRINSIC_VALUE.DEMAND_MULTIPLIER.MIN;
+    const demandMultiplier = CONFIG.INTRINSIC_VALUE.DEMAND_MULTIPLIER.MIN +
+      (demandScore / 100) * demandRange;
+
+    const themeMultiplier = this.calculateThemeMultiplier(theme);
+    const ppdScore = this.calculatePPDScore(partsCount, msrp);
+    const liquidityMultiplier = this.calculateLiquidityMultiplier(
+      salesVelocity,
+      avgDaysBetweenSales,
+    );
+    const volatilityDiscount = this.calculateVolatilityDiscount(
+      priceVolatility,
+    );
+    const saturationDiscount = this.calculateSaturationDiscount(
+      availableQty,
+      availableLots,
+      salesVelocity,
+    );
+    const zeroSalesPenalty = this.calculateZeroSalesPenalty(
+      timesSold,
+      inputs.demandScore,
+    );
+
+    // 3. BUILD EXPLANATIONS
+    const retirementExplanation = this.getRetirementExplanation(
+      retirementStatus,
+      yearsPostRetirement,
+      inputs.demandScore,
+      retirementMultiplier,
+    );
+
+    const qualityExplanation = this.getQualityExplanation(
+      qualityScore,
+      qualityMultiplier,
+    );
+
+    const demandExplanation = this.getDemandExplanation(
+      demandScore,
+      demandMultiplier,
+    );
+
+    const themeExplanation = this.getThemeExplanation(
+      theme,
+      themeMultiplier,
+    );
+
+    const ppdExplanation = this.getPPDExplanation(
+      partsCount,
+      msrp,
+      ppdScore,
+    );
+
+    const liquidityExplanation = this.getLiquidityExplanation(
+      salesVelocity,
+      avgDaysBetweenSales,
+      liquidityMultiplier,
+    );
+
+    const volatilityExplanation = this.getVolatilityExplanation(
+      priceVolatility,
+      volatilityDiscount,
+    );
+
+    const saturationExplanation = this.getSaturationExplanation(
+      availableQty,
+      availableLots,
+      salesVelocity,
+      saturationDiscount,
+    );
+
+    const zeroSalesExplanation = this.getZeroSalesExplanation(
+      timesSold,
+      inputs.demandScore,
+      zeroSalesPenalty,
+    );
+
+    // 4. CALCULATE INTERMEDIATE VALUES
+    const afterQualityMultipliers = Math.round(
+      baseValue *
+        retirementMultiplier *
+        themeMultiplier *
+        ppdScore *
+        qualityMultiplier *
+        demandMultiplier,
+    ) as Cents;
+
+    const finalIntrinsicValue = Math.round(
+      afterQualityMultipliers *
+        liquidityMultiplier *
+        volatilityDiscount *
+        saturationDiscount *
+        zeroSalesPenalty,
+    ) as Cents;
+
+    const totalMultiplier = baseValue > 0
+      ? finalIntrinsicValue / baseValue
+      : 0;
+
+    // 5. BUILD BREAKDOWN OBJECT
+    const breakdown: import("../../types/value-investing.ts").IntrinsicValueBreakdown =
+      {
+        baseValue: baseValue as Cents,
+        baseValueSource,
+        baseValueExplanation,
+        qualityMultipliers: {
+          retirement: {
+            value: retirementMultiplier,
+            explanation: retirementExplanation,
+            applied: retirementMultiplier !== 1.0,
+          },
+          quality: {
+            value: qualityMultiplier,
+            score: qualityScore,
+            explanation: qualityExplanation,
+          },
+          demand: {
+            value: demandMultiplier,
+            score: demandScore,
+            explanation: demandExplanation,
+          },
+          theme: {
+            value: themeMultiplier,
+            themeName: theme || "Not specified",
+            explanation: themeExplanation,
+          },
+          partsPerDollar: {
+            value: ppdScore,
+            ppdValue: partsCount && msrp && msrp > 0
+              ? partsCount / (msrp / 100)
+              : undefined,
+            explanation: ppdExplanation,
+          },
+        },
+        riskDiscounts: {
+          liquidity: {
+            value: liquidityMultiplier,
+            explanation: liquidityExplanation,
+            applied: liquidityMultiplier !== 1.0,
+          },
+          volatility: {
+            value: volatilityDiscount,
+            volatilityPercent: priceVolatility
+              ? priceVolatility * 100
+              : undefined,
+            explanation: volatilityExplanation,
+            applied: volatilityDiscount !== 1.0,
+          },
+          saturation: {
+            value: saturationDiscount,
+            explanation: saturationExplanation,
+            applied: saturationDiscount !== 1.0,
+          },
+          zeroSales: {
+            value: zeroSalesPenalty,
+            explanation: zeroSalesExplanation,
+            applied: zeroSalesPenalty !== 1.0,
+          },
+        },
+        intermediateValues: {
+          afterQualityMultipliers,
+          afterRiskDiscounts: finalIntrinsicValue,
+        },
+        finalIntrinsicValue,
+        totalMultiplier,
+      };
+
+    return {
+      intrinsicValue: finalIntrinsicValue,
+      breakdown,
+    };
+  }
+
+  /**
+   * Generate explanation for retirement multiplier
+   */
+  private static getRetirementExplanation(
+    retirementStatus?: string,
+    yearsPostRetirement?: number,
+    demandScore?: number,
+    multiplier?: number,
+  ): string {
+    if (retirementStatus === "retiring_soon") {
+      return `Set is retiring soon (+${((multiplier! - 1) * 100).toFixed(0)}% premium)`;
+    } else if (retirementStatus !== "retired") {
+      return "Set is active (no retirement premium)";
+    }
+
+    const hasSufficientDemand = demandScore !== undefined &&
+      demandScore >= CONFIG.INTRINSIC_VALUE.RETIREMENT_TIME_DECAY
+        .MIN_DEMAND_FOR_PREMIUM;
+
+    if (!hasSufficientDemand) {
+      return `Retired but low demand (${demandScore?.toFixed(0) || "unknown"}/100) - limited premium (+${((multiplier! - 1) * 100).toFixed(0)}%)`;
+    }
+
+    if (
+      yearsPostRetirement !== undefined && yearsPostRetirement !== null &&
+      yearsPostRetirement >= 0
+    ) {
+      if (yearsPostRetirement < 1) {
+        return `Retired <1 year ago - market flooded (${((multiplier! - 1) * 100).toFixed(0)}% change)`;
+      } else if (yearsPostRetirement < 2) {
+        return `Retired 1-2 years ago - stabilizing (${((multiplier! - 1) * 100).toFixed(0)}% change)`;
+      } else if (yearsPostRetirement < 5) {
+        return `Retired 2-5 years ago - appreciating (+${((multiplier! - 1) * 100).toFixed(0)}%)`;
+      } else if (yearsPostRetirement < 10) {
+        return `Retired 5-10 years ago - scarcity premium (+${((multiplier! - 1) * 100).toFixed(0)}%)`;
+      } else {
+        return `Retired 10+ years ago - vintage (+${((multiplier! - 1) * 100).toFixed(0)}%)`;
+      }
+    }
+
+    return `Retired with sufficient demand (+${((multiplier! - 1) * 100).toFixed(0)}% premium)`;
+  }
+
+  private static getQualityExplanation(
+    score: number,
+    multiplier: number,
+  ): string {
+    const effect = ((multiplier - 1) * 100).toFixed(1);
+    const sign = multiplier >= 1 ? "+" : "";
+    return `Quality score ${score.toFixed(0)}/100 (${sign}${effect}% adjustment)`;
+  }
+
+  private static getDemandExplanation(
+    score: number,
+    multiplier: number,
+  ): string {
+    const effect = ((multiplier - 1) * 100).toFixed(1);
+    const sign = multiplier >= 1 ? "+" : "";
+    return `Demand score ${score.toFixed(0)}/100 (${sign}${effect}% adjustment)`;
+  }
+
+  private static getThemeExplanation(
+    theme: string | undefined,
+    multiplier: number,
+  ): string {
+    if (!theme || multiplier === 1.0) {
+      return "No theme premium applied";
+    }
+    const effect = ((multiplier - 1) * 100).toFixed(0);
+    const sign = multiplier >= 1 ? "+" : "";
+    return `${theme} theme (${sign}${effect}% adjustment)`;
+  }
+
+  private static getPPDExplanation(
+    partsCount: number | undefined,
+    msrp: number | undefined,
+    multiplier: number,
+  ): string {
+    if (!partsCount || !msrp || msrp <= 0) {
+      return "No parts-per-dollar data available";
+    }
+    const ppd = partsCount / (msrp / 100);
+    const effect = ((multiplier - 1) * 100).toFixed(0);
+    const sign = multiplier >= 1 ? "+" : "";
+    return `${ppd.toFixed(1)} parts/dollar (${sign}${effect}% adjustment)`;
+  }
+
+  private static getLiquidityExplanation(
+    salesVelocity: number | undefined,
+    avgDaysBetweenSales: number | undefined,
+    multiplier: number,
+  ): string {
+    if (multiplier === 1.0) {
+      return "No liquidity data - neutral adjustment";
+    }
+    const effect = ((multiplier - 1) * 100).toFixed(1);
+    const sign = multiplier >= 1 ? "+" : "";
+
+    if (salesVelocity !== undefined) {
+      return `Sales velocity: ${salesVelocity.toFixed(2)}/day (${sign}${effect}% adjustment)`;
+    } else if (avgDaysBetweenSales !== undefined) {
+      return `Avg ${avgDaysBetweenSales.toFixed(1)} days between sales (${sign}${effect}% adjustment)`;
+    }
+
+    return `Liquidity adjustment: ${sign}${effect}%`;
+  }
+
+  private static getVolatilityExplanation(
+    priceVolatility: number | undefined,
+    discount: number,
+  ): string {
+    if (discount === 1.0 || !priceVolatility) {
+      return "No price volatility - stable pricing";
+    }
+    const effect = ((1 - discount) * 100).toFixed(1);
+    return `Price volatility ${(priceVolatility * 100).toFixed(1)}% (${effect}% discount)`;
+  }
+
+  private static getSaturationExplanation(
+    availableQty: number | undefined,
+    availableLots: number | undefined,
+    _salesVelocity: number | undefined,
+    discount: number,
+  ): string {
+    if (discount === 1.0) {
+      return "No market saturation detected - healthy supply";
+    }
+    const effect = ((1 - discount) * 100).toFixed(1);
+
+    const details: string[] = [];
+    if (availableQty) details.push(`${availableQty} units available`);
+    if (availableLots) details.push(`${availableLots} sellers`);
+
+    if (details.length > 0) {
+      return `Market saturation: ${details.join(", ")} (${effect}% discount)`;
+    }
+
+    return `Market saturation detected (${effect}% discount)`;
+  }
+
+  private static getZeroSalesExplanation(
+    timesSold: number | undefined,
+    demandScore: number | undefined,
+    penalty: number,
+  ): string {
+    if (penalty === 1.0) {
+      return timesSold !== undefined && timesSold > 0
+        ? `${timesSold} sales recorded - no penalty`
+        : "Sufficient sales activity - no penalty";
+    }
+
+    const effect = ((1 - penalty) * 100).toFixed(0);
+    if (timesSold === 0 || timesSold === undefined) {
+      if (demandScore !== undefined && demandScore < 30) {
+        return `Zero sales + low demand (${effect}% penalty for dead inventory)`;
+      }
+      return `Zero sales recorded (${effect}% penalty)`;
+    }
+
+    return `Very low sales activity (${effect}% penalty)`;
+  }
+
+  /**
    * Calculate target buy price (price at which you should buy)
    * Using margin of safety principle - buy at a discount to intrinsic value
    *
@@ -1027,9 +1461,13 @@ export class ValueCalculator {
         qualityScore?: number;
         availabilityScore?: number;
       };
+      // Include detailed calculation breakdown
+      calculationBreakdown?: import("../../types/value-investing.ts").IntrinsicValueBreakdown;
     };
   } | null {
-    const intrinsicValue = this.calculateIntrinsicValue(inputs);
+    // Calculate intrinsic value WITH breakdown for transparency
+    const { intrinsicValue, breakdown: calculationBreakdown } = this
+      .calculateIntrinsicValueWithBreakdown(inputs);
 
     if (intrinsicValue === 0) {
       return null; // Insufficient data
@@ -1156,7 +1594,33 @@ export class ValueCalculator {
           qualityScore: inputs.qualityScore,
           availabilityScore: options.availabilityScore,
         },
+        // Include detailed calculation breakdown
+        calculationBreakdown,
       },
     };
+  }
+
+  /**
+   * Calculate deal quality metrics
+   * Compares current retail price against market price and intrinsic value
+   */
+  static calculateDealQuality(
+    inputs: IntrinsicValueInputs,
+    intrinsicValue: Cents,
+  ): DealQualityMetrics | null {
+    // Need at least current retail price and one comparison point
+    if (!inputs.currentRetailPrice) {
+      return null;
+    }
+
+    const calculator = new DealQualityCalculator();
+
+    return calculator.calculateDealQuality({
+      currentRetailPrice: inputs.currentRetailPrice,
+      originalRetailPrice: inputs.originalRetailPrice,
+      bricklinkMarketPrice: inputs.bricklinkAvgPrice,
+      intrinsicValue: intrinsicValue,
+      msrp: inputs.msrp,
+    });
   }
 }

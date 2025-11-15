@@ -23,6 +23,7 @@ import { scrapeSessions } from "../../db/schema.ts";
 import { rawDataService } from "../raw-data/index.ts";
 import { MaintenanceError } from "../../types/errors/MaintenanceError.ts";
 import { SetNotFoundError } from "../../types/errors/SetNotFoundError.ts";
+import { RateLimitError } from "../../types/errors/RateLimitError.ts";
 
 /**
  * Options for retry logic
@@ -142,6 +143,26 @@ export abstract class BaseScraperService {
               attempt,
               estimatedDurationMs: error.estimatedDurationMs,
               estimatedEndTime: error.getEstimatedEndTime(),
+              url,
+              source,
+              ...context,
+            },
+          );
+          // Re-throw immediately without retrying or counting toward circuit breaker
+          throw error;
+        }
+
+        // Handle rate limit errors (403) - don't count toward circuit breaker
+        if (RateLimitError.isRateLimitError(error)) {
+          scraperLogger.warn(
+            `Rate limit detected (403): ${error.message}`,
+            {
+              attempt,
+              domain: error.domain,
+              consecutive403Count: error.consecutive403Count,
+              delayMs: error.delayMs,
+              delayDescription: error.getDelayDescription(),
+              retryTime: error.getRetryTime(),
               url,
               source,
               ...context,

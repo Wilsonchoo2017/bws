@@ -40,6 +40,7 @@ import { WorldBricksScraperService } from "../worldbricks/WorldBricksScraperServ
 import { queueLogger } from "../../utils/logger.ts";
 import { MaintenanceError } from "../../types/errors/MaintenanceError.ts";
 import { SetNotFoundError } from "../../types/errors/SetNotFoundError.ts";
+import { RateLimitError } from "../../types/errors/RateLimitError.ts";
 
 /**
  * Job priority levels
@@ -251,6 +252,19 @@ export class QueueService {
         } as ScrapeResult;
       }
 
+      // Handle rate limit errors (403) - reschedule with progressive delay
+      if (RateLimitError.isRateLimitError(error)) {
+        await this.handleRateLimitError(error, job);
+        // Return success result to mark job as completed
+        return {
+          success: true,
+          data: undefined,
+          saved: false,
+          rescheduled: true,
+          rateLimitDetected: true,
+        } as ScrapeResult;
+      }
+
       // Handle set not found errors - mark as completed, schedule far future retry
       if (SetNotFoundError.isSetNotFoundError(error)) {
         await this.handleSetNotFoundError(error, job);
@@ -330,6 +344,80 @@ export class QueueService {
         {
           jobId: job.id,
           jobType: job.name,
+          error: rescheduleError.message,
+          stack: rescheduleError.stack,
+        },
+      );
+      throw rescheduleError;
+    }
+  }
+
+  /**
+   * Handle rate limit error (403) by rescheduling the job with progressive delay
+   * Progressive backoff: 1hr -> 6hrs -> 24hrs based on consecutive 403 count
+   */
+  private async handleRateLimitError(
+    error: RateLimitError,
+    job: Job,
+  ): Promise<void> {
+    const delayMs = error.delayMs;
+    const retryTime = error.getRetryTime();
+
+    queueLogger.warn(
+      `Rate limit (403) detected for ${error.domain} - rescheduling job ${job.id}`,
+      {
+        jobId: job.id,
+        jobType: job.name,
+        originalJobData: job.data,
+        domain: error.domain,
+        consecutive403Count: error.consecutive403Count,
+        rateLimitMessage: error.message,
+        delayMs,
+        delayDescription: error.getDelayDescription(),
+        retryTime: retryTime.toISOString(),
+        rescheduledFor: new Date(Date.now() + delayMs).toISOString(),
+      },
+    );
+
+    try {
+      if (!this.queue) {
+        throw new Error("Queue not initialized");
+      }
+
+      // Reschedule the same job with progressive backoff delay
+      await this.queue.add(
+        job.name,
+        job.data,
+        {
+          delay: delayMs,
+          priority: JobPriority.MEDIUM, // Medium priority after rate limit
+          attempts: 3,
+          backoff: {
+            type: "exponential",
+            delay: 30000,
+          },
+        },
+      );
+
+      queueLogger.info(
+        `Successfully rescheduled job ${job.id} after rate limit (403)`,
+        {
+          jobId: job.id,
+          jobType: job.name,
+          domain: error.domain,
+          consecutive403Count: error.consecutive403Count,
+          delayMs,
+          delayHours: Math.ceil(delayMs / 3600000),
+          delayDescription: error.getDelayDescription(),
+        },
+      );
+    } catch (rescheduleError) {
+      queueLogger.error(
+        `Failed to reschedule job ${job.id} after rate limit`,
+        {
+          jobId: job.id,
+          jobType: job.name,
+          domain: error.domain,
           error: rescheduleError.message,
           stack: rescheduleError.stack,
         },
