@@ -52,6 +52,19 @@ export interface PastSaleTransaction {
 }
 
 /**
+ * Monthly sales summary data
+ */
+export interface MonthlySalesSummary {
+  month: string; // YYYY-MM format
+  condition: "new" | "used";
+  times_sold: number;
+  total_quantity: number;
+  min_price?: PriceData;
+  max_price?: PriceData;
+  avg_price?: PriceData;
+}
+
+/**
  * Complete Bricklink item data
  */
 export interface BricklinkData {
@@ -740,4 +753,316 @@ export function parsePastSales(html: string): PastSaleTransaction[] {
   });
 
   return transactions;
+}
+
+/**
+ * Parse monthly sales summaries from BrickLink HTML
+ * Handles the monthly aggregate format where sales are grouped by month
+ *
+ * Example structure:
+ *   November 2025
+ *   Qty  Each
+ *    1   ~MYR 224.14
+ *    1   ~MYR 289.29
+ *
+ * @param html Raw HTML from BrickLink price guide page
+ * @returns Array of monthly sales summaries
+ */
+export function parseMonthlySales(html: string): MonthlySalesSummary[] {
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(html, "text/html");
+
+  if (!doc) {
+    throw new Error("Failed to parse monthly sales HTML");
+  }
+
+  logger.info("Parsing monthly sales from HTML", {
+    htmlSize: html.length,
+  });
+
+  const monthlySummaries: MonthlySalesSummary[] = [];
+
+  // Find all tables
+  const tables = doc.querySelectorAll("table");
+
+  logger.info("Scanning HTML for monthly sales tables", {
+    tablesFound: tables.length,
+  });
+
+  // Track current month and condition as we scan through tables
+  let currentMonth: string | null = null;
+  let currentCondition: "new" | "used" | null = null;
+
+  for (let tableIndex = 0; tableIndex < tables.length; tableIndex++) {
+    const table = tables[tableIndex];
+    // @ts-ignore - deno_dom types issue
+    const rows = table.querySelectorAll("tr");
+
+    if (rows.length === 0) continue;
+
+    // Check if this table contains a month header
+    const firstRowText = rows[0]?.textContent?.trim() || "";
+
+    // Check for "Currently Available" and skip it
+    if (firstRowText.includes("Currently Available")) {
+      currentMonth = null; // Reset month context
+      logger.debug("Skipping 'Currently Available' section", { tableIndex });
+      continue;
+    }
+
+    // Month pattern: "November 2025", "October 2025", etc.
+    // Use \s+ to match any whitespace (including non-breaking spaces)
+    const monthMatch = firstRowText.match(/(January|February|March|April|May|June|July|August|September|October|November|December)\s+(\d{4})/);
+
+    if (monthMatch) {
+      // This is a month header table
+      const monthName = monthMatch[1];
+      const year = monthMatch[2];
+
+      // Convert month name to number (January = 01, etc.)
+      const monthMap: { [key: string]: string } = {
+        "January": "01", "February": "02", "March": "03", "April": "04",
+        "May": "05", "June": "06", "July": "07", "August": "08",
+        "September": "09", "October": "10", "November": "11", "December": "12"
+      };
+
+      currentMonth = `${year}-${monthMap[monthName]}`;
+
+      logger.debug(`Found month header: ${monthName} ${year}`, {
+        formattedMonth: currentMonth,
+        tableIndex
+      });
+
+      continue;
+    }
+
+    // Check if this table is a sales data table (has "Qty" and "Each" headers)
+    const headerText = firstRowText.toLowerCase();
+    if (headerText.includes("qty") && headerText.includes("each")) {
+      if (!currentMonth) {
+        logger.debug("Found sales table but no month context (skipping)", { tableIndex });
+        continue;
+      }
+
+      // Determine condition based on context
+      // Look backwards in the HTML to find "New" or "Used" heading
+      // For now, we'll extract from the broader context
+      currentCondition = determineConditionFromContext(table, tables, tableIndex);
+
+      if (!currentCondition) {
+        logger.warn("Could not determine condition for sales table", {
+          tableIndex,
+          month: currentMonth
+        });
+        continue;
+      }
+
+      logger.info(`Parsing sales data table`, {
+        month: currentMonth,
+        condition: currentCondition,
+        tableIndex,
+        rowCount: rows.length
+      });
+
+      // Parse the sales data rows
+      const prices: number[] = [];
+      const quantities: number[] = [];
+      let rowsProcessed = 0;
+      let rowsSkippedDueToCellCount = 0;
+      let rowsSkippedSummary = 0;
+      let rowsSkippedEmpty = 0;
+      let rowsSkippedQtyParse = 0;
+      let rowsSkippedPriceParse = 0;
+      let currency: string | null = null;
+
+      for (let i = 1; i < rows.length; i++) {
+        rowsProcessed++;
+        const row = rows[i];
+        // @ts-ignore
+        const cells = row.querySelectorAll("td");
+
+        if (cells.length < 2) {
+          rowsSkippedDueToCellCount++;
+          continue;
+        }
+
+        const cellTexts = Array.from(cells).map(c => c.textContent?.trim() || "");
+
+        // Skip summary rows (e.g., "Times Sold:", "Qty Avg:", etc.)
+        const rowText = cellTexts.join(" ");
+        if (
+          rowText.includes("Times Sold:") ||
+          rowText.includes("Total Lots:") ||
+          rowText.includes("Total Qty:") ||
+          rowText.includes("Avg:") ||
+          rowText.includes("Min:") ||
+          rowText.includes("Max:")
+        ) {
+          rowsSkippedSummary++;
+          continue;
+        }
+
+        // Skip horizontal rule rows
+        if (rowText.trim() === "") {
+          rowsSkippedEmpty++;
+          continue;
+        }
+
+        // Try to parse quantity and price
+        // Note: First cell is often empty/blank, so Qty is usually in cellTexts[1] and Price in cellTexts[2]
+        // But we need to find the actual Qty and Price columns dynamically
+        let qtyText = "";
+        let priceText = "";
+
+        // Find quantity (should be a number) and price (should have currency code)
+        for (let j = 0; j < cellTexts.length; j++) {
+          const text = cellTexts[j];
+          if (!qtyText && /^\d+$/.test(text)) {
+            qtyText = text;
+          } else if (!priceText && /([A-Z]{2,3})\s+([\d,\.]+)/.test(text)) {
+            priceText = text;
+          }
+        }
+
+        // Quantity should be a simple number
+        const qtyMatch = qtyText.match(/^(\d+)$/);
+        if (!qtyMatch) {
+          rowsSkippedQtyParse++;
+          continue;
+        }
+
+        const quantity = parseInt(qtyMatch[1]);
+
+        // Price pattern: ~MYR 224.14 or MYR 224.14 or ~USD 50.00
+        // Need to handle non-breaking spaces and extra whitespace
+        const priceMatch = priceText.match(/~?\s*([A-Z]{2,3})\s+([\d,\.]+)/);
+        if (!priceMatch) {
+          rowsSkippedPriceParse++;
+          continue;
+        }
+
+        const priceCurrency = priceMatch[1].toUpperCase();
+        const priceAmount = parseFloat(priceMatch[2].replace(/,/g, ""));
+
+        if (!currency) {
+          currency = priceCurrency;
+        } else if (currency !== priceCurrency) {
+          logger.warn(`Currency mismatch in table`, {
+            expected: currency,
+            found: priceCurrency,
+            month: currentMonth
+          });
+        }
+
+        prices.push(priceAmount);
+        quantities.push(quantity);
+      }
+
+      // Log parsing statistics
+      logger.info(`Table parsing complete`, {
+        month: currentMonth,
+        condition: currentCondition,
+        rowsProcessed,
+        rowsSkippedDueToCellCount,
+        rowsSkippedSummary,
+        rowsSkippedEmpty,
+        rowsSkippedQtyParse,
+        rowsSkippedPriceParse,
+        salesFound: prices.length
+      });
+
+      // Create summary if we found sales data
+      if (prices.length > 0 && currency) {
+        const totalQuantity = quantities.reduce((sum, q) => sum + q, 0);
+        const minPrice = Math.min(...prices);
+        const maxPrice = Math.max(...prices);
+        const avgPrice = prices.reduce((sum, p) => sum + p, 0) / prices.length;
+
+        const summary: MonthlySalesSummary = {
+          month: currentMonth,
+          condition: currentCondition,
+          times_sold: prices.length,
+          total_quantity: totalQuantity,
+          min_price: { currency, amount: minPrice },
+          max_price: { currency, amount: maxPrice },
+          avg_price: { currency, amount: avgPrice }
+        };
+
+        monthlySummaries.push(summary);
+
+        logger.info(`Added monthly summary`, {
+          month: currentMonth,
+          condition: currentCondition,
+          timesSold: prices.length,
+          totalQty: totalQuantity,
+          avgPrice: avgPrice.toFixed(2)
+        });
+      }
+    }
+  }
+
+  logger.info("Monthly sales parsing complete", {
+    totalSummariesFound: monthlySummaries.length
+  });
+
+  // Deduplicate summaries by month+condition
+  // Multiple tables for same month/condition may exist due to HTML structure
+  const deduped = new Map<string, MonthlySalesSummary>();
+  for (const summary of monthlySummaries) {
+    const key = `${summary.month}-${summary.condition}`;
+    deduped.set(key, summary); // Last one wins (they should all be identical)
+  }
+
+  const finalSummaries = Array.from(deduped.values());
+
+  logger.info("After deduplication", {
+    originalCount: monthlySummaries.length,
+    finalCount: finalSummaries.length
+  });
+
+  return finalSummaries;
+}
+
+/**
+ * Determine condition (new/used) from the table's context
+ * BrickLink shows New and Used sales in separate columns with different bgcolor values:
+ * - New: bgcolor="EEEEEE" (light gray)
+ * - Used: bgcolor="DDDDDD" (dark gray)
+ */
+function determineConditionFromContext(
+  currentTable: Element,
+  allTables: NodeListOf<Element>,
+  currentIndex: number
+): "new" | "used" | null {
+  // Walk up the DOM tree to find the parent <td> element
+  let parent = currentTable.parentElement;
+  while (parent && parent.tagName !== "TD") {
+    parent = parent.parentElement;
+  }
+
+  if (parent) {
+    // Check the bgcolor attribute
+    const bgcolor = parent.getAttribute("bgcolor")?.toLowerCase();
+    if (bgcolor === "eeeeee") {
+      return "new";
+    } else if (bgcolor === "dddddd") {
+      return "used";
+    }
+  }
+
+  // Fallback: look for explicit "New" or "Used" text in nearby elements
+  const precedingTables = Array.from(allTables).slice(Math.max(0, currentIndex - 10), currentIndex);
+  for (const table of precedingTables.reverse()) {
+    const tableText = table.textContent?.toLowerCase() || "";
+    // @ts-ignore
+    const boldElements = table.querySelectorAll("b, strong");
+    for (const el of boldElements) {
+      const text = el.textContent?.trim().toLowerCase() || "";
+      if (text === "new") return "new";
+      if (text === "used") return "used";
+    }
+  }
+
+  // Default to "new" if unable to determine
+  return "new";
 }

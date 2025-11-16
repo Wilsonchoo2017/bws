@@ -18,15 +18,18 @@ import { db } from "../../db/client.ts";
 import {
   type BricklinkItem,
   bricklinkItems,
+  bricklinkMonthlySales,
   bricklinkPastSales,
   bricklinkPriceHistory,
   bricklinkVolumeHistory,
   type NewBricklinkItem,
+  type NewBricklinkMonthlySale,
   type NewBricklinkPriceHistory,
   type NewBricklinkVolumeHistory,
 } from "../../db/schema.ts";
 import { and, eq, lte, or, sql } from "drizzle-orm";
 import type {
+  MonthlySalesSummary,
   PastSaleTransaction,
   PriceData,
   PricingBox,
@@ -609,6 +612,112 @@ export class BricklinkRepository {
       .where(and(...conditions))
       .orderBy(bricklinkPastSales.dateSold)
       .limit(options?.limit || 1000);
+
+    return results;
+  }
+
+  /**
+   * Upsert monthly sales summaries for an item
+   * Uses ON CONFLICT DO UPDATE to replace existing monthly summaries with new data
+   *
+   * @param itemId - The Bricklink item ID
+   * @param summaries - Array of monthly sales summaries to store
+   * @returns Number of summaries inserted or updated
+   */
+  async upsertMonthlySales(
+    itemId: string,
+    summaries: MonthlySalesSummary[],
+  ): Promise<number> {
+    if (summaries.length === 0) {
+      return 0;
+    }
+
+    const now = new Date();
+
+    // Convert summaries to database format
+    const values = summaries.map((summary) => ({
+      itemId,
+      month: summary.month,
+      condition: summary.condition,
+      timesSold: summary.times_sold,
+      totalQuantity: summary.total_quantity,
+      minPrice: summary.min_price
+        ? Math.round(summary.min_price.amount * 100)
+        : null,
+      maxPrice: summary.max_price
+        ? Math.round(summary.max_price.amount * 100)
+        : null,
+      avgPrice: summary.avg_price
+        ? Math.round(summary.avg_price.amount * 100)
+        : null,
+      currency: summary.min_price?.currency ||
+        summary.max_price?.currency ||
+        summary.avg_price?.currency ||
+        "USD",
+      scrapedAt: now,
+    }));
+
+    // Bulk insert with ON CONFLICT DO UPDATE to replace existing data
+    const result = await db.insert(bricklinkMonthlySales)
+      .values(values)
+      .onConflictDoUpdate({
+        target: [
+          bricklinkMonthlySales.itemId,
+          bricklinkMonthlySales.month,
+          bricklinkMonthlySales.condition,
+        ],
+        set: {
+          timesSold: sql`EXCLUDED.times_sold`,
+          totalQuantity: sql`EXCLUDED.total_quantity`,
+          minPrice: sql`EXCLUDED.min_price`,
+          maxPrice: sql`EXCLUDED.max_price`,
+          avgPrice: sql`EXCLUDED.avg_price`,
+          currency: sql`EXCLUDED.currency`,
+          scrapedAt: sql`EXCLUDED.scraped_at`,
+        },
+      })
+      .returning();
+
+    return result.length;
+  }
+
+  /**
+   * Get monthly sales summaries for an item
+   *
+   * @param itemId - The Bricklink item ID
+   * @param options - Optional filters for condition and date range
+   * @returns Array of monthly sales summaries
+   */
+  async getMonthlySales(
+    itemId: string,
+    options?: {
+      condition?: "new" | "used";
+      startMonth?: string; // YYYY-MM format
+      endMonth?: string; // YYYY-MM format
+    },
+  ): Promise<typeof bricklinkMonthlySales.$inferSelect[]> {
+    const conditions = [eq(bricklinkMonthlySales.itemId, itemId)];
+
+    if (options?.condition) {
+      conditions.push(eq(bricklinkMonthlySales.condition, options.condition));
+    }
+
+    if (options?.startMonth) {
+      conditions.push(
+        sql`${bricklinkMonthlySales.month} >= ${options.startMonth}`,
+      );
+    }
+
+    if (options?.endMonth) {
+      conditions.push(
+        sql`${bricklinkMonthlySales.month} <= ${options.endMonth}`,
+      );
+    }
+
+    const results = await db.select()
+      .from(bricklinkMonthlySales)
+      .where(and(...conditions))
+      .orderBy(bricklinkMonthlySales.month);
 
     return results;
   }

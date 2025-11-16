@@ -453,6 +453,55 @@ export const bricklinkPastSales = pgTable(
   }),
 );
 
+// Bricklink monthly sales summaries - aggregate sales data by month
+export const bricklinkMonthlySales = pgTable(
+  "bricklink_monthly_sales",
+  {
+    id: serial("id").primaryKey(),
+    itemId: varchar("item_id", { length: 50 }).notNull(),
+
+    // Time period (YYYY-MM format for easy sorting)
+    month: varchar("month", { length: 7 }).notNull(),
+
+    // Condition (new vs used)
+    condition: conditionEnum("condition").notNull(),
+
+    // Sales metrics
+    timesSold: integer("times_sold").notNull(), // Number of sales
+    totalQuantity: integer("total_quantity").notNull(), // Sum of quantities
+
+    // Price metrics (stored as cents/smallest currency unit)
+    minPrice: integer("min_price"),
+    maxPrice: integer("max_price"),
+    avgPrice: integer("avg_price"), // Simple average
+
+    // Currency
+    currency: varchar("currency", { length: 3 }).notNull().default("USD"),
+
+    // Metadata
+    scrapedAt: timestamp("scraped_at").defaultNow().notNull(),
+  },
+  (table) => ({
+    // Composite index for efficient item queries
+    itemMonthIdx: index("idx_bricklink_monthly_sales_item_month").on(
+      table.itemId,
+      table.month,
+    ),
+    // Index for month-based queries
+    monthIdx: index("idx_bricklink_monthly_sales_month").on(table.month),
+    // Index for condition filtering
+    conditionIdx: index("idx_bricklink_monthly_sales_condition").on(
+      table.condition,
+    ),
+    // Unique constraint to prevent duplicate monthly summaries
+    uniqueMonthlySummary: unique("unique_bricklink_monthly_summary").on(
+      table.itemId,
+      table.month,
+      table.condition,
+    ),
+  }),
+);
+
 // Unified scrape sessions for tracking scraping metadata (all platforms)
 export const scrapeSessions = pgTable(
   "scrape_sessions",
@@ -685,6 +734,12 @@ export type NewBricklinkPriceHistory =
 export type BricklinkVolumeHistory = typeof bricklinkVolumeHistory.$inferSelect;
 export type NewBricklinkVolumeHistory =
   typeof bricklinkVolumeHistory.$inferInsert;
+
+export type BricklinkPastSale = typeof bricklinkPastSales.$inferSelect;
+export type NewBricklinkPastSale = typeof bricklinkPastSales.$inferInsert;
+
+export type BricklinkMonthlySale = typeof bricklinkMonthlySales.$inferSelect;
+export type NewBricklinkMonthlySale = typeof bricklinkMonthlySales.$inferInsert;
 
 export type Product = typeof products.$inferSelect;
 export type NewProduct = typeof products.$inferInsert;

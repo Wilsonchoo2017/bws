@@ -25,6 +25,7 @@ import {
   hasAnyPricingChanged,
   parseBricklinkUrl,
   parseItemInfo,
+  parseMonthlySales,
   parsePastSales,
   parsePriceGuide,
   validatePricingData,
@@ -172,12 +173,12 @@ export class BricklinkScraperService extends BaseScraperService {
           // Validate that we got price information
           validatePricingData(pricingData);
 
-          // Parse past sales transactions from the item page
-          scraperLogger.info("Parsing past sales", { itemId });
-          const pastSales = parsePastSales(itemResponse.html);
+          // Parse monthly sales summaries from the price guide page
+          scraperLogger.info("Parsing monthly sales", { itemId });
+          const monthlySales = parseMonthlySales(priceResponse.html);
           scraperLogger.info(
-            `Found ${pastSales.length} past sales transactions`,
-            { itemId, count: pastSales.length },
+            `Found ${monthlySales.length} monthly sales summaries`,
+            { itemId, count: monthlySales.length },
           );
 
           // Build complete data object
@@ -199,7 +200,7 @@ export class BricklinkScraperService extends BaseScraperService {
 
           // Save to database if requested
           if (saveToDb) {
-            await this.saveToDatabase(scraperData, pastSales);
+            await this.saveToDatabase(scraperData, monthlySales);
           }
 
           return { data: scraperData, saved: saveToDb };
@@ -231,11 +232,11 @@ export class BricklinkScraperService extends BaseScraperService {
    * Uses transaction to ensure atomicity of multi-step database operations
    *
    * @param data - The Bricklink item data
-   * @param pastSales - Array of past sales transactions (optional)
+   * @param monthlySales - Array of monthly sales summaries (optional)
    */
   private async saveToDatabase(
     data: BricklinkData,
-    pastSales: import("./BricklinkParser.ts").PastSaleTransaction[] = [],
+    monthlySales: import("./BricklinkParser.ts").MonthlySalesSummary[] = [],
   ): Promise<void> {
     try {
       // Download and store image if available (outside transaction - file I/O)
@@ -379,19 +380,18 @@ export class BricklinkScraperService extends BaseScraperService {
           }
         }
 
-        // Save past sales transactions if any were found
-        if (pastSales.length > 0) {
-          const insertedCount = await this.repository.upsertPastSales(
+        // Save monthly sales summaries if any were found
+        if (monthlySales.length > 0) {
+          const insertedCount = await this.repository.upsertMonthlySales(
             data.item_id,
-            pastSales,
+            monthlySales,
           );
           scraperLogger.info(
-            `Saved ${insertedCount} past sales transactions for ${data.item_id}`,
+            `Saved ${insertedCount} monthly sales summaries for ${data.item_id}`,
             {
               itemId: data.item_id,
-              totalParsed: pastSales.length,
+              totalParsed: monthlySales.length,
               inserted: insertedCount,
-              duplicatesSkipped: pastSales.length - insertedCount,
             },
           );
         }
