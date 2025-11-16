@@ -68,6 +68,11 @@ export default function QueueDiagnosticsDashboard() {
   const [isTriggeringRescrape, setIsTriggeringRescrape] = useState(false);
   const [showRescrapeConfirm, setShowRescrapeConfirm] = useState(false);
   const [rescrapeSuccess, setRescrapeSuccess] = useState<string | null>(null);
+  const [isTriggeringMissingData, setIsTriggeringMissingData] = useState(false);
+  const [showMissingDataConfirm, setShowMissingDataConfirm] = useState(false);
+  const [missingDataSuccess, setMissingDataSuccess] = useState<string | null>(
+    null,
+  );
 
   // Fetch queue status
   const fetchQueueStats = async () => {
@@ -173,6 +178,48 @@ export default function QueueDiagnosticsDashboard() {
     }
   };
 
+  // Trigger missing data detection handler
+  const handleTriggerMissingData = async () => {
+    setIsTriggeringMissingData(true);
+    setError(null);
+    setMissingDataSuccess(null);
+    setShowMissingDataConfirm(false);
+
+    try {
+      const response = await fetch("/api/detect-missing-data", {
+        method: "POST",
+      });
+
+      if (response.ok) {
+        const result = await response.json();
+        const jobsEnqueued = result.result?.jobsEnqueued || 0;
+        const missingBricklink = result.result?.missingBricklinkData || 0;
+        const missingVolume = result.result?.missingVolumeData || 0;
+
+        let message = `Found ${missingBricklink} missing BrickLink items`;
+        if (missingVolume > 0) {
+          message += ` and ${missingVolume} items with missing volume data`;
+        }
+        message += `. Queued ${jobsEnqueued} jobs!`;
+
+        setMissingDataSuccess(message);
+
+        // Refresh stats after triggering
+        setTimeout(() => fetchQueueStats(), 1000);
+      } else {
+        const errorData = await response.json();
+        setError(errorData.message || "Failed to detect missing data");
+      }
+    } catch (err) {
+      console.error("Missing data detection error:", err);
+      setError(
+        err instanceof Error ? err.message : "Failed to detect missing data",
+      );
+    } finally {
+      setIsTriggeringMissingData(false);
+    }
+  };
+
   // Auto-refresh every 30 seconds
   useEffect(() => {
     fetchQueueStats();
@@ -263,6 +310,32 @@ export default function QueueDiagnosticsDashboard() {
                     </svg>
                   )}
                   Trigger Scrape All
+                </button>
+                <button
+                  class="btn btn-info btn-outline"
+                  onClick={() => setShowMissingDataConfirm(true)}
+                  disabled={isLoading || isResetting || isTriggeringMissingData}
+                >
+                  {isTriggeringMissingData && (
+                    <span class="loading loading-spinner" />
+                  )}
+                  {!isTriggeringMissingData && (
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      class="h-5 w-5"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                      stroke="currentColor"
+                    >
+                      <path
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        stroke-width="2"
+                        d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4"
+                      />
+                    </svg>
+                  )}
+                  Detect Missing Data
                 </button>
                 <button
                   class="btn btn-error btn-outline"
@@ -481,6 +554,32 @@ export default function QueueDiagnosticsDashboard() {
         </div>
       )}
 
+      {/* Success Message - Missing Data Detection */}
+      {missingDataSuccess && (
+        <div class="alert alert-info">
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            class="stroke-current shrink-0 h-6 w-6"
+            fill="none"
+            viewBox="0 0 24 24"
+          >
+            <path
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              stroke-width="2"
+              d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"
+            />
+          </svg>
+          <span>{missingDataSuccess}</span>
+          <button
+            class="btn btn-sm btn-ghost"
+            onClick={() => setMissingDataSuccess(null)}
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
+
       {/* Error State */}
       {error && (
         <div class="alert alert-error">
@@ -584,6 +683,57 @@ export default function QueueDiagnosticsDashboard() {
             class="modal-backdrop"
             onClick={() =>
               !isTriggeringRescrape && setShowRescrapeConfirm(false)}
+          />
+        </dialog>
+      )}
+
+      {/* Confirmation Modal - Missing Data Detection */}
+      {showMissingDataConfirm && (
+        <dialog class="modal modal-open">
+          <div class="modal-box">
+            <h3 class="font-bold text-lg">Detect Missing Data?</h3>
+            <p class="py-4">
+              This will scan all products to find missing BrickLink data and
+              volume information, then queue jobs to fill the gaps:
+            </p>
+            <ul class="list-disc list-inside py-2 space-y-1">
+              <li>
+                <strong>Missing BrickLink items:</strong>{" "}
+                Products with LEGO set numbers but no BrickLink data
+              </li>
+              <li>
+                <strong>Missing volume data:</strong>{" "}
+                Items with pricing boxes but no quantity information
+              </li>
+            </ul>
+            <p class="pt-2 text-sm text-info">
+              💡 Monthly data checks will automatically downgrade priority if
+              data already exists!
+            </p>
+            <div class="modal-action">
+              <button
+                class="btn btn-ghost"
+                onClick={() => setShowMissingDataConfirm(false)}
+                disabled={isTriggeringMissingData}
+              >
+                Cancel
+              </button>
+              <button
+                class="btn btn-info"
+                onClick={handleTriggerMissingData}
+                disabled={isTriggeringMissingData}
+              >
+                {isTriggeringMissingData && (
+                  <span class="loading loading-spinner" />
+                )}
+                Detect Missing Data
+              </button>
+            </div>
+          </div>
+          <div
+            class="modal-backdrop"
+            onClick={() =>
+              !isTriggeringMissingData && setShowMissingDataConfirm(false)}
           />
         </dialog>
       )}
