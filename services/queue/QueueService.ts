@@ -901,6 +901,10 @@ export class QueueService {
           `⏬ Downgrading priority for ${data.itemId}: monthly data exists`,
         );
         priority = JobPriority.NORMAL;
+      } else {
+        console.log(
+          `✓ Keeping HIGH priority for ${data.itemId}: no monthly data yet`,
+        );
       }
     }
 
@@ -978,6 +982,10 @@ export class QueueService {
             `⏬ Downgrading priority for ${job.itemId}: monthly data exists`,
           );
           priority = JobPriority.NORMAL;
+        } else {
+          console.log(
+            `✓ Keeping HIGH priority for ${job.itemId}: no monthly data yet`,
+          );
         }
       }
 
