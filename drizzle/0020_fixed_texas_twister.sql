@@ -1,0 +1,2 @@
+ALTER TABLE "bricklink_items" ADD COLUMN "monthly_data_unavailable" boolean DEFAULT false NOT NULL;--> statement-breakpoint
+ALTER TABLE "bricklink_items" ADD COLUMN "monthly_data_last_checked" timestamp;

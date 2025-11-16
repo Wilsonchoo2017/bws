@@ -15,7 +15,9 @@
 
 import {
   DOMParser,
+  type Element,
   type HTMLDocument,
+  type NodeList,
 } from "https://deno.land/x/deno_dom@v0.1.45/deno-dom-wasm.ts";
 import { scraperLogger as logger } from "../../utils/logger.ts";
 
@@ -847,7 +849,11 @@ export function parseMonthlySales(html: string): MonthlySalesSummary[] {
       // Determine condition based on context
       // Look backwards in the HTML to find "New" or "Used" heading
       // For now, we'll extract from the broader context
-      currentCondition = determineConditionFromContext(table, tables, tableIndex);
+      currentCondition = determineConditionFromContext(
+        table as Element,
+        tables,
+        tableIndex,
+      );
 
       if (!currentCondition) {
         logger.warn("Could not determine condition for sales table", {
@@ -878,7 +884,7 @@ export function parseMonthlySales(html: string): MonthlySalesSummary[] {
       for (let i = 1; i < rows.length; i++) {
         rowsProcessed++;
         const row = rows[i];
-        // @ts-ignore
+        // @ts-ignore: deno-dom type inference issue with querySelectorAll
         const cells = row.querySelectorAll("td");
 
         if (cells.length < 2) {
@@ -886,7 +892,9 @@ export function parseMonthlySales(html: string): MonthlySalesSummary[] {
           continue;
         }
 
-        const cellTexts = Array.from(cells).map(c => c.textContent?.trim() || "");
+        const cellTexts = Array.from(cells).map((c) =>
+          (c as Element).textContent?.trim() || ""
+        );
 
         // Skip summary rows (e.g., "Times Sold:", "Qty Avg:", etc.)
         const rowText = cellTexts.join(" ");
@@ -1031,8 +1039,8 @@ export function parseMonthlySales(html: string): MonthlySalesSummary[] {
  */
 function determineConditionFromContext(
   currentTable: Element,
-  allTables: NodeListOf<Element>,
-  currentIndex: number
+  allTables: NodeList,
+  currentIndex: number,
 ): "new" | "used" | null {
   // Walk up the DOM tree to find the parent <td> element
   let parent = currentTable.parentElement;
@@ -1051,13 +1059,14 @@ function determineConditionFromContext(
   }
 
   // Fallback: look for explicit "New" or "Used" text in nearby elements
-  const precedingTables = Array.from(allTables).slice(Math.max(0, currentIndex - 10), currentIndex);
+  const precedingTables = Array.from(allTables).slice(
+    Math.max(0, currentIndex - 10),
+    currentIndex,
+  );
   for (const table of precedingTables.reverse()) {
-    const tableText = table.textContent?.toLowerCase() || "";
-    // @ts-ignore
-    const boldElements = table.querySelectorAll("b, strong");
+    const boldElements = (table as Element).querySelectorAll("b, strong");
     for (const el of boldElements) {
-      const text = el.textContent?.trim().toLowerCase() || "";
+      const text = (el as Element).textContent?.trim().toLowerCase() || "";
       if (text === "new") return "new";
       if (text === "used") return "used";
     }

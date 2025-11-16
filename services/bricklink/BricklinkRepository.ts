@@ -23,7 +23,7 @@ import {
   bricklinkPriceHistory,
   bricklinkVolumeHistory,
   type NewBricklinkItem,
-  type NewBricklinkMonthlySale,
+  type NewBricklinkMonthlySale as _NewBricklinkMonthlySale,
   type NewBricklinkPriceHistory,
   type NewBricklinkVolumeHistory,
 } from "../../db/schema.ts";
@@ -720,6 +720,36 @@ export class BricklinkRepository {
       .orderBy(bricklinkMonthlySales.month);
 
     return results;
+  }
+
+  /**
+   * Check if monthly sales data exists for an item
+   * Used to determine if immediate scraping priority is needed
+   */
+  async hasMonthlyData(itemId: string): Promise<boolean> {
+    const result = await db.select({ count: sql<number>`count(*)` })
+      .from(bricklinkMonthlySales)
+      .where(eq(bricklinkMonthlySales.itemId, itemId));
+
+    return result[0]?.count > 0;
+  }
+
+  /**
+   * Update monthly data availability status
+   * Sets the flag indicating whether monthly sales data exists on BrickLink
+   * @param itemId - The BrickLink item ID
+   * @param unavailable - True if monthly data doesn't exist, false if it does
+   */
+  async updateMonthlyDataStatus(
+    itemId: string,
+    unavailable: boolean,
+  ): Promise<void> {
+    await db.update(bricklinkItems)
+      .set({
+        monthlyDataUnavailable: unavailable,
+        monthlyDataLastChecked: new Date(),
+      })
+      .where(eq(bricklinkItems.itemId, itemId));
   }
 
   /**

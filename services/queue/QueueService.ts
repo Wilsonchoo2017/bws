@@ -881,8 +881,28 @@ export class QueueService {
       throw new Error("Queue not initialized. Call initialize() first.");
     }
 
-    const priority = data.priority ?? JobPriority.NORMAL;
+    let priority = data.priority ?? JobPriority.NORMAL;
     const jobId = `${JOB_TYPES.SCRAPE_SINGLE}-${data.itemId}`;
+
+    // Downgrade priority if monthly data exists or is marked unavailable
+    if (priority === JobPriority.HIGH) {
+      const bricklinkRepo = getBricklinkRepository();
+      const item = await bricklinkRepo.findByItemId(data.itemId);
+
+      // Check if monthly data is marked as unavailable (legitimately doesn't exist)
+      if (item?.monthlyDataUnavailable) {
+        console.log(
+          `⏬ Downgrading priority for ${data.itemId}: monthly data marked unavailable`,
+        );
+        priority = JobPriority.NORMAL;
+      } // Check if monthly data already exists
+      else if (await bricklinkRepo.hasMonthlyData(data.itemId)) {
+        console.log(
+          `⏬ Downgrading priority for ${data.itemId}: monthly data exists`,
+        );
+        priority = JobPriority.NORMAL;
+      }
+    }
 
     // Check if item was recently scraped (unless HIGH priority)
     if (priority !== JobPriority.HIGH) {
@@ -934,12 +954,34 @@ export class QueueService {
 
     console.log(`🔍 Filtering ${jobs.length} jobs before bulk enqueue...`);
 
+    const bricklinkRepo = getBricklinkRepository();
+
     // Filter out jobs that were recently scraped
     const filteredJobs: ScrapeJobData[] = [];
 
     for (const job of jobs) {
+      let priority = job.priority ?? JobPriority.NORMAL;
+
+      // Downgrade priority if monthly data exists or is marked unavailable
+      if (priority === JobPriority.HIGH) {
+        const item = await bricklinkRepo.findByItemId(job.itemId);
+
+        // Check if monthly data is marked as unavailable (legitimately doesn't exist)
+        if (item?.monthlyDataUnavailable) {
+          console.log(
+            `⏬ Downgrading priority for ${job.itemId}: monthly data marked unavailable`,
+          );
+          priority = JobPriority.NORMAL;
+        } // Check if monthly data already exists
+        else if (await bricklinkRepo.hasMonthlyData(job.itemId)) {
+          console.log(
+            `⏬ Downgrading priority for ${job.itemId}: monthly data exists`,
+          );
+          priority = JobPriority.NORMAL;
+        }
+      }
+
       // Check if recently scraped (unless HIGH priority)
-      const priority = job.priority ?? JobPriority.NORMAL;
       if (priority !== JobPriority.HIGH) {
         const wasRecent = await this.wasRecentlyScrapped(job.itemId, 12);
         if (wasRecent) {
@@ -948,7 +990,7 @@ export class QueueService {
         }
       }
 
-      filteredJobs.push(job);
+      filteredJobs.push({ ...job, priority });
     }
 
     if (filteredJobs.length === 0) {

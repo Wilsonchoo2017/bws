@@ -141,6 +141,13 @@
       "when": 1763257691001,
       "tag": "0019_fat_spencer_smythe",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1763277577143,
+      "tag": "0020_fixed_texas_twister",
+      "breakpoints": true
     }
   ]
 }

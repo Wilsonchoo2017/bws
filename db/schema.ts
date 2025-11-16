@@ -66,6 +66,11 @@ export const bricklinkItems = pgTable(
     lastScrapedAt: timestamp("last_scraped_at"),
     nextScrapeAt: timestamp("next_scrape_at"),
 
+    // Monthly data tracking
+    monthlyDataUnavailable: boolean("monthly_data_unavailable").default(false)
+      .notNull(),
+    monthlyDataLastChecked: timestamp("monthly_data_last_checked"),
+
     // Metadata
     createdAt: timestamp("created_at").defaultNow().notNull(),
     updatedAt: timestamp("updated_at").defaultNow().notNull(),

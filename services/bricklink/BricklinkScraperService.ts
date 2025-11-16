@@ -26,7 +26,7 @@ import {
   parseBricklinkUrl,
   parseItemInfo,
   parseMonthlySales,
-  parsePastSales,
+  parsePastSales as _parsePastSales,
   parsePriceGuide,
   validatePricingData,
 } from "./BricklinkParser.ts";
@@ -393,6 +393,21 @@ export class BricklinkScraperService extends BaseScraperService {
               totalParsed: monthlySales.length,
               inserted: insertedCount,
             },
+          );
+          // Mark that monthly data exists (unset unavailable flag)
+          await this.repository.updateMonthlyDataStatus(
+            data.item_id,
+            false, // monthly data IS available
+          );
+        } else {
+          // No monthly sales found - mark as unavailable
+          scraperLogger.info(
+            `No monthly sales found for ${data.item_id} - marking as unavailable`,
+            { itemId: data.item_id },
+          );
+          await this.repository.updateMonthlyDataStatus(
+            data.item_id,
+            true, // monthly data IS NOT available
           );
         }
 
