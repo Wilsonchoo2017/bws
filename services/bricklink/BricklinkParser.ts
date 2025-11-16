@@ -67,6 +67,26 @@ export interface MonthlySalesSummary {
 }
 
 /**
+ * Parsing metadata to track parsing health
+ */
+export interface MonthlyParseMetadata {
+  tablesFound: number;
+  tablesProcessed: number;
+  rowsParsed: number;
+  rowsSkipped: number;
+  parsingSuccessful: boolean; // true if at least 1 table was successfully processed
+  htmlSizeBytes: number; // Size of HTML input
+}
+
+/**
+ * Result from parsing monthly sales data
+ */
+export interface MonthlyParseResult {
+  summaries: MonthlySalesSummary[];
+  metadata: MonthlyParseMetadata;
+}
+
+/**
  * Complete Bricklink item data
  */
 export interface BricklinkData {
@@ -768,9 +788,9 @@ export function parsePastSales(html: string): PastSaleTransaction[] {
  *    1   ~MYR 289.29
  *
  * @param html Raw HTML from BrickLink price guide page
- * @returns Array of monthly sales summaries
+ * @returns Parse result with summaries and metadata
  */
-export function parseMonthlySales(html: string): MonthlySalesSummary[] {
+export function parseMonthlySales(html: string): MonthlyParseResult {
   const parser = new DOMParser();
   const doc = parser.parseFromString(html, "text/html");
 
@@ -784,8 +804,19 @@ export function parseMonthlySales(html: string): MonthlySalesSummary[] {
 
   const monthlySummaries: MonthlySalesSummary[] = [];
 
+  // Initialize parsing metadata
+  const metadata: MonthlyParseMetadata = {
+    tablesFound: 0,
+    tablesProcessed: 0,
+    rowsParsed: 0,
+    rowsSkipped: 0,
+    parsingSuccessful: false,
+    htmlSizeBytes: html.length,
+  };
+
   // Find all tables
   const tables = doc.querySelectorAll("table");
+  metadata.tablesFound = tables.length;
 
   logger.info("Scanning HTML for monthly sales tables", {
     tablesFound: tables.length,
@@ -814,7 +845,9 @@ export function parseMonthlySales(html: string): MonthlySalesSummary[] {
 
     // Month pattern: "November 2025", "October 2025", etc.
     // Use \s+ to match any whitespace (including non-breaking spaces)
-    const monthMatch = firstRowText.match(/(January|February|March|April|May|June|July|August|September|October|November|December)\s+(\d{4})/);
+    const monthMatch = firstRowText.match(
+      /(January|February|March|April|May|June|July|August|September|October|November|December)\s+(\d{4})/,
+    );
 
     if (monthMatch) {
       // This is a month header table
@@ -823,16 +856,25 @@ export function parseMonthlySales(html: string): MonthlySalesSummary[] {
 
       // Convert month name to number (January = 01, etc.)
       const monthMap: { [key: string]: string } = {
-        "January": "01", "February": "02", "March": "03", "April": "04",
-        "May": "05", "June": "06", "July": "07", "August": "08",
-        "September": "09", "October": "10", "November": "11", "December": "12"
+        "January": "01",
+        "February": "02",
+        "March": "03",
+        "April": "04",
+        "May": "05",
+        "June": "06",
+        "July": "07",
+        "August": "08",
+        "September": "09",
+        "October": "10",
+        "November": "11",
+        "December": "12",
       };
 
       currentMonth = `${year}-${monthMap[monthName]}`;
 
       logger.debug(`Found month header: ${monthName} ${year}`, {
         formattedMonth: currentMonth,
-        tableIndex
+        tableIndex,
       });
 
       continue;
@@ -842,7 +884,9 @@ export function parseMonthlySales(html: string): MonthlySalesSummary[] {
     const headerText = firstRowText.toLowerCase();
     if (headerText.includes("qty") && headerText.includes("each")) {
       if (!currentMonth) {
-        logger.debug("Found sales table but no month context (skipping)", { tableIndex });
+        logger.debug("Found sales table but no month context (skipping)", {
+          tableIndex,
+        });
         continue;
       }
 
@@ -858,7 +902,7 @@ export function parseMonthlySales(html: string): MonthlySalesSummary[] {
       if (!currentCondition) {
         logger.warn("Could not determine condition for sales table", {
           tableIndex,
-          month: currentMonth
+          month: currentMonth,
         });
         continue;
       }
@@ -867,7 +911,7 @@ export function parseMonthlySales(html: string): MonthlySalesSummary[] {
         month: currentMonth,
         condition: currentCondition,
         tableIndex,
-        rowCount: rows.length
+        rowCount: rows.length,
       });
 
       // Parse the sales data rows
@@ -958,7 +1002,7 @@ export function parseMonthlySales(html: string): MonthlySalesSummary[] {
           logger.warn(`Currency mismatch in table`, {
             expected: currency,
             found: priceCurrency,
-            month: currentMonth
+            month: currentMonth,
           });
         }
 
@@ -976,7 +1020,7 @@ export function parseMonthlySales(html: string): MonthlySalesSummary[] {
         rowsSkippedEmpty,
         rowsSkippedQtyParse,
         rowsSkippedPriceParse,
-        salesFound: prices.length
+        salesFound: prices.length,
       });
 
       // Create summary if we found sales data
@@ -993,24 +1037,33 @@ export function parseMonthlySales(html: string): MonthlySalesSummary[] {
           total_quantity: totalQuantity,
           min_price: { currency, amount: minPrice },
           max_price: { currency, amount: maxPrice },
-          avg_price: { currency, amount: avgPrice }
+          avg_price: { currency, amount: avgPrice },
         };
 
         monthlySummaries.push(summary);
+
+        // Update metadata - successfully processed this table
+        metadata.tablesProcessed++;
+        metadata.rowsParsed += prices.length;
+        metadata.rowsSkipped += rowsSkippedDueToCellCount +
+          rowsSkippedSummary +
+          rowsSkippedEmpty +
+          rowsSkippedQtyParse +
+          rowsSkippedPriceParse;
 
         logger.info(`Added monthly summary`, {
           month: currentMonth,
           condition: currentCondition,
           timesSold: prices.length,
           totalQty: totalQuantity,
-          avgPrice: avgPrice.toFixed(2)
+          avgPrice: avgPrice.toFixed(2),
         });
       }
     }
   }
 
   logger.info("Monthly sales parsing complete", {
-    totalSummariesFound: monthlySummaries.length
+    totalSummariesFound: monthlySummaries.length,
   });
 
   // Deduplicate summaries by month+condition
@@ -1023,12 +1076,20 @@ export function parseMonthlySales(html: string): MonthlySalesSummary[] {
 
   const finalSummaries = Array.from(deduped.values());
 
+  // Determine if parsing was successful
+  // Successful if we processed at least one table with data
+  metadata.parsingSuccessful = metadata.tablesProcessed > 0;
+
   logger.info("After deduplication", {
     originalCount: monthlySummaries.length,
-    finalCount: finalSummaries.length
+    finalCount: finalSummaries.length,
+    metadata,
   });
 
-  return finalSummaries;
+  return {
+    summaries: finalSummaries,
+    metadata,
+  };
 }
 
 /**

@@ -175,10 +175,14 @@ export class BricklinkScraperService extends BaseScraperService {
 
           // Parse monthly sales summaries from the price guide page
           scraperLogger.info("Parsing monthly sales", { itemId });
-          const monthlySales = parseMonthlySales(priceResponse.html);
+          const parseResult = parseMonthlySales(priceResponse.html);
           scraperLogger.info(
-            `Found ${monthlySales.length} monthly sales summaries`,
-            { itemId, count: monthlySales.length },
+            `Found ${parseResult.summaries.length} monthly sales summaries`,
+            {
+              itemId,
+              count: parseResult.summaries.length,
+              metadata: parseResult.metadata,
+            },
           );
 
           // Build complete data object
@@ -200,7 +204,7 @@ export class BricklinkScraperService extends BaseScraperService {
 
           // Save to database if requested
           if (saveToDb) {
-            await this.saveToDatabase(scraperData, monthlySales);
+            await this.saveToDatabase(scraperData, parseResult);
           }
 
           return { data: scraperData, saved: saveToDb };
@@ -236,7 +240,7 @@ export class BricklinkScraperService extends BaseScraperService {
    */
   private async saveToDatabase(
     data: BricklinkData,
-    monthlySales: import("./BricklinkParser.ts").MonthlySalesSummary[] = [],
+    parseResult: import("./BricklinkParser.ts").MonthlyParseResult,
   ): Promise<void> {
     try {
       // Download and store image if available (outside transaction - file I/O)
@@ -380,17 +384,31 @@ export class BricklinkScraperService extends BaseScraperService {
           }
         }
 
-        // Save monthly sales summaries if any were found
-        if (monthlySales.length > 0) {
+        // Validate parse result before making decisions
+        const isParseValid = this.validateMonthlyParseResult(parseResult);
+
+        if (!isParseValid.valid) {
+          // Parsing was suspicious - don't set unavailable flag
+          scraperLogger.warn(
+            `Monthly sales parsing suspicious for ${data.item_id}: ${isParseValid.reason}`,
+            {
+              itemId: data.item_id,
+              reason: isParseValid.reason,
+              metadata: parseResult.metadata,
+            },
+          );
+          // Don't update monthly_data_unavailable flag - allow retry next time
+        } else if (parseResult.summaries.length > 0) {
+          // Valid parse with data found
           const insertedCount = await this.repository.upsertMonthlySales(
             data.item_id,
-            monthlySales,
+            parseResult.summaries,
           );
           scraperLogger.info(
             `Saved ${insertedCount} monthly sales summaries for ${data.item_id}`,
             {
               itemId: data.item_id,
-              totalParsed: monthlySales.length,
+              totalParsed: parseResult.summaries.length,
               inserted: insertedCount,
             },
           );
@@ -400,10 +418,13 @@ export class BricklinkScraperService extends BaseScraperService {
             false, // monthly data IS available
           );
         } else {
-          // No monthly sales found - mark as unavailable
+          // Valid parse but no data found - legitimately unavailable
           scraperLogger.info(
-            `No monthly sales found for ${data.item_id} - marking as unavailable`,
-            { itemId: data.item_id },
+            `No monthly sales found for ${data.item_id} (parsing successful) - marking as unavailable`,
+            {
+              itemId: data.item_id,
+              metadata: parseResult.metadata,
+            },
           );
           await this.repository.updateMonthlyDataStatus(
             data.item_id,
@@ -424,6 +445,50 @@ export class BricklinkScraperService extends BaseScraperService {
       });
       throw new Error(`Database save failed: ${error.message}`);
     }
+  }
+
+  /**
+   * Validate monthly parse result to detect potential parsing bugs
+   * Returns whether the result is trustworthy
+   */
+  private validateMonthlyParseResult(
+    parseResult: import("./BricklinkParser.ts").MonthlyParseResult,
+  ): { valid: boolean; reason?: string } {
+    const { metadata, summaries } = parseResult;
+
+    // Check 1: If HTML is large but got no results, likely parsing issue
+    if (metadata.htmlSizeBytes > 50000 && summaries.length === 0) {
+      return {
+        valid: false,
+        reason:
+          "Large HTML (>50KB) but no data parsed - possible structure change",
+      };
+    }
+
+    // Check 2: If tables found but none processed, definitely parsing issue
+    if (metadata.tablesFound > 0 && metadata.tablesProcessed === 0) {
+      return {
+        valid: false,
+        reason: "Tables found but none successfully parsed",
+      };
+    }
+
+    // Check 3: If high skip rate, possible pattern mismatch
+    const totalRows = metadata.rowsParsed + metadata.rowsSkipped;
+    if (totalRows > 0) {
+      const skipRate = metadata.rowsSkipped / totalRows;
+      if (skipRate > 0.8 && metadata.rowsParsed < 5) {
+        return {
+          valid: false,
+          reason: `High row skip rate (${
+            (skipRate * 100).toFixed(1)
+          }%) - possible pattern mismatch`,
+        };
+      }
+    }
+
+    // All checks passed
+    return { valid: true };
   }
 
   /**
