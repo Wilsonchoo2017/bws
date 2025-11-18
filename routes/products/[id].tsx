@@ -25,6 +25,7 @@ import IntrinsicValueCard from "../../islands/IntrinsicValueCard.tsx";
 import ProductEditModal from "../../islands/ProductEditModal.tsx";
 import ProductImageGallery from "../../islands/ProductImageGallery.tsx";
 import PricingOverview from "../../islands/PricingOverview.tsx";
+import ScrapingLogsSection from "../../islands/ScrapingLogsSection.tsx";
 
 interface ShopeeScrape {
   id: number;
@@ -1581,6 +1582,9 @@ export default function ProductDetailPage(
               </div>
             </div>
           )}
+
+          {/* Scraping Logs Section */}
+          <ScrapingLogsSection productId={product.productId} />
 
           {/* Metadata Section */}
           <div class="card bg-base-100 shadow-xl">

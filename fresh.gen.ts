@@ -30,6 +30,7 @@ import * as $api_reddit_search from "./routes/api/reddit-search.ts";
 import * as $api_scrape_bricklink from "./routes/api/scrape-bricklink.ts";
 import * as $api_scrape_queue_status from "./routes/api/scrape-queue-status.ts";
 import * as $api_scrape_scheduler from "./routes/api/scrape-scheduler.ts";
+import * as $api_scraping_logs_product_productId_ from "./routes/api/scraping-logs/product/[productId].ts";
 import * as $api_shopee_items from "./routes/api/shopee-items.ts";
 import * as $api_tags from "./routes/api/tags.ts";
 import * as $api_tags_cleanup_expired from "./routes/api/tags/cleanup-expired.ts";
@@ -54,6 +55,7 @@ import * as $ProductEditModal from "./islands/ProductEditModal.tsx";
 import * as $ProductImageGallery from "./islands/ProductImageGallery.tsx";
 import * as $ProductsList from "./islands/ProductsList.tsx";
 import * as $QueueDiagnosticsDashboard from "./islands/QueueDiagnosticsDashboard.tsx";
+import * as $ScrapingLogsSection from "./islands/ScrapingLogsSection.tsx";
 import * as $ShopeeParser from "./islands/ShopeeParser.tsx";
 import * as $Sidebar from "./islands/Sidebar.tsx";
 import * as $TagManager from "./islands/TagManager.tsx";
@@ -102,6 +104,8 @@ const manifest = {
     "./routes/api/scrape-bricklink.ts": $api_scrape_bricklink,
     "./routes/api/scrape-queue-status.ts": $api_scrape_queue_status,
     "./routes/api/scrape-scheduler.ts": $api_scrape_scheduler,
+    "./routes/api/scraping-logs/product/[productId].ts":
+      $api_scraping_logs_product_productId_,
     "./routes/api/shopee-items.ts": $api_shopee_items,
     "./routes/api/tags.ts": $api_tags,
     "./routes/api/tags/cleanup-expired.ts": $api_tags_cleanup_expired,
@@ -129,6 +133,7 @@ const manifest = {
     "./islands/ProductImageGallery.tsx": $ProductImageGallery,
     "./islands/ProductsList.tsx": $ProductsList,
     "./islands/QueueDiagnosticsDashboard.tsx": $QueueDiagnosticsDashboard,
+    "./islands/ScrapingLogsSection.tsx": $ScrapingLogsSection,
     "./islands/ShopeeParser.tsx": $ShopeeParser,
     "./islands/Sidebar.tsx": $Sidebar,
     "./islands/TagManager.tsx": $TagManager,

@@ -45,6 +45,10 @@ export default function ProductsList() {
     debouncedSearch: filters.debouncedSearch,
     legoSetFilter: filters.legoSetFilter,
     sourceFilter: filters.sourceFilter,
+    bricklinkStatus: filters.bricklinkStatus,
+    worldbricksStatus: filters.worldbricksStatus,
+    showIncompleteOnly: filters.showIncompleteOnly,
+    showMissingCriticalData: filters.showMissingCriticalData,
     sortBy: filters.sortBy,
     sortOrder: filters.sortOrder,
   });
@@ -107,11 +111,19 @@ export default function ProductsList() {
           legoSetFilter={filters.legoSetFilter}
           sourceFilter={filters.sourceFilter}
           tagFilter={filters.tagFilter}
+          bricklinkStatus={filters.bricklinkStatus}
+          worldbricksStatus={filters.worldbricksStatus}
+          showIncompleteOnly={filters.showIncompleteOnly}
+          showMissingCriticalData={filters.showMissingCriticalData}
           availableTags={availableTags.value}
           onSearchChange={filterActions.setSearchQuery}
           onLegoSetChange={filterActions.setLegoSetFilter}
           onSourceChange={filterActions.setSourceFilter}
           onTagFilterChange={filterActions.setTagFilter}
+          onBricklinkStatusChange={filterActions.setBricklinkStatus}
+          onWorldbricksStatusChange={filterActions.setWorldbricksStatus}
+          onShowIncompleteOnlyChange={filterActions.setShowIncompleteOnly}
+          onShowMissingCriticalDataChange={filterActions.setShowMissingCriticalData}
         />
 
         {/* Table with loading, error, and empty states */}

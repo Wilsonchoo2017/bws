@@ -35,6 +35,16 @@ export const handler = async (
       url.searchParams.get("watch_status") || "";
     const tagIds = url.searchParams.get("tagIds")?.split(",").filter(Boolean) ||
       [];
+    const bricklinkStatus = url.searchParams.get("bricklinkStatus") || "all";
+    const worldbricksStatus = url.searchParams.get("worldbricksStatus") ||
+      "all";
+    const lastScrapedBefore = url.searchParams.get("lastScrapedBefore") || "";
+    const lastScrapedAfter = url.searchParams.get("lastScrapedAfter") || "";
+    const showIncompleteOnly = url.searchParams.get("showIncompleteOnly") ===
+      "true";
+    const showMissingCriticalData = url.searchParams.get(
+      "showMissingCriticalData",
+    ) === "true";
     const sortBy = url.searchParams.get("sortBy") || "updatedAt";
     const sortOrder = (url.searchParams.get("sortOrder") || "desc") as
       | "asc"
@@ -98,13 +108,17 @@ export const handler = async (
       }
     }
 
-    // Get total count (before pagination)
-    const countResult = await db
-      .select({ count: sql<number>`count(*)` })
-      .from(products)
-      .where(conditions.length > 0 ? and(...conditions) : undefined);
-
-    const totalCount = Number(countResult[0]?.count || 0);
+    // Add date range filters for last scraped
+    if (lastScrapedBefore) {
+      conditions.push(
+        sql`${products.updatedAt} < ${new Date(lastScrapedBefore)}`,
+      );
+    }
+    if (lastScrapedAfter) {
+      conditions.push(
+        sql`${products.updatedAt} > ${new Date(lastScrapedAfter)}`,
+      );
+    }
 
     // Build query with LEFT JOINs to fetch related LEGO data
     const baseQuery = db
@@ -145,6 +159,58 @@ export const handler = async (
         sql`${products.legoSetNumber} = be.lego_set_number AND be.source = 'brickeconomy'`,
       );
 
+    // Add JOIN-based filters for data completeness
+    const joinConditions = [...conditions];
+
+    // Filter by Bricklink data status
+    if (bricklinkStatus !== "all") {
+      if (bricklinkStatus === "missing") {
+        joinConditions.push(
+          sql`${products.legoSetNumber} IS NOT NULL AND ${bricklinkItems.itemId} IS NULL`,
+        );
+      } else if (bricklinkStatus === "complete" || bricklinkStatus === "partial") {
+        joinConditions.push(
+          sql`${bricklinkItems.itemId} IS NOT NULL`,
+        );
+        // Note: We'll filter complete vs partial in memory after validation
+      }
+    }
+
+    // Filter by WorldBricks data status
+    if (worldbricksStatus === "missing_data") {
+      joinConditions.push(
+        sql`${products.legoSetNumber} IS NOT NULL AND ${worldbricksSets.setNumber} IS NULL`,
+      );
+    } else if (worldbricksStatus === "has_data") {
+      joinConditions.push(
+        sql`${worldbricksSets.setNumber} IS NOT NULL`,
+      );
+    }
+
+    // Show incomplete only (missing any LEGO data)
+    if (showIncompleteOnly) {
+      joinConditions.push(
+        sql`(
+          ${products.legoSetNumber} IS NOT NULL AND (
+            ${worldbricksSets.setNumber} IS NULL OR
+            ${bricklinkItems.itemId} IS NULL
+          )
+        )`,
+      );
+    }
+
+    // Show missing critical data (missing retail price OR Bricklink data)
+    if (showMissingCriticalData) {
+      joinConditions.push(
+        sql`(
+          ${products.legoSetNumber} IS NOT NULL AND (
+            ${bricklinkItems.itemId} IS NULL OR
+            (${worldbricksSets.setNumber} IS NULL AND ${products.priceBeforeDiscount} IS NULL)
+          )
+        )`,
+      );
+    }
+
     // Determine sort column
     const sortColumn = sortBy === "price"
       ? products.price
@@ -156,10 +222,10 @@ export const handler = async (
 
     const orderFunc = sortOrder === "asc" ? asc : desc;
 
-    // Build query with all conditions and execute
-    const productList = conditions.length > 0
+    // Execute query with all conditions
+    const productList = joinConditions.length > 0
       ? await baseQuery
-        .where(and(...conditions))
+        .where(and(...joinConditions))
         .orderBy(orderFunc(sortColumn))
         .limit(limit)
         .offset(offset)
@@ -168,8 +234,27 @@ export const handler = async (
         .limit(limit)
         .offset(offset);
 
+    // Get total count with same filters
+    const countQuery = db
+      .select({ count: sql<number>`count(*)` })
+      .from(products)
+      .leftJoin(
+        worldbricksSets,
+        eq(products.legoSetNumber, worldbricksSets.setNumber),
+      )
+      .leftJoin(
+        bricklinkItems,
+        eq(products.legoSetNumber, bricklinkItems.itemId),
+      );
+
+    const countResult = joinConditions.length > 0
+      ? await countQuery.where(and(...joinConditions))
+      : await countQuery;
+
+    const totalCount = Number(countResult[0]?.count || 0);
+
     // Fetch tags and enrich products with LEGO data
-    const productsWithEnrichedData = await Promise.all(
+    let productsWithEnrichedData = await Promise.all(
       productList.map(async (row) => {
         const { product, worldbricks, brickranker, bricklink, brickEconomy } =
           row;
@@ -249,6 +334,17 @@ export const handler = async (
         };
       }),
     );
+
+    // Apply in-memory filter for complete vs partial Bricklink data
+    if (bricklinkStatus === "complete") {
+      productsWithEnrichedData = productsWithEnrichedData.filter(
+        (p) => p.bricklinkDataStatus === "complete",
+      );
+    } else if (bricklinkStatus === "partial") {
+      productsWithEnrichedData = productsWithEnrichedData.filter(
+        (p) => p.bricklinkDataStatus === "partial",
+      );
+    }
 
     // Calculate pagination metadata
     const totalPages = Math.ceil(totalCount / limit);

@@ -2,7 +2,12 @@ import { useSignal } from "@preact/signals";
 import { useEffect } from "preact/hooks";
 import { PAGINATION } from "../constants/app-config.ts";
 import type { ProductSource } from "../db/schema.ts";
-import type { SortBy, SortOrder } from "./useProductFilters.ts";
+import type {
+  BricklinkStatus,
+  SortBy,
+  SortOrder,
+  WorldbricksStatus,
+} from "./useProductFilters.ts";
 
 export interface Product {
   id: number;
@@ -83,6 +88,10 @@ export interface ProductListFilters {
   debouncedSearch: string;
   legoSetFilter: string;
   sourceFilter: ProductSource | "all";
+  bricklinkStatus: BricklinkStatus;
+  worldbricksStatus: WorldbricksStatus;
+  showIncompleteOnly: boolean;
+  showMissingCriticalData: boolean;
   sortBy: SortBy;
   sortOrder: SortOrder;
 }
@@ -117,6 +126,10 @@ export function useProductList(
     filters.debouncedSearch,
     filters.legoSetFilter,
     filters.sourceFilter,
+    filters.bricklinkStatus,
+    filters.worldbricksStatus,
+    filters.showIncompleteOnly,
+    filters.showMissingCriticalData,
   ]);
 
   const fetchProducts = async () => {
@@ -141,6 +154,22 @@ export function useProductList(
 
       if (filters.sourceFilter !== "all") {
         params.set("source", filters.sourceFilter);
+      }
+
+      if (filters.bricklinkStatus !== "all") {
+        params.set("bricklinkStatus", filters.bricklinkStatus);
+      }
+
+      if (filters.worldbricksStatus !== "all") {
+        params.set("worldbricksStatus", filters.worldbricksStatus);
+      }
+
+      if (filters.showIncompleteOnly) {
+        params.set("showIncompleteOnly", "true");
+      }
+
+      if (filters.showMissingCriticalData) {
+        params.set("showMissingCriticalData", "true");
       }
 
       const response = await fetch(`/api/products?${params}`);
@@ -169,6 +198,10 @@ export function useProductList(
     filters.debouncedSearch,
     filters.legoSetFilter,
     filters.sourceFilter,
+    filters.bricklinkStatus,
+    filters.worldbricksStatus,
+    filters.showIncompleteOnly,
+    filters.showMissingCriticalData,
     filters.sortBy,
     filters.sortOrder,
     currentPage.value,
