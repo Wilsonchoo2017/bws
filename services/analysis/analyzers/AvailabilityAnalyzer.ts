@@ -196,11 +196,21 @@ export class AvailabilityAnalyzer extends BaseAnalyzer<AvailabilityData> {
         .join(" + ")
       : "Insufficient data";
 
-    // Build breakdown
+    // Calculate the scarcity multiplier that will be used in intrinsic value
+    // INVERSE relationship: Lower availability = Higher scarcity = Higher value
+    // High availability (100) → 0.95x (low scarcity, lower value)
+    // Low availability (0) → 1.10x (high scarcity, higher value)
+    const scarcityMultiplier = 0.95 + ((100 - finalScore) / 100) * 0.15;
+
+    // Build breakdown with multiplier information
     const breakdown: ScoreBreakdown = {
       components,
       formula: `Weighted Average: ${formula}`,
       totalScore: Math.round(finalScore),
+      multiplier: scarcityMultiplier,
+      multiplierRange: "0.95x - 1.10x",
+      multiplierFormula:
+        "0.95 + ((100 - score)/100) × 0.15 = scarcity premium (inverse)",
       dataPoints,
       missingData: missingData.length > 0 ? missingData : undefined,
     };

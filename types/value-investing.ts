@@ -151,12 +151,15 @@ export interface IntrinsicValueInputs {
   // Analysis scores
   demandScore?: number;
   qualityScore?: number;
+  availabilityScore?: number; // For scarcity multiplier (inverse relationship)
   // Liquidity metrics for liquidity multiplier
   salesVelocity?: number; // Transactions per day
   avgDaysBetweenSales?: number; // Days between sales (liquidity indicator)
   timesSold?: number; // Total number of sales in observation period (for zero sales penalty)
   // Volatility metric for risk-adjusted valuation
   priceVolatility?: number; // Coefficient of variation (0-1+)
+  priceDecline?: number; // Price decline rate (0-1 where 0.15 = 15% decline)
+  priceTrend?: number; // Price trend (positive = rising, negative = falling)
   // Saturation metrics for market oversupply detection
   availableQty?: number; // Total units available for sale
   availableLots?: number; // Number of competing sellers
@@ -202,6 +205,12 @@ export interface IntrinsicValueBreakdown {
       ppdValue?: number;
       explanation: string;
     };
+    scarcity: {
+      value: number;
+      score: number;
+      explanation: string;
+      applied: boolean;
+    };
   };
 
   // Risk discounts (decrease value)
@@ -240,4 +249,86 @@ export interface IntrinsicValueBreakdown {
 
   // Combined multiplier (for display)
   totalMultiplier: number;
+
+  // Rejection metadata (Pabrai "Too Hard Pile")
+  rejection?: {
+    rejected: boolean;
+    reason: string;
+    category: "INSUFFICIENT_DATA" | "INSUFFICIENT_DEMAND" | "DEAD_INVENTORY" | "OVERSATURATED" | "VALUE_TRAP";
+  };
+}
+
+/**
+ * Future value projection for post-retirement appreciation
+ * Based on Pabrai's focus on "ability to generate cash" = future selling price
+ */
+export interface ValueProjection {
+  /** Current intrinsic value (in cents) */
+  currentValue: Cents;
+  /** Projected value in 1 year (in cents) */
+  oneYearValue: Cents;
+  /** Projected value in 3 years (in cents) */
+  threeYearValue: Cents;
+  /** Projected value in 5 years (in cents) */
+  fiveYearValue: Cents;
+  /** Expected annual appreciation rate (CAGR as percentage) */
+  expectedCAGR: number;
+  /** When will available supply run out? (months, null if unknown) */
+  supplyExhaustionMonths: number | null;
+  /** Months of inventory at current sales rate */
+  monthsOfInventory: number | null;
+  /** Confidence in projection (0-100) */
+  projectionConfidence: number;
+  /** Key assumptions driving the projection */
+  assumptions: string[];
+  /** Risk factors that could invalidate projection */
+  risks: string[];
+  /** Is this a pre-retirement opportunity? */
+  isPreRetirementOpportunity?: boolean;
+  /** Is this in the appreciation phase? */
+  isInAppreciationPhase?: boolean;
+  /** Retirement phase indicator */
+  retirementPhase?:
+    | "market-flooded"
+    | "stabilizing"
+    | "appreciation"
+    | "scarcity"
+    | "vintage"
+    | "none";
+}
+
+/**
+ * Data quality assessment result
+ * Pabrai principle: Only invest within your circle of competence (with sufficient data)
+ */
+export interface DataQualityAssessment {
+  /** Can we proceed with valuation? */
+  canCalculate: boolean;
+  /** Overall data quality score (0-100) */
+  qualityScore: number;
+  /** Confidence level: HIGH (80-100), MEDIUM (50-79), LOW (0-49), INSUFFICIENT */
+  confidenceLevel: "HIGH" | "MEDIUM" | "LOW" | "INSUFFICIENT";
+  /** What critical data is missing? */
+  missingCriticalData: string[];
+  /** What optional data is missing? */
+  missingOptionalData: string[];
+  /** Detailed breakdown by category */
+  breakdown: {
+    pricingData: { score: number; issues: string[] };
+    salesData: { score: number; issues: string[] };
+    marketData: { score: number; issues: string[] };
+    productData: { score: number; issues: string[] };
+  };
+  /** Human-readable explanation */
+  explanation: string;
+}
+
+/**
+ * Enhanced value metrics with future projections and data quality
+ */
+export interface EnhancedValueMetrics extends ValueMetrics {
+  /** Future value projections */
+  valueProjection?: ValueProjection;
+  /** Data quality assessment */
+  dataQuality?: DataQualityAssessment;
 }

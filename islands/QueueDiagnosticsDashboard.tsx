@@ -73,6 +73,12 @@ export default function QueueDiagnosticsDashboard() {
   const [missingDataSuccess, setMissingDataSuccess] = useState<string | null>(
     null,
   );
+  const [isTriggeringForceScrape, setIsTriggeringForceScrape] = useState(false);
+  const [showForceScrapeConfirm, setShowForceScrapeConfirm] = useState(false);
+  const [forceScrapeSuccess, setForceScrapeSuccess] = useState<string | null>(
+    null,
+  );
+  const [forceScrapeItemIds, setForceScrapeItemIds] = useState("");
 
   // Fetch queue status
   const fetchQueueStats = async () => {
@@ -194,11 +200,15 @@ export default function QueueDiagnosticsDashboard() {
         const result = await response.json();
         const jobsEnqueued = result.result?.jobsEnqueued || 0;
         const missingBricklink = result.result?.missingBricklinkData || 0;
+        const missingWorldBricks = result.result?.missingWorldBricksData || 0;
         const missingVolume = result.result?.missingVolumeData || 0;
 
         let message = `Found ${missingBricklink} missing BrickLink items`;
+        if (missingWorldBricks > 0) {
+          message += `, ${missingWorldBricks} missing WorldBricks data`;
+        }
         if (missingVolume > 0) {
-          message += ` and ${missingVolume} items with missing volume data`;
+          message += `, and ${missingVolume} items with missing volume data`;
         }
         message += `. Queued ${jobsEnqueued} jobs!`;
 
@@ -217,6 +227,56 @@ export default function QueueDiagnosticsDashboard() {
       );
     } finally {
       setIsTriggeringMissingData(false);
+    }
+  };
+
+  // Trigger force scrape handler
+  const handleForceScrape = async () => {
+    setIsTriggeringForceScrape(true);
+    setError(null);
+    setForceScrapeSuccess(null);
+    setShowForceScrapeConfirm(false);
+
+    try {
+      // Parse item IDs from input (comma or newline separated)
+      const itemIds = forceScrapeItemIds
+        .split(/[,\n]/)
+        .map((id) => id.trim())
+        .filter((id) => id.length > 0);
+
+      if (itemIds.length === 0) {
+        setError("Please enter at least one item ID");
+        return;
+      }
+
+      const response = await fetch("/api/force-scrape", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ itemIds }),
+      });
+
+      if (response.ok) {
+        const result = await response.json();
+        const jobsEnqueued = result.result?.jobsEnqueued || 0;
+
+        setForceScrapeSuccess(
+          `Successfully force-enqueued ${jobsEnqueued} jobs for ${itemIds.length} items!`,
+        );
+        setForceScrapeItemIds(""); // Clear input
+
+        // Refresh stats after triggering
+        setTimeout(() => fetchQueueStats(), 1000);
+      } else {
+        const errorData = await response.json();
+        setError(errorData.error || "Failed to force scrape");
+      }
+    } catch (err) {
+      console.error("Force scrape error:", err);
+      setError(
+        err instanceof Error ? err.message : "Failed to force scrape",
+      );
+    } finally {
+      setIsTriggeringForceScrape(false);
     }
   };
 
@@ -336,6 +396,32 @@ export default function QueueDiagnosticsDashboard() {
                     </svg>
                   )}
                   Detect Missing Data
+                </button>
+                <button
+                  class="btn btn-warning btn-outline"
+                  onClick={() => setShowForceScrapeConfirm(true)}
+                  disabled={isLoading || isTriggeringForceScrape}
+                >
+                  {isTriggeringForceScrape && (
+                    <span class="loading loading-spinner" />
+                  )}
+                  {!isTriggeringForceScrape && (
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      class="h-5 w-5"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                      stroke="currentColor"
+                    >
+                      <path
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        stroke-width="2"
+                        d="M13 10V3L4 14h7v7l9-11h-7z"
+                      />
+                    </svg>
+                  )}
+                  Force Scrape
                 </button>
                 <button
                   class="btn btn-error btn-outline"
@@ -580,6 +666,32 @@ export default function QueueDiagnosticsDashboard() {
         </div>
       )}
 
+      {/* Success Message - Force Scrape */}
+      {forceScrapeSuccess && (
+        <div class="alert alert-warning">
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            class="stroke-current shrink-0 h-6 w-6"
+            fill="none"
+            viewBox="0 0 24 24"
+          >
+            <path
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              stroke-width="2"
+              d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"
+            />
+          </svg>
+          <span>{forceScrapeSuccess}</span>
+          <button
+            class="btn btn-sm btn-ghost"
+            onClick={() => setForceScrapeSuccess(null)}
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
+
       {/* Error State */}
       {error && (
         <div class="alert alert-error">
@@ -693,13 +805,17 @@ export default function QueueDiagnosticsDashboard() {
           <div class="modal-box">
             <h3 class="font-bold text-lg">Detect Missing Data?</h3>
             <p class="py-4">
-              This will scan all products to find missing BrickLink data and
-              volume information, then queue jobs to fill the gaps:
+              This will scan all products to find missing data and queue jobs to
+              fill the gaps:
             </p>
             <ul class="list-disc list-inside py-2 space-y-1">
               <li>
                 <strong>Missing BrickLink items:</strong>{" "}
                 Products with LEGO set numbers but no BrickLink data
+              </li>
+              <li>
+                <strong>Missing WorldBricks data:</strong>{" "}
+                Products with LEGO set numbers but no WorldBricks data
               </li>
               <li>
                 <strong>Missing volume data:</strong>{" "}
@@ -734,6 +850,76 @@ export default function QueueDiagnosticsDashboard() {
             class="modal-backdrop"
             onClick={() =>
               !isTriggeringMissingData && setShowMissingDataConfirm(false)}
+          />
+        </dialog>
+      )}
+
+      {/* Confirmation Modal - Force Scrape */}
+      {showForceScrapeConfirm && (
+        <dialog class="modal modal-open">
+          <div class="modal-box">
+            <h3 class="font-bold text-lg text-warning">
+              ⚠️ Force Scrape Items
+            </h3>
+            <p class="py-4">
+              This will force immediate scraping of specific items,{" "}
+              <strong>bypassing all validation checks</strong>:
+            </p>
+            <ul class="list-disc list-inside py-2 space-y-1 text-sm">
+              <li>Skips recent scrape check</li>
+              <li>Ignores monthly data availability</li>
+              <li>Forces HIGH priority regardless of state</li>
+            </ul>
+            <div class="form-control py-4">
+              <label class="label">
+                <span class="label-text">
+                  Item IDs (comma or newline separated):
+                </span>
+              </label>
+              <textarea
+                class="textarea textarea-bordered h-24"
+                placeholder="e.g., 10294-1, 75192-1, 21330-1"
+                value={forceScrapeItemIds}
+                onInput={(e) =>
+                  setForceScrapeItemIds(
+                    (e.target as HTMLTextAreaElement).value,
+                  )}
+              />
+            </div>
+            <p class="text-sm text-warning">
+              ⚠️ Use this only for testing or manual intervention!
+            </p>
+            <div class="modal-action">
+              <button
+                class="btn btn-ghost"
+                onClick={() => {
+                  setShowForceScrapeConfirm(false);
+                  setForceScrapeItemIds("");
+                }}
+                disabled={isTriggeringForceScrape}
+              >
+                Cancel
+              </button>
+              <button
+                class="btn btn-warning"
+                onClick={handleForceScrape}
+                disabled={isTriggeringForceScrape || !forceScrapeItemIds.trim()}
+              >
+                {isTriggeringForceScrape && (
+                  <span class="loading loading-spinner" />
+                )}
+                Force Scrape
+              </button>
+            </div>
+          </div>
+          <div
+            class="modal-backdrop"
+            onClick={() => {
+              if (!isTriggeringForceScrape) {
+                setShowForceScrapeConfirm(false);
+                setForceScrapeItemIds("");
+              }
+            }}
           />
         </dialog>
       )}

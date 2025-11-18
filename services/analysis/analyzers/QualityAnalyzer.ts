@@ -200,11 +200,18 @@ export class QualityAnalyzer extends BaseAnalyzer<QualityData> {
         .join(" + ")
       : "Insufficient data";
 
-    // Build breakdown
+    // Calculate the multiplier that will be used in intrinsic value
+    const qualityMultiplier = 0.90 + (finalScore / 100) * 0.20;
+
+    // Build breakdown with multiplier information
     const breakdown: ScoreBreakdown = {
       components,
       formula: `Weighted Average: ${formula}`,
       totalScore: Math.round(finalScore),
+      multiplier: qualityMultiplier,
+      multiplierRange: "0.90x - 1.10x",
+      multiplierFormula:
+        "0.90 + (score/100) × 0.20 = applies to intrinsic value",
       dataPoints,
       missingData: missingData.length > 0 ? missingData : undefined,
     };
@@ -215,7 +222,10 @@ export class QualityAnalyzer extends BaseAnalyzer<QualityData> {
       reasoning: reasons.length > 0
         ? this.formatReasoning(reasons)
         : "Insufficient quality data for analysis.",
-      dataPoints,
+      dataPoints: {
+        ...dataPoints,
+        qualityScoreBreakdown: data.qualityScoreBreakdown,
+      },
       breakdown,
     };
   }

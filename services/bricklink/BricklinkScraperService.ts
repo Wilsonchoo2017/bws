@@ -49,6 +49,12 @@ export interface ScrapeResult {
   error?: string;
   retries?: number;
   saved?: boolean;
+  delayed?: boolean; // Job was delayed due to source lock
+  sourceLocked?: boolean; // Source lock was unavailable
+  rescheduled?: boolean; // Job was rescheduled (maintenance/rate limit)
+  maintenanceDetected?: boolean; // Maintenance error detected
+  rateLimitDetected?: boolean; // Rate limit error detected
+  setNotFound?: boolean; // Set not found error
 }
 
 /**

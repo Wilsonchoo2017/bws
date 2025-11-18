@@ -47,9 +47,17 @@ interface RecommendedBuyPrice {
   };
 }
 
+interface ValueMetrics {
+  monthsOfInventory?: number | null;
+}
+
 interface AnalysisResponse {
   recommendedBuyPrice?: RecommendedBuyPrice;
   availableDimensions: number;
+}
+
+interface ValueInvestingResponse {
+  valueMetrics: ValueMetrics;
 }
 
 /**
@@ -103,19 +111,30 @@ export default function PricingOverview(
   const loading = useSignal(true);
   const error = useSignal<string | null>(null);
   const analysis = useSignal<AnalysisResponse | null>(null);
+  const valueInvesting = useSignal<ValueInvestingResponse | null>(null);
 
   // Fetch analysis data
   useEffect(() => {
     loading.value = true;
     error.value = null;
 
-    fetch(`/api/analysis/${productId}?strategy=Investment Focus`)
-      .then((res) => {
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        return res.json();
-      })
-      .then((data) => {
-        analysis.value = data;
+    // Fetch both analysis and value investing data
+    Promise.all([
+      fetch(`/api/analysis/${productId}?strategy=Investment Focus`)
+        .then((res) => {
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+          return res.json();
+        }),
+      fetch(`/api/value-investing/${productId}`)
+        .then((res) => {
+          if (!res.ok) return null; // Silently fail for value investing data
+          return res.json();
+        })
+        .catch(() => null), // Silently fail
+    ])
+      .then(([analysisData, valueData]) => {
+        analysis.value = analysisData;
+        valueInvesting.value = valueData;
         loading.value = false;
       })
       .catch((err) => {
@@ -233,211 +252,55 @@ export default function PricingOverview(
           )}
         </div>
 
-        {/* Calculation Details (collapsible) */}
-        <details class="collapse collapse-arrow bg-base-200 mt-4">
-          <summary class="collapse-title text-sm font-medium">
-            📊 How is this price calculated?
-          </summary>
-          <div class="collapse-content space-y-3">
-            {/* Reasoning */}
-            <div>
-              <p class="text-xs font-semibold text-base-content/60 mb-1">
-                PRICING STRATEGY
-              </p>
-              <p class="text-sm text-base-content/80">
-                {recommendedBuyPrice.reasoning}
-              </p>
-            </div>
-
-            {/* Step-by-Step Calculation */}
-            {recommendedBuyPrice.breakdown && (
-              <>
-                <div class="divider my-2"></div>
-                <div>
-                  <p class="text-xs font-semibold text-base-content/60 mb-3">
-                    STEP-BY-STEP CALCULATION
-                  </p>
-
-                  {/* Step 1: Intrinsic Value */}
-                  <div class="bg-base-300 p-3 rounded-lg mb-3">
-                    <div class="flex items-start gap-2 mb-2">
-                      <span class="text-success font-mono font-bold">
-                        Step 1
-                      </span>
-                      <div class="flex-1">
-                        <strong>Calculate Intrinsic Value</strong>
-                      </div>
-                    </div>
-                    <div class="ml-12 text-sm space-y-1">
-                      <div class="text-base-content/70">
-                        Using:
-                        {recommendedBuyPrice.breakdown.inputs.msrp && (
-                          <div>
-                            • MSRP: {formatPrice(
-                              recommendedBuyPrice.breakdown.inputs.msrp,
-                              currency,
-                            )}
-                          </div>
-                        )}
-                        {recommendedBuyPrice.breakdown.inputs
-                          .bricklinkAvgPrice && (
-                          <div>
-                            • Bricklink Avg: {formatPrice(
-                              recommendedBuyPrice.breakdown.inputs
-                                .bricklinkAvgPrice,
-                              currency,
-                            )}
-                          </div>
-                        )}
-                        {recommendedBuyPrice.breakdown.inputs
-                          .retirementStatus &&
-                          (
-                            <div>
-                              • Status: {recommendedBuyPrice.breakdown.inputs
-                                .retirementStatus}
-                            </div>
-                          )}
-                        {recommendedBuyPrice.breakdown.inputs.demandScore !==
-                            undefined && (
-                          <div>
-                            • Demand Score:{" "}
-                            {recommendedBuyPrice.breakdown.inputs.demandScore
-                              .toFixed(
-                                0,
-                              )}
-                            /100
-                          </div>
-                        )}
-                        {recommendedBuyPrice.breakdown.inputs.qualityScore !==
-                            undefined && (
-                          <div>
-                            • Quality Score:{" "}
-                            {recommendedBuyPrice.breakdown.inputs.qualityScore
-                              .toFixed(
-                                0,
-                              )}
-                            /100
-                          </div>
-                        )}
-                      </div>
-                      <div class="font-bold text-success mt-2">
-                        = {formatPrice(
-                          recommendedBuyPrice.breakdown.intrinsicValue,
-                          currency,
-                        )}
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Step 2: Margin of Safety */}
-                  <div class="bg-base-300 p-3 rounded-lg mb-3">
-                    <div class="flex items-start gap-2 mb-2">
-                      <span class="text-success font-mono font-bold">
-                        Step 2
-                      </span>
-                      <div class="flex-1">
-                        <strong>Apply Margin of Safety</strong>
-                      </div>
-                    </div>
-                    <div class="ml-12 text-sm space-y-1">
-                      <div class="text-base-content/70">
-                        Base margin:{" "}
-                        {(recommendedBuyPrice.breakdown.baseMargin * 100)
-                          .toFixed(
-                            0,
-                          )}%
-                        {recommendedBuyPrice.breakdown.marginAdjustments
-                              .length >
-                            0 && (
-                          <div class="mt-2">
-                            Adjustments:
-                            {recommendedBuyPrice.breakdown.marginAdjustments
-                              .map((
-                                adj,
-                                i,
-                              ) => (
-                                <div key={i} class="ml-4">
-                                  • {adj.reason}: {adj.value > 0 ? "+" : ""}
-                                  {(adj.value * 100).toFixed(1)}%
-                                </div>
-                              ))}
-                          </div>
-                        )}
-                      </div>
-                      <div class="font-bold text-success mt-2">
-                        Final margin:{" "}
-                        {(recommendedBuyPrice.breakdown.adjustedMargin * 100)
-                          .toFixed(
-                            1,
-                          )}%
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Step 3: Target Price */}
-                  <div class="bg-base-300 p-3 rounded-lg">
-                    <div class="flex items-start gap-2 mb-2">
-                      <span class="text-success font-mono font-bold">
-                        Step 3
-                      </span>
-                      <div class="flex-1">
-                        <strong>Calculate Target Buy Price</strong>
-                      </div>
-                    </div>
-                    <div class="ml-12 text-sm space-y-1">
-                      <div class="font-mono text-base-content/70">
-                        {formatPrice(
-                          recommendedBuyPrice.breakdown.intrinsicValue,
-                          currency,
-                        )} × (1 -{" "}
-                        {(recommendedBuyPrice.breakdown.adjustedMargin *
-                          100).toFixed(1)}%)
-                      </div>
-                      <div class="font-mono text-base-content/70">
-                        = {formatPrice(
-                          recommendedBuyPrice.breakdown.intrinsicValue,
-                          currency,
-                        )} × {(1 - recommendedBuyPrice.breakdown.adjustedMargin)
-                          .toFixed(
-                            3,
-                          )}
-                      </div>
-                      <div class="font-bold text-success text-lg mt-2">
-                        = {formatPrice(
-                          recommendedBuyPrice.price,
-                          currency,
-                        )}
-                      </div>
-                    </div>
-                  </div>
+        {/* MARKET SUPPLY - MONTHS OF INVENTORY */}
+        {valueInvesting.value?.valueMetrics?.monthsOfInventory !== undefined &&
+          valueInvesting.value.valueMetrics.monthsOfInventory !== null && (
+          <div class="mt-4">
+            <div class={`alert ${
+              valueInvesting.value.valueMetrics.monthsOfInventory > 24
+                ? "alert-error"
+                : valueInvesting.value.valueMetrics.monthsOfInventory > 12
+                ? "alert-warning"
+                : valueInvesting.value.valueMetrics.monthsOfInventory < 3
+                ? "alert-success"
+                : "alert-info"
+            }`}>
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                fill="none"
+                viewBox="0 0 24 24"
+                class="stroke-current shrink-0 w-6 h-6"
+              >
+                <path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="2"
+                  d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+                />
+              </svg>
+              <div>
+                <h3 class="font-bold">Market Supply</h3>
+                <div class="text-sm">
+                  {valueInvesting.value.valueMetrics.monthsOfInventory.toFixed(1)} months of inventory at current sales rate
+                  {valueInvesting.value.valueMetrics.monthsOfInventory > 24 && (
+                    <span class="ml-2">(Dead inventory - avoid)</span>
+                  )}
+                  {valueInvesting.value.valueMetrics.monthsOfInventory > 12 &&
+                    valueInvesting.value.valueMetrics.monthsOfInventory <= 24 && (
+                    <span class="ml-2">(High supply - may suppress prices)</span>
+                  )}
+                  {valueInvesting.value.valueMetrics.monthsOfInventory >= 3 &&
+                    valueInvesting.value.valueMetrics.monthsOfInventory <= 12 && (
+                    <span class="ml-2">(Healthy supply)</span>
+                  )}
+                  {valueInvesting.value.valueMetrics.monthsOfInventory < 3 && (
+                    <span class="ml-2">(Low supply - scarcity premium)</span>
+                  )}
                 </div>
-              </>
-            )}
-
-            {/* Confidence indicator */}
-            <div class="divider my-2"></div>
-            <div>
-              <p class="text-xs font-semibold text-base-content/60 mb-1">
-                DATA CONFIDENCE
-              </p>
-              <div class="flex items-center gap-2">
-                <progress
-                  class="progress progress-success w-full"
-                  value={recommendedBuyPrice.confidence * 100}
-                  max="100"
-                >
-                </progress>
-                <span class="text-sm font-medium">
-                  {Math.round(recommendedBuyPrice.confidence * 100)}%
-                </span>
               </div>
-              <p class="text-xs text-base-content/60 mt-1">
-                Based on availability of pricing data, market metrics, and
-                quality scores
-              </p>
             </div>
           </div>
-        </details>
+        )}
       </div>
     </div>
   );

@@ -461,6 +461,18 @@ export default function ProductDetailPage(
             currency={product.currency ?? "MYR"}
           />
 
+          {/* Investment Analysis Section */}
+          {product.legoSetNumber && (
+            <div class="card bg-base-100 shadow-xl">
+              <div class="card-body">
+                <h2 class="card-title text-2xl mb-4">
+                  💎 Investment Analysis
+                </h2>
+                <IntrinsicValueCard productId={product.productId} />
+              </div>
+            </div>
+          )}
+
           {/* Bricklink Market Data Section */}
           {bricklinkItem && (() => {
             // Type cast JSONB fields to PricingBox
@@ -1080,18 +1092,6 @@ export default function ProductDetailPage(
                     <p class="text-sm">{worldbricksSet.description}</p>
                   </div>
                 )}
-              </div>
-            </div>
-          )}
-
-          {/* Investment Analysis Section */}
-          {product.legoSetNumber && (
-            <div class="card bg-base-100 shadow-xl">
-              <div class="card-body">
-                <h2 class="card-title text-2xl mb-4">
-                  💎 Investment Analysis
-                </h2>
-                <IntrinsicValueCard productId={product.productId} />
               </div>
             </div>
           )}

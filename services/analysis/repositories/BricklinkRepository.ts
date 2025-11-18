@@ -109,6 +109,7 @@ export class BricklinkRepository implements IBricklinkRepository {
 
   /**
    * Get past sales statistics for an item
+   * Now uses monthly sales data instead of individual transactions
    * Delegates to BricklinkRepository for actual data access
    */
   async getPastSalesStatistics(
@@ -116,11 +117,11 @@ export class BricklinkRepository implements IBricklinkRepository {
   ): Promise<PastSalesStatistics | null> {
     try {
       const repo = getBricklinkRepository();
-      const stats = await repo.getPastSalesStatistics(itemId);
+      const stats = await repo.getMonthlySalesStatistics(itemId);
       return stats;
     } catch (error) {
       console.warn(
-        `[BricklinkRepository] Failed to fetch past sales statistics for ${itemId}:`,
+        `[BricklinkRepository] Failed to fetch monthly sales statistics for ${itemId}:`,
         error instanceof Error ? error.message : error,
       );
       return null;
@@ -141,11 +142,11 @@ export class BricklinkRepository implements IBricklinkRepository {
       const repo = getBricklinkRepository();
       const resultMap = new Map<string, PastSalesStatistics>();
 
-      // Fetch statistics for each item
+      // Fetch statistics for each item using monthly sales data
       // Note: This is parallelized but could be optimized further with a true batch query
       const results = await Promise.allSettled(
         itemIds.map(async (itemId) => {
-          const stats = await repo.getPastSalesStatistics(itemId);
+          const stats = await repo.getMonthlySalesStatistics(itemId);
           return { itemId, stats };
         }),
       );
@@ -160,7 +161,7 @@ export class BricklinkRepository implements IBricklinkRepository {
       return resultMap;
     } catch (error) {
       console.warn(
-        `[BricklinkRepository] Failed to batch fetch past sales statistics (count: ${itemIds.length}):`,
+        `[BricklinkRepository] Failed to batch fetch monthly sales statistics (count: ${itemIds.length}):`,
         error instanceof Error ? error.message : error,
       );
       return new Map();

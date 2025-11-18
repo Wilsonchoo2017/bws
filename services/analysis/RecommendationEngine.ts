@@ -74,7 +74,7 @@ export class RecommendationEngine {
     const recommendation = strategy.interpret(scores);
 
     // Calculate recommended buy price using ValueCalculator
-    const recommendedBuyPrice = this.calculateRecommendedBuyPrice(
+    const recommendedBuyPriceResult = this.calculateRecommendedBuyPrice(
       input,
       strategyName as StrategyType,
       demandScore,
@@ -82,22 +82,40 @@ export class RecommendationEngine {
       qualityScore,
     );
 
-    if (recommendedBuyPrice) {
-      // No conversion needed - ValueCalculator now works in CENTS
-      // Cast to Cents branded type
-      recommendation.recommendedBuyPrice = {
-        price: asCents(recommendedBuyPrice.price),
-        reasoning: recommendedBuyPrice.reasoning,
-        confidence: recommendedBuyPrice.confidence,
-        breakdown: recommendedBuyPrice.breakdown
-          ? {
-            ...recommendedBuyPrice.breakdown,
-            intrinsicValue: asCents(
-              recommendedBuyPrice.breakdown.intrinsicValue,
-            ),
-          }
-          : undefined,
-      };
+    if (recommendedBuyPriceResult) {
+      const { recommendedBuyPrice, rejectionReason } = recommendedBuyPriceResult;
+
+      if (recommendedBuyPrice) {
+        // No conversion needed - ValueCalculator now works in CENTS
+        // Cast to Cents branded type
+        recommendation.recommendedBuyPrice = {
+          price: asCents(recommendedBuyPrice.price),
+          reasoning: recommendedBuyPrice.reasoning,
+          confidence: recommendedBuyPrice.confidence,
+          breakdown: recommendedBuyPrice.breakdown
+            ? {
+              ...recommendedBuyPrice.breakdown,
+              intrinsicValue: asCents(
+                recommendedBuyPrice.breakdown.intrinsicValue,
+              ),
+            }
+            : undefined,
+        };
+      }
+
+      // Store rejection reason if present
+      if (rejectionReason) {
+        // Add rejection reason to risks array for visibility
+        if (!recommendation.risks.includes(rejectionReason)) {
+          recommendation.risks.unshift(rejectionReason); // Add at beginning
+        }
+        // Also add to reasoning
+        if (recommendation.overall.reasoning) {
+          recommendation.overall.reasoning = `${rejectionReason}. ${recommendation.overall.reasoning}`;
+        } else {
+          recommendation.overall.reasoning = rejectionReason;
+        }
+      }
     }
 
     return recommendation;
@@ -105,6 +123,7 @@ export class RecommendationEngine {
 
   /**
    * Calculate recommended buy price using ValueCalculator
+   * Returns both the price result and any rejection reason
    */
   private calculateRecommendedBuyPrice(
     input: ProductAnalysisInput,
@@ -113,11 +132,12 @@ export class RecommendationEngine {
     availabilityScore: { value: number } | null,
     qualityScore: { value: number } | null,
   ): {
-    price: number;
-    reasoning: string;
-    confidence: number;
-    breakdown?: {
-      intrinsicValue: number;
+    recommendedBuyPrice: {
+      price: number;
+      reasoning: string;
+      confidence: number;
+      breakdown?: {
+        intrinsicValue: number;
       baseMargin: number;
       adjustedMargin: number;
       marginAdjustments: Array<{ reason: string; value: number }>;
@@ -131,6 +151,8 @@ export class RecommendationEngine {
         availabilityScore?: number;
       };
     };
+  } | null;
+    rejectionReason?: string;
   } | null {
     // Determine retirement status with time-decay support
     // IMPROVED: Use WorldBricks yearRetired for accurate calculation
@@ -174,9 +196,11 @@ export class RecommendationEngine {
       // Analysis scores
       demandScore: demandScore?.value,
       qualityScore: qualityScore?.value,
+      availabilityScore: availabilityScore?.value, // For scarcity multiplier
       // Liquidity metrics
       salesVelocity: input.demand.bricklinkSalesVelocity,
       avgDaysBetweenSales: input.demand.bricklinkAvgDaysBetweenSales,
+      timesSold: input.demand.bricklinkSixMonthNewTimesSold || input.demand.bricklinkTimesSold, // For zero sales penalty
       // Volatility metric
       priceVolatility: input.demand.bricklinkPriceVolatility,
       // Saturation metrics
@@ -187,12 +211,37 @@ export class RecommendationEngine {
       partsCount: input.quality.partsCount,
     };
 
-    // Calculate recommended buy price
-    return ValueCalculator.calculateRecommendedBuyPrice(valueInputs, {
+    // Calculate recommended buy price with breakdown
+    const result = ValueCalculator.calculateRecommendedBuyPrice(valueInputs, {
       strategy,
       availabilityScore: availabilityScore?.value,
       demandScore: demandScore?.value,
     });
+
+    // If null, check if there's a rejection reason in the breakdown
+    if (!result) {
+      // Try to get the rejection reason by recalculating with breakdown
+      const { breakdown } = ValueCalculator.calculateIntrinsicValueWithBreakdown(
+        valueInputs,
+      );
+
+      if (breakdown.rejection?.rejected) {
+        return {
+          recommendedBuyPrice: null,
+          rejectionReason: breakdown.rejection.reason,
+        };
+      }
+
+      return {
+        recommendedBuyPrice: null,
+        rejectionReason: "Insufficient data for value analysis",
+      };
+    }
+
+    return {
+      recommendedBuyPrice: result,
+      rejectionReason: undefined,
+    };
   }
 
   /**
@@ -237,5 +286,157 @@ export class RecommendationEngine {
         description: this.qualityAnalyzer.getDescription(),
       },
     ];
+  }
+
+  /**
+   * Detect if this is a pre-retirement opportunity
+   * DEMAND-GATED: Only flag as opportunity if there's real demand
+   *
+   * Criteria:
+   * - Set is retiring soon (limited time to accumulate)
+   * - Demand score >= 50 (must have at least moderate demand)
+   * - Quality score >= 40 (avoid poor quality sets)
+   *
+   * Philosophy: Retirement alone doesn't create value, DEMAND does.
+   * A retiring set with no buyers is just old inventory!
+   */
+  isPreRetirementOpportunity(
+    availability: { retiringSoon?: boolean; yearRetired?: number },
+    demandScore?: number,
+    qualityScore?: number,
+  ): {
+    isOpportunity: boolean;
+    reason: string;
+    urgency: "high" | "medium" | "low";
+  } {
+    const isRetiringSoon = availability.retiringSoon === true;
+    const hasSufficientDemand = (demandScore ?? 0) >= 50;
+    const hasDecentQuality = (qualityScore ?? 0) >= 40;
+
+    if (!isRetiringSoon) {
+      return {
+        isOpportunity: false,
+        reason: "Set is not retiring soon",
+        urgency: "low",
+      };
+    }
+
+    if (!hasSufficientDemand) {
+      return {
+        isOpportunity: false,
+        reason:
+          `Retiring soon but demand too low (${demandScore?.toFixed(0) ?? "unknown"}/100) - likely won't appreciate`,
+        urgency: "low",
+      };
+    }
+
+    if (!hasDecentQuality) {
+      return {
+        isOpportunity: false,
+        reason:
+          `Retiring soon with demand, but quality too low (${qualityScore?.toFixed(0) ?? "unknown"}/100)`,
+        urgency: "low",
+      };
+    }
+
+    // All criteria met - this is a PRE-RETIREMENT OPPORTUNITY
+    let urgency: "high" | "medium" | "low" = "medium";
+    let reason = "Set retiring soon with strong demand - accumulate before scarcity";
+
+    // Adjust urgency based on demand strength
+    if (demandScore! >= 70) {
+      urgency = "high";
+      reason =
+        "EXCELLENT PRE-RETIREMENT OPPORTUNITY: Retiring soon with exceptional demand - accumulate aggressively";
+    } else if (demandScore! >= 60) {
+      urgency = "high";
+      reason =
+        "STRONG PRE-RETIREMENT OPPORTUNITY: Retiring soon with strong demand - accumulate now";
+    }
+
+    return {
+      isOpportunity: true,
+      reason,
+      urgency,
+    };
+  }
+
+  /**
+   * Detect if set is in the "value appreciation phase"
+   * Retired + Early stage (0-5 years) + Strong demand = Sweet spot for value growth
+   *
+   * Philosophy: Best time to hold is early retirement when:
+   * 1. Supply stops (retired)
+   * 2. Market hasn't fully absorbed available inventory yet
+   * 3. Demand remains strong
+   */
+  isInAppreciationPhase(
+    availability: { retiringSoon?: boolean; yearRetired?: number },
+    demandScore?: number,
+  ): {
+    isInPhase: boolean;
+    reason: string;
+    phase: "market-flooded" | "stabilizing" | "appreciation" | "scarcity" | "vintage" | "none";
+  } {
+    const currentYear = new Date().getFullYear();
+    const yearRetired = availability.yearRetired;
+    const hasSufficientDemand = (demandScore ?? 0) >= 50;
+
+    if (!yearRetired) {
+      return {
+        isInPhase: false,
+        reason: "Set is not retired or retirement date unknown",
+        phase: "none",
+      };
+    }
+
+    const yearsPostRetirement = currentYear - yearRetired;
+
+    if (!hasSufficientDemand) {
+      return {
+        isInPhase: false,
+        reason:
+          `Retired but demand too low (${demandScore?.toFixed(0) ?? "unknown"}/100) - won't appreciate without buyers`,
+        phase: "none",
+      };
+    }
+
+    // Determine phase based on years post-retirement
+    if (yearsPostRetirement < 1) {
+      return {
+        isInPhase: false,
+        reason:
+          "Recently retired (<1 year) - market likely flooded, wait for stabilization",
+        phase: "market-flooded",
+      };
+    } else if (yearsPostRetirement < 2) {
+      return {
+        isInPhase: true,
+        reason:
+          "STABILIZING PHASE (1-2 years retired): Good time to accumulate as market absorbs supply",
+        phase: "stabilizing",
+      };
+    } else if (yearsPostRetirement < 5) {
+      return {
+        isInPhase: true,
+        reason:
+          "APPRECIATION PHASE (2-5 years retired): Prime value growth period with strong demand",
+        phase: "appreciation",
+      };
+    } else if (yearsPostRetirement < 10) {
+      return {
+        isInPhase: true,
+        reason:
+          "SCARCITY PHASE (5-10 years retired): Limited supply drives premium prices",
+        phase: "scarcity",
+      };
+    } else {
+      return {
+        isInPhase: true,
+        reason:
+          "VINTAGE PHASE (10+ years retired): Collector's item with premium pricing",
+        phase: "vintage",
+      };
+    }
   }
 }

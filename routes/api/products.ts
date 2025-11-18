@@ -215,10 +215,11 @@ export const handler = async (
           ? (brickEconomy?.priceBeforeDiscount ?? product.priceBeforeDiscount)
           : product.priceBeforeDiscount;
 
-        // Validate Bricklink data completeness
-        const bricklinkValidation = BricklinkDataValidator.validateCompleteness(
-          bricklink,
-        );
+        // Validate Bricklink data completeness (including monthly sales data)
+        const bricklinkValidation = await BricklinkDataValidator
+          .validateCompletenessWithMonthlyData(
+            bricklink,
+          );
         const bricklinkDataStatus = !bricklink
           ? "missing"
           : bricklinkValidation.isComplete
@@ -244,6 +245,7 @@ export const handler = async (
           // Enhanced Bricklink data status
           bricklinkDataStatus,
           bricklinkMissingBoxes: bricklinkValidation.missingBoxes,
+          bricklinkHasMonthlyData: bricklinkValidation.hasMonthlyData ?? false,
         };
       }),
     );

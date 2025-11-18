@@ -63,6 +63,12 @@ export const handler = async (
     // Get worker status
     const workerStatus = queueService.getWorkerStatus();
 
+    // Get lock status for all sources
+    const lockStatus = await queueService.getSourceLockStatus();
+
+    // Get source distribution in queue
+    const sourceDistribution = await queueService.getSourceDistribution();
+
     // Get sample jobs from each category
     const waiting = await queueService.getWaitingJobs(0, 5);
     const active = await queueService.getActiveJobs(0, 5);
@@ -79,6 +85,8 @@ export const handler = async (
         isPaused: workerStatus.isPaused,
         isRunning: workerStatus.isRunning,
       },
+      lockStatus,
+      sourceDistribution,
       jobs: {
         waiting: waiting.map((j) => ({
           id: j.id,

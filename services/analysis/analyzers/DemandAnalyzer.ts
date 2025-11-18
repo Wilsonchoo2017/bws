@@ -52,10 +52,11 @@ export class DemandAnalyzer extends BaseAnalyzer<DemandData> {
     const components: ScoreComponent[] = [];
     const missingData: string[] = [];
 
-    // PRIMARY: 1. Bricklink Market Pricing (60% weight) - Direct market indicators
+    // REWEIGHTED: 1. BrickLink Transaction Prices (8% weight) - Actual transaction data only
+    // REDUCED from 60% to 8% - trust transactions over listings
     if (hasBricklinkPricing) {
       const pricingScore = this.analyzeBricklinkPricing(data);
-      scores.push({ score: pricingScore, weight: 0.60 });
+      scores.push({ score: pricingScore, weight: 0.08 });
 
       // Build calculation breakdown
       let pricingCalc = "Based on: ";
@@ -120,21 +121,22 @@ export class DemandAnalyzer extends BaseAnalyzer<DemandData> {
       pricingCalc += pricingParts.join(", ");
 
       components.push({
-        name: "Bricklink Market Pricing",
-        weight: 0.60,
+        name: "BrickLink Transaction Prices",
+        weight: 0.08,
         score: pricingScore,
         calculation: pricingCalc,
         reasoning:
-          "Primary demand signal. Price trends and market liquidity indicate buying interest. Rising prices + limited lots = strong demand.",
+          "Actual transaction prices (qtyAvgPrice) - what buyers actually paid. More reliable than listing prices.",
       });
     } else {
       missingData.push("Bricklink market pricing data");
     }
 
-    // SECONDARY: 2. Liquidity & Velocity (25% weight) - Like trading volume in stocks
+    // PRIMARY: 2. Transaction Metrics - Liquidity & Velocity (45% weight) - OBJECTIVE DATA
+    // INCREASED from 25% to 45% - actual sales activity is most trustworthy
     if (hasPastSalesData) {
       const liquidityScore = this.analyzeLiquidityVelocity(data);
-      scores.push({ score: liquidityScore, weight: 0.25 });
+      scores.push({ score: liquidityScore, weight: 0.45 });
 
       const liquidityParts: string[] = [];
 
@@ -180,12 +182,12 @@ export class DemandAnalyzer extends BaseAnalyzer<DemandData> {
       }
 
       components.push({
-        name: "Liquidity & Velocity",
-        weight: 0.25,
+        name: "Transaction Metrics (Liquidity & Velocity)",
+        weight: 0.45,
         score: liquidityScore,
         calculation: `Based on: ${liquidityParts.join(", ")}`,
         reasoning:
-          "Market liquidity indicator. Higher sales velocity = easier to buy/sell = more reliable market. Like trading volume in stocks.",
+          "PRIMARY METRIC: Actual sales velocity and transaction volume. Objective data showing real market activity. Higher weight = trust what people DO, not what sellers ASK.",
       });
     } else if (hasLegacyBricklinkData && !hasBricklinkPricing) {
       // Fallback to legacy Bricklink data ONLY if no pricing data (reduced weight)
@@ -223,10 +225,11 @@ export class DemandAnalyzer extends BaseAnalyzer<DemandData> {
       missingData.push("Bricklink sales velocity data");
     }
 
-    // 3. Momentum & Trends (10% weight) - Like price/volume trends
+    // 3. Price Momentum & Trends (30% weight) - OBJECTIVE trend analysis
+    // INCREASED from 10% to 30% - price trends are objective math, not opinion
     if (hasPastSalesData && data.bricklinkPriceTrend) {
       const momentumScore = this.analyzeMomentumTrends(data);
-      scores.push({ score: momentumScore, weight: 0.10 });
+      scores.push({ score: momentumScore, weight: 0.30 });
 
       const momentumParts: string[] = [];
 
@@ -259,23 +262,50 @@ export class DemandAnalyzer extends BaseAnalyzer<DemandData> {
       }
 
       components.push({
-        name: "Momentum & Trends",
-        weight: 0.10,
+        name: "Price Momentum & Trends",
+        weight: 0.30,
         score: momentumScore,
         calculation: `Based on: ${momentumParts.join(", ")}`,
         reasoning:
-          "Technical indicators of market momentum. RSI >70 = overbought, <30 = oversold. Bullish trends + rising volume = strong demand signal.",
+          "OBJECTIVE technical indicators: price trends, RSI, volume patterns. Math doesn't lie - bullish trends + rising volume = genuine demand growth.",
       });
     }
 
-    // 4. Community Sentiment (3% weight) - Like analyst ratings
+    // 4. Market Depth (15% weight) - Lot distribution and market structure
+    // NEW COMPONENT: Analyzes who controls the market (few big sellers vs distributed)
+    if (data.bricklinkCurrentNewLots !== undefined) {
+      const marketDepthScore = this.analyzeMarketDepth(data);
+      scores.push({ score: marketDepthScore, weight: 0.15 });
+
+      const depthParts: string[] = [];
+
+      if (data.bricklinkCurrentNewLots) {
+        depthParts.push(`${data.bricklinkCurrentNewLots} active sellers`);
+        if (data.bricklinkCurrentNewQty) {
+          const avgLotSize = data.bricklinkCurrentNewQty / data.bricklinkCurrentNewLots;
+          depthParts.push(`avg ${avgLotSize.toFixed(1)} units/seller`);
+        }
+      }
+
+      components.push({
+        name: "Market Depth",
+        weight: 0.15,
+        score: marketDepthScore,
+        calculation: `Based on: ${depthParts.join(", ")}`,
+        reasoning:
+          "Market structure analysis. Many small sellers = healthy distributed market. Few large sellers = concentration risk.",
+      });
+    }
+
+    // 5. Community Sentiment (2% weight) - Social validation
+    // REDUCED from 3% to 2% - subjective and lagging indicator
     if (hasRedditData) {
       const communityScore = this.analyzeCommunitySentiment(
         data.redditPosts,
         data.redditAverageScore,
         data.redditTotalComments,
       );
-      scores.push({ score: communityScore, weight: 0.03 });
+      scores.push({ score: communityScore, weight: 0.02 });
 
       const communityParts: string[] = [];
 
@@ -297,45 +327,16 @@ export class DemandAnalyzer extends BaseAnalyzer<DemandData> {
 
       components.push({
         name: "Community Sentiment",
-        weight: 0.03,
+        weight: 0.02,
         score: communityScore,
         calculation: `Based on: ${communityParts.join(", ")}`,
         reasoning:
-          "Social validation from Reddit community. More posts + higher engagement = stronger collector interest and awareness.",
+          "Social validation from Reddit. Lagging indicator - awareness follows price action. Low weight reflects this.",
       });
     }
 
-    // 5. Retail Activity (2% weight) - Market awareness indicator
-    if (hasSalesData) {
-      const salesScore = this.analyzeSalesVelocity(
-        data.unitsSold,
-        data.lifetimeSold,
-      );
-      scores.push({ score: salesScore, weight: 0.02 });
-
-      const retailParts: string[] = [];
-
-      if (data.unitsSold !== undefined) {
-        dataPoints.unitsSold = data.unitsSold;
-        retailParts.push(`${data.unitsSold.toLocaleString()} units sold`);
-        if (data.unitsSold > 1000) {
-          reasons.push(
-            `High retail awareness (${data.unitsSold.toLocaleString()} sold)`,
-          );
-        }
-      } else if (data.lifetimeSold !== undefined) {
-        retailParts.push(`${data.lifetimeSold.toLocaleString()} lifetime sold`);
-      }
-
-      components.push({
-        name: "Retail Activity",
-        weight: 0.02,
-        score: salesScore,
-        calculation: `Based on: ${retailParts.join(", ")}`,
-        reasoning:
-          "Retail platform sales indicate market awareness and mainstream appeal. High volume suggests broad consumer interest.",
-      });
-    }
+    // REMOVED: Retail Activity component - not relevant for retired sets
+    // For active sets, retail sales don't predict resale demand
 
     // Calculate final score
     const finalScore = scores.length > 0 ? this.weightedAverage(scores) : 50;
@@ -362,11 +363,18 @@ export class DemandAnalyzer extends BaseAnalyzer<DemandData> {
         .join(" + ")
       : "Insufficient data";
 
-    // Build breakdown
+    // Calculate the multiplier that will be used in intrinsic value
+    const demandMultiplier = 0.85 + (finalScore / 100) * 0.30;
+
+    // Build breakdown with multiplier information
     const breakdown: ScoreBreakdown = {
       components,
       formula: `Weighted Average: ${formula}`,
       totalScore: Math.round(finalScore),
+      multiplier: demandMultiplier,
+      multiplierRange: "0.85x - 1.15x",
+      multiplierFormula:
+        "0.85 + (score/100) × 0.30 = applies to intrinsic value",
       dataPoints,
       missingData: missingData.length > 0 ? missingData : undefined,
     };
@@ -377,7 +385,10 @@ export class DemandAnalyzer extends BaseAnalyzer<DemandData> {
       reasoning: reasons.length > 0
         ? this.formatReasoning(reasons)
         : "Insufficient demand data for analysis.",
-      dataPoints,
+      dataPoints: {
+        ...dataPoints,
+        demandScoreBreakdown: data.demandScoreBreakdown,
+      },
       breakdown,
     };
   }
@@ -924,6 +935,90 @@ export class DemandAnalyzer extends BaseAnalyzer<DemandData> {
         scores.push(60 + (50 - spread) * 0.67);
       } else {
         scores.push(Math.max(30, 60 - (spread - 50) * 0.4));
+      }
+    }
+
+    // Return average of available scores, or neutral score if no data
+    return scores.length > 0
+      ? scores.reduce((sum, s) => sum + s, 0) / scores.length
+      : 50;
+  }
+
+  /**
+   * NEW: Analyze market depth and seller distribution
+   * Healthy market = many small sellers (distributed)
+   * Risky market = few large sellers (concentration risk - they control prices)
+   */
+  private analyzeMarketDepth(data: DemandData): number {
+    const scores: number[] = [];
+
+    // 1. Seller count score (more sellers = healthier market)
+    if (data.bricklinkCurrentNewLots !== undefined) {
+      const lots = data.bricklinkCurrentNewLots;
+
+      // Interpret lot count as market health:
+      // 50+ sellers = very healthy (distributed) = 90-100
+      // 30-50 sellers = healthy = 75-90
+      // 15-30 sellers = moderate = 60-75
+      // 5-15 sellers = concentrated = 40-60
+      // <5 sellers = highly concentrated (risky) = 20-40
+
+      if (lots >= 50) {
+        scores.push(Math.min(100, 90 + (lots - 50) / 5));
+      } else if (lots >= 30) {
+        scores.push(75 + (lots - 30) * 0.75);
+      } else if (lots >= 15) {
+        scores.push(60 + (lots - 15) * 1.0);
+      } else if (lots >= 5) {
+        scores.push(40 + (lots - 5) * 2.0);
+      } else {
+        scores.push(Math.max(10, 20 + lots * 4));
+      }
+    }
+
+    // 2. Lot size distribution score (avg units per seller)
+    if (data.bricklinkCurrentNewQty && data.bricklinkCurrentNewLots && data.bricklinkCurrentNewLots > 0) {
+      const avgLotSize = data.bricklinkCurrentNewQty / data.bricklinkCurrentNewLots;
+
+      // Small average lot size = distributed market = healthy
+      // Large average lot size = few sellers with lots of inventory = concentrated
+      // 1-2 units/seller = very distributed = 90-100
+      // 2-5 units/seller = distributed = 75-90
+      // 5-10 units/seller = moderate = 60-75
+      // 10-20 units/seller = concentrated = 40-60
+      // >20 units/seller = highly concentrated = 20-40
+
+      if (avgLotSize <= 2) {
+        scores.push(Math.max(90, 100 - avgLotSize * 5));
+      } else if (avgLotSize <= 5) {
+        scores.push(75 + (5 - avgLotSize) * 5);
+      } else if (avgLotSize <= 10) {
+        scores.push(60 + (10 - avgLotSize) * 3);
+      } else if (avgLotSize <= 20) {
+        scores.push(40 + (20 - avgLotSize) * 2);
+      } else {
+        scores.push(Math.max(10, 40 - (avgLotSize - 20) * 1));
+      }
+    }
+
+    // 3. Total quantity vs lots (another distribution indicator)
+    if (data.bricklinkCurrentNewQty !== undefined && data.bricklinkCurrentNewLots !== undefined) {
+      const qty = data.bricklinkCurrentNewQty;
+      const lots = data.bricklinkCurrentNewLots;
+
+      // If total qty is low but lots are high = good distribution
+      // If total qty is high but lots are low = bad distribution
+
+      if (qty < 20 && lots >= 10) {
+        scores.push(90); // Very distributed, low inventory
+      } else if (qty < 50 && lots >= 15) {
+        scores.push(80); // Distributed
+      } else if (qty < 100 && lots >= 20) {
+        scores.push(70); // Moderately distributed
+      } else if (qty > 200 && lots < 10) {
+        scores.push(30); // Highly concentrated (few sellers, lots of inventory)
+      } else if (qty > 100 && lots < 15) {
+        scores.push(45); // Concentrated
       }
     }
 

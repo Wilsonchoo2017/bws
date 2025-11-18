@@ -19,6 +19,7 @@ import {
   bricklinkItems,
   products,
   redditSearchResults,
+  worldbricksSets,
 } from "../../db/schema.ts";
 import { and, eq, isNotNull, or, sql } from "drizzle-orm";
 import { getQueueService, JobPriority } from "../queue/QueueService.ts";
@@ -37,11 +38,17 @@ export interface MissingDataResult {
   success: boolean;
   productsChecked: number;
   missingBricklinkData: number;
+  missingWorldBricksData: number;
   missingVolumeData: number;
   jobsEnqueued: number;
   errors: string[];
   timestamp: Date;
   productsWithMissingData: Array<{
+    productId: string;
+    legoSetNumber: string;
+    name: string | null;
+  }>;
+  productsWithMissingWorldBricksData: Array<{
     productId: string;
     legoSetNumber: string;
     name: string | null;
@@ -65,11 +72,13 @@ export class MissingDataDetectorService {
       success: true,
       productsChecked: 0,
       missingBricklinkData: 0,
+      missingWorldBricksData: 0,
       missingVolumeData: 0,
       jobsEnqueued: 0,
       errors: [],
       timestamp: new Date(),
       productsWithMissingData: [],
+      productsWithMissingWorldBricksData: [],
       itemsWithMissingVolume: [],
     };
 
@@ -195,6 +204,31 @@ export class MissingDataDetectorService {
       } else {
         console.log(
           "✅ All active Bricklink items have complete volume data",
+        );
+      }
+
+      // Find products with missing WorldBricks data
+      const productsWithMissingWorldBricks = await this
+        .findProductsMissingWorldBricksData();
+      result.missingWorldBricksData = productsWithMissingWorldBricks.length;
+      result.productsWithMissingWorldBricksData = productsWithMissingWorldBricks
+        .map((p) => ({
+          productId: p.productId,
+          legoSetNumber: p.legoSetNumber!,
+          name: p.name,
+        }));
+
+      console.log(
+        `📊 Found ${productsWithMissingWorldBricks.length} products with LEGO set numbers missing WorldBricks data`,
+      );
+
+      if (productsWithMissingWorldBricks.length === 0) {
+        console.log(
+          "✅ All products with LEGO set numbers have WorldBricks data",
+        );
+      } else {
+        console.log(
+          `ℹ️  WorldBricks data missing for ${productsWithMissingWorldBricks.length} products (not auto-enqueued - WorldBricks scraping must be triggered manually)`,
         );
       }
 
@@ -360,13 +394,50 @@ export class MissingDataDetectorService {
   }
 
   /**
+   * Find products with LEGO set numbers that don't have corresponding WorldBricks data
+   * Similar to BrickLink missing data detection
+   */
+  async findProductsMissingWorldBricksData(): Promise<
+    Array<{
+      productId: string;
+      legoSetNumber: string | null;
+      name: string | null;
+    }>
+  > {
+    // Use LEFT JOIN to find products without matching WorldBricks sets in a single query
+    const missingProducts = await db
+      .select({
+        productId: products.productId,
+        legoSetNumber: products.legoSetNumber,
+        name: products.name,
+      })
+      .from(products)
+      .leftJoin(
+        worldbricksSets,
+        eq(products.legoSetNumber, worldbricksSets.setNumber),
+      )
+      .where(
+        sql`${products.legoSetNumber} IS NOT NULL AND ${worldbricksSets.setNumber} IS NULL`,
+      );
+
+    return missingProducts;
+  }
+
+  /**
    * Get preview of products that would be checked (for UI display)
    */
   async preview(): Promise<{
     productsWithLegoSets: number;
     productsWithBricklinkData: number;
     productsMissingBricklinkData: number;
+    productsWithWorldBricksData: number;
+    productsMissingWorldBricksData: number;
     sampleMissingProducts: Array<{
+      productId: string;
+      legoSetNumber: string;
+      name: string | null;
+    }>;
+    sampleMissingWorldBricksProducts: Array<{
       productId: string;
       legoSetNumber: string;
       name: string | null;
@@ -374,6 +445,8 @@ export class MissingDataDetectorService {
   }> {
     const productsWithMissingData = await this
       .findProductsMissingBricklinkData();
+    const productsWithMissingWorldBricksData = await this
+      .findProductsMissingWorldBricksData();
 
     // Get total count of products with LEGO set numbers
     const allProductsWithLegoSets = await db.select({
@@ -383,18 +456,29 @@ export class MissingDataDetectorService {
       .where(isNotNull(products.legoSetNumber));
 
     const totalWithLegoSets = allProductsWithLegoSets.length;
-    const missingCount = productsWithMissingData.length;
-    const withDataCount = totalWithLegoSets - missingCount;
+    const missingBricklinkCount = productsWithMissingData.length;
+    const withBricklinkDataCount = totalWithLegoSets - missingBricklinkCount;
+    const missingWorldBricksCount = productsWithMissingWorldBricksData.length;
+    const withWorldBricksDataCount = totalWithLegoSets -
+      missingWorldBricksCount;
 
     return {
       productsWithLegoSets: totalWithLegoSets,
-      productsWithBricklinkData: withDataCount,
-      productsMissingBricklinkData: missingCount,
+      productsWithBricklinkData: withBricklinkDataCount,
+      productsMissingBricklinkData: missingBricklinkCount,
+      productsWithWorldBricksData: withWorldBricksDataCount,
+      productsMissingWorldBricksData: missingWorldBricksCount,
       sampleMissingProducts: productsWithMissingData.slice(0, 10).map((p) => ({
         productId: p.productId,
         legoSetNumber: p.legoSetNumber!,
         name: p.name,
       })),
+      sampleMissingWorldBricksProducts: productsWithMissingWorldBricksData
+        .slice(0, 10).map((p) => ({
+          productId: p.productId,
+          legoSetNumber: p.legoSetNumber!,
+          name: p.name,
+        })),
     };
   }
 

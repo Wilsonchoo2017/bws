@@ -177,10 +177,22 @@ export const VALUE_INVESTING_CONFIG = {
       LOW_DEMAND_THRESHOLD: 30, // Demand score < 30 compounds with zero sales
       COMPOUND_MULTIPLIER: 0.60, // Additional 40% discount if low demand + zero sales
     },
+
+    /**
+     * Sanity bounds to prevent extreme valuations
+     * Prevents multiplicative compounding from creating unrealistic values
+     * Buffett principle: "If it seems too good to be true, it probably is"
+     */
+    SANITY_BOUNDS: {
+      MIN_MULTIPLIER: 0.30, // Minimum 0.30× base value (even junk sets retain some value)
+      MAX_MULTIPLIER: 3.50, // Maximum 3.50× base value (very few sets exceed this, even vintage)
+    },
   },
 
   /**
    * Margin of safety parameters (Buffett/Pabrai principle)
+   * ENHANCED: Confidence-aware margins
+   * Buffett principle: "The less certain you are, the bigger your margin should be"
    */
   MARGIN_OF_SAFETY: {
     /**
@@ -193,6 +205,15 @@ export const VALUE_INVESTING_CONFIG = {
      * Minimum margin to consider a "good buy"
      */
     MINIMUM: 0.20,
+
+    /**
+     * Confidence-aware margins based on data quality
+     * Higher quality data = can accept smaller margin
+     * Lower quality data = need bigger margin for safety
+     */
+    HIGH_CONFIDENCE: 0.20, // Data quality 80-100: 20% margin
+    MEDIUM_CONFIDENCE: 0.30, // Data quality 50-79: 30% margin
+    LOW_CONFIDENCE: 0.40, // Data quality 0-49: 40% margin
   },
 
   /**

@@ -17,22 +17,22 @@ console.log();
 const volumeData = await db
   .select()
   .from(bricklinkVolumeHistory)
-  .orderBy(desc(bricklinkVolumeHistory.recorded_at))
+  .orderBy(desc(bricklinkVolumeHistory.recordedAt))
   .limit(100)
   .then((rows) =>
     rows.filter((row) =>
-      row.condition === "new" && row.time_period === "six_month"
+      row.condition === "new" && row.timePeriod === "six_month"
     )
   );
 
 // Separate into categories
 const zeroSales = volumeData.filter((item) =>
-  (item.times_sold ?? 0) === 0 && (item.total_qty ?? 0) > 0
+  (item.timesSold ?? 0) === 0 && (item.totalQty ?? 0) > 0
 );
 const lowSales = volumeData.filter((item) =>
-  (item.times_sold ?? 0) > 0 && (item.times_sold ?? 0) <= 5
+  (item.timesSold ?? 0) > 0 && (item.timesSold ?? 0) <= 5
 );
-const goodSales = volumeData.filter((item) => (item.times_sold ?? 0) > 10);
+const goodSales = volumeData.filter((item) => (item.timesSold ?? 0) > 10);
 
 console.log("📊 DATASET SUMMARY");
 console.log("-".repeat(80));
@@ -63,15 +63,15 @@ if (zeroSales.length > 0) {
   console.log("-".repeat(80));
 
   zeroSales.slice(0, 10).forEach((item) => {
-    const supply = item.total_qty ?? 0;
-    const sellers = item.total_lots ?? 0;
-    const price = item.avg_price
-      ? `$${(item.avg_price / 100).toFixed(2)}`
+    const supply = item.totalQty ?? 0;
+    const sellers = item.totalLots ?? 0;
+    const price = item.avgPrice
+      ? `$${(item.avgPrice / 100).toFixed(2)}`
       : "N/A";
-    const timesSold = item.times_sold ?? 0;
+    const timesSold = item.timesSold ?? 0;
 
     console.log(
-      `${item.item_id.padEnd(13)} | ${String(supply).padEnd(6)} | ${
+      `${item.itemId.padEnd(13)} | ${String(supply).padEnd(6)} | ${
         String(sellers).padEnd(7)
       } | ${price.padEnd(9)} | ${String(timesSold).padEnd(10)} | 0.50x (50%)`,
     );
@@ -79,9 +79,9 @@ if (zeroSales.length > 0) {
   console.log();
 
   const avgZeroSupply = zeroSales.reduce((sum, item) =>
-    sum + (item.total_qty ?? 0), 0) / zeroSales.length;
+    sum + (item.totalQty ?? 0), 0) / zeroSales.length;
   const avgZeroSellers = zeroSales.reduce((sum, item) =>
-    sum + (item.total_lots ?? 0), 0) / zeroSales.length;
+    sum + (item.totalLots ?? 0), 0) / zeroSales.length;
 
   console.log(
     `Average supply for zero-sales items: ${avgZeroSupply.toFixed(0)} units`,
@@ -103,16 +103,16 @@ if (goodSales.length > 0) {
   console.log("-".repeat(80));
 
   goodSales.slice(0, 10).forEach((item) => {
-    const supply = item.total_qty ?? 0;
-    const sellers = item.total_lots ?? 0;
-    const price = item.avg_price
-      ? `$${(item.avg_price / 100).toFixed(2)}`
+    const supply = item.totalQty ?? 0;
+    const sellers = item.totalLots ?? 0;
+    const price = item.avgPrice
+      ? `$${(item.avgPrice / 100).toFixed(2)}`
       : "N/A";
-    const timesSold = item.times_sold ?? 0;
+    const timesSold = item.timesSold ?? 0;
     const velocity = (timesSold / 180).toFixed(3); // 6 months ≈ 180 days
 
     console.log(
-      `${item.item_id.padEnd(13)} | ${String(supply).padEnd(6)} | ${
+      `${item.itemId.padEnd(13)} | ${String(supply).padEnd(6)} | ${
         String(sellers).padEnd(7)
       } | ${price.padEnd(9)} | ${
         String(timesSold).padEnd(10)
@@ -122,11 +122,11 @@ if (goodSales.length > 0) {
   console.log();
 
   const avgGoodSupply = goodSales.reduce((sum, item) =>
-    sum + (item.total_qty ?? 0), 0) / goodSales.length;
+    sum + (item.totalQty ?? 0), 0) / goodSales.length;
   const avgGoodSellers = goodSales.reduce((sum, item) =>
-    sum + (item.total_lots ?? 0), 0) / goodSales.length;
+    sum + (item.totalLots ?? 0), 0) / goodSales.length;
   const avgGoodSales = goodSales.reduce((sum, item) =>
-    sum + (item.times_sold ?? 0), 0) / goodSales.length;
+    sum + (item.timesSold ?? 0), 0) / goodSales.length;
 
   console.log(
     `Average supply for good-sales items: ${avgGoodSupply.toFixed(0)} units`,
@@ -149,9 +149,9 @@ console.log();
 
 if (zeroSales.length > 0 && goodSales.length > 0) {
   const avgZeroSupply = zeroSales.reduce((sum, item) =>
-    sum + (item.total_qty ?? 0), 0) / zeroSales.length;
+    sum + (item.totalQty ?? 0), 0) / zeroSales.length;
   const avgGoodSupply = goodSales.reduce((sum, item) =>
-    sum + (item.total_qty ?? 0), 0) / goodSales.length;
+    sum + (item.totalQty ?? 0), 0) / goodSales.length;
 
   console.log("1. Zero-sales items typically have:");
   console.log(

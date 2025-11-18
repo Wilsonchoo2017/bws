@@ -10,6 +10,7 @@ import * as $api_analysis_batch from "./routes/api/analysis/batch.ts";
 import * as $api_analysis_strategies from "./routes/api/analysis/strategies.ts";
 import * as $api_bricklink_items from "./routes/api/bricklink-items.ts";
 import * as $api_detect_missing_data from "./routes/api/detect-missing-data.ts";
+import * as $api_force_scrape from "./routes/api/force-scrape.ts";
 import * as $api_joke from "./routes/api/joke.ts";
 import * as $api_parse_brickeconomy from "./routes/api/parse-brickeconomy.ts";
 import * as $api_parse_shopee from "./routes/api/parse-shopee.ts";
@@ -79,6 +80,7 @@ const manifest = {
     "./routes/api/analysis/strategies.ts": $api_analysis_strategies,
     "./routes/api/bricklink-items.ts": $api_bricklink_items,
     "./routes/api/detect-missing-data.ts": $api_detect_missing_data,
+    "./routes/api/force-scrape.ts": $api_force_scrape,
     "./routes/api/joke.ts": $api_joke,
     "./routes/api/parse-brickeconomy.ts": $api_parse_brickeconomy,
     "./routes/api/parse-shopee.ts": $api_parse_shopee,

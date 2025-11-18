@@ -22,6 +22,9 @@ export interface ScoreBreakdown {
   components: ScoreComponent[]; // Individual calculation components
   formula: string; // Overall formula used
   totalScore: number; // Final calculated score
+  multiplier?: number; // Multiplier applied to intrinsic value (e.g., 1.05x)
+  multiplierRange?: string; // Range of possible multipliers (e.g., "0.90x - 1.10x")
+  multiplierFormula?: string; // Formula for calculating multiplier
   dataPoints: Record<string, unknown>; // All raw data used
   missingData?: string[]; // What data was missing (if any)
 }

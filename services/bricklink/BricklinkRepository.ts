@@ -753,6 +753,116 @@ export class BricklinkRepository {
   }
 
   /**
+   * Get market-driven statistics from MONTHLY sales data
+   * Uses aggregated monthly sales instead of individual transactions
+   * Calculates similar metrics to getPastSalesStatistics but from monthly summaries
+   *
+   * @param itemId - The Bricklink item ID
+   * @returns Market statistics derived from monthly aggregated data
+   */
+  async getMonthlySalesStatistics(itemId: string): Promise<{
+    totalTransactions: number;
+    dateRangeStart: Date | null;
+    dateRangeEnd: Date | null;
+    totalDays: number;
+    new: {
+      transactionCount: number;
+      totalQuantity: number;
+      salesVelocity: number;
+      avgDaysBetweenSales: number;
+      avgPrice: number;
+      medianPrice: number;
+      minPrice: number;
+      maxPrice: number;
+      priceStdDev: number;
+      volatilityIndex: number;
+      trends: {
+        last30Days: TrendMetrics;
+        last90Days: TrendMetrics;
+        last180Days: TrendMetrics;
+        allTime: TrendMetrics;
+      };
+      recent30d: number;
+      recent60d: number;
+      recent90d: number;
+    };
+    used: {
+      transactionCount: number;
+      totalQuantity: number;
+      salesVelocity: number;
+      avgDaysBetweenSales: number;
+      avgPrice: number;
+      medianPrice: number;
+      minPrice: number;
+      maxPrice: number;
+      priceStdDev: number;
+      volatilityIndex: number;
+      trends: {
+        last30Days: TrendMetrics;
+        last90Days: TrendMetrics;
+        last180Days: TrendMetrics;
+        allTime: TrendMetrics;
+      };
+      recent30d: number;
+      recent60d: number;
+      recent90d: number;
+    };
+    rsi: {
+      new: number | null;
+      used: number | null;
+    };
+  }> {
+    // Fetch all monthly sales for this item
+    const monthlySales = await this.getMonthlySales(itemId);
+
+    if (monthlySales.length === 0) {
+      return this.getEmptyStatistics();
+    }
+
+    // Separate by condition
+    const newSales = monthlySales.filter((s) => s.condition === "new");
+    const usedSales = monthlySales.filter((s) => s.condition === "used");
+
+    // Calculate date range from month strings (YYYY-MM format)
+    const months = monthlySales.map((s) => s.month).sort();
+    const startMonth = months[0];
+    const endMonth = months[months.length - 1];
+
+    // Convert YYYY-MM to Date (use first day of month)
+    const minDate = new Date(`${startMonth}-01`);
+    const maxDate = new Date(`${endMonth}-01`);
+
+    // Calculate total days (approximate - use 30 days per month)
+    const totalDays = Math.max(
+      1,
+      Math.ceil(
+        (maxDate.getTime() - minDate.getTime()) / (1000 * 60 * 60 * 24),
+      ) + 30, // Add 30 days for the last month
+    );
+
+    // Calculate metrics for each condition from monthly data
+    const newMetrics = this.calculateMonthlyConditionMetrics(newSales, totalDays);
+    const usedMetrics = this.calculateMonthlyConditionMetrics(usedSales, totalDays);
+
+    // Calculate RSI from monthly price data
+    const newRsi = this.calculateMonthlyRSI(newSales);
+    const usedRsi = this.calculateMonthlyRSI(usedSales);
+
+    return {
+      totalTransactions: monthlySales.reduce((sum, s) => sum + s.timesSold, 0),
+      dateRangeStart: minDate,
+      dateRangeEnd: maxDate,
+      totalDays,
+      new: newMetrics,
+      used: usedMetrics,
+      rsi: {
+        new: newRsi,
+        used: usedRsi,
+      },
+    };
+  }
+
+  /**
    * Get market-driven statistics from past sales data
    * Inspired by stock market technical analysis:
    * - Velocity: Sales transactions per day (like trading volume)
@@ -1064,6 +1174,240 @@ export class BricklinkRepository {
     const changes: number[] = [];
     for (let i = 1; i < sorted.length; i++) {
       changes.push(sorted[i].price - sorted[i - 1].price);
+    }
+
+    // Use last 'period' changes
+    const recentChanges = changes.slice(-period);
+
+    // Separate gains and losses
+    const gains = recentChanges.filter((c) => c > 0);
+    const losses = recentChanges.filter((c) => c < 0).map((c) => Math.abs(c));
+
+    const avgGain = gains.length > 0
+      ? gains.reduce((sum, g) => sum + g, 0) / period
+      : 0;
+    const avgLoss = losses.length > 0
+      ? losses.reduce((sum, l) => sum + l, 0) / period
+      : 0;
+
+    if (avgLoss === 0) {
+      return 100; // All gains, maximum RSI
+    }
+
+    const rs = avgGain / avgLoss;
+    const rsi = 100 - (100 / (1 + rs));
+
+    return Math.round(rsi * 100) / 100;
+  }
+
+  /**
+   * Calculate metrics for a specific condition from MONTHLY sales data
+   * Similar to calculateConditionMetrics but works with monthly aggregates
+   */
+  private calculateMonthlyConditionMetrics(
+    monthlySales: typeof bricklinkMonthlySales.$inferSelect[],
+    totalDays: number,
+  ) {
+    if (monthlySales.length === 0) {
+      return this.getEmptyConditionMetrics();
+    }
+
+    // Sort by month
+    const sorted = [...monthlySales].sort((a, b) => a.month.localeCompare(b.month));
+
+    // Calculate totals
+    const transactionCount = sorted.reduce((sum, s) => sum + s.timesSold, 0);
+    const totalQuantity = sorted.reduce((sum, s) => sum + s.totalQuantity, 0);
+
+    // Calculate velocity (transactions per day)
+    const salesVelocity = totalDays > 0 ? transactionCount / totalDays : 0;
+
+    // Approximate days between sales
+    const avgDaysBetweenSales = transactionCount > 0 ? totalDays / transactionCount : 0;
+
+    // Calculate price statistics from monthly averages
+    const prices = sorted
+      .filter((s) => s.avgPrice !== null)
+      .map((s) => s.avgPrice!);
+
+    const avgPrice = prices.length > 0
+      ? prices.reduce((sum, p) => sum + p, 0) / prices.length
+      : 0;
+
+    const sortedPrices = [...prices].sort((a, b) => a - b);
+    const medianPrice = sortedPrices.length > 0
+      ? sortedPrices[Math.floor(sortedPrices.length / 2)]
+      : 0;
+
+    const minPrice = sorted
+      .filter((s) => s.minPrice !== null)
+      .reduce((min, s) => Math.min(min, s.minPrice!), Infinity);
+
+    const maxPrice = sorted
+      .filter((s) => s.maxPrice !== null)
+      .reduce((max, s) => Math.max(max, s.maxPrice!), -Infinity);
+
+    // Calculate standard deviation from monthly averages
+    const variance = prices.length > 1
+      ? prices.reduce((sum, p) => sum + Math.pow(p - avgPrice, 2), 0) /
+        (prices.length - 1)
+      : 0;
+    const priceStdDev = Math.sqrt(variance);
+    const volatilityIndex = avgPrice > 0 ? priceStdDev / avgPrice : 0;
+
+    // Calculate trend metrics for different time periods
+    const now = new Date();
+    const last30DaysTrend = this.calculateMonthlyTrendMetrics(
+      sorted,
+      new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000),
+    );
+    const last90DaysTrend = this.calculateMonthlyTrendMetrics(
+      sorted,
+      new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000),
+    );
+    const last180DaysTrend = this.calculateMonthlyTrendMetrics(
+      sorted,
+      new Date(now.getTime() - 180 * 24 * 60 * 60 * 1000),
+    );
+    const allTimeTrend = this.calculateMonthlyTrendMetrics(sorted, null);
+
+    // Calculate recent activity (approximate using month-based filtering)
+    const recent30d = sorted
+      .filter((s) => {
+        const monthDate = new Date(`${s.month}-01`);
+        return monthDate >= new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+      })
+      .reduce((sum, s) => sum + s.timesSold, 0);
+
+    const recent60d = sorted
+      .filter((s) => {
+        const monthDate = new Date(`${s.month}-01`);
+        return monthDate >= new Date(now.getTime() - 60 * 24 * 60 * 60 * 1000);
+      })
+      .reduce((sum, s) => sum + s.timesSold, 0);
+
+    const recent90d = sorted
+      .filter((s) => {
+        const monthDate = new Date(`${s.month}-01`);
+        return monthDate >= new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000);
+      })
+      .reduce((sum, s) => sum + s.timesSold, 0);
+
+    return {
+      transactionCount,
+      totalQuantity,
+      salesVelocity,
+      avgDaysBetweenSales,
+      avgPrice,
+      medianPrice,
+      minPrice: minPrice === Infinity ? 0 : minPrice,
+      maxPrice: maxPrice === -Infinity ? 0 : maxPrice,
+      priceStdDev,
+      volatilityIndex,
+      trends: {
+        last30Days: last30DaysTrend,
+        last90Days: last90DaysTrend,
+        last180Days: last180DaysTrend,
+        allTime: allTimeTrend,
+      },
+      recent30d,
+      recent60d,
+      recent90d,
+    };
+  }
+
+  /**
+   * Calculate trend metrics from monthly sales data
+   */
+  private calculateMonthlyTrendMetrics(
+    monthlySales: typeof bricklinkMonthlySales.$inferSelect[],
+    startDate: Date | null,
+  ): TrendMetrics {
+    // Filter to date range if specified
+    const filtered = startDate
+      ? monthlySales.filter((s) => {
+        const monthDate = new Date(`${s.month}-01`);
+        return monthDate >= startDate;
+      })
+      : monthlySales;
+
+    if (filtered.length === 0) {
+      return {
+        direction: "neutral",
+        momentum: 0,
+        percentChange: 0,
+        volumeTrend: "neutral",
+        avgPrice: 0,
+      };
+    }
+
+    // Sort by month
+    const sorted = [...filtered].sort((a, b) => a.month.localeCompare(b.month));
+
+    // Calculate price trend
+    const prices = sorted.filter((s) => s.avgPrice !== null).map((s) => s.avgPrice!);
+    const firstPrice = prices[0];
+    const lastPrice = prices[prices.length - 1];
+
+    const percentChange = firstPrice > 0
+      ? ((lastPrice - firstPrice) / firstPrice) * 100
+      : 0;
+
+    const direction: "increasing" | "decreasing" | "stable" =
+      percentChange > 5 ? "increasing" : percentChange < -5 ? "decreasing" : "stable";
+
+    // Calculate momentum (simple linear regression slope approximation)
+    const avgPrice = prices.reduce((sum, p) => sum + p, 0) / prices.length;
+    const momentum = percentChange; // Use percent change as momentum approximation
+
+    // Volume trend
+    const volumes = sorted.map((s) => s.timesSold);
+    const firstHalfVol = volumes.slice(0, Math.floor(volumes.length / 2))
+      .reduce((sum, v) => sum + v, 0);
+    const secondHalfVol = volumes.slice(Math.floor(volumes.length / 2))
+      .reduce((sum, v) => sum + v, 0);
+
+    const volumeTrend: "increasing" | "decreasing" | "stable" =
+      secondHalfVol > firstHalfVol * 1.1
+        ? "increasing"
+        : secondHalfVol < firstHalfVol * 0.9
+        ? "decreasing"
+        : "stable";
+
+    return {
+      direction,
+      momentum,
+      percentChange,
+      volumeTrend,
+      avgPrice,
+    };
+  }
+
+  /**
+   * Calculate RSI from monthly price data
+   * Similar to calculateRSI but works with monthly averages
+   */
+  private calculateMonthlyRSI(
+    monthlySales: typeof bricklinkMonthlySales.$inferSelect[],
+    period: number = 6, // Use 6 months instead of 14 days
+  ): number | null {
+    if (monthlySales.length < period + 1) {
+      return null;
+    }
+
+    // Sort by month
+    const sorted = [...monthlySales].sort((a, b) => a.month.localeCompare(b.month));
+
+    // Calculate price changes from monthly averages
+    const changes: number[] = [];
+    for (let i = 1; i < sorted.length; i++) {
+      if (sorted[i].avgPrice !== null && sorted[i - 1].avgPrice !== null) {
+        changes.push(sorted[i].avgPrice! - sorted[i - 1].avgPrice!);
+      }
+    }
+
+    if (changes.length < period) {
+      return null;
     }
 
     // Use last 'period' changes

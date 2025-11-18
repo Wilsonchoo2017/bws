@@ -363,6 +363,29 @@ export class WorldBricksRepository {
   }
 
   /**
+   * Update set status when not found during scraping
+   * Creates or updates a worldbricks_sets record with 'not_found' status
+   * and sets nextScrapeAt to prevent re-queuing on restart
+   *
+   * @param setNumber - The LEGO set number
+   * @param nextScrapeAt - When to retry scraping (typically 90 days from now)
+   */
+  async updateNotFoundStatus(
+    setNumber: string,
+    nextScrapeAt: Date,
+  ): Promise<WorldbricksSet> {
+    const now = new Date();
+
+    // Use upsert to create or update the record
+    return await this.upsert(setNumber, {
+      scrapeStatus: "not_found",
+      lastScrapedAt: now,
+      nextScrapeAt: nextScrapeAt,
+      scrapeIntervalDays: 90, // Default to 90-day interval for not found sets
+    });
+  }
+
+  /**
    * Get count of sets in database
    */
   async count(): Promise<number> {

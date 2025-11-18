@@ -32,18 +32,18 @@ export interface DealQualityMetrics {
   dealQualityScore: number;
 
   // Component scores
-  retailDiscountScore: number;      // How good is the retail discount?
-  priceToMarketScore: number;       // How does retail compare to market?
-  priceToValueScore: number;        // How does retail compare to intrinsic value?
+  retailDiscountScore: number; // How good is the retail discount?
+  priceToMarketScore: number; // How does retail compare to market?
+  priceToValueScore: number; // How does retail compare to intrinsic value?
 
   // Raw metrics for display
-  retailDiscountPercent: number;    // Percentage discount from original
-  priceToMarketRatio: number;       // Retail / BrickLink market
-  priceToValueRatio: number;        // Retail / Intrinsic value
+  retailDiscountPercent: number; // Percentage discount from original
+  priceToMarketRatio: number; // Retail / BrickLink market
+  priceToValueRatio: number; // Retail / Intrinsic value
 
   // Human-readable assessment
-  dealQualityLabel: string;         // "Excellent", "Good", "Fair", etc.
-  recommendation: string;           // Brief recommendation text
+  dealQualityLabel: string; // "Excellent", "Good", "Fair", etc.
+  recommendation: string; // Brief recommendation text
 }
 
 export class DealQualityCalculator {
@@ -220,11 +220,10 @@ export class DealQualityCalculator {
     priceToMarketScore: number,
     priceToValueScore: number,
   ): number {
-    const score = (
+    const score =
       retailDiscountScore * DealQualityCalculator.RETAIL_DISCOUNT_WEIGHT +
       priceToMarketScore * DealQualityCalculator.PRICE_TO_MARKET_WEIGHT +
-      priceToValueScore * DealQualityCalculator.PRICE_TO_VALUE_WEIGHT
-    );
+      priceToValueScore * DealQualityCalculator.PRICE_TO_VALUE_WEIGHT;
 
     return Math.round(Math.max(0, Math.min(100, score)));
   }
@@ -243,7 +242,8 @@ export class DealQualityCalculator {
     const basePrice = originalRetailPrice || msrp;
     if (!basePrice) return 0;
 
-    const discountPercent = ((basePrice - currentRetailPrice) / basePrice) * 100;
+    const discountPercent = ((basePrice - currentRetailPrice) / basePrice) *
+      100;
     return Math.max(0, Math.round(discountPercent * 10) / 10); // Round to 1 decimal
   }
 

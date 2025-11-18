@@ -26,7 +26,8 @@
       "Bash(sha256sum:*)",
       "WebFetch(domain:www.bricklink.com)",
       "Bash(lsof:*)",
-      "Bash(source .env)"
+      "Bash(source .env)",
+      "Bash(git push)"
     ],
     "deny": [],
     "ask": []

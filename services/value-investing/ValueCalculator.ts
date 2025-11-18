@@ -11,6 +11,10 @@ import {
   DealQualityCalculator,
   type DealQualityMetrics,
 } from "./DealQualityCalculator.ts";
+import {
+  DataQualityValidator,
+  type DataQualityResult,
+} from "./DataQualityValidator.ts";
 
 // Strategy-specific margin of safety configurations
 export const STRATEGY_MARGINS = {
@@ -191,11 +195,25 @@ export class ValueCalculator {
 
   /**
    * Calculate volatility discount based on price coefficient of variation
-   * High volatility = higher risk = discount
-   * Stable pricing = low risk = minimal discount
+   * CONTEXT-AWARE: Volatility meaning depends on retirement status and price direction
+   *
+   * For RETIRED sets with RISING prices:
+   *   - High volatility = collector frenzy / appreciation phase (GOOD)
+   *   - No penalty applied
+   *
+   * For RETIRED sets with FALLING prices:
+   *   - High volatility = sellers panicking / market uncertainty (BAD)
+   *   - Heavy penalty (15% discount)
+   *
+   * For ACTIVE/NEW sets:
+   *   - High volatility = unstable pricing / market noise (BAD)
+   *   - Standard penalty (original formula)
    */
   private static calculateVolatilityDiscount(
     priceVolatility?: number,
+    retirementStatus?: string,
+    yearsPostRetirement?: number,
+    priceTrend?: number, // Positive = rising, negative = falling
   ): number {
     const config = CONFIG.INTRINSIC_VALUE.VOLATILITY_DISCOUNT;
 
@@ -207,9 +225,35 @@ export class ValueCalculator {
       return 1.0;
     }
 
-    // Apply risk-adjusted discount
-    // discount = volatility × risk_aversion_coefficient
-    // Capped at MAX_DISCOUNT (12%)
+    // CONTEXT-AWARE LOGIC for retired sets
+    const isRetired = retirementStatus === "retired";
+    const isMatured = yearsPostRetirement !== undefined && yearsPostRetirement >= 2;
+
+    if (isRetired && isMatured) {
+      // For mature retired sets, interpret volatility in context of price direction
+
+      if (priceTrend !== undefined && priceTrend > 0) {
+        // RISING PRICES + HIGH VOLATILITY = Collector demand / appreciation phase
+        // This is GOOD volatility - don't penalize
+        // Example: Architecture sets during appreciation phase often have 50-100% volatility
+        if (priceVolatility > 0.30) {
+          return 1.0; // No penalty for high volatility during bull runs
+        } else {
+          return 1.0; // Low volatility is also fine
+        }
+      } else if (priceTrend !== undefined && priceTrend < 0) {
+        // FALLING PRICES + HIGH VOLATILITY = Sellers panicking / market dump
+        // This is BAD volatility - heavy penalty
+        if (priceVolatility > 0.30) {
+          return 0.85; // 15% discount for volatile falling prices
+        } else {
+          return 0.95; // 5% discount for stable falling prices
+        }
+      }
+    }
+
+    // DEFAULT: For active sets or when no trend data, use original risk-adjusted formula
+    // High volatility in active/new sets = unstable pricing = risk
     const discount = Math.min(
       priceVolatility * config.RISK_AVERSION_COEFFICIENT,
       config.MAX_DISCOUNT,
@@ -219,10 +263,16 @@ export class ValueCalculator {
   }
 
   /**
-   * Calculate market saturation discount
-   * High supply + low sales = oversaturated market = discount
-   * ENHANCED: More aggressive penalties for extreme oversaturation
-   * CRITICAL: Prevents overvaluing sets with no real buyers
+   * Calculate market saturation discount using "Months of Inventory" approach
+   *
+   * Philosophy: How many months would it take to sell all available inventory?
+   * - <3 months = undersupplied (premium) - scarcity drives value up
+   * - 3-12 months = healthy (neutral) - balanced market
+   * - 12-24 months = oversupplied (discount) - too much inventory suppresses price
+   * - >24 months = dead inventory (heavy discount) - reject these deals
+   *
+   * CRITICAL: This is a clearer, more intuitive measure than abstract "saturation scores"
+   * Aligns with Pabrai's principle: Focus on clear, understandable metrics
    */
   private static calculateSaturationDiscount(
     availableQty?: number,
@@ -239,73 +289,196 @@ export class ValueCalculator {
       return config.MAX;
     }
 
-    let saturationScore = 0; // 0 = healthy, 100 = saturated
+    // Calculate months of inventory
+    const monthsOfInventory = this.calculateMonthsOfInventory(
+      availableQty,
+      salesVelocity,
+    );
 
-    // Factor 1: Quantity available (30% weight, reduced from 40%)
-    if (
-      availableQty !== undefined && availableQty !== null && availableQty > 0
-    ) {
-      if (availableQty >= config.QTY_EXTREME) {
-        saturationScore += 30; // Extreme oversupply
-      } else if (availableQty >= config.QTY_HIGH) {
-        // Linear interpolation between high and extreme
-        saturationScore += 22 + ((availableQty - config.QTY_HIGH) /
-              (config.QTY_EXTREME - config.QTY_HIGH)) * 8;
-      } else if (availableQty >= config.QTY_MEDIUM) {
-        // Linear interpolation between medium and high
-        saturationScore += 12 + ((availableQty - config.QTY_MEDIUM) /
-              (config.QTY_HIGH - config.QTY_MEDIUM)) * 10;
-      } else if (availableQty >= config.QTY_LOW) {
-        // Linear interpolation between low and medium
-        saturationScore += ((availableQty - config.QTY_LOW) /
-          (config.QTY_MEDIUM - config.QTY_LOW)) * 12;
+    let saturationDiscount = 1.0; // Start with no discount
+
+    if (monthsOfInventory !== null) {
+      // Primary driver: Months of inventory (70% weight)
+      if (monthsOfInventory > 24) {
+        // Dead inventory: >24 months to sell through
+        saturationDiscount = 0.50; // 50% discount - REJECT these deals
+      } else if (monthsOfInventory > 12) {
+        // Oversupplied: 12-24 months inventory
+        // Linear interpolation from 1.0 (at 12 months) to 0.50 (at 24 months)
+        const excessMonths = monthsOfInventory - 12;
+        const discountFactor = excessMonths / 12; // 0 to 1
+        saturationDiscount = 1.0 - (discountFactor * 0.50); // 1.0 to 0.50
+      } else if (monthsOfInventory > 3) {
+        // Healthy: 3-12 months inventory
+        // Neutral zone with slight adjustment
+        // At 3 months: 1.0 (neutral)
+        // At 12 months: 1.0 (neutral)
+        saturationDiscount = 1.0; // No discount in healthy range
+      } else if (monthsOfInventory > 1) {
+        // Low inventory: 1-3 months
+        // Slight premium for scarcity (but not too much - could just be low demand)
+        const scarcityFactor = (3 - monthsOfInventory) / 2; // 0 to 1
+        saturationDiscount = 1.0 + (scarcityFactor * 0.05); // 1.0 to 1.05 (5% premium)
+      } else if (monthsOfInventory <= 1) {
+        // Very scarce: <1 month inventory
+        // Moderate premium (but verify demand is real!)
+        saturationDiscount = 1.05; // 5% premium max
       }
-      // else: healthy supply, no points
+    } else {
+      // No velocity data - fall back to seller count + absolute quantity
+      let saturationScore = 0; // 0 = healthy, 100 = saturated
+
+      // Factor 1: Absolute quantity (40% weight)
+      if (
+        availableQty !== undefined && availableQty !== null && availableQty > 0
+      ) {
+        if (availableQty >= config.QTY_EXTREME) {
+          saturationScore += 40; // Extreme oversupply
+        } else if (availableQty >= config.QTY_HIGH) {
+          saturationScore += 30 + ((availableQty - config.QTY_HIGH) /
+                (config.QTY_EXTREME - config.QTY_HIGH)) * 10;
+        } else if (availableQty >= config.QTY_MEDIUM) {
+          saturationScore += 15 + ((availableQty - config.QTY_MEDIUM) /
+                (config.QTY_HIGH - config.QTY_MEDIUM)) * 15;
+        } else if (availableQty >= config.QTY_LOW) {
+          saturationScore += ((availableQty - config.QTY_LOW) /
+            (config.QTY_MEDIUM - config.QTY_LOW)) * 15;
+        }
+      }
+
+      // Factor 2: Number of competing sellers (30% weight)
+      if (
+        availableLots !== undefined && availableLots !== null &&
+        availableLots > 0
+      ) {
+        if (availableLots >= config.LOTS_EXTREME) {
+          saturationScore += 30; // Extreme seller count
+        } else if (availableLots >= config.LOTS_HIGH) {
+          saturationScore += 22 + ((availableLots - config.LOTS_HIGH) /
+                (config.LOTS_EXTREME - config.LOTS_HIGH)) * 8;
+        } else if (availableLots >= config.LOTS_MEDIUM) {
+          saturationScore += 12 + ((availableLots - config.LOTS_MEDIUM) /
+                (config.LOTS_HIGH - config.LOTS_MEDIUM)) * 10;
+        } else if (availableLots >= config.LOTS_LOW) {
+          saturationScore += ((availableLots - config.LOTS_LOW) /
+            (config.LOTS_MEDIUM - config.LOTS_LOW)) * 12;
+        }
+      }
+
+      // Convert saturation score (0-100) to discount multiplier (0.50-1.0)
+      const range = config.MAX - config.MIN;
+      saturationDiscount = config.MAX - (saturationScore / 100) * range;
     }
 
-    // Factor 2: Number of competing sellers (20% weight, reduced from 30%)
+    return Math.max(config.MIN, Math.min(config.MAX, saturationDiscount));
+  }
+
+  /**
+   * Helper: Calculate months of inventory at current sales rate
+   * Returns null if cannot be calculated (no velocity data)
+   */
+  private static calculateMonthsOfInventory(
+    availableQty?: number,
+    salesVelocity?: number,
+  ): number | null {
     if (
-      availableLots !== undefined && availableLots !== null && availableLots > 0
+      availableQty === undefined || availableQty === null ||
+      salesVelocity === undefined || salesVelocity === null
     ) {
-      if (availableLots >= config.LOTS_EXTREME) {
-        saturationScore += 20; // Extreme seller count
-      } else if (availableLots >= config.LOTS_HIGH) {
-        // Linear interpolation between high and extreme
-        saturationScore += 15 + ((availableLots - config.LOTS_HIGH) /
-              (config.LOTS_EXTREME - config.LOTS_HIGH)) * 5;
-      } else if (availableLots >= config.LOTS_MEDIUM) {
-        saturationScore += 8 + ((availableLots - config.LOTS_MEDIUM) /
-              (config.LOTS_HIGH - config.LOTS_MEDIUM)) * 7;
-      } else if (availableLots >= config.LOTS_LOW) {
-        saturationScore += ((availableLots - config.LOTS_LOW) /
-          (config.LOTS_MEDIUM - config.LOTS_LOW)) * 8;
-      }
+      return null;
     }
 
-    // Factor 3: Velocity-to-supply ratio (50% weight, increased from 30%)
-    // This is the MOST IMPORTANT indicator of dead inventory
-    if (
-      salesVelocity !== undefined && salesVelocity !== null &&
-      availableQty !== undefined && availableQty !== null &&
-      availableQty > 0
-    ) {
-      const velocityRatio = salesVelocity / availableQty;
+    if (availableQty === 0) return 0; // Already out of stock
+    if (salesVelocity === 0) return 999; // Not selling = infinite inventory (treat as dead)
 
-      if (velocityRatio <= config.POOR_RATIO) {
-        saturationScore += 50; // Inventory not moving AT ALL
-      } else if (velocityRatio < config.HEALTHY_RATIO) {
-        // Linear interpolation
-        saturationScore += 50 * (1 - (velocityRatio - config.POOR_RATIO) /
-            (config.HEALTHY_RATIO - config.POOR_RATIO));
-      }
-      // else: healthy turnover, no points
+    // Sales velocity is in units/day
+    const monthlyVelocity = salesVelocity * 30;
+
+    if (monthlyVelocity === 0) return 999; // Not selling
+
+    const monthsOfInventory = availableQty / monthlyVelocity;
+
+    // Cap at 999 to avoid infinity issues
+    return Math.min(999, Math.round(monthsOfInventory * 10) / 10);
+  }
+
+  /**
+   * PABRAI'S "TOO HARD PILE" - Hard gate rejection criteria
+   * Implements strict data quality and market condition thresholds
+   * Returns rejection reason if set should be rejected, null if acceptable
+   *
+   * Philosophy: Only invest in sets you can confidently value with acceptable risk
+   */
+  private static checkHardGateRejection(
+    inputs: IntrinsicValueInputs,
+  ): { shouldReject: boolean; reason: string; category: string } | null {
+    const demandScore = this.safeScore(inputs.demandScore, 50);
+    const qualityScore = this.safeScore(inputs.qualityScore, 50);
+
+    // GATE 1: Minimum Quality/Demand Threshold
+    // Sets with scores <40 are too uncertain to value confidently
+    if (qualityScore < 40) {
+      return {
+        shouldReject: true,
+        reason: `Quality score too low (${qualityScore.toFixed(0)}/100, minimum 40/100) - insufficient data for confident valuation`,
+        category: "INSUFFICIENT_DATA",
+      };
     }
 
-    // Convert saturation score (0-100) to discount multiplier (0.50-1.0)
-    const range = config.MAX - config.MIN;
-    const discount = config.MAX - (saturationScore / 100) * range;
+    if (demandScore < 40) {
+      return {
+        shouldReject: true,
+        reason: `Demand score too low (${demandScore.toFixed(0)}/100, minimum 40/100) - insufficient market demand`,
+        category: "INSUFFICIENT_DEMAND",
+      };
+    }
 
-    return Math.max(config.MIN, Math.min(config.MAX, discount));
+    // GATE 2: Dead Inventory Gate (Sales Velocity)
+    // Less than 1 sale per month = illiquid asset
+    if (
+      inputs.salesVelocity !== undefined &&
+      inputs.salesVelocity !== null &&
+      inputs.salesVelocity < 0.033
+    ) {
+      return {
+        shouldReject: true,
+        reason: `Sales velocity too low (${(inputs.salesVelocity * 30).toFixed(2)} sales/month, minimum 1/month) - illiquid market`,
+        category: "DEAD_INVENTORY",
+      };
+    }
+
+    // GATE 3: Market Oversaturation Gate (Months of Inventory)
+    // >24 months of inventory = will take years to sell
+    const monthsOfInventory = this.calculateMonthsOfInventory(
+      inputs.availableQty,
+      inputs.salesVelocity,
+    );
+
+    if (monthsOfInventory !== null && monthsOfInventory > 24) {
+      return {
+        shouldReject: true,
+        reason: `Market oversaturated (${monthsOfInventory.toFixed(1)} months of inventory, maximum 24 months) - excessive supply`,
+        category: "OVERSATURATED",
+      };
+    }
+
+    // GATE 4: Value Trap Detection (Falling Knife + Oversupply)
+    // Declining prices + high inventory = value trap
+    if (
+      inputs.priceDecline !== undefined &&
+      inputs.priceDecline > 0.15 && // >15% price decline
+      monthsOfInventory !== null &&
+      monthsOfInventory > 12 // >12 months inventory
+    ) {
+      return {
+        shouldReject: true,
+        reason: `Value trap detected: prices declining ${(inputs.priceDecline * 100).toFixed(1)}% with ${monthsOfInventory.toFixed(1)} months inventory - falling knife`,
+        category: "VALUE_TRAP",
+      };
+    }
+
+    // All gates passed - set is acceptable for valuation
+    return null;
   }
 
   /**
@@ -461,6 +634,100 @@ export class ValueCalculator {
   }
 
   /**
+   * Calculate scarcity multiplier based on TRUE scarcity (supply vs demand)
+   * CRITICAL FIX: Separated from "availability score" which conflates urgency
+   *
+   * TRUE SCARCITY = Low supply relative to demand
+   * - availableQty: Total units for sale
+   * - availableLots: Number of sellers
+   * - salesVelocity: How fast units are selling
+   *
+   * This is DIFFERENT from retirement urgency (time pressure to buy)
+   */
+  private static calculateScarcityMultiplier(
+    availableQty?: number,
+    availableLots?: number,
+    salesVelocity?: number,
+  ): number {
+    // No data = no adjustment (neutral)
+    if (
+      (availableQty === undefined || availableQty === null) &&
+      (availableLots === undefined || availableLots === null)
+    ) {
+      return 1.0;
+    }
+
+    // Calculate months of inventory (supply ÷ demand rate)
+    const monthsOfInventory = this.calculateMonthsOfInventory(
+      availableQty,
+      salesVelocity,
+    );
+
+    let scarcityScore = 50; // Default to neutral
+
+    // PRIMARY: Months of inventory (if available)
+    if (monthsOfInventory !== null) {
+      if (monthsOfInventory < 1) {
+        scarcityScore = 95; // Extremely scarce (<1 month supply)
+      } else if (monthsOfInventory < 3) {
+        scarcityScore = 80; // Very scarce (1-3 months)
+      } else if (monthsOfInventory < 6) {
+        scarcityScore = 65; // Moderately scarce (3-6 months)
+      } else if (monthsOfInventory < 12) {
+        scarcityScore = 50; // Neutral (6-12 months)
+      } else if (monthsOfInventory < 24) {
+        scarcityScore = 35; // Abundant (12-24 months)
+      } else {
+        scarcityScore = 20; // Oversupplied (>24 months)
+      }
+    } else {
+      // FALLBACK: Use absolute quantities (less accurate)
+      let qtyScore = 50;
+      let lotsScore = 50;
+
+      if (availableQty !== undefined && availableQty !== null) {
+        if (availableQty === 0) {
+          qtyScore = 100; // Out of stock = maximum scarcity
+        } else if (availableQty < 10) {
+          qtyScore = 90; // Very low quantity
+        } else if (availableQty < 50) {
+          qtyScore = 70; // Low quantity
+        } else if (availableQty < 200) {
+          qtyScore = 50; // Moderate
+        } else if (availableQty < 500) {
+          qtyScore = 30; // High quantity
+        } else {
+          qtyScore = 10; // Extremely high quantity
+        }
+      }
+
+      if (availableLots !== undefined && availableLots !== null) {
+        if (availableLots < 5) {
+          lotsScore = 90; // Few sellers = scarce
+        } else if (availableLots < 15) {
+          lotsScore = 70; // Moderate seller count
+        } else if (availableLots < 30) {
+          lotsScore = 50; // Many sellers
+        } else if (availableLots < 50) {
+          lotsScore = 30; // Very competitive
+        } else {
+          lotsScore = 10; // Oversaturated
+        }
+      }
+
+      // Average the scores
+      scarcityScore = (qtyScore + lotsScore) / 2;
+    }
+
+    // Convert scarcity score (0-100) to multiplier (0.95-1.10)
+    // High scarcity (score 100) = 1.10× multiplier
+    // Low scarcity (score 0) = 0.95× multiplier
+    const scarcityMultiplier = 0.95 + (scarcityScore / 100) * 0.15;
+
+    return Math.max(0.95, Math.min(1.10, scarcityMultiplier));
+  }
+
+  /**
    * Calculate Parts-Per-Dollar (PPD) quality score
    * Higher PPD = better brick value
    */
@@ -521,6 +788,57 @@ export class ValueCalculator {
   }
 
   /**
+   * Apply sanity bounds to prevent extreme valuations
+   * Prevents multiplicative compounding from creating unrealistic values
+   *
+   * Buffett principle: "If it seems too good to be true, it probably is"
+   *
+   * Bounds: 0.30× to 3.50× of base value (MSRP/retail)
+   * - Min 0.30×: Even junk sets don't drop to <30% of MSRP
+   * - Max 3.50×: Very few sets exceed 3.5× MSRP (even vintage Architecture)
+   */
+  private static applySanityBounds(
+    calculatedValue: number,
+    baseValue: number,
+  ): { boundedValue: Cents; wasAdjusted: boolean; adjustment: string } {
+    if (baseValue <= 0) {
+      return {
+        boundedValue: calculatedValue as Cents,
+        wasAdjusted: false,
+        adjustment: "",
+      };
+    }
+
+    const config = CONFIG.INTRINSIC_VALUE.SANITY_BOUNDS;
+    const minAllowed = baseValue * config.MIN_MULTIPLIER; // 0.30× base
+    const maxAllowed = baseValue * config.MAX_MULTIPLIER; // 3.50× base
+
+    let boundedValue = calculatedValue;
+    let wasAdjusted = false;
+    let adjustment = "";
+
+    if (calculatedValue < minAllowed) {
+      boundedValue = minAllowed;
+      wasAdjusted = true;
+      const originalMultiplier = (calculatedValue / baseValue).toFixed(2);
+      adjustment =
+        `Capped at minimum ${config.MIN_MULTIPLIER}× base value (was ${originalMultiplier}×). Even poor-quality sets retain some value.`;
+    } else if (calculatedValue > maxAllowed) {
+      boundedValue = maxAllowed;
+      wasAdjusted = true;
+      const originalMultiplier = (calculatedValue / baseValue).toFixed(2);
+      adjustment =
+        `Capped at maximum ${config.MAX_MULTIPLIER}× base value (was ${originalMultiplier}×). Extreme valuations likely due to compounding multipliers.`;
+    }
+
+    return {
+      boundedValue: Math.round(boundedValue) as Cents,
+      wasAdjusted,
+      adjustment,
+    };
+  }
+
+  /**
    * Calculate intrinsic value using FUNDAMENTAL VALUE APPROACH
    * 1. Base value = MSRP/Retail (replacement cost) - NOT market price
    * 2. Apply multipliers for retirement, quality, demand, theme, PPD
@@ -536,6 +854,7 @@ export class ValueCalculator {
    * 4. Risk discounts (volatility, saturation, zero sales penalty)
    *
    * ENHANCED: Zero sales penalty heavily punishes dead inventory
+   * ENHANCED: Sanity bounds prevent extreme valuations (0.30× - 3.50× base)
    *
    * @returns Intrinsic value in CENTS (Cents branded type)
    */
@@ -625,9 +944,12 @@ export class ValueCalculator {
       avgDaysBetweenSales,
     );
 
-    // Volatility discount (risk-adjusted, penalizes high volatility)
+    // Volatility discount (context-aware: retired+rising=good, retired+falling=bad, active=risk)
     const volatilityDiscount = this.calculateVolatilityDiscount(
       priceVolatility,
+      retirementStatus,
+      yearsPostRetirement,
+      inputs.priceTrend,
     );
 
     // SATURATION discount (CRITICAL: oversupply kills value)
@@ -644,6 +966,14 @@ export class ValueCalculator {
     // NEW: Parts-per-dollar quality score
     const ppdScore = this.calculatePPDScore(partsCount, msrp);
 
+    // NEW: Scarcity multiplier (TRUE scarcity based on supply vs demand)
+    // CRITICAL FIX: Now uses availableQty/Lots/Velocity instead of urgency score
+    const scarcityMultiplier = this.calculateScarcityMultiplier(
+      availableQty,
+      availableLots,
+      salesVelocity,
+    );
+
     // CRITICAL: Zero sales penalty (dead inventory detection)
     // Items with zero sales get heavily penalized
     const zeroSalesPenalty = this.calculateZeroSalesPenalty(
@@ -653,43 +983,187 @@ export class ValueCalculator {
 
     // Calculate intrinsic value with all factors
     // Structure: Base × Positive Multipliers × Risk Discounts
-    const intrinsicValue = baseValue *
+    const calculatedValue = baseValue *
       retirementMultiplier * // Time-based appreciation
       themeMultiplier * // Theme quality
       ppdScore * // Brick value quality
       qualityMultiplier * // Product quality
       demandMultiplier * // Market demand
+      scarcityMultiplier * // Scarcity premium (inverse of availability)
       liquidityMultiplier * // Ease of selling
       volatilityDiscount * // Price stability
       saturationDiscount * // Market oversupply
       zeroSalesPenalty; // Dead inventory penalty (CRITICAL)
 
     // Guard against NaN or negative values
-    if (isNaN(intrinsicValue) || intrinsicValue < 0) {
+    if (isNaN(calculatedValue) || calculatedValue < 0) {
       console.warn(
         "[ValueCalculator] Calculated invalid intrinsic value:",
-        { intrinsicValue, inputs },
+        { calculatedValue, inputs },
       );
       return 0 as Cents;
     }
 
+    // Apply sanity bounds to prevent extreme valuations (0.30× - 3.50× base)
+    const { boundedValue } = this.applySanityBounds(calculatedValue, baseValue);
+
     // Return as integer cents (already in cents, just ensure it's an integer)
-    return Math.round(intrinsicValue) as Cents;
+    return boundedValue;
   }
 
   /**
    * Calculate intrinsic value WITH detailed breakdown for transparency
    * Shows step-by-step how each factor affects the final value
    *
-   * @returns Object containing intrinsic value and detailed breakdown
+   * ENHANCED: Includes Pabrai-style data quality validation
+   * Will return 0 if data quality is insufficient (refuse to calculate with bad data)
+   *
+   * @returns Object containing intrinsic value, breakdown, and data quality assessment
    */
   static calculateIntrinsicValueWithBreakdown(
     inputs: IntrinsicValueInputs,
   ): {
     intrinsicValue: Cents;
     breakdown: import("../../types/value-investing.ts").IntrinsicValueBreakdown;
+    dataQuality?: DataQualityResult;
   } {
-    // Validate inputs
+    // CRITICAL: Validate data quality FIRST (Pabrai approach)
+    // Convert inputs to the format expected by DataQualityValidator
+    const bricklinkData = {
+      avgPrice: inputs.bricklinkAvgPrice,
+      minPrice: undefined, // Not in inputs
+      maxPrice: inputs.bricklinkMaxPrice,
+      totalQty: inputs.timesSold, // Approximation
+      timesSold: inputs.timesSold,
+      totalLots: inputs.availableLots,
+      salesVelocity: inputs.salesVelocity,
+      priceHistory: [], // Not in inputs, but validator will handle
+      availableQty: inputs.availableQty,
+      priceVolatility: inputs.priceVolatility,
+    };
+
+    const worldBricksData = {
+      msrp: inputs.msrp,
+      status: inputs.retirementStatus,
+      theme: inputs.theme,
+      pieces: inputs.partsCount,
+      yearRetired: inputs.retirementStatus === "retired"
+        ? (inputs.yearReleased ? inputs.yearReleased + 3 : undefined)
+        : undefined,
+    };
+
+    const dataQuality = DataQualityValidator.validate(
+      // deno-lint-ignore no-explicit-any
+      bricklinkData as any,
+      // deno-lint-ignore no-explicit-any
+      worldBricksData as any,
+    );
+
+    // Pabrai approach: Refuse to calculate if data quality is insufficient
+    if (!dataQuality.canCalculate) {
+      console.warn(
+        "[ValueCalculator] Insufficient data quality to calculate intrinsic value:",
+        dataQuality.explanation,
+      );
+
+      // Return 0 with explanation
+      return {
+        intrinsicValue: 0 as Cents,
+        breakdown: {
+          baseValue: 0 as Cents,
+          baseValueSource: "none",
+          baseValueExplanation: dataQuality.explanation,
+          qualityMultipliers: {
+            retirement: { value: 1.0, explanation: "", applied: false },
+            quality: { value: 1.0, score: 0, explanation: "" },
+            demand: { value: 1.0, score: 0, explanation: "" },
+            theme: {
+              value: 1.0,
+              themeName: "",
+              explanation: "Insufficient data",
+            },
+            partsPerDollar: { value: 1.0, explanation: "Insufficient data" },
+            scarcity: {
+              value: 1.0,
+              score: 0,
+              explanation: "Insufficient data",
+              applied: false,
+            },
+          },
+          riskDiscounts: {
+            liquidity: { value: 1.0, explanation: "", applied: false },
+            volatility: { value: 1.0, explanation: "", applied: false },
+            saturation: { value: 1.0, explanation: "", applied: false },
+            zeroSales: { value: 1.0, explanation: "", applied: false },
+          },
+          intermediateValues: {
+            afterQualityMultipliers: 0 as Cents,
+            afterRiskDiscounts: 0 as Cents,
+          },
+          finalIntrinsicValue: 0 as Cents,
+          totalMultiplier: 0,
+        },
+        dataQuality,
+      };
+    }
+
+    // HARD GATE REJECTION: Check Pabrai "Too Hard Pile" criteria
+    // Refuse to calculate if set fails minimum quality/demand/liquidity thresholds
+    const rejection = this.checkHardGateRejection(inputs);
+    if (rejection) {
+      console.warn(
+        "[ValueCalculator] Hard gate rejection:",
+        rejection.reason,
+      );
+
+      // Return 0 with rejection explanation
+      return {
+        intrinsicValue: 0 as Cents,
+        breakdown: {
+          baseValue: 0 as Cents,
+          baseValueSource: "none",
+          baseValueExplanation: `REJECTED - ${rejection.reason}`,
+          qualityMultipliers: {
+            retirement: { value: 1.0, explanation: rejection.reason, applied: false },
+            quality: { value: 1.0, score: this.safeScore(inputs.qualityScore, 50), explanation: rejection.category === "INSUFFICIENT_DATA" ? rejection.reason : "" },
+            demand: { value: 1.0, score: this.safeScore(inputs.demandScore, 50), explanation: rejection.category === "INSUFFICIENT_DEMAND" ? rejection.reason : "" },
+            theme: {
+              value: 1.0,
+              themeName: "",
+              explanation: "Set rejected - valuation not performed",
+            },
+            partsPerDollar: { value: 1.0, explanation: "Set rejected - valuation not performed" },
+            scarcity: {
+              value: 1.0,
+              score: 0,
+              explanation: "Set rejected - valuation not performed",
+              applied: false,
+            },
+          },
+          riskDiscounts: {
+            liquidity: { value: 1.0, explanation: rejection.category === "DEAD_INVENTORY" ? rejection.reason : "", applied: false },
+            volatility: { value: 1.0, explanation: "", applied: false },
+            saturation: { value: 1.0, explanation: rejection.category === "OVERSATURATED" ? rejection.reason : "", applied: false },
+            zeroSales: { value: 1.0, explanation: rejection.category === "VALUE_TRAP" ? rejection.reason : "", applied: false },
+          },
+          intermediateValues: {
+            afterQualityMultipliers: 0 as Cents,
+            afterRiskDiscounts: 0 as Cents,
+          },
+          finalIntrinsicValue: 0 as Cents,
+          totalMultiplier: 0,
+          // Add rejection metadata
+          rejection: {
+            rejected: true,
+            reason: rejection.reason,
+            category: rejection.category as "INSUFFICIENT_DATA" | "INSUFFICIENT_DEMAND" | "DEAD_INVENTORY" | "OVERSATURATED" | "VALUE_TRAP",
+          },
+        },
+        dataQuality,
+      };
+    }
+
+    // Validate inputs (legacy validation for type checking)
     this.validatePrice(inputs.bricklinkAvgPrice, "bricklinkAvgPrice");
     this.validatePrice(inputs.bricklinkMaxPrice, "bricklinkMaxPrice");
     this.validateScore(inputs.demandScore, "demandScore");
@@ -732,12 +1206,15 @@ export class ValueCalculator {
       baseValue = msrp;
       baseValueSource = "msrp";
       baseValueExplanation =
-        `Using MSRP as base value (original retail price: MYR ${(msrp / 100).toFixed(2)})`;
+        `Using MSRP as base value (original retail price: MYR ${
+          (msrp / 100).toFixed(2)
+        })`;
     } else if (currentRetailPrice && currentRetailPrice > 0) {
       baseValue = currentRetailPrice;
       baseValueSource = "currentRetail";
-      baseValueExplanation =
-        `Using current retail price as base value: MYR ${(currentRetailPrice / 100).toFixed(2)}`;
+      baseValueExplanation = `Using current retail price as base value: MYR ${
+        (currentRetailPrice / 100).toFixed(2)
+      }`;
     } else if (bricklinkAvgPrice && bricklinkMaxPrice) {
       baseValue = (bricklinkAvgPrice *
           CONFIG.INTRINSIC_VALUE.BASE_WEIGHTS.AVG_PRICE +
@@ -745,17 +1222,23 @@ export class ValueCalculator {
         0.70;
       baseValueSource = "bricklink";
       baseValueExplanation =
-        `Using BrickLink market prices with 30% discount: MYR ${(baseValue / 100).toFixed(2)}`;
+        `Using BrickLink market prices with 30% discount: MYR ${
+          (baseValue / 100).toFixed(2)
+        }`;
     } else if (bricklinkAvgPrice) {
       baseValue = bricklinkAvgPrice * 0.70;
       baseValueSource = "bricklink";
       baseValueExplanation =
-        `Using BrickLink avg price with 30% discount: MYR ${(baseValue / 100).toFixed(2)}`;
+        `Using BrickLink avg price with 30% discount: MYR ${
+          (baseValue / 100).toFixed(2)
+        }`;
     } else if (bricklinkMaxPrice) {
       baseValue = bricklinkMaxPrice * 0.50;
       baseValueSource = "bricklink";
       baseValueExplanation =
-        `Using BrickLink max price with 50% discount: MYR ${(baseValue / 100).toFixed(2)}`;
+        `Using BrickLink max price with 50% discount: MYR ${
+          (baseValue / 100).toFixed(2)
+        }`;
     } else {
       baseValueExplanation = "No pricing data available";
     }
@@ -779,12 +1262,20 @@ export class ValueCalculator {
 
     const themeMultiplier = this.calculateThemeMultiplier(theme);
     const ppdScore = this.calculatePPDScore(partsCount, msrp);
+    const scarcityMultiplier = this.calculateScarcityMultiplier(
+      availableQty,
+      availableLots,
+      salesVelocity,
+    );
     const liquidityMultiplier = this.calculateLiquidityMultiplier(
       salesVelocity,
       avgDaysBetweenSales,
     );
     const volatilityDiscount = this.calculateVolatilityDiscount(
       priceVolatility,
+      retirementStatus,
+      yearsPostRetirement,
+      inputs.priceTrend,
     );
     const saturationDiscount = this.calculateSaturationDiscount(
       availableQty,
@@ -825,6 +1316,13 @@ export class ValueCalculator {
       ppdScore,
     );
 
+    const scarcityExplanation = this.getScarcityExplanation(
+      availableQty,
+      availableLots,
+      salesVelocity,
+      scarcityMultiplier,
+    );
+
     const liquidityExplanation = this.getLiquidityExplanation(
       salesVelocity,
       avgDaysBetweenSales,
@@ -856,24 +1354,28 @@ export class ValueCalculator {
         themeMultiplier *
         ppdScore *
         qualityMultiplier *
-        demandMultiplier,
+        demandMultiplier *
+        scarcityMultiplier,
     ) as Cents;
 
-    const finalIntrinsicValue = Math.round(
-      afterQualityMultipliers *
-        liquidityMultiplier *
-        volatilityDiscount *
-        saturationDiscount *
-        zeroSalesPenalty,
-    ) as Cents;
+    const calculatedValue = afterQualityMultipliers *
+      liquidityMultiplier *
+      volatilityDiscount *
+      saturationDiscount *
+      zeroSalesPenalty;
 
-    const totalMultiplier = baseValue > 0
-      ? finalIntrinsicValue / baseValue
-      : 0;
+    // Apply sanity bounds to prevent extreme valuations
+    const {
+      boundedValue: finalIntrinsicValue,
+      wasAdjusted: sanityBoundsApplied,
+      adjustment: sanityBoundsExplanation,
+    } = this.applySanityBounds(calculatedValue, baseValue);
+
+    const totalMultiplier = baseValue > 0 ? finalIntrinsicValue / baseValue : 0;
 
     // 5. BUILD BREAKDOWN OBJECT
-    const breakdown: import("../../types/value-investing.ts").IntrinsicValueBreakdown =
-      {
+    const breakdown:
+      import("../../types/value-investing.ts").IntrinsicValueBreakdown = {
         baseValue: baseValue as Cents,
         baseValueSource,
         baseValueExplanation,
@@ -904,6 +1406,14 @@ export class ValueCalculator {
               ? partsCount / (msrp / 100)
               : undefined,
             explanation: ppdExplanation,
+          },
+          scarcity: {
+            value: scarcityMultiplier,
+            score: this.calculateMonthsOfInventory(availableQty, salesVelocity) !== null
+              ? 100 - Math.min(100, (this.calculateMonthsOfInventory(availableQty, salesVelocity)! / 24) * 100)
+              : 50, // If months available, convert to 0-100 score, otherwise neutral
+            explanation: scarcityExplanation,
+            applied: scarcityMultiplier !== 1.0,
           },
         },
         riskDiscounts: {
@@ -937,11 +1447,21 @@ export class ValueCalculator {
         },
         finalIntrinsicValue,
         totalMultiplier,
+        // Add sanity bounds information if applied
+        ...(sanityBoundsApplied && {
+          sanityBoundsAdjustment: {
+            applied: true,
+            explanation: sanityBoundsExplanation,
+            originalValue: Math.round(calculatedValue) as Cents,
+            boundedValue: finalIntrinsicValue,
+          },
+        }),
       };
 
     return {
       intrinsicValue: finalIntrinsicValue,
       breakdown,
+      dataQuality, // Include data quality assessment
     };
   }
 
@@ -955,17 +1475,21 @@ export class ValueCalculator {
     multiplier?: number,
   ): string {
     if (retirementStatus === "retiring_soon") {
-      return `Set is retiring soon (+${((multiplier! - 1) * 100).toFixed(0)}% premium)`;
+      return `Set is retiring soon (+${
+        ((multiplier! - 1) * 100).toFixed(0)
+      }% premium)`;
     } else if (retirementStatus !== "retired") {
       return "Set is active (no retirement premium)";
     }
 
     const hasSufficientDemand = demandScore !== undefined &&
       demandScore >= CONFIG.INTRINSIC_VALUE.RETIREMENT_TIME_DECAY
-        .MIN_DEMAND_FOR_PREMIUM;
+          .MIN_DEMAND_FOR_PREMIUM;
 
     if (!hasSufficientDemand) {
-      return `Retired but low demand (${demandScore?.toFixed(0) || "unknown"}/100) - limited premium (+${((multiplier! - 1) * 100).toFixed(0)}%)`;
+      return `Retired but low demand (${
+        demandScore?.toFixed(0) || "unknown"
+      }/100) - limited premium (+${((multiplier! - 1) * 100).toFixed(0)}%)`;
     }
 
     if (
@@ -973,19 +1497,31 @@ export class ValueCalculator {
       yearsPostRetirement >= 0
     ) {
       if (yearsPostRetirement < 1) {
-        return `Retired <1 year ago - market flooded (${((multiplier! - 1) * 100).toFixed(0)}% change)`;
+        return `Retired <1 year ago - market flooded (${
+          ((multiplier! - 1) * 100).toFixed(0)
+        }% change)`;
       } else if (yearsPostRetirement < 2) {
-        return `Retired 1-2 years ago - stabilizing (${((multiplier! - 1) * 100).toFixed(0)}% change)`;
+        return `Retired 1-2 years ago - stabilizing (${
+          ((multiplier! - 1) * 100).toFixed(0)
+        }% change)`;
       } else if (yearsPostRetirement < 5) {
-        return `Retired 2-5 years ago - appreciating (+${((multiplier! - 1) * 100).toFixed(0)}%)`;
+        return `Retired 2-5 years ago - appreciating (+${
+          ((multiplier! - 1) * 100).toFixed(0)
+        }%)`;
       } else if (yearsPostRetirement < 10) {
-        return `Retired 5-10 years ago - scarcity premium (+${((multiplier! - 1) * 100).toFixed(0)}%)`;
+        return `Retired 5-10 years ago - scarcity premium (+${
+          ((multiplier! - 1) * 100).toFixed(0)
+        }%)`;
       } else {
-        return `Retired 10+ years ago - vintage (+${((multiplier! - 1) * 100).toFixed(0)}%)`;
+        return `Retired 10+ years ago - vintage (+${
+          ((multiplier! - 1) * 100).toFixed(0)
+        }%)`;
       }
     }
 
-    return `Retired with sufficient demand (+${((multiplier! - 1) * 100).toFixed(0)}% premium)`;
+    return `Retired with sufficient demand (+${
+      ((multiplier! - 1) * 100).toFixed(0)
+    }% premium)`;
   }
 
   private static getQualityExplanation(
@@ -994,7 +1530,9 @@ export class ValueCalculator {
   ): string {
     const effect = ((multiplier - 1) * 100).toFixed(1);
     const sign = multiplier >= 1 ? "+" : "";
-    return `Quality score ${score.toFixed(0)}/100 (${sign}${effect}% adjustment)`;
+    return `Quality score ${
+      score.toFixed(0)
+    }/100 (${sign}${effect}% adjustment)`;
   }
 
   private static getDemandExplanation(
@@ -1003,7 +1541,9 @@ export class ValueCalculator {
   ): string {
     const effect = ((multiplier - 1) * 100).toFixed(1);
     const sign = multiplier >= 1 ? "+" : "";
-    return `Demand score ${score.toFixed(0)}/100 (${sign}${effect}% adjustment)`;
+    return `Demand score ${
+      score.toFixed(0)
+    }/100 (${sign}${effect}% adjustment)`;
   }
 
   private static getThemeExplanation(
@@ -1032,6 +1572,49 @@ export class ValueCalculator {
     return `${ppd.toFixed(1)} parts/dollar (${sign}${effect}% adjustment)`;
   }
 
+  private static getScarcityExplanation(
+    availableQty: number | undefined,
+    availableLots: number | undefined,
+    salesVelocity: number | undefined,
+    multiplier: number,
+  ): string {
+    if (multiplier === 1.0) {
+      return "No scarcity data - neutral adjustment";
+    }
+
+    const effect = ((multiplier - 1) * 100).toFixed(1);
+    const sign = multiplier >= 1 ? "+" : "";
+
+    // Calculate months of inventory for context
+    const monthsOfInventory = this.calculateMonthsOfInventory(
+      availableQty,
+      salesVelocity,
+    );
+
+    const details: string[] = [];
+
+    if (monthsOfInventory !== null) {
+      details.push(`${monthsOfInventory.toFixed(1)} months of inventory`);
+
+      if (monthsOfInventory < 3) {
+        details.push("(SCARCE - low supply vs demand)");
+      } else if (monthsOfInventory < 12) {
+        details.push("(balanced supply/demand)");
+      } else {
+        details.push("(oversupplied)");
+      }
+    } else {
+      if (availableQty !== undefined) details.push(`${availableQty} units`);
+      if (availableLots !== undefined) details.push(`${availableLots} sellers`);
+    }
+
+    if (details.length === 0) {
+      return `Scarcity adjustment: ${sign}${effect}%`;
+    }
+
+    return `Market supply: ${details.join(" ")} (${sign}${effect}% scarcity premium)`;
+  }
+
   private static getLiquidityExplanation(
     salesVelocity: number | undefined,
     avgDaysBetweenSales: number | undefined,
@@ -1044,9 +1627,13 @@ export class ValueCalculator {
     const sign = multiplier >= 1 ? "+" : "";
 
     if (salesVelocity !== undefined) {
-      return `Sales velocity: ${salesVelocity.toFixed(2)}/day (${sign}${effect}% adjustment)`;
+      return `Sales velocity: ${
+        salesVelocity.toFixed(2)
+      }/day (${sign}${effect}% adjustment)`;
     } else if (avgDaysBetweenSales !== undefined) {
-      return `Avg ${avgDaysBetweenSales.toFixed(1)} days between sales (${sign}${effect}% adjustment)`;
+      return `Avg ${
+        avgDaysBetweenSales.toFixed(1)
+      } days between sales (${sign}${effect}% adjustment)`;
     }
 
     return `Liquidity adjustment: ${sign}${effect}%`;
@@ -1060,7 +1647,9 @@ export class ValueCalculator {
       return "No price volatility - stable pricing";
     }
     const effect = ((1 - discount) * 100).toFixed(1);
-    return `Price volatility ${(priceVolatility * 100).toFixed(1)}% (${effect}% discount)`;
+    return `Price volatility ${
+      (priceVolatility * 100).toFixed(1)
+    }% (${effect}% discount)`;
   }
 
   private static getSaturationExplanation(
@@ -1111,7 +1700,10 @@ export class ValueCalculator {
    * Calculate target buy price (price at which you should buy)
    * Using margin of safety principle - buy at a discount to intrinsic value
    *
-   * Enhanced with strategy-specific margins and availability/demand adjustments
+   * Enhanced with:
+   * - Strategy-specific margins
+   * - Confidence-aware margins (Buffett principle: bigger margin when uncertain)
+   * - Availability/demand adjustments
    *
    * @returns Target price in CENTS (Cents branded type)
    */
@@ -1122,6 +1714,7 @@ export class ValueCalculator {
       availabilityScore?: number;
       demandScore?: number;
       desiredMarginOfSafety?: number;
+      dataQualityScore?: number; // 0-100 score from DataQualityValidator
     } = {},
   ): Cents {
     // Validate inputs
@@ -1134,8 +1727,21 @@ export class ValueCalculator {
 
     let marginOfSafety: number;
 
-    // Use strategy-specific margin if provided
-    if (options.strategy && STRATEGY_MARGINS[options.strategy]) {
+    // CRITICAL: Confidence-aware margin (Buffett principle)
+    // Lower confidence = require bigger margin of safety
+    if (
+      typeof options.dataQualityScore === "number" &&
+      !isNaN(options.dataQualityScore)
+    ) {
+      if (options.dataQualityScore >= 80) {
+        marginOfSafety = CONFIG.MARGIN_OF_SAFETY.HIGH_CONFIDENCE; // 20%
+      } else if (options.dataQualityScore >= 50) {
+        marginOfSafety = CONFIG.MARGIN_OF_SAFETY.MEDIUM_CONFIDENCE; // 30%
+      } else {
+        marginOfSafety = CONFIG.MARGIN_OF_SAFETY.LOW_CONFIDENCE; // 40%
+      }
+    } else if (options.strategy && STRATEGY_MARGINS[options.strategy]) {
+      // Use strategy-specific margin if provided (legacy)
       marginOfSafety = STRATEGY_MARGINS[options.strategy].margin;
     } else if (
       typeof options.desiredMarginOfSafety === "number" &&
@@ -1410,12 +2016,38 @@ export class ValueCalculator {
 
   /**
    * Determine if a product is a good buy based on value investing principles
+   * ENHANCED: Confidence-aware minimum margins
+   *
+   * @param marginOfSafety - Current margin of safety (percentage, e.g., 25 = 25%)
+   * @param dataQualityScore - Optional data quality score (0-100)
+   * @param minMarginOfSafety - Override minimum margin (percentage)
    */
   static isGoodBuy(
     marginOfSafety: number,
-    minMarginOfSafety: number = CONFIG.MARGIN_OF_SAFETY.MINIMUM * 100,
+    dataQualityScore?: number,
+    minMarginOfSafety?: number,
   ): boolean {
-    return marginOfSafety >= minMarginOfSafety;
+    // Determine minimum required margin based on confidence
+    let requiredMargin: number;
+
+    if (minMarginOfSafety !== undefined) {
+      // User-specified minimum
+      requiredMargin = minMarginOfSafety;
+    } else if (dataQualityScore !== undefined) {
+      // Confidence-aware minimum
+      if (dataQualityScore >= 80) {
+        requiredMargin = CONFIG.MARGIN_OF_SAFETY.HIGH_CONFIDENCE * 100; // 20%
+      } else if (dataQualityScore >= 50) {
+        requiredMargin = CONFIG.MARGIN_OF_SAFETY.MEDIUM_CONFIDENCE * 100; // 30%
+      } else {
+        requiredMargin = CONFIG.MARGIN_OF_SAFETY.LOW_CONFIDENCE * 100; // 40%
+      }
+    } else {
+      // Default minimum
+      requiredMargin = CONFIG.MARGIN_OF_SAFETY.MINIMUM * 100; // 20%
+    }
+
+    return marginOfSafety >= requiredMargin;
   }
 
   /**
@@ -1462,15 +2094,25 @@ export class ValueCalculator {
         availabilityScore?: number;
       };
       // Include detailed calculation breakdown
-      calculationBreakdown?: import("../../types/value-investing.ts").IntrinsicValueBreakdown;
+      calculationBreakdown?:
+        import("../../types/value-investing.ts").IntrinsicValueBreakdown;
+      // Rejection information (if applicable)
+      rejection?: {
+        rejected: boolean;
+        reason: string;
+        category: string;
+      };
     };
   } | null {
     // Calculate intrinsic value WITH breakdown for transparency
     const { intrinsicValue, breakdown: calculationBreakdown } = this
       .calculateIntrinsicValueWithBreakdown(inputs);
 
+    // Check if rejected by hard gates
     if (intrinsicValue === 0) {
-      return null; // Insufficient data
+      // Return null, but the rejection info is in calculationBreakdown
+      // The caller should check calculationBreakdown.rejection for details
+      return null;
     }
 
     // Calculate margin of safety with detailed tracking

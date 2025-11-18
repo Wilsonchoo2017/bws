@@ -7,6 +7,28 @@ import { useSignal } from "@preact/signals";
 import { useEffect } from "preact/hooks";
 import type { Cents } from "../types/price.ts";
 
+interface DataQuality {
+  canCalculate: boolean;
+  qualityScore: number;
+  confidenceLevel: "HIGH" | "MEDIUM" | "LOW" | "INSUFFICIENT";
+  explanation: string;
+  missingCriticalData: string[];
+  missingOptionalData: string[];
+}
+
+interface ValueProjection {
+  currentValue: Cents;
+  oneYearValue: Cents;
+  threeYearValue: Cents;
+  fiveYearValue: Cents;
+  expectedCAGR: number;
+  supplyExhaustionMonths: number | null;
+  monthsOfInventory: number | null;
+  projectionConfidence: number;
+  assumptions: string[];
+  risks: string[];
+}
+
 interface ValueMetrics {
   currentPrice: Cents; // Branded Cents type
   targetPrice: Cents; // Branded Cents type
@@ -25,6 +47,12 @@ interface ValueMetrics {
   priceToValueRatio?: number;
   // Detailed calculation breakdown
   calculationBreakdown?: IntrinsicValueBreakdown;
+  // ENHANCED: Future value projections
+  valueProjection?: ValueProjection | null;
+  // ENHANCED: Data quality assessment
+  dataQuality?: DataQuality | null;
+  // ENHANCED: Months of inventory
+  monthsOfInventory?: number | null;
 }
 
 interface IntrinsicValueBreakdown {
@@ -59,6 +87,12 @@ interface IntrinsicValueBreakdown {
   };
   finalIntrinsicValue: Cents;
   totalMultiplier: number;
+  // Rejection metadata (Pabrai "Too Hard Pile")
+  rejection?: {
+    rejected: boolean;
+    reason: string;
+    category: "INSUFFICIENT_DATA" | "INSUFFICIENT_DEMAND" | "DEAD_INVENTORY" | "OVERSATURATED" | "VALUE_TRAP";
+  };
 }
 
 interface BreakdownInputs {
@@ -173,6 +207,15 @@ interface IntrinsicValueData {
   qualityScoreBreakdown?: QualityScoreBreakdown;
   demandScoreBreakdown?: DemandScoreBreakdown;
   availabilityScoreBreakdown?: AvailabilityScoreBreakdown;
+  catalyst?: {
+    isPreRetirementOpportunity: boolean;
+    urgency: "high" | "medium" | "low";
+    reason: string;
+  };
+  appreciationPhase?: {
+    phase: "market-flooded" | "stabilizing" | "appreciation" | "scarcity" | "vintage";
+    description: string;
+  };
 }
 
 interface IntrinsicValueCardProps {
@@ -188,6 +231,7 @@ export default function IntrinsicValueCard(
   const showQualityBreakdown = useSignal(true);
   const showDemandBreakdown = useSignal(true);
   const showAvailabilityBreakdown = useSignal(true);
+  const showIntrinsicBreakdown = useSignal(false);
 
   // Fetch intrinsic value data
   useEffect(() => {
@@ -195,16 +239,42 @@ export default function IntrinsicValueCard(
     error.value = null;
 
     fetch(`/api/value-investing/${productId}`)
-      .then((res) => {
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        return res.json();
+      .then(async (res) => {
+        // Get response text first (can be parsed as JSON or used as-is)
+        const responseText = await res.text();
+
+        if (!res.ok) {
+          // Extract error details from API response
+          let errorMessage = `HTTP ${res.status}`;
+
+          try {
+            const errorData = JSON.parse(responseText);
+            // Extract the most informative error message
+            errorMessage = errorData.reason ||
+                          errorData.error ||
+                          errorData.details?.reasoning ||
+                          (errorData.details?.risks && errorData.details.risks[0]) ||
+                          `HTTP ${res.status} - ${res.statusText}`;
+          } catch (_parseError) {
+            // If not valid JSON, use the text directly (truncated)
+            if (responseText && responseText.length > 0) {
+              errorMessage = responseText.substring(0, 200);
+            }
+          }
+
+          throw new Error(errorMessage);
+        }
+
+        // Parse successful response
+        return JSON.parse(responseText);
       })
       .then((responseData) => {
         data.value = responseData;
         loading.value = false;
       })
       .catch((err) => {
-        error.value = err.message;
+        console.error('[IntrinsicValueCard] Error fetching data:', err);
+        error.value = err.message || 'Failed to load investment analysis';
         loading.value = false;
       });
   }, [productId]);
@@ -250,12 +320,14 @@ export default function IntrinsicValueCard(
     action,
     analyzedAt,
     currency,
-    breakdown,
-    reasoning,
-    confidence,
+    breakdown: _breakdown,
+    reasoning: _reasoning,
+    confidence: _confidence,
     qualityScoreBreakdown,
     demandScoreBreakdown,
     availabilityScoreBreakdown,
+    catalyst,
+    appreciationPhase,
   } = data.value;
 
   // Helper: Calculate data completeness percentage
@@ -400,6 +472,232 @@ export default function IntrinsicValueCard(
           <div>{getActionBadge(action)}</div>
         </div>
 
+        {/* PABRAI "TOO HARD PILE" - REJECTION BANNER */}
+        {valueMetrics.calculationBreakdown?.rejection?.rejected && (
+          <div class="alert alert-error shadow-lg">
+            <div class="flex items-start gap-4">
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                class="stroke-current shrink-0 h-8 w-8"
+                fill="none"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  stroke-width="2"
+                  d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636"
+                />
+              </svg>
+              <div class="flex-1">
+                <h3 class="font-bold text-lg">
+                  ⛔ REJECTED - "Too Hard Pile"
+                </h3>
+                <p class="text-sm mt-1">
+                  {valueMetrics.calculationBreakdown.rejection.reason}
+                </p>
+                <div class="mt-3 p-3 bg-base-100 rounded-lg">
+                  <p class="text-xs font-semibold mb-2">Why was this rejected?</p>
+                  <p class="text-xs opacity-90">
+                    {valueMetrics.calculationBreakdown.rejection.category === "INSUFFICIENT_DATA" && (
+                      <>
+                        <strong>Quality/Demand Too Low:</strong> Pabrai's principle - only invest in sets you can confidently value.
+                        Sets with quality or demand scores below 40/100 lack sufficient data for accurate valuation.
+                      </>
+                    )}
+                    {valueMetrics.calculationBreakdown.rejection.category === "INSUFFICIENT_DEMAND" && (
+                      <>
+                        <strong>Market Demand Too Weak:</strong> Sets with demand scores below 40/100 indicate insufficient buyer interest.
+                        Without demand, even "cheap" sets are bad investments.
+                      </>
+                    )}
+                    {valueMetrics.calculationBreakdown.rejection.category === "DEAD_INVENTORY" && (
+                      <>
+                        <strong>Illiquid Market:</strong> Less than 1 sale per month indicates dead inventory.
+                        You won't be able to sell this - your money will be tied up indefinitely.
+                      </>
+                    )}
+                    {valueMetrics.calculationBreakdown.rejection.category === "OVERSATURATED" && (
+                      <>
+                        <strong>Market Flooded:</strong> More than 24 months of inventory at current sales velocity.
+                        It would take years to sell through existing supply - avoid oversaturated markets.
+                      </>
+                    )}
+                    {valueMetrics.calculationBreakdown.rejection.category === "VALUE_TRAP" && (
+                      <>
+                        <strong>Falling Knife Detected:</strong> Declining prices combined with high inventory is a classic value trap.
+                        The set appears "cheap" but prices are falling for a reason - don't catch falling knives.
+                      </>
+                    )}
+                  </p>
+                </div>
+                <div class="mt-3">
+                  <div class="badge badge-neutral badge-sm">
+                    Category: {valueMetrics.calculationBreakdown.rejection.category.replace(/_/g, " ")}
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* DATA QUALITY BANNER - PABRAI APPROACH */}
+        {valueMetrics.dataQuality && (
+          <div>
+            {/* INSUFFICIENT DATA - RED BANNER */}
+            {!valueMetrics.dataQuality.canCalculate && (
+              <div class="alert alert-error">
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  class="stroke-current shrink-0 h-6 w-6"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="2"
+                    d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
+                  />
+                </svg>
+                <div>
+                  <h3 class="font-bold">INSUFFICIENT DATA TO VALUE</h3>
+                  <div class="text-sm">{valueMetrics.dataQuality.explanation}</div>
+                  {valueMetrics.dataQuality.missingCriticalData.length > 0 && (
+                    <div class="text-xs mt-2">
+                      Missing: {valueMetrics.dataQuality.missingCriticalData.join(", ")}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* LOW CONFIDENCE - YELLOW BANNER */}
+            {valueMetrics.dataQuality.canCalculate &&
+              valueMetrics.dataQuality.confidenceLevel === "LOW" && (
+              <div class="alert alert-warning">
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  class="stroke-current shrink-0 h-6 w-6"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="2"
+                    d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
+                  />
+                </svg>
+                <div>
+                  <h3 class="font-bold">LOW CONFIDENCE - Use with Caution</h3>
+                  <div class="text-sm">
+                    Quality Score: {valueMetrics.dataQuality.qualityScore}/100
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* MEDIUM CONFIDENCE - INFO BANNER */}
+            {valueMetrics.dataQuality.canCalculate &&
+              valueMetrics.dataQuality.confidenceLevel === "MEDIUM" && (
+              <div class="alert alert-info">
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  class="stroke-current shrink-0 w-6 h-6"
+                >
+                  <path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="2"
+                    d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+                  />
+                </svg>
+                <div>
+                  <h3 class="font-bold">MEDIUM CONFIDENCE</h3>
+                  <div class="text-sm">
+                    Quality Score: {valueMetrics.dataQuality.qualityScore}/100
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* HIGH CONFIDENCE - GREEN CHECKMARK */}
+            {valueMetrics.dataQuality.canCalculate &&
+              valueMetrics.dataQuality.confidenceLevel === "HIGH" && (
+              <div class="alert alert-success">
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  class="stroke-current shrink-0 h-6 w-6"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    stroke-width="2"
+                    d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"
+                  />
+                </svg>
+                <div>
+                  <h3 class="font-bold">HIGH CONFIDENCE - Comprehensive Data</h3>
+                  <div class="text-sm">
+                    Quality Score: {valueMetrics.dataQuality.qualityScore}/100
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* PRE-RETIREMENT CATALYST BADGE */}
+        {catalyst?.isPreRetirementOpportunity && (
+          <div class={`alert ${
+            catalyst.urgency === "high"
+              ? "alert-error"
+              : catalyst.urgency === "medium"
+              ? "alert-warning"
+              : "alert-info"
+          }`}>
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              class="stroke-current shrink-0 h-6 w-6"
+              fill="none"
+              viewBox="0 0 24 24"
+            >
+              <path
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                stroke-width="2"
+                d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"
+              />
+            </svg>
+            <div>
+              <h3 class="font-bold">⏰ RETIRING SOON - BUY BEFORE SCARCITY</h3>
+              <div class="text-sm">{catalyst.reason}</div>
+            </div>
+          </div>
+        )}
+
+        {/* APPRECIATION PHASE INDICATOR */}
+        {appreciationPhase && (
+          <div class={`badge badge-lg ${
+            appreciationPhase.phase === "appreciation"
+              ? "badge-success"
+              : appreciationPhase.phase === "stabilizing"
+              ? "badge-info"
+              : appreciationPhase.phase === "scarcity"
+              ? "badge-warning"
+              : appreciationPhase.phase === "vintage"
+              ? "badge-secondary"
+              : "badge-ghost"
+          }`}>
+            {appreciationPhase.phase.toUpperCase()}: {appreciationPhase.description}
+          </div>
+        )}
+
         {/* Main Value Metrics */}
         <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
           {/* Current Price */}
@@ -456,100 +754,6 @@ export default function IntrinsicValueCard(
           </p>
         </div>
 
-        {/* Deal Quality Analysis */}
-        {valueMetrics.dealQualityScore !== undefined && (
-          <div class="p-5 bg-gradient-to-br from-purple-50 to-indigo-50 dark:from-purple-900/20 dark:to-indigo-900/20 border-2 border-purple-300 dark:border-purple-700 rounded-lg">
-            <div class="flex items-center justify-between mb-4">
-              <div>
-                <p class="text-sm font-semibold text-purple-700 dark:text-purple-300 mb-1">
-                  Deal Quality Score
-                </p>
-                <p class="text-xs text-purple-600/70 dark:text-purple-400/70">
-                  Retail vs Market & Intrinsic Value
-                </p>
-              </div>
-              <div class="text-right">
-                <p class="text-3xl font-bold text-purple-600 dark:text-purple-400">
-                  {valueMetrics.dealQualityScore}
-                  <span class="text-lg">/100</span>
-                </p>
-                <div
-                  class={`badge badge-sm mt-1 ${
-                    valueMetrics.dealQualityScore >= 85
-                      ? "badge-success"
-                      : valueMetrics.dealQualityScore >= 70
-                      ? "badge-info"
-                      : valueMetrics.dealQualityScore >= 60
-                      ? "badge-primary"
-                      : valueMetrics.dealQualityScore >= 50
-                      ? "badge-warning"
-                      : "badge-error"
-                  }`}
-                >
-                  {valueMetrics.dealQualityLabel}
-                </div>
-              </div>
-            </div>
-
-            {valueMetrics.dealRecommendation && (
-              <div class="mb-3 p-3 bg-white/50 dark:bg-black/20 rounded border border-purple-200 dark:border-purple-800">
-                <p class="text-sm text-purple-900 dark:text-purple-100">
-                  💡 {valueMetrics.dealRecommendation}
-                </p>
-              </div>
-            )}
-
-            <div class="grid grid-cols-3 gap-3 text-center">
-              {valueMetrics.retailDiscountPercent !== undefined && (
-                <div class="p-2 bg-white/60 dark:bg-black/30 rounded">
-                  <p class="text-xs text-purple-700 dark:text-purple-300 mb-1">
-                    Retail Discount
-                  </p>
-                  <p class="text-lg font-bold text-purple-900 dark:text-purple-100">
-                    {valueMetrics.retailDiscountPercent.toFixed(1)}%
-                  </p>
-                </div>
-              )}
-              {valueMetrics.priceToMarketRatio !== undefined && (
-                <div class="p-2 bg-white/60 dark:bg-black/30 rounded">
-                  <p class="text-xs text-purple-700 dark:text-purple-300 mb-1">
-                    vs Market
-                  </p>
-                  <p
-                    class={`text-lg font-bold ${
-                      valueMetrics.priceToMarketRatio <= 0.80
-                        ? "text-success"
-                        : valueMetrics.priceToMarketRatio <= 1.0
-                        ? "text-info"
-                        : "text-error"
-                    }`}
-                  >
-                    {valueMetrics.priceToMarketRatio.toFixed(2)}x
-                  </p>
-                </div>
-              )}
-              {valueMetrics.priceToValueRatio !== undefined && (
-                <div class="p-2 bg-white/60 dark:bg-black/30 rounded">
-                  <p class="text-xs text-purple-700 dark:text-purple-300 mb-1">
-                    vs Intrinsic
-                  </p>
-                  <p
-                    class={`text-lg font-bold ${
-                      valueMetrics.priceToValueRatio <= 0.75
-                        ? "text-success"
-                        : valueMetrics.priceToValueRatio <= 1.0
-                        ? "text-info"
-                        : "text-error"
-                    }`}
-                  >
-                    {valueMetrics.priceToValueRatio.toFixed(2)}x
-                  </p>
-                </div>
-              )}
-            </div>
-          </div>
-        )}
-
         {/* Realized Value (if available) */}
         {valueMetrics.realizedValue !== undefined && (
           <div class="p-4 bg-warning/10 border border-warning rounded-lg">
@@ -580,995 +784,1191 @@ export default function IntrinsicValueCard(
           </div>
         )}
 
-        {/* Quality Score Breakdown */}
-        {qualityScoreBreakdown && (
+        {/* FUTURE VALUE PROJECTIONS - PABRAI'S "CASH GENERATION" FOCUS */}
+        {valueMetrics.valueProjection && (
+          <div class="collapse collapse-arrow bg-base-200">
+            <input type="checkbox" />
+            <div class="collapse-title text-lg font-medium">
+              📈 Future Value Projections
+              <span class="text-sm text-base-content/60 ml-2">
+                ({valueMetrics.valueProjection.projectionConfidence}% confidence)
+              </span>
+            </div>
+            <div class="collapse-content space-y-4">
+              {/* Value Timeline */}
+              <div class="grid grid-cols-2 md:grid-cols-4 gap-2">
+                <div class="p-3 bg-base-100 rounded-lg">
+                  <p class="text-xs text-base-content/60 mb-1">Current</p>
+                  <p class="text-lg font-bold">
+                    {formatCurrency(valueMetrics.valueProjection.currentValue)}
+                  </p>
+                </div>
+                <div class="p-3 bg-base-100 rounded-lg">
+                  <p class="text-xs text-base-content/60 mb-1">1 Year</p>
+                  <p class="text-lg font-bold text-info">
+                    {formatCurrency(valueMetrics.valueProjection.oneYearValue)}
+                  </p>
+                </div>
+                <div class="p-3 bg-base-100 rounded-lg">
+                  <p class="text-xs text-base-content/60 mb-1">3 Years</p>
+                  <p class="text-lg font-bold text-success">
+                    {formatCurrency(valueMetrics.valueProjection.threeYearValue)}
+                  </p>
+                </div>
+                <div class="p-3 bg-base-100 rounded-lg">
+                  <p class="text-xs text-base-content/60 mb-1">5 Years</p>
+                  <p class="text-lg font-bold text-warning">
+                    {formatCurrency(valueMetrics.valueProjection.fiveYearValue)}
+                  </p>
+                </div>
+              </div>
+
+              {/* Expected CAGR */}
+              <div class="p-3 bg-base-100 rounded-lg">
+                <p class="text-xs text-base-content/60 mb-1">Expected Annual Growth (CAGR)</p>
+                <p class={`text-2xl font-bold ${
+                  valueMetrics.valueProjection.expectedCAGR > 0 ? "text-success" : "text-error"
+                }`}>
+                  {formatPercentage(valueMetrics.valueProjection.expectedCAGR)}
+                </p>
+              </div>
+
+              {/* Supply Metrics */}
+              {(valueMetrics.valueProjection.monthsOfInventory !== null ||
+                valueMetrics.valueProjection.supplyExhaustionMonths !== null) && (
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-2">
+                  {valueMetrics.valueProjection.monthsOfInventory !== null && (
+                    <div class="p-3 bg-base-100 rounded-lg">
+                      <p class="text-xs text-base-content/60 mb-1">Months of Inventory</p>
+                      <p class="text-xl font-bold">
+                        {valueMetrics.valueProjection.monthsOfInventory.toFixed(1)} months
+                      </p>
+                    </div>
+                  )}
+                  {valueMetrics.valueProjection.supplyExhaustionMonths !== null && (
+                    <div class="p-3 bg-base-100 rounded-lg">
+                      <p class="text-xs text-base-content/60 mb-1">Supply Exhaustion</p>
+                      <p class="text-xl font-bold">
+                        ~{valueMetrics.valueProjection.supplyExhaustionMonths.toFixed(0)} months
+                      </p>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Key Assumptions */}
+              {valueMetrics.valueProjection.assumptions.length > 0 && (
+                <div class="collapse collapse-arrow bg-base-100">
+                  <input type="checkbox" />
+                  <div class="collapse-title text-sm font-medium">
+                    Key Assumptions ({valueMetrics.valueProjection.assumptions.length})
+                  </div>
+                  <div class="collapse-content">
+                    <ul class="text-sm space-y-1">
+                      {valueMetrics.valueProjection.assumptions.map((assumption, idx) => (
+                        <li key={idx} class="flex items-start">
+                          <span class="text-info mr-2">•</span>
+                          <span>{assumption}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                </div>
+              )}
+
+              {/* Key Risks */}
+              {valueMetrics.valueProjection.risks.length > 0 && (
+                <div class="collapse collapse-arrow bg-base-100">
+                  <input type="checkbox" />
+                  <div class="collapse-title text-sm font-medium">
+                    Key Risks ({valueMetrics.valueProjection.risks.length})
+                  </div>
+                  <div class="collapse-content">
+                    <ul class="text-sm space-y-1">
+                      {valueMetrics.valueProjection.risks.map((risk, idx) => (
+                        <li key={idx} class="flex items-start">
+                          <span class="text-error mr-2">⚠</span>
+                          <span>{risk}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Consolidated Score Breakdown */}
+        {(qualityScoreBreakdown || demandScoreBreakdown ||
+          availabilityScoreBreakdown) && (
           <>
             <button
               class="btn btn-outline btn-block btn-sm"
-              onClick={() =>
-                showQualityBreakdown.value = !showQualityBreakdown.value}
+              onClick={() => {
+                const newValue = !showQualityBreakdown.value;
+                showQualityBreakdown.value = newValue;
+                showDemandBreakdown.value = newValue;
+                showAvailabilityBreakdown.value = newValue;
+              }}
             >
               {showQualityBreakdown.value
-                ? "▲ Hide Quality Score Breakdown"
-                : "▼ Show Quality Score Breakdown"}
-              {calculateQualityCompleteness() < 100 && (
-                <span class="badge badge-warning badge-sm ml-2">
-                  ⚠️ Incomplete Data
-                </span>
-              )}
+                ? "▲ Hide Score Breakdown"
+                : "▼ Show Score Breakdown"}
             </button>
 
             {showQualityBreakdown.value && (
-              <div class="space-y-4 pt-4 border-t border-base-300">
-                {/* Data Completeness Bar */}
+              <div class="space-y-6 pt-4 border-t border-base-300">
+                {/* Overall Data Completeness */}
                 <div>
                   <div class="flex items-center justify-between mb-2">
                     <p class="text-xs font-semibold text-base-content/60">
                       DATA COMPLETENESS
                     </p>
                     <span class="text-sm font-medium">
-                      {calculateQualityCompleteness()}%
+                      {(() => {
+                        const scores = [
+                          qualityScoreBreakdown
+                            ? calculateQualityCompleteness()
+                            : null,
+                          demandScoreBreakdown
+                            ? calculateDemandCompleteness()
+                            : null,
+                          availabilityScoreBreakdown
+                            ? calculateAvailabilityCompleteness()
+                            : null,
+                        ].filter((s) => s !== null);
+                        const avg = scores.length > 0
+                          ? Math.round(
+                            scores.reduce((a, b) => a! + b!, 0)! /
+                              scores.length,
+                          )
+                          : 0;
+                        return avg;
+                      })()}%
                     </span>
                   </div>
                   <progress
                     class={`progress w-full ${
-                      calculateQualityCompleteness() === 100
-                        ? "progress-success"
-                        : calculateQualityCompleteness() >= 50
-                        ? "progress-warning"
-                        : "progress-error"
+                      (() => {
+                        const scores = [
+                          qualityScoreBreakdown
+                            ? calculateQualityCompleteness()
+                            : null,
+                          demandScoreBreakdown
+                            ? calculateDemandCompleteness()
+                            : null,
+                          availabilityScoreBreakdown
+                            ? calculateAvailabilityCompleteness()
+                            : null,
+                        ].filter((s) => s !== null);
+                        const avg = scores.length > 0
+                          ? Math.round(
+                            scores.reduce((a, b) =>
+                              a! + b!, 0)! /
+                              scores.length,
+                          )
+                          : 0;
+                        return avg === 100
+                          ? "progress-success"
+                          : avg >= 50
+                          ? "progress-warning"
+                          : "progress-error";
+                      })()
                     }`}
-                    value={calculateQualityCompleteness()}
+                    value={(() => {
+                      const scores = [
+                        qualityScoreBreakdown
+                          ? calculateQualityCompleteness()
+                          : null,
+                        demandScoreBreakdown
+                          ? calculateDemandCompleteness()
+                          : null,
+                        availabilityScoreBreakdown
+                          ? calculateAvailabilityCompleteness()
+                          : null,
+                      ].filter((s) => s !== null);
+                      const avg = scores.length > 0
+                        ? Math.round(
+                          scores.reduce((a, b) => a! + b!, 0)! / scores.length,
+                        )
+                        : 0;
+                      return avg;
+                    })()}
                     max="100"
                   >
                   </progress>
-                  {calculateQualityCompleteness() < 100 && (
-                    <p class="text-xs text-base-content/60 mt-1">
-                      Missing: {[
-                        !qualityScoreBreakdown.dataQuality.hasParts &&
-                        "Parts Count",
-                        !qualityScoreBreakdown.dataQuality.hasMsrp && "MSRP",
-                        !qualityScoreBreakdown.dataQuality.hasTheme && "Theme",
-                        !qualityScoreBreakdown.dataQuality.hasAvailability &&
-                        "Availability",
-                      ].filter(Boolean).join(", ")}
-                    </p>
-                  )}
+                  {(() => {
+                    const missing: string[] = [];
+                    if (
+                      qualityScoreBreakdown &&
+                      calculateQualityCompleteness() < 100
+                    ) {
+                      if (!qualityScoreBreakdown.dataQuality.hasParts) {
+                        missing.push("Parts Count");
+                      }
+                      if (!qualityScoreBreakdown.dataQuality.hasMsrp) {
+                        missing.push("MSRP");
+                      }
+                      if (!qualityScoreBreakdown.dataQuality.hasTheme) {
+                        missing
+                          .push("Theme");
+                      }
+                      if (
+                        !qualityScoreBreakdown.dataQuality.hasAvailability
+                      ) missing.push("Availability");
+                    }
+                    if (
+                      demandScoreBreakdown &&
+                      calculateDemandCompleteness() < 100
+                    ) {
+                      if (
+                        !demandScoreBreakdown.dataQuality.hasSalesData
+                      ) missing.push("Sales Data");
+                      if (
+                        !demandScoreBreakdown.dataQuality.hasPriceData
+                      ) missing.push("Price History");
+                      if (
+                        !demandScoreBreakdown.dataQuality.hasMarketDepth
+                      ) missing.push("Market Depth");
+                    }
+                    if (availabilityScoreBreakdown?.missingData) {
+                      missing.push(...availabilityScoreBreakdown.missingData);
+                    }
+                    return missing.length > 0 && (
+                      <p class="text-xs text-base-content/60 mt-1">
+                        Missing: {missing.join(", ")}
+                      </p>
+                    );
+                  })()}
                 </div>
 
-                {/* Component Scores */}
-                <div class="space-y-3">
-                  <p class="text-xs font-semibold text-base-content/60">
-                    COMPONENT BREAKDOWN
-                  </p>
+                <p class="text-xs font-semibold text-base-content/60">
+                  COMPONENT BREAKDOWN
+                </p>
 
-                  {/* PPD Score */}
-                  <div class="bg-base-200 p-3 rounded-lg">
-                    <div class="flex items-center justify-between mb-1">
-                      <span class="text-sm font-medium">
-                        Parts-Per-Dollar (40% weight)
-                      </span>
-                      <span class="text-sm font-bold">
-                        {qualityScoreBreakdown.components.ppdScore.score}/100
-                      </span>
-                    </div>
-                    <div class="flex items-center gap-2">
-                      <progress
-                        class="progress progress-primary flex-1"
-                        value={qualityScoreBreakdown.components.ppdScore.score}
-                        max="100"
-                      >
-                      </progress>
-                      <span class="text-xs text-base-content/60">
-                        →{" "}
-                        {qualityScoreBreakdown.components.ppdScore.weightedScore
-                          .toFixed(1)} pts
-                      </span>
-                    </div>
-                    <p class="text-xs text-base-content/60 mt-1">
-                      {qualityScoreBreakdown.components.ppdScore.notes}
+                {/* Quality Score Section */}
+                {qualityScoreBreakdown && (
+                  <div class="space-y-3">
+                    <p class="text-sm font-bold text-base-content/80 border-b border-base-300 pb-2">
+                      Quality Score
                     </p>
-                  </div>
 
-                  {/* Complexity Score */}
-                  <div class="bg-base-200 p-3 rounded-lg">
-                    <div class="flex items-center justify-between mb-1">
-                      <span class="text-sm font-medium">
-                        Build Complexity (30% weight)
-                      </span>
-                      <span class="text-sm font-bold">
-                        {qualityScoreBreakdown.components.complexityScore
-                          .score}/100
-                      </span>
+                    {/* PPD Score */}
+                    <div class="bg-base-200 p-3 rounded-lg">
+                      <div class="flex items-center justify-between mb-1">
+                        <span class="text-sm font-medium">
+                          Parts-Per-Dollar (40% weight)
+                        </span>
+                        <span class="text-sm font-bold">
+                          {qualityScoreBreakdown.components.ppdScore.score}/100
+                        </span>
+                      </div>
+                      <div class="flex items-center gap-2">
+                        <progress
+                          class="progress progress-primary flex-1"
+                          value={qualityScoreBreakdown.components.ppdScore
+                            .score}
+                          max="100"
+                        >
+                        </progress>
+                        <span class="text-xs text-base-content/60">
+                          → {qualityScoreBreakdown.components.ppdScore
+                            .weightedScore
+                            .toFixed(1)} pts
+                        </span>
+                      </div>
+                      <p class="text-xs text-base-content/60 mt-1">
+                        {qualityScoreBreakdown.components.ppdScore.notes}
+                      </p>
                     </div>
-                    <div class="flex items-center gap-2">
-                      <progress
-                        class="progress progress-primary flex-1"
-                        value={qualityScoreBreakdown.components.complexityScore
-                          .score}
-                        max="100"
-                      >
-                      </progress>
-                      <span class="text-xs text-base-content/60">
-                        → {qualityScoreBreakdown.components.complexityScore
-                          .weightedScore.toFixed(1)} pts
-                      </span>
-                    </div>
-                    <p class="text-xs text-base-content/60 mt-1">
-                      {qualityScoreBreakdown.components.complexityScore.notes}
-                    </p>
-                  </div>
 
-                  {/* Theme Premium */}
-                  <div class="bg-base-200 p-3 rounded-lg">
-                    <div class="flex items-center justify-between mb-1">
-                      <span class="text-sm font-medium">
-                        Theme Premium (20% weight)
-                      </span>
-                      <span class="text-sm font-bold">
-                        {qualityScoreBreakdown.components.themePremium
-                          .score}/100
-                      </span>
+                    {/* Complexity Score */}
+                    <div class="bg-base-200 p-3 rounded-lg">
+                      <div class="flex items-center justify-between mb-1">
+                        <span class="text-sm font-medium">
+                          Build Complexity (30% weight)
+                        </span>
+                        <span class="text-sm font-bold">
+                          {qualityScoreBreakdown.components.complexityScore
+                            .score}/100
+                        </span>
+                      </div>
+                      <div class="flex items-center gap-2">
+                        <progress
+                          class="progress progress-primary flex-1"
+                          value={qualityScoreBreakdown.components
+                            .complexityScore
+                            .score}
+                          max="100"
+                        >
+                        </progress>
+                        <span class="text-xs text-base-content/60">
+                          → {qualityScoreBreakdown.components.complexityScore
+                            .weightedScore.toFixed(1)} pts
+                        </span>
+                      </div>
+                      <p class="text-xs text-base-content/60 mt-1">
+                        {qualityScoreBreakdown.components.complexityScore.notes}
+                      </p>
                     </div>
-                    <div class="flex items-center gap-2">
-                      <progress
-                        class="progress progress-primary flex-1"
-                        value={qualityScoreBreakdown.components.themePremium
-                          .score}
-                        max="100"
-                      >
-                      </progress>
-                      <span class="text-xs text-base-content/60">
-                        → {qualityScoreBreakdown.components.themePremium
-                          .weightedScore.toFixed(1)} pts
-                      </span>
-                    </div>
-                    <p class="text-xs text-base-content/60 mt-1">
-                      {qualityScoreBreakdown.components.themePremium.notes}
-                    </p>
-                  </div>
 
-                  {/* Scarcity Score */}
-                  <div class="bg-base-200 p-3 rounded-lg">
-                    <div class="flex items-center justify-between mb-1">
-                      <span class="text-sm font-medium">
-                        Scarcity (10% weight)
-                      </span>
-                      <span class="text-sm font-bold">
-                        {qualityScoreBreakdown.components.scarcityScore
-                          .score}/100
-                      </span>
+                    {/* Theme Premium */}
+                    <div class="bg-base-200 p-3 rounded-lg">
+                      <div class="flex items-center justify-between mb-1">
+                        <span class="text-sm font-medium">
+                          Theme Premium (20% weight)
+                        </span>
+                        <span class="text-sm font-bold">
+                          {qualityScoreBreakdown.components.themePremium
+                            .score}/100
+                        </span>
+                      </div>
+                      <div class="flex items-center gap-2">
+                        <progress
+                          class="progress progress-primary flex-1"
+                          value={qualityScoreBreakdown.components.themePremium
+                            .score}
+                          max="100"
+                        >
+                        </progress>
+                        <span class="text-xs text-base-content/60">
+                          → {qualityScoreBreakdown.components.themePremium
+                            .weightedScore.toFixed(1)} pts
+                        </span>
+                      </div>
+                      <p class="text-xs text-base-content/60 mt-1">
+                        {qualityScoreBreakdown.components.themePremium.notes}
+                      </p>
                     </div>
-                    <div class="flex items-center gap-2">
-                      <progress
-                        class="progress progress-primary flex-1"
-                        value={qualityScoreBreakdown.components.scarcityScore
-                          .score}
-                        max="100"
-                      >
-                      </progress>
-                      <span class="text-xs text-base-content/60">
-                        → {qualityScoreBreakdown.components.scarcityScore
-                          .weightedScore.toFixed(1)} pts
-                      </span>
-                    </div>
-                    <p class="text-xs text-base-content/60 mt-1">
-                      {qualityScoreBreakdown.components.scarcityScore.notes}
-                    </p>
-                  </div>
 
-                  {/* Total */}
-                  <div class="bg-success/10 border-2 border-success p-3 rounded-lg">
-                    <div class="flex items-center justify-between">
-                      <span class="text-sm font-bold text-success">
-                        Total Quality Score
-                      </span>
-                      <span class="text-lg font-bold text-success">
-                        {Math.round(
-                          qualityScoreBreakdown.components.ppdScore
-                            .weightedScore +
-                            qualityScoreBreakdown.components.complexityScore
+                    {/* Scarcity Score */}
+                    <div class="bg-base-200 p-3 rounded-lg">
+                      <div class="flex items-center justify-between mb-1">
+                        <span class="text-sm font-medium">
+                          Scarcity (10% weight)
+                        </span>
+                        <span class="text-sm font-bold">
+                          {qualityScoreBreakdown.components.scarcityScore
+                            .score}/100
+                        </span>
+                      </div>
+                      <div class="flex items-center gap-2">
+                        <progress
+                          class="progress progress-primary flex-1"
+                          value={qualityScoreBreakdown.components.scarcityScore
+                            .score}
+                          max="100"
+                        >
+                        </progress>
+                        <span class="text-xs text-base-content/60">
+                          → {qualityScoreBreakdown.components.scarcityScore
+                            .weightedScore.toFixed(1)} pts
+                        </span>
+                      </div>
+                      <p class="text-xs text-base-content/60 mt-1">
+                        {qualityScoreBreakdown.components.scarcityScore.notes}
+                      </p>
+                    </div>
+
+                    {/* Total */}
+                    <div class="bg-success/10 border-2 border-success p-3 rounded-lg">
+                      <div class="flex items-center justify-between">
+                        <span class="text-sm font-bold text-success">
+                          Total Quality Score
+                        </span>
+                        <span class="text-lg font-bold text-success">
+                          {Math.round(
+                            qualityScoreBreakdown.components.ppdScore
                               .weightedScore +
-                            qualityScoreBreakdown.components.themePremium
-                              .weightedScore +
-                            qualityScoreBreakdown.components.scarcityScore
-                              .weightedScore,
-                        )}/100
-                      </span>
+                              qualityScoreBreakdown.components.complexityScore
+                                .weightedScore +
+                              qualityScoreBreakdown.components.themePremium
+                                .weightedScore +
+                              qualityScoreBreakdown.components.scarcityScore
+                                .weightedScore,
+                          )}/100
+                        </span>
+                      </div>
                     </div>
                   </div>
-                </div>
-              </div>
-            )}
-          </>
-        )}
+                )}
 
-        {/* Demand Score Breakdown */}
-        {demandScoreBreakdown && (
-          <>
-            <button
-              class="btn btn-outline btn-block btn-sm"
-              onClick={() =>
-                showDemandBreakdown.value = !showDemandBreakdown.value}
-            >
-              {showDemandBreakdown.value
-                ? "▲ Hide Demand Score Breakdown"
-                : "▼ Show Demand Score Breakdown"}
-              {calculateDemandCompleteness() < 100 && (
-                <span class="badge badge-warning badge-sm ml-2">
-                  ⚠️ Incomplete Data
-                </span>
-              )}
-            </button>
-
-            {showDemandBreakdown.value && (
-              <div class="space-y-4 pt-4 border-t border-base-300">
-                {/* Data Completeness Bar */}
-                <div>
-                  <div class="flex items-center justify-between mb-2">
-                    <p class="text-xs font-semibold text-base-content/60">
-                      DATA COMPLETENESS
+                {/* Demand Score Section */}
+                {demandScoreBreakdown && (
+                  <div class="space-y-3">
+                    <p class="text-sm font-bold text-base-content/80 border-b border-base-300 pb-2">
+                      Demand Score
                     </p>
-                    <span class="text-sm font-medium">
-                      {calculateDemandCompleteness()}%
-                    </span>
-                  </div>
-                  <progress
-                    class={`progress w-full ${
-                      calculateDemandCompleteness() === 100
-                        ? "progress-success"
-                        : calculateDemandCompleteness() >= 50
-                        ? "progress-warning"
-                        : "progress-error"
-                    }`}
-                    value={calculateDemandCompleteness()}
-                    max="100"
-                  >
-                  </progress>
-                  {calculateDemandCompleteness() < 100 && (
-                    <p class="text-xs text-base-content/60 mt-1">
-                      Missing: {[
-                        !demandScoreBreakdown.dataQuality.hasSalesData &&
-                        "Sales Data",
-                        !demandScoreBreakdown.dataQuality.hasPriceData &&
-                        "Price History",
-                        !demandScoreBreakdown.dataQuality.hasMarketDepth &&
-                        "Market Depth",
-                      ].filter(Boolean).join(", ")}
-                    </p>
-                  )}
-                  <p class="text-xs text-base-content/60 mt-1">
-                    Observation Period:{" "}
-                    {demandScoreBreakdown.dataQuality.observationPeriod} days
-                  </p>
-                </div>
 
-                {/* Component Scores */}
-                <div class="space-y-3">
-                  <p class="text-xs font-semibold text-base-content/60">
-                    COMPONENT BREAKDOWN
-                  </p>
-
-                  {/* Sales Velocity */}
-                  <div class="bg-base-200 p-3 rounded-lg">
-                    <div class="flex items-center justify-between mb-1">
-                      <span class="text-sm font-medium">
-                        Sales Velocity
-                        ({(demandScoreBreakdown.components.salesVelocity
-                          .weight * 100).toFixed(0)}% weight)
-                      </span>
-                      <span class="text-sm font-bold">
-                        {demandScoreBreakdown.components.salesVelocity.score
-                          .toFixed(0)}/100
-                      </span>
-                    </div>
-                    <div class="flex items-center gap-2">
-                      <progress
-                        class="progress progress-info flex-1"
-                        value={demandScoreBreakdown.components.salesVelocity
-                          .score}
-                        max="100"
-                      >
-                      </progress>
-                      <span class="text-xs text-base-content/60">
-                        → {demandScoreBreakdown.components.salesVelocity
-                          .weightedScore.toFixed(1)} pts
-                      </span>
-                    </div>
-                    {demandScoreBreakdown.components.salesVelocity.notes && (
-                      <p class="text-xs text-base-content/60 mt-1">
-                        {demandScoreBreakdown.components.salesVelocity.notes}
-                      </p>
-                    )}
-                  </div>
-
-                  {/* Price Momentum */}
-                  <div class="bg-base-200 p-3 rounded-lg">
-                    <div class="flex items-center justify-between mb-1">
-                      <span class="text-sm font-medium">
-                        Price Momentum
-                        ({(demandScoreBreakdown.components.priceMomentum
-                          .weight * 100).toFixed(0)}% weight)
-                      </span>
-                      <span class="text-sm font-bold">
-                        {demandScoreBreakdown.components.priceMomentum.score
-                          .toFixed(0)}/100
-                      </span>
-                    </div>
-                    <div class="flex items-center gap-2">
-                      <progress
-                        class="progress progress-info flex-1"
-                        value={demandScoreBreakdown.components.priceMomentum
-                          .score}
-                        max="100"
-                      >
-                      </progress>
-                      <span class="text-xs text-base-content/60">
-                        → {demandScoreBreakdown.components.priceMomentum
-                          .weightedScore.toFixed(1)} pts
-                      </span>
-                    </div>
-                    {demandScoreBreakdown.components.priceMomentum.notes && (
-                      <p class="text-xs text-base-content/60 mt-1">
-                        {demandScoreBreakdown.components.priceMomentum.notes}
-                      </p>
-                    )}
-                  </div>
-
-                  {/* Market Depth */}
-                  <div class="bg-base-200 p-3 rounded-lg">
-                    <div class="flex items-center justify-between mb-1">
-                      <span class="text-sm font-medium">
-                        Market Depth
-                        ({(demandScoreBreakdown.components.marketDepth.weight *
-                          100).toFixed(0)}% weight)
-                      </span>
-                      <span class="text-sm font-bold">
-                        {demandScoreBreakdown.components.marketDepth.score
-                          .toFixed(0)}/100
-                      </span>
-                    </div>
-                    <div class="flex items-center gap-2">
-                      <progress
-                        class="progress progress-info flex-1"
-                        value={demandScoreBreakdown.components.marketDepth
-                          .score}
-                        max="100"
-                      >
-                      </progress>
-                      <span class="text-xs text-base-content/60">
-                        → {demandScoreBreakdown.components.marketDepth
-                          .weightedScore.toFixed(1)} pts
-                      </span>
-                    </div>
-                    {demandScoreBreakdown.components.marketDepth.notes && (
-                      <p class="text-xs text-base-content/60 mt-1">
-                        {demandScoreBreakdown.components.marketDepth.notes}
-                      </p>
-                    )}
-                  </div>
-
-                  {/* Supply/Demand Ratio */}
-                  <div class="bg-base-200 p-3 rounded-lg">
-                    <div class="flex items-center justify-between mb-1">
-                      <span class="text-sm font-medium">
-                        Supply/Demand Ratio
-                        ({(demandScoreBreakdown.components.supplyDemandRatio
-                          .weight * 100).toFixed(0)}% weight)
-                      </span>
-                      <span class="text-sm font-bold">
-                        {demandScoreBreakdown.components.supplyDemandRatio.score
-                          .toFixed(0)}/100
-                      </span>
-                    </div>
-                    <div class="flex items-center gap-2">
-                      <progress
-                        class="progress progress-info flex-1"
-                        value={demandScoreBreakdown.components.supplyDemandRatio
-                          .score}
-                        max="100"
-                      >
-                      </progress>
-                      <span class="text-xs text-base-content/60">
-                        → {demandScoreBreakdown.components.supplyDemandRatio
-                          .weightedScore.toFixed(1)} pts
-                      </span>
-                    </div>
-                    {demandScoreBreakdown.components.supplyDemandRatio.notes &&
-                      (
+                    {/* Sales Velocity */}
+                    <div class="bg-base-200 p-3 rounded-lg">
+                      <div class="flex items-center justify-between mb-1">
+                        <span class="text-sm font-medium">
+                          Sales Velocity
+                          ({(demandScoreBreakdown.components.salesVelocity
+                            .weight * 100).toFixed(0)}% weight)
+                        </span>
+                        <span class="text-sm font-bold">
+                          {demandScoreBreakdown.components.salesVelocity.score
+                            .toFixed(0)}/100
+                        </span>
+                      </div>
+                      <div class="flex items-center gap-2">
+                        <progress
+                          class="progress progress-info flex-1"
+                          value={demandScoreBreakdown.components.salesVelocity
+                            .score}
+                          max="100"
+                        >
+                        </progress>
+                        <span class="text-xs text-base-content/60">
+                          → {demandScoreBreakdown.components.salesVelocity
+                            .weightedScore.toFixed(1)} pts
+                        </span>
+                      </div>
+                      {demandScoreBreakdown.components.salesVelocity.notes && (
                         <p class="text-xs text-base-content/60 mt-1">
+                          {demandScoreBreakdown.components.salesVelocity.notes}
+                        </p>
+                      )}
+                    </div>
+
+                    {/* Price Momentum */}
+                    <div class="bg-base-200 p-3 rounded-lg">
+                      <div class="flex items-center justify-between mb-1">
+                        <span class="text-sm font-medium">
+                          Price Momentum
+                          ({(demandScoreBreakdown.components.priceMomentum
+                            .weight * 100).toFixed(0)}% weight)
+                        </span>
+                        <span class="text-sm font-bold">
+                          {demandScoreBreakdown.components.priceMomentum.score
+                            .toFixed(0)}/100
+                        </span>
+                      </div>
+                      <div class="flex items-center gap-2">
+                        <progress
+                          class="progress progress-info flex-1"
+                          value={demandScoreBreakdown.components.priceMomentum
+                            .score}
+                          max="100"
+                        >
+                        </progress>
+                        <span class="text-xs text-base-content/60">
+                          → {demandScoreBreakdown.components.priceMomentum
+                            .weightedScore.toFixed(1)} pts
+                        </span>
+                      </div>
+                      {demandScoreBreakdown.components.priceMomentum.notes && (
+                        <p class="text-xs text-base-content/60 mt-1">
+                          {demandScoreBreakdown.components.priceMomentum.notes}
+                        </p>
+                      )}
+                    </div>
+
+                    {/* Market Depth */}
+                    <div class="bg-base-200 p-3 rounded-lg">
+                      <div class="flex items-center justify-between mb-1">
+                        <span class="text-sm font-medium">
+                          Market Depth
+                          ({(demandScoreBreakdown.components.marketDepth
+                            .weight *
+                            100).toFixed(0)}% weight)
+                        </span>
+                        <span class="text-sm font-bold">
+                          {demandScoreBreakdown.components.marketDepth.score
+                            .toFixed(0)}/100
+                        </span>
+                      </div>
+                      <div class="flex items-center gap-2">
+                        <progress
+                          class="progress progress-info flex-1"
+                          value={demandScoreBreakdown.components.marketDepth
+                            .score}
+                          max="100"
+                        >
+                        </progress>
+                        <span class="text-xs text-base-content/60">
+                          → {demandScoreBreakdown.components.marketDepth
+                            .weightedScore.toFixed(1)} pts
+                        </span>
+                      </div>
+                      {demandScoreBreakdown.components.marketDepth.notes && (
+                        <p class="text-xs text-base-content/60 mt-1">
+                          {demandScoreBreakdown.components.marketDepth.notes}
+                        </p>
+                      )}
+                    </div>
+
+                    {/* Supply/Demand Ratio */}
+                    <div class="bg-base-200 p-3 rounded-lg">
+                      <div class="flex items-center justify-between mb-1">
+                        <span class="text-sm font-medium">
+                          Supply/Demand Ratio
+                          ({(demandScoreBreakdown.components.supplyDemandRatio
+                            .weight * 100).toFixed(0)}% weight)
+                        </span>
+                        <span class="text-sm font-bold">
                           {demandScoreBreakdown.components.supplyDemandRatio
+                            .score
+                            .toFixed(0)}/100
+                        </span>
+                      </div>
+                      <div class="flex items-center gap-2">
+                        <progress
+                          class="progress progress-info flex-1"
+                          value={demandScoreBreakdown.components
+                            .supplyDemandRatio
+                            .score}
+                          max="100"
+                        >
+                        </progress>
+                        <span class="text-xs text-base-content/60">
+                          → {demandScoreBreakdown.components.supplyDemandRatio
+                            .weightedScore.toFixed(1)} pts
+                        </span>
+                      </div>
+                      {demandScoreBreakdown.components.supplyDemandRatio
+                        .notes &&
+                        (
+                          <p class="text-xs text-base-content/60 mt-1">
+                            {demandScoreBreakdown.components.supplyDemandRatio
+                              .notes}
+                          </p>
+                        )}
+                    </div>
+
+                    {/* Velocity Consistency */}
+                    <div class="bg-base-200 p-3 rounded-lg">
+                      <div class="flex items-center justify-between mb-1">
+                        <span class="text-sm font-medium">
+                          Velocity Consistency
+                          ({(demandScoreBreakdown.components.velocityConsistency
+                            .weight * 100).toFixed(0)}% weight)
+                        </span>
+                        <span class="text-sm font-bold">
+                          {demandScoreBreakdown.components.velocityConsistency
+                            .score.toFixed(0)}/100
+                        </span>
+                      </div>
+                      <div class="flex items-center gap-2">
+                        <progress
+                          class="progress progress-info flex-1"
+                          value={demandScoreBreakdown.components
+                            .velocityConsistency.score}
+                          max="100"
+                        >
+                        </progress>
+                        <span class="text-xs text-base-content/60">
+                          → {demandScoreBreakdown.components.velocityConsistency
+                            .weightedScore.toFixed(1)} pts
+                        </span>
+                      </div>
+                      {demandScoreBreakdown.components.velocityConsistency
+                        .notes && (
+                        <p class="text-xs text-base-content/60 mt-1">
+                          {demandScoreBreakdown.components.velocityConsistency
                             .notes}
                         </p>
                       )}
-                  </div>
+                    </div>
 
-                  {/* Velocity Consistency */}
-                  <div class="bg-base-200 p-3 rounded-lg">
-                    <div class="flex items-center justify-between mb-1">
-                      <span class="text-sm font-medium">
-                        Velocity Consistency
-                        ({(demandScoreBreakdown.components.velocityConsistency
-                          .weight * 100).toFixed(0)}% weight)
-                      </span>
-                      <span class="text-sm font-bold">
-                        {demandScoreBreakdown.components.velocityConsistency
-                          .score.toFixed(0)}/100
-                      </span>
+                    {/* Total */}
+                    <div class="bg-info/10 border-2 border-info p-3 rounded-lg">
+                      <div class="flex items-center justify-between">
+                        <span class="text-sm font-bold text-info">
+                          Total Demand Score
+                        </span>
+                        <span class="text-lg font-bold text-info">
+                          {Math.round(
+                            demandScoreBreakdown.components.salesVelocity
+                              .weightedScore +
+                              demandScoreBreakdown.components.priceMomentum
+                                .weightedScore +
+                              demandScoreBreakdown.components.marketDepth
+                                .weightedScore +
+                              demandScoreBreakdown.components.supplyDemandRatio
+                                .weightedScore +
+                              demandScoreBreakdown.components
+                                .velocityConsistency
+                                .weightedScore,
+                          )}/100
+                        </span>
+                      </div>
                     </div>
-                    <div class="flex items-center gap-2">
-                      <progress
-                        class="progress progress-info flex-1"
-                        value={demandScoreBreakdown.components
-                          .velocityConsistency.score}
-                        max="100"
-                      >
-                      </progress>
-                      <span class="text-xs text-base-content/60">
-                        → {demandScoreBreakdown.components.velocityConsistency
-                          .weightedScore.toFixed(1)} pts
-                      </span>
-                    </div>
-                    {demandScoreBreakdown.components.velocityConsistency
-                      .notes && (
-                      <p class="text-xs text-base-content/60 mt-1">
-                        {demandScoreBreakdown.components.velocityConsistency
-                          .notes}
-                      </p>
-                    )}
                   </div>
+                )}
 
-                  {/* Total */}
-                  <div class="bg-info/10 border-2 border-info p-3 rounded-lg">
-                    <div class="flex items-center justify-between">
-                      <span class="text-sm font-bold text-info">
-                        Total Demand Score
-                      </span>
-                      <span class="text-lg font-bold text-info">
-                        {Math.round(
-                          demandScoreBreakdown.components.salesVelocity
-                            .weightedScore +
-                            demandScoreBreakdown.components.priceMomentum
-                              .weightedScore +
-                            demandScoreBreakdown.components.marketDepth
-                              .weightedScore +
-                            demandScoreBreakdown.components.supplyDemandRatio
-                              .weightedScore +
-                            demandScoreBreakdown.components.velocityConsistency
-                              .weightedScore,
-                        )}/100
-                      </span>
+                {/* Availability Score Section */}
+                {availabilityScoreBreakdown && (
+                  <div class="space-y-3">
+                    <p class="text-sm font-bold text-base-content/80 border-b border-base-300 pb-2">
+                      Availability Score
+                    </p>
+
+                    {availabilityScoreBreakdown.components.map((component) => {
+                      const weightedScore = component.score * component.weight;
+                      return (
+                        <div
+                          key={component.name}
+                          class="bg-base-200 p-3 rounded-lg"
+                        >
+                          <div class="flex items-center justify-between mb-1">
+                            <span class="text-sm font-medium">
+                              {component.name}
+                              ({(component.weight * 100).toFixed(0)}% weight)
+                            </span>
+                            <span class="text-sm font-bold">
+                              {component.score.toFixed(0)}/100
+                            </span>
+                          </div>
+                          <div class="flex items-center gap-2">
+                            <progress
+                              class="progress progress-accent flex-1"
+                              value={component.score}
+                              max="100"
+                            >
+                            </progress>
+                            <span class="text-xs text-base-content/60">
+                              → {weightedScore.toFixed(1)} pts
+                            </span>
+                          </div>
+                          <p class="text-xs text-base-content/60 mt-1">
+                            {component.calculation}
+                          </p>
+                          <p class="text-xs text-base-content/50 mt-1 italic">
+                            {component.reasoning}
+                          </p>
+                        </div>
+                      );
+                    })}
+
+                    {/* Total */}
+                    <div class="bg-accent/10 border-2 border-accent p-3 rounded-lg">
+                      <div class="flex items-center justify-between">
+                        <span class="text-sm font-bold text-accent">
+                          Total Availability Score
+                        </span>
+                        <span class="text-lg font-bold text-accent">
+                          {availabilityScoreBreakdown.totalScore}/100
+                        </span>
+                      </div>
                     </div>
                   </div>
-                </div>
+                )}
               </div>
             )}
           </>
         )}
 
-        {/* Availability Score Breakdown */}
-        {availabilityScoreBreakdown && (
+        {/* Intrinsic Value Calculation Breakdown */}
+        {valueMetrics.calculationBreakdown && (
           <>
             <button
-              class="btn btn-outline btn-block btn-sm"
+              class="btn btn-outline btn-block btn-sm mt-4"
               onClick={() =>
-                showAvailabilityBreakdown.value = !showAvailabilityBreakdown.value}
+                showIntrinsicBreakdown.value = !showIntrinsicBreakdown.value}
             >
-              {showAvailabilityBreakdown.value
-                ? "▲ Hide Availability Score Breakdown"
-                : "▼ Show Availability Score Breakdown"}
-              {calculateAvailabilityCompleteness() < 100 && (
-                <span class="badge badge-warning badge-sm ml-2">
-                  ⚠️ Incomplete Data
-                </span>
-              )}
+              {showIntrinsicBreakdown.value
+                ? "▲ Hide Intrinsic Value Calculation"
+                : "▼ Show Intrinsic Value Calculation"}
             </button>
 
-            {showAvailabilityBreakdown.value && (
+            {showIntrinsicBreakdown.value && (
               <div class="space-y-4 pt-4 border-t border-base-300">
-                {/* Data Completeness Bar */}
-                <div>
-                  <div class="flex items-center justify-between mb-2">
-                    <p class="text-xs font-semibold text-base-content/60">
-                      DATA COMPLETENESS
-                    </p>
-                    <span class="text-sm font-medium">
-                      {calculateAvailabilityCompleteness()}%
-                    </span>
-                  </div>
-                  <progress
-                    class={`progress w-full ${
-                      calculateAvailabilityCompleteness() === 100
-                        ? "progress-success"
-                        : calculateAvailabilityCompleteness() >= 50
-                        ? "progress-warning"
-                        : "progress-error"
-                    }`}
-                    value={calculateAvailabilityCompleteness()}
-                    max="100"
-                  >
-                  </progress>
-                  {calculateAvailabilityCompleteness() < 100 &&
-                    availabilityScoreBreakdown.missingData && (
-                    <p class="text-xs text-base-content/60 mt-1">
-                      Missing: {availabilityScoreBreakdown.missingData.join(", ")}
-                    </p>
-                  )}
-                </div>
-
-                {/* Component Scores */}
-                <div class="space-y-3">
-                  <p class="text-xs font-semibold text-base-content/60">
-                    COMPONENT BREAKDOWN
-                  </p>
-
-                  {availabilityScoreBreakdown.components.map((component) => {
-                    const weightedScore = component.score * component.weight;
-                    return (
-                      <div
-                        key={component.name}
-                        class="bg-base-200 p-3 rounded-lg"
-                      >
-                        <div class="flex items-center justify-between mb-1">
-                          <span class="text-sm font-medium">
-                            {component.name}
-                            ({(component.weight * 100).toFixed(0)}% weight)
-                          </span>
-                          <span class="text-sm font-bold">
-                            {component.score.toFixed(0)}/100
-                          </span>
-                        </div>
-                        <div class="flex items-center gap-2">
-                          <progress
-                            class="progress progress-accent flex-1"
-                            value={component.score}
-                            max="100"
-                          >
-                          </progress>
-                          <span class="text-xs text-base-content/60">
-                            → {weightedScore.toFixed(1)} pts
-                          </span>
-                        </div>
-                        <p class="text-xs text-base-content/60 mt-1">
-                          {component.calculation}
-                        </p>
-                        <p class="text-xs text-base-content/50 mt-1 italic">
-                          {component.reasoning}
-                        </p>
+                {/* Show rejection notice if set was rejected */}
+                {valueMetrics.calculationBreakdown.rejection?.rejected ? (
+                  <div class="alert alert-error">
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      class="stroke-current shrink-0 h-6 w-6"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                        stroke-width="2"
+                        d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636"
+                      />
+                    </svg>
+                    <div>
+                      <h3 class="font-bold">VALUATION NOT PERFORMED</h3>
+                      <div class="text-sm">
+                        This set was rejected during hard gate screening. No intrinsic value calculation was performed.
                       </div>
-                    );
-                  })}
-
-                  {/* Total */}
-                  <div class="bg-accent/10 border-2 border-accent p-3 rounded-lg">
-                    <div class="flex items-center justify-between">
-                      <span class="text-sm font-bold text-accent">
-                        Total Availability Score
-                      </span>
-                      <span class="text-lg font-bold text-accent">
-                        {availabilityScoreBreakdown.totalScore}/100
-                      </span>
+                      <div class="text-xs mt-2 opacity-80">
+                        Reason: {valueMetrics.calculationBreakdown.rejection.reason}
+                      </div>
                     </div>
                   </div>
+                ) : (
+                  <>
+                    <div class="flex items-center gap-2 mb-4">
+                      <div class="badge badge-info badge-sm">CALCULATION</div>
+                      <h3 class="text-sm font-bold">
+                        How We Calculated {formatCurrency(
+                          valueMetrics.calculationBreakdown.finalIntrinsicValue,
+                        )}
+                      </h3>
+                    </div>
+
+                    <div class="alert alert-info">
+                      <svg
+                        xmlns="http://www.w3.org/2000/svg"
+                        fill="none"
+                        viewBox="0 0 24 24"
+                        class="stroke-current shrink-0 w-6 h-6"
+                      >
+                        <path
+                          stroke-linecap="round"
+                          stroke-linejoin="round"
+                          stroke-width="2"
+                      d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+                    >
+                    </path>
+                  </svg>
+                  <span class="text-sm">
+                    Each multiplier is applied sequentially. Watch the running
+                    total change step-by-step.
+                  </span>
                 </div>
+
+                {/* Step-by-step calculation flow */}
+                {(() => {
+                  const breakdown = valueMetrics.calculationBreakdown;
+                  let runningTotal = breakdown.baseValue;
+
+                  const steps: Array<{
+                    label: string;
+                    multiplier: number;
+                    newTotal: Cents;
+                    explanation: string;
+                    isApplied: boolean;
+                    category: "base" | "quality" | "risk";
+                  }> = [];
+
+                  // Base Value
+                  steps.push({
+                    label: "Base Value (Starting Point)",
+                    multiplier: 1,
+                    newTotal: runningTotal,
+                    explanation:
+                      `Source: ${breakdown.baseValueSource.toUpperCase()} - ${breakdown.baseValueExplanation}`,
+                    isApplied: true,
+                    category: "base",
+                  });
+
+                  // Quality Multipliers
+                  if (breakdown.qualityMultipliers.retirement.applied) {
+                    const mult = breakdown.qualityMultipliers.retirement.value;
+                    runningTotal = Math.round(runningTotal * mult) as Cents;
+                    steps.push({
+                      label: "Retirement Premium",
+                      multiplier: mult,
+                      newTotal: runningTotal,
+                      explanation: breakdown.qualityMultipliers.retirement
+                        .explanation,
+                      isApplied: true,
+                      category: "quality",
+                    });
+                  }
+
+                  const qualityMult = breakdown.qualityMultipliers.quality
+                    .value;
+                  runningTotal = Math.round(
+                    runningTotal * qualityMult,
+                  ) as Cents;
+                  steps.push({
+                    label:
+                      `Quality Score (${breakdown.qualityMultipliers.quality.score}/100)`,
+                    multiplier: qualityMult,
+                    newTotal: runningTotal,
+                    explanation: breakdown.qualityMultipliers.quality
+                      .explanation,
+                    isApplied: true,
+                    category: "quality",
+                  });
+
+                  const demandMult = breakdown.qualityMultipliers.demand.value;
+                  runningTotal = Math.round(runningTotal * demandMult) as Cents;
+                  steps.push({
+                    label:
+                      `Demand Score (${breakdown.qualityMultipliers.demand.score}/100)`,
+                    multiplier: demandMult,
+                    newTotal: runningTotal,
+                    explanation: breakdown.qualityMultipliers.demand
+                      .explanation,
+                    isApplied: true,
+                    category: "quality",
+                  });
+
+                  const themeMult = breakdown.qualityMultipliers.theme.value;
+                  runningTotal = Math.round(runningTotal * themeMult) as Cents;
+                  steps.push({
+                    label:
+                      `Theme: ${breakdown.qualityMultipliers.theme.themeName}`,
+                    multiplier: themeMult,
+                    newTotal: runningTotal,
+                    explanation: breakdown.qualityMultipliers.theme
+                      .explanation,
+                    isApplied: true,
+                    category: "quality",
+                  });
+
+                  const ppdMult = breakdown.qualityMultipliers.partsPerDollar
+                    .value;
+                  runningTotal = Math.round(runningTotal * ppdMult) as Cents;
+                  steps.push({
+                    label: `Parts-Per-Dollar${
+                      breakdown.qualityMultipliers.partsPerDollar.ppdValue
+                        ? ` (${
+                          breakdown.qualityMultipliers.partsPerDollar.ppdValue
+                            .toFixed(2)
+                        })`
+                        : ""
+                    }`,
+                    multiplier: ppdMult,
+                    newTotal: runningTotal,
+                    explanation: breakdown.qualityMultipliers.partsPerDollar
+                      .explanation,
+                    isApplied: true,
+                    category: "quality",
+                  });
+
+                  // Mark intermediate value after quality multipliers
+                  const afterQualityIndex = steps.length - 1;
+
+                  // Risk Discounts
+                  if (breakdown.riskDiscounts.liquidity.applied) {
+                    const mult = breakdown.riskDiscounts.liquidity.value;
+                    runningTotal = Math.round(runningTotal * mult) as Cents;
+                    steps.push({
+                      label: "Liquidity Discount",
+                      multiplier: mult,
+                      newTotal: runningTotal,
+                      explanation: breakdown.riskDiscounts.liquidity
+                        .explanation,
+                      isApplied: true,
+                      category: "risk",
+                    });
+                  }
+
+                  if (breakdown.riskDiscounts.volatility.applied) {
+                    const mult = breakdown.riskDiscounts.volatility.value;
+                    runningTotal = Math.round(runningTotal * mult) as Cents;
+                    steps.push({
+                      label: `Volatility Discount${
+                        breakdown.riskDiscounts.volatility.volatilityPercent
+                          ? ` (${
+                            (breakdown.riskDiscounts.volatility
+                              .volatilityPercent * 100).toFixed(0)
+                          }% volatility)`
+                          : ""
+                      }`,
+                      multiplier: mult,
+                      newTotal: runningTotal,
+                      explanation: breakdown.riskDiscounts.volatility
+                        .explanation,
+                      isApplied: true,
+                      category: "risk",
+                    });
+                  }
+
+                  if (breakdown.riskDiscounts.saturation.applied) {
+                    const mult = breakdown.riskDiscounts.saturation.value;
+                    runningTotal = Math.round(runningTotal * mult) as Cents;
+                    steps.push({
+                      label: "Market Saturation Discount",
+                      multiplier: mult,
+                      newTotal: runningTotal,
+                      explanation: breakdown.riskDiscounts.saturation
+                        .explanation,
+                      isApplied: true,
+                      category: "risk",
+                    });
+                  }
+
+                  if (breakdown.riskDiscounts.zeroSales.applied) {
+                    const mult = breakdown.riskDiscounts.zeroSales.value;
+                    runningTotal = Math.round(runningTotal * mult) as Cents;
+                    steps.push({
+                      label: "Zero Sales Penalty",
+                      multiplier: mult,
+                      newTotal: runningTotal,
+                      explanation: breakdown.riskDiscounts.zeroSales
+                        .explanation,
+                      isApplied: true,
+                      category: "risk",
+                    });
+                  }
+
+                  return (
+                    <div class="space-y-3">
+                      {steps.map((step, index) => {
+                        const isBase = step.category === "base";
+                        const isQuality = step.category === "quality";
+                        const isAfterQuality = index === afterQualityIndex;
+                        const isFinal = index === steps.length - 1;
+
+                        return (
+                          <div key={index}>
+                            <div
+                              class={`p-4 rounded-lg border-2 ${
+                                isBase
+                                  ? "bg-info/10 border-info"
+                                  : isQuality
+                                  ? "bg-success/5 border-success/30"
+                                  : "bg-error/5 border-error/30"
+                              }`}
+                            >
+                              {/* Step Header */}
+                              <div class="flex items-start justify-between mb-2">
+                                <div class="flex-1">
+                                  <div class="flex items-center gap-2 mb-1">
+                                    <span
+                                      class={`badge badge-sm ${
+                                        isBase
+                                          ? "badge-info"
+                                          : isQuality
+                                          ? "badge-success"
+                                          : "badge-error"
+                                      }`}
+                                    >
+                                      {isBase
+                                        ? "START"
+                                        : isQuality
+                                        ? "MULTIPLY"
+                                        : "DISCOUNT"}
+                                    </span>
+                                    <span class="text-sm font-bold">
+                                      {isBase ? "" : `Step ${index}`}
+                                    </span>
+                                  </div>
+                                  <p class="text-sm font-medium">
+                                    {step.label}
+                                  </p>
+                                </div>
+                                {!isBase && (
+                                  <span
+                                    class={`text-lg font-bold font-mono ${
+                                      isQuality ? "text-success" : "text-error"
+                                    }`}
+                                  >
+                                    ×{step.multiplier.toFixed(3)}
+                                  </span>
+                                )}
+                              </div>
+
+                              {/* Calculation Formula */}
+                              {!isBase && (
+                                <div class="bg-base-100/50 p-2 rounded mb-2 font-mono text-xs">
+                                  <span class="text-base-content/60">
+                                    {formatCurrency(
+                                      steps[index - 1].newTotal,
+                                    )}
+                                  </span>
+                                  {" × "}
+                                  <span
+                                    class={isQuality
+                                      ? "text-success font-bold"
+                                      : "text-error font-bold"}
+                                  >
+                                    {step.multiplier.toFixed(3)}
+                                  </span>
+                                  {" = "}
+                                  <span class="text-base-content font-bold">
+                                    {formatCurrency(step.newTotal)}
+                                  </span>
+                                </div>
+                              )}
+
+                              {/* Running Total */}
+                              <div
+                                class={`flex items-center justify-between p-3 rounded ${
+                                  isBase || isAfterQuality || isFinal
+                                    ? "bg-base-100 border-2 border-dashed border-base-content/20"
+                                    : "bg-base-100/30"
+                                }`}
+                              >
+                                <span class="text-xs font-semibold text-base-content/70">
+                                  {isBase
+                                    ? "Starting Value:"
+                                    : isAfterQuality
+                                    ? "After Quality Multipliers:"
+                                    : isFinal
+                                    ? "FINAL INTRINSIC VALUE:"
+                                    : "Running Total:"}
+                                </span>
+                                <span
+                                  class={`font-mono font-bold ${
+                                    isBase || isAfterQuality || isFinal
+                                      ? "text-lg text-info"
+                                      : "text-sm"
+                                  }`}
+                                >
+                                  {formatCurrency(step.newTotal)}
+                                </span>
+                              </div>
+
+                              {/* Explanation */}
+                              <p class="text-xs text-base-content/60 mt-2">
+                                {step.explanation}
+                              </p>
+
+                              {/* Additional breakdown for Quality and Demand scores */}
+                              {step.label.includes("Quality Score") &&
+                                qualityScoreBreakdown && (
+                                <div class="mt-3 pt-3 border-t border-base-300">
+                                  <p class="text-xs font-semibold text-base-content/70 mb-2">
+                                    Quality Score Components:
+                                  </p>
+                                  <div class="space-y-1 pl-2 border-l-2 border-success/30">
+                                    <p class="text-xs text-base-content/60">
+                                      • PPD: {qualityScoreBreakdown.components
+                                        .ppdScore.weightedScore.toFixed(
+                                          1,
+                                        )}/40pts
+                                    </p>
+                                    <p class="text-xs text-base-content/60">
+                                      • Complexity: {qualityScoreBreakdown
+                                        .components
+                                        .complexityScore.weightedScore.toFixed(
+                                          1,
+                                        )}/30pts
+                                    </p>
+                                    <p class="text-xs text-base-content/60">
+                                      • Theme: {qualityScoreBreakdown.components
+                                        .themePremium.weightedScore.toFixed(
+                                          1,
+                                        )}/20pts
+                                    </p>
+                                    <p class="text-xs text-base-content/60">
+                                      • Scarcity: {qualityScoreBreakdown
+                                        .components
+                                        .scarcityScore.weightedScore.toFixed(
+                                          1,
+                                        )}/10pts
+                                    </p>
+                                    <p class="text-xs text-base-content/50 italic mt-1">
+                                      See "Score Breakdown" above for details
+                                    </p>
+                                  </div>
+                                </div>
+                              )}
+
+                              {step.label.includes("Demand Score") &&
+                                demandScoreBreakdown && (
+                                <div class="mt-3 pt-3 border-t border-base-300">
+                                  <p class="text-xs font-semibold text-base-content/70 mb-2">
+                                    Demand Score Components:
+                                  </p>
+                                  <div class="space-y-1 pl-2 border-l-2 border-success/30">
+                                    <p class="text-xs text-base-content/60">
+                                      • Sales Velocity: {demandScoreBreakdown
+                                        .components
+                                        .salesVelocity.weightedScore.toFixed(
+                                          1,
+                                        )}pts
+                                    </p>
+                                    <p class="text-xs text-base-content/60">
+                                      • Price Momentum: {demandScoreBreakdown
+                                        .components
+                                        .priceMomentum.weightedScore.toFixed(
+                                          1,
+                                        )}pts
+                                    </p>
+                                    <p class="text-xs text-base-content/60">
+                                      • Market Depth: {demandScoreBreakdown
+                                        .components
+                                        .marketDepth.weightedScore.toFixed(
+                                          1,
+                                        )}pts
+                                    </p>
+                                    <p class="text-xs text-base-content/60">
+                                      • Supply/Demand: {demandScoreBreakdown
+                                        .components
+                                        .supplyDemandRatio.weightedScore
+                                        .toFixed(1)}pts
+                                    </p>
+                                    <p class="text-xs text-base-content/60">
+                                      • Consistency: {demandScoreBreakdown
+                                        .components
+                                        .velocityConsistency.weightedScore
+                                        .toFixed(1)}pts
+                                    </p>
+                                    <p class="text-xs text-base-content/50 italic mt-1">
+                                      See "Score Breakdown" above for details
+                                    </p>
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+
+                            {/* Arrow between steps */}
+                            {index < steps.length - 1 && (
+                              <div class="flex justify-center py-1">
+                                <svg
+                                  xmlns="http://www.w3.org/2000/svg"
+                                  class="h-6 w-6 text-base-content/30"
+                                  fill="none"
+                                  viewBox="0 0 24 24"
+                                  stroke="currentColor"
+                                >
+                                  <path
+                                    stroke-linecap="round"
+                                    stroke-linejoin="round"
+                                    stroke-width="2"
+                                    d="M19 14l-7 7m0 0l-7-7m7 7V3"
+                                  />
+                                </svg>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+
+                      {/* Summary */}
+                      <div class="bg-gradient-to-r from-info/20 to-info/10 border-2 border-info p-4 rounded-lg mt-4">
+                        <p class="text-sm font-bold text-info mb-2">
+                          Calculation Summary
+                        </p>
+                        <div class="grid grid-cols-2 gap-3 text-xs">
+                          <div>
+                            <p class="text-base-content/60">Base Value:</p>
+                            <p class="font-mono font-bold">
+                              {formatCurrency(breakdown.baseValue)}
+                            </p>
+                          </div>
+                          <div>
+                            <p class="text-base-content/60">
+                              Total Multiplier:
+                            </p>
+                            <p class="font-mono font-bold">
+                              {breakdown.totalMultiplier.toFixed(3)}x
+                            </p>
+                          </div>
+                          <div class="col-span-2">
+                            <p class="text-base-content/60">
+                              Formula: Base × All Multipliers × All Discounts
+                            </p>
+                            <p class="font-mono font-bold text-info text-base mt-1">
+                              = {formatCurrency(
+                                breakdown.finalIntrinsicValue,
+                              )}
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })()}
+                  </>
+                )}
               </div>
             )}
           </>
-        )}
-
-
-        {/* Calculation Details (collapsible) */}
-        {breakdown && (
-          <details class="collapse collapse-arrow bg-base-200 mt-4">
-            <summary class="collapse-title text-sm font-medium">
-              📊 How is this value calculated?
-            </summary>
-            <div class="collapse-content space-y-3">
-              {/* Reasoning */}
-              {reasoning && (
-                <div>
-                  <p class="text-xs font-semibold text-base-content/60 mb-1">
-                    PRICING STRATEGY
-                  </p>
-                  <p class="text-sm text-base-content/80">
-                    {reasoning}
-                  </p>
-                </div>
-              )}
-
-              {/* Step-by-Step Calculation */}
-              <div class="divider my-2"></div>
-              <div>
-                <p class="text-xs font-semibold text-base-content/60 mb-3">
-                  STEP-BY-STEP CALCULATION
-                </p>
-
-                {/* Step 1: Intrinsic Value */}
-                <div class="bg-base-300 p-3 rounded-lg mb-3">
-                  <div class="flex items-start gap-2 mb-2">
-                    <span class="text-success font-mono font-bold">
-                      Step 1
-                    </span>
-                    <div class="flex-1">
-                      <strong>Calculate Intrinsic Value</strong>
-                    </div>
-                  </div>
-                  <div class="ml-12 text-sm space-y-3">
-                    {/* Show detailed breakdown if available */}
-                    {valueMetrics.calculationBreakdown
-                      ? (
-                        <>
-                          {/* Base Value */}
-                          <div class="space-y-1">
-                            <div class="font-semibold text-xs text-base-content/80">
-                              BASE VALUE
-                            </div>
-                            <div class="text-base-content/70 text-xs">
-                              {valueMetrics.calculationBreakdown
-                                .baseValueExplanation}
-                            </div>
-                            <div class="font-mono text-sm">
-                              {formatCurrency(
-                                valueMetrics.calculationBreakdown.baseValue,
-                              )}
-                            </div>
-                          </div>
-
-                          {/* Quality Multipliers */}
-                          <div class="space-y-1">
-                            <div class="font-semibold text-xs text-base-content/80">
-                              QUALITY MULTIPLIERS (increase value)
-                            </div>
-                            <div class="ml-2 space-y-1 text-xs">
-                              {valueMetrics.calculationBreakdown
-                                  .qualityMultipliers.retirement.applied && (
-                                <div class="flex justify-between items-center">
-                                  <span class="text-base-content/70">
-                                    • Retirement:{" "}
-                                    {valueMetrics.calculationBreakdown
-                                      .qualityMultipliers.retirement
-                                      .explanation}
-                                  </span>
-                                  <span
-                                    class={valueMetrics.calculationBreakdown
-                                        .qualityMultipliers.retirement.value >=
-                                        1.0
-                                      ? "text-success font-medium"
-                                      : "text-error font-medium"}
-                                  >
-                                    {valueMetrics.calculationBreakdown
-                                      .qualityMultipliers.retirement.value
-                                      .toFixed(2)}×
-                                  </span>
-                                </div>
-                              )}
-                              <div class="flex justify-between items-center">
-                                <span class="text-base-content/70">
-                                  • Quality:{" "}
-                                  {valueMetrics.calculationBreakdown
-                                    .qualityMultipliers.quality.explanation}
-                                </span>
-                                <span
-                                  class={valueMetrics.calculationBreakdown
-                                      .qualityMultipliers.quality.value >= 1.0
-                                    ? "text-success font-medium"
-                                    : "text-warning font-medium"}
-                                >
-                                  {valueMetrics.calculationBreakdown
-                                    .qualityMultipliers.quality.value.toFixed(
-                                      2,
-                                    )}×
-                                </span>
-                              </div>
-                              <div class="flex justify-between items-center">
-                                <span class="text-base-content/70">
-                                  • Demand:{" "}
-                                  {valueMetrics.calculationBreakdown
-                                    .qualityMultipliers.demand.explanation}
-                                </span>
-                                <span
-                                  class={valueMetrics.calculationBreakdown
-                                      .qualityMultipliers.demand.value >= 1.0
-                                    ? "text-success font-medium"
-                                    : "text-warning font-medium"}
-                                >
-                                  {valueMetrics.calculationBreakdown
-                                    .qualityMultipliers.demand.value.toFixed(2)}×
-                                </span>
-                              </div>
-                              {valueMetrics.calculationBreakdown
-                                  .qualityMultipliers.theme.value !== 1.0 && (
-                                <div class="flex justify-between items-center">
-                                  <span class="text-base-content/70">
-                                    • Theme:{" "}
-                                    {valueMetrics.calculationBreakdown
-                                      .qualityMultipliers.theme.explanation}
-                                  </span>
-                                  <span
-                                    class={valueMetrics.calculationBreakdown
-                                        .qualityMultipliers.theme.value >= 1.0
-                                      ? "text-success font-medium"
-                                      : "text-warning font-medium"}
-                                  >
-                                    {valueMetrics.calculationBreakdown
-                                      .qualityMultipliers.theme.value.toFixed(
-                                        2,
-                                      )}×
-                                  </span>
-                                </div>
-                              )}
-                              {valueMetrics.calculationBreakdown
-                                  .qualityMultipliers.partsPerDollar.value !==
-                                  1.0 && (
-                                <div class="flex justify-between items-center">
-                                  <span class="text-base-content/70">
-                                    • Parts/Dollar:{" "}
-                                    {valueMetrics.calculationBreakdown
-                                      .qualityMultipliers.partsPerDollar
-                                      .explanation}
-                                  </span>
-                                  <span
-                                    class={valueMetrics.calculationBreakdown
-                                        .qualityMultipliers.partsPerDollar
-                                        .value >= 1.0
-                                      ? "text-success font-medium"
-                                      : "text-warning font-medium"}
-                                  >
-                                    {valueMetrics.calculationBreakdown
-                                      .qualityMultipliers.partsPerDollar.value
-                                      .toFixed(2)}×
-                                  </span>
-                                </div>
-                              )}
-                            </div>
-                            <div class="font-mono text-sm text-info pt-1">
-                              After quality multipliers:{" "}
-                              {formatCurrency(
-                                valueMetrics.calculationBreakdown
-                                  .intermediateValues.afterQualityMultipliers,
-                              )}
-                            </div>
-                          </div>
-
-                          {/* Risk Discounts */}
-                          <div class="space-y-1">
-                            <div class="font-semibold text-xs text-base-content/80">
-                              RISK DISCOUNTS (decrease value)
-                            </div>
-                            <div class="ml-2 space-y-1 text-xs">
-                              {valueMetrics.calculationBreakdown.riskDiscounts
-                                  .liquidity.applied && (
-                                <div class="flex justify-between items-center">
-                                  <span class="text-base-content/70">
-                                    • Liquidity:{" "}
-                                    {valueMetrics.calculationBreakdown
-                                      .riskDiscounts.liquidity.explanation}
-                                  </span>
-                                  <span
-                                    class={valueMetrics.calculationBreakdown
-                                        .riskDiscounts.liquidity.value >= 1.0
-                                      ? "text-success font-medium"
-                                      : "text-error font-medium"}
-                                  >
-                                    {valueMetrics.calculationBreakdown
-                                      .riskDiscounts.liquidity.value.toFixed(2)}×
-                                  </span>
-                                </div>
-                              )}
-                              {valueMetrics.calculationBreakdown.riskDiscounts
-                                  .volatility.applied && (
-                                <div class="flex justify-between items-center">
-                                  <span class="text-base-content/70">
-                                    • Volatility:{" "}
-                                    {valueMetrics.calculationBreakdown
-                                      .riskDiscounts.volatility.explanation}
-                                  </span>
-                                  <span class="text-error font-medium">
-                                    {valueMetrics.calculationBreakdown
-                                      .riskDiscounts.volatility.value.toFixed(
-                                        2,
-                                      )}×
-                                  </span>
-                                </div>
-                              )}
-                              {valueMetrics.calculationBreakdown.riskDiscounts
-                                  .saturation.applied && (
-                                <div class="flex justify-between items-center">
-                                  <span class="text-base-content/70">
-                                    • Saturation:{" "}
-                                    {valueMetrics.calculationBreakdown
-                                      .riskDiscounts.saturation.explanation}
-                                  </span>
-                                  <span class="text-error font-medium">
-                                    {valueMetrics.calculationBreakdown
-                                      .riskDiscounts.saturation.value.toFixed(
-                                        2,
-                                      )}×
-                                  </span>
-                                </div>
-                              )}
-                              {valueMetrics.calculationBreakdown.riskDiscounts
-                                  .zeroSales.applied && (
-                                <div class="flex justify-between items-center">
-                                  <span class="text-base-content/70">
-                                    • Zero Sales:{" "}
-                                    {valueMetrics.calculationBreakdown
-                                      .riskDiscounts.zeroSales.explanation}
-                                  </span>
-                                  <span class="text-error font-medium">
-                                    {valueMetrics.calculationBreakdown
-                                      .riskDiscounts.zeroSales.value.toFixed(2)}×
-                                  </span>
-                                </div>
-                              )}
-                            </div>
-                          </div>
-
-                          {/* Final Result */}
-                          <div class="border-t border-base-content/20 pt-2">
-                            <div class="flex justify-between items-center">
-                              <span class="font-semibold text-sm">
-                                FINAL INTRINSIC VALUE
-                              </span>
-                              <span class="font-bold text-success text-lg">
-                                {formatCurrency(
-                                  valueMetrics.calculationBreakdown
-                                    .finalIntrinsicValue,
-                                )}
-                              </span>
-                            </div>
-                            <div class="text-xs text-base-content/60 mt-1">
-                              Total multiplier from base:{" "}
-                              {valueMetrics.calculationBreakdown.totalMultiplier
-                                .toFixed(3)}×
-                            </div>
-                          </div>
-                        </>
-                      )
-                      : (
-                        <>
-                          {/* Fallback to simple display if no detailed breakdown */}
-                          <div class="text-base-content/70">
-                            Using:
-                            {breakdown.inputs.msrp && (
-                              <div>
-                                • MSRP:{" "}
-                                {formatCurrency(breakdown.inputs.msrp as Cents)}
-                              </div>
-                            )}
-                            {breakdown.inputs.bricklinkAvgPrice && (
-                              <div>
-                                • Bricklink Avg: {formatCurrency(
-                                  breakdown.inputs.bricklinkAvgPrice as Cents,
-                                )}
-                              </div>
-                            )}
-                            {breakdown.inputs.retirementStatus && (
-                              <div>
-                                • Status: {breakdown.inputs.retirementStatus}
-                              </div>
-                            )}
-                            {breakdown.inputs.demandScore !== undefined && (
-                              <div>
-                                • Demand Score:{" "}
-                                {breakdown.inputs.demandScore.toFixed(0)}/100
-                              </div>
-                            )}
-                            {breakdown.inputs.qualityScore !== undefined && (
-                              <div>
-                                • Quality Score:{" "}
-                                {breakdown.inputs.qualityScore.toFixed(0)}/100
-                              </div>
-                            )}
-                            {breakdown.inputs.priceToPieceRatio !==
-                                undefined && (
-                              <div>
-                                • Price/Piece: ${breakdown.inputs
-                                  .priceToPieceRatio.toFixed(
-                                    3,
-                                  )}
-                              </div>
-                            )}
-                            {breakdown.inputs.theme && (
-                              <div>
-                                • Theme: {breakdown.inputs.theme}
-                              </div>
-                            )}
-                          </div>
-                          <div class="font-bold text-success mt-2">
-                            = {formatCurrency(breakdown.intrinsicValue)}
-                          </div>
-                        </>
-                      )}
-                  </div>
-                </div>
-
-                {/* Step 2: Margin of Safety */}
-                <div class="bg-base-300 p-3 rounded-lg mb-3">
-                  <div class="flex items-start gap-2 mb-2">
-                    <span class="text-success font-mono font-bold">
-                      Step 2
-                    </span>
-                    <div class="flex-1">
-                      <strong>Apply Margin of Safety</strong>
-                    </div>
-                  </div>
-                  <div class="ml-12 text-sm space-y-1">
-                    <div class="text-base-content/70">
-                      Base margin: {(breakdown.baseMargin * 100).toFixed(0)}%
-                      {breakdown.marginAdjustments.length > 0 && (
-                        <div class="mt-2">
-                          Adjustments:
-                          {breakdown.marginAdjustments.map((adj, i) => (
-                            <div key={i} class="ml-4">
-                              • {adj.reason}: {adj.value > 0 ? "+" : ""}
-                              {(adj.value * 100).toFixed(1)}%
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                    <div class="font-bold text-success mt-2">
-                      Final margin:{" "}
-                      {(breakdown.adjustedMargin * 100).toFixed(1)}%
-                    </div>
-                  </div>
-                </div>
-
-                {/* Step 3: Target Price */}
-                <div class="bg-base-300 p-3 rounded-lg">
-                  <div class="flex items-start gap-2 mb-2">
-                    <span class="text-success font-mono font-bold">
-                      Step 3
-                    </span>
-                    <div class="flex-1">
-                      <strong>Calculate Target Buy Price</strong>
-                    </div>
-                  </div>
-                  <div class="ml-12 text-sm space-y-1">
-                    <div class="font-mono text-base-content/70">
-                      {formatCurrency(breakdown.intrinsicValue)} × (1 -{" "}
-                      {(breakdown.adjustedMargin * 100).toFixed(1)}%)
-                    </div>
-                    <div class="font-mono text-base-content/70">
-                      = {formatCurrency(breakdown.intrinsicValue)} ×{" "}
-                      {(1 - breakdown.adjustedMargin).toFixed(3)}
-                    </div>
-                    <div class="font-bold text-success text-lg mt-2">
-                      = {formatCurrency(valueMetrics.targetPrice)}
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              {/* Confidence indicator */}
-              {confidence !== undefined && (
-                <>
-                  <div class="divider my-2"></div>
-                  <div>
-                    <p class="text-xs font-semibold text-base-content/60 mb-1">
-                      DATA CONFIDENCE
-                    </p>
-                    <div class="flex items-center gap-2">
-                      <progress
-                        class="progress progress-success w-full"
-                        value={confidence * 100}
-                        max="100"
-                      >
-                      </progress>
-                      <span class="text-sm font-medium">
-                        {Math.round(confidence * 100)}%
-                      </span>
-                    </div>
-                    <p class="text-xs text-base-content/60 mt-1">
-                      Based on availability of pricing data, market metrics, and
-                      quality scores
-                    </p>
-                  </div>
-                </>
-              )}
-            </div>
-          </details>
         )}
 
         {/* Analysis Timestamp */}

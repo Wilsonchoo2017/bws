@@ -114,8 +114,8 @@ export class WorldBricksScraperService extends BaseScraperService {
             if (!skipRateLimit) {
               await this.rateLimiter.waitForNextRequest({
                 domain: "worldbricks.com",
-                minDelayMs: 60000, // 1 minute (from WORLDBRICKS_CONFIG)
-                maxDelayMs: 180000, // 3 minutes (from WORLDBRICKS_CONFIG)
+                minDelayMs: 10000, // 10 seconds (matching BrickLink's aggressive timing)
+                maxDelayMs: 30000, // 30 seconds (matching BrickLink's aggressive timing)
               });
             }
 
@@ -171,8 +171,8 @@ export class WorldBricksScraperService extends BaseScraperService {
           if (!skipRateLimit) {
             await this.rateLimiter.waitForNextRequest({
               domain: "worldbricks.com",
-              minDelayMs: 60000, // 1 minute (from WORLDBRICKS_CONFIG)
-              maxDelayMs: 180000, // 3 minutes (from WORLDBRICKS_CONFIG)
+              minDelayMs: 10000, // 10 seconds (matching BrickLink's aggressive timing)
+              maxDelayMs: 30000, // 30 seconds (matching BrickLink's aggressive timing)
             });
           }
 
@@ -266,6 +266,11 @@ export class WorldBricksScraperService extends BaseScraperService {
         retries: 0,
       };
     } catch (error) {
+      // Re-throw SetNotFoundError to preserve type information for queue handling
+      if (SetNotFoundError.isSetNotFoundError(error)) {
+        throw error;
+      }
+
       return {
         success: false,
         error: error.message || "Unknown error occurred",

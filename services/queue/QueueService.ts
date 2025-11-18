@@ -61,6 +61,7 @@ export interface ScrapeJobData {
   itemId: string;
   saveToDb?: boolean;
   priority?: JobPriority;
+  force?: boolean; // Skip all validation checks (recent scrape, monthly data, etc.)
 }
 
 export interface BulkScrapeJobData {
@@ -102,6 +103,16 @@ export const JOB_TYPES = {
 } as const;
 
 /**
+ * Source identifiers for lock management
+ */
+export enum JobSource {
+  BRICKLINK = "bricklink",
+  WORLDBRICKS = "worldbricks",
+  REDDIT = "reddit",
+  NONE = "none", // Jobs that don't require locks
+}
+
+/**
  * QueueService - Manages BullMQ job queue for scraping
  */
 export class QueueService {
@@ -141,11 +152,11 @@ export class QueueService {
         defaultJobOptions: QUEUE_CONFIG.DEFAULT_JOB_OPTIONS,
       });
 
-      // Create worker
-      // Note: We'll handle Bricklink sequential processing via concurrency control in the processJob method
+      // Create worker with source-aware job processing
+      // Uses custom job fetching to skip locked sources
       this.worker = new Worker(
         QUEUE_CONFIG.QUEUE_NAME,
-        this.processJob.bind(this),
+        this.processJobWithSourceAwareness.bind(this),
         {
           connection: this.connection,
           concurrency: QUEUE_CONFIG.WORKER_CONCURRENCY,
@@ -157,9 +168,10 @@ export class QueueService {
 
       // Worker event listeners
       this.worker.on("completed", (job: Job) => {
-        queueLogger.info(`Job ${job.id} completed successfully`, {
+        queueLogger.info(`✅ Job ${job.id} completed successfully (FINISHED)`, {
           jobId: job.id,
           jobType: job.name,
+          timestamp: new Date().toISOString(),
         });
       });
 
@@ -173,9 +185,11 @@ export class QueueService {
       });
 
       this.worker.on("active", (job: Job) => {
-        queueLogger.info(`Job ${job.id} is now active`, {
+        queueLogger.info(`🚀 Job ${job.id} is now active (STARTED)`, {
           jobId: job.id,
           jobType: job.name,
+          timestamp: new Date().toISOString(),
+          data: job.data,
         });
       });
 
@@ -188,6 +202,78 @@ export class QueueService {
       });
       throw new Error(`Queue initialization failed: ${error.message}`);
     }
+  }
+
+  /**
+   * Source-aware job processor wrapper
+   * Checks if the source lock is available before processing
+   * If locked, re-enqueues the job with a delay and rejects to let worker try next job
+   */
+  private async processJobWithSourceAwareness(
+    job: Job,
+  ): Promise<
+    | ScrapeResult
+    | ScrapeResult[]
+    | SearchResult
+    | BrickRankerScrapeResult
+  > {
+    const source = this.getJobSource(job.name);
+
+    // Jobs with no lock requirement (e.g., BrickRanker) always process immediately
+    if (source === JobSource.NONE) {
+      return await this.processJob(job);
+    }
+
+    // Check if source lock is available before attempting to acquire
+    const lockAvailable = await this.isSourceLockAvailable(source);
+
+    if (!lockAvailable) {
+      // Source is locked, re-add job with delay and mark current job as completed
+      const delayMs = 7000; // 7 seconds delay for requeue
+
+      queueLogger.info(
+        `⏭️  Skipping job ${job.id} - ${source} source is locked. Re-adding with ${delayMs}ms delay`,
+        {
+          jobId: job.id,
+          jobType: job.name,
+          source,
+          delayMs,
+          priority: job.opts.priority,
+          rescheduledFor: new Date(Date.now() + delayMs).toISOString(),
+        },
+      );
+
+      // Re-add the job with a delay using the same job ID and data
+      if (this.queue) {
+        await this.queue.add(job.name, job.data, {
+          delay: delayMs,
+          priority: job.opts.priority,
+          jobId: job.opts.jobId, // Keep same job ID to prevent duplicates
+        });
+      }
+
+      // Return a special result to indicate the job was delayed (not failed)
+      // This allows BullMQ to mark the current job as completed
+      return {
+        success: true,
+        data: undefined,
+        saved: false,
+        delayed: true,
+        sourceLocked: true,
+      } as ScrapeResult;
+    }
+
+    // Source is available, proceed with normal processing
+    queueLogger.info(
+      `🔓 Source ${source} available for job ${job.id}, proceeding with processing`,
+      {
+        jobId: job.id,
+        jobType: job.name,
+        source,
+      },
+    );
+
+    return await this.processJob(job);
   }
 
   /**
@@ -437,6 +523,7 @@ export class QueueService {
     job: Job,
   ): Promise<void> {
     const delayMs = 90 * 24 * 60 * 60 * 1000; // 90 days
+    const nextScrapeAt = new Date(Date.now() + delayMs);
 
     queueLogger.warn(
       `Set not found - scheduling single retry in 90 days (no immediate retries)`,
@@ -447,7 +534,7 @@ export class QueueService {
         source: error.source,
         errorMessage: error.message,
         retryDelayDays: 90,
-        rescheduledFor: new Date(Date.now() + delayMs).toISOString(),
+        rescheduledFor: nextScrapeAt.toISOString(),
       },
     );
 
@@ -456,7 +543,7 @@ export class QueueService {
         throw new Error("Queue not initialized");
       }
 
-      // Schedule single retry in 90 days
+      // Schedule single retry in 90 days in the queue
       await this.queue.add(
         job.name,
         job.data,
@@ -467,6 +554,24 @@ export class QueueService {
           removeOnComplete: true,
         },
       );
+
+      // Persist the not_found status to database to prevent re-queueing on restart
+      if (error.source === "worldbricks") {
+        const worldBricksRepo = getWorldBricksRepository();
+        await worldBricksRepo.updateNotFoundStatus(
+          error.setNumber,
+          nextScrapeAt,
+        );
+
+        queueLogger.info(
+          `Updated database with not_found status for set ${error.setNumber}`,
+          {
+            jobId: job.id,
+            setNumber: error.setNumber,
+            nextScrapeAt: nextScrapeAt.toISOString(),
+          },
+        );
+      }
 
       queueLogger.info(
         `Scheduled 90-day retry for set ${error.setNumber}`,
@@ -500,6 +605,7 @@ export class QueueService {
 
     const maxWaitTime = timeoutMs;
     const startTime = Date.now();
+    let retryCount = 0;
 
     while (Date.now() - startTime < maxWaitTime) {
       // Try to acquire lock with 5 minute expiration (longer than expected scrape time)
@@ -512,15 +618,32 @@ export class QueueService {
       );
 
       if (acquired) {
-        queueLogger.info("Acquired Bricklink scraping lock");
+        queueLogger.info("🔒 Acquired Bricklink scraping lock", {
+          timestamp: new Date().toISOString(),
+          lockKey: this.bricklinkSemaphoreKey,
+          retriesNeeded: retryCount,
+        });
         return true;
+      }
+
+      retryCount++;
+      if (retryCount === 1) {
+        queueLogger.warn("⏳ Waiting for Bricklink lock (another job is running)", {
+          timestamp: new Date().toISOString(),
+          lockKey: this.bricklinkSemaphoreKey,
+        });
       }
 
       // Wait 1 second before retrying
       await new Promise((resolve) => setTimeout(resolve, 1000));
     }
 
-    queueLogger.warn("Failed to acquire Bricklink lock within timeout");
+    queueLogger.warn("❌ Failed to acquire Bricklink lock within timeout", {
+      timestamp: new Date().toISOString(),
+      lockKey: this.bricklinkSemaphoreKey,
+      timeoutMs,
+      retries: retryCount,
+    });
     return false;
   }
 
@@ -530,7 +653,10 @@ export class QueueService {
   private async releaseBricklinkLock(): Promise<void> {
     if (!this.connection) return;
     await this.connection.del(this.bricklinkSemaphoreKey);
-    queueLogger.info("Released Bricklink scraping lock");
+    queueLogger.info("🔓 Released Bricklink scraping lock", {
+      timestamp: new Date().toISOString(),
+      lockKey: this.bricklinkSemaphoreKey,
+    });
   }
 
   /**
@@ -544,6 +670,7 @@ export class QueueService {
 
     const maxWaitTime = timeoutMs;
     const startTime = Date.now();
+    let retryCount = 0;
 
     while (Date.now() - startTime < maxWaitTime) {
       // Try to acquire lock with 10 minute expiration (longer than expected scrape time with rate limits)
@@ -556,15 +683,32 @@ export class QueueService {
       );
 
       if (acquired) {
-        queueLogger.info("Acquired WorldBricks scraping lock");
+        queueLogger.info("🔒 Acquired WorldBricks scraping lock", {
+          timestamp: new Date().toISOString(),
+          lockKey: this.worldbricksSemaphoreKey,
+          retriesNeeded: retryCount,
+        });
         return true;
+      }
+
+      retryCount++;
+      if (retryCount === 1) {
+        queueLogger.warn("⏳ Waiting for WorldBricks lock (another job is running)", {
+          timestamp: new Date().toISOString(),
+          lockKey: this.worldbricksSemaphoreKey,
+        });
       }
 
       // Wait 1 second before retrying
       await new Promise((resolve) => setTimeout(resolve, 1000));
     }
 
-    queueLogger.warn("Failed to acquire WorldBricks lock within timeout");
+    queueLogger.warn("❌ Failed to acquire WorldBricks lock within timeout", {
+      timestamp: new Date().toISOString(),
+      lockKey: this.worldbricksSemaphoreKey,
+      timeoutMs,
+      retries: retryCount,
+    });
     return false;
   }
 
@@ -574,7 +718,10 @@ export class QueueService {
   private async releaseWorldBricksLock(): Promise<void> {
     if (!this.connection) return;
     await this.connection.del(this.worldbricksSemaphoreKey);
-    queueLogger.info("Released WorldBricks scraping lock");
+    queueLogger.info("🔓 Released WorldBricks scraping lock", {
+      timestamp: new Date().toISOString(),
+      lockKey: this.worldbricksSemaphoreKey,
+    });
   }
 
   /**
@@ -587,6 +734,7 @@ export class QueueService {
 
     const maxWaitTime = timeoutMs;
     const startTime = Date.now();
+    let retryCount = 0;
 
     while (Date.now() - startTime < maxWaitTime) {
       // Try to acquire lock with 5 minute expiration (sufficient for Reddit's 5-10s rate limits)
@@ -599,15 +747,32 @@ export class QueueService {
       );
 
       if (acquired) {
-        queueLogger.info("Acquired Reddit scraping lock");
+        queueLogger.info("🔒 Acquired Reddit scraping lock", {
+          timestamp: new Date().toISOString(),
+          lockKey: this.redditSemaphoreKey,
+          retriesNeeded: retryCount,
+        });
         return true;
+      }
+
+      retryCount++;
+      if (retryCount === 1) {
+        queueLogger.warn("⏳ Waiting for Reddit lock (another job is running)", {
+          timestamp: new Date().toISOString(),
+          lockKey: this.redditSemaphoreKey,
+        });
       }
 
       // Wait 1 second before retrying
       await new Promise((resolve) => setTimeout(resolve, 1000));
     }
 
-    queueLogger.warn("Failed to acquire Reddit lock within timeout");
+    queueLogger.warn("❌ Failed to acquire Reddit lock within timeout", {
+      timestamp: new Date().toISOString(),
+      lockKey: this.redditSemaphoreKey,
+      timeoutMs,
+      retries: retryCount,
+    });
     return false;
   }
 
@@ -617,7 +782,69 @@ export class QueueService {
   private async releaseRedditLock(): Promise<void> {
     if (!this.connection) return;
     await this.connection.del(this.redditSemaphoreKey);
-    queueLogger.info("Released Reddit scraping lock");
+    queueLogger.info("🔓 Released Reddit scraping lock", {
+      timestamp: new Date().toISOString(),
+      lockKey: this.redditSemaphoreKey,
+    });
+  }
+
+  /**
+   * Get the source (lock group) for a given job type
+   * Maps job types to their corresponding source for lock management
+   */
+  private getJobSource(jobType: string): JobSource {
+    switch (jobType) {
+      case JOB_TYPES.SCRAPE_SINGLE:
+      case JOB_TYPES.SCRAPE_BULK:
+      case JOB_TYPES.SCRAPE_SCHEDULED:
+        return JobSource.BRICKLINK;
+
+      case JOB_TYPES.SCRAPE_WORLDBRICKS:
+        return JobSource.WORLDBRICKS;
+
+      case JOB_TYPES.SEARCH_REDDIT:
+        return JobSource.REDDIT;
+
+      case JOB_TYPES.SCRAPE_BRICKRANKER_RETIREMENT:
+      default:
+        return JobSource.NONE; // No lock required
+    }
+  }
+
+  /**
+   * Check if a source lock is currently available (non-blocking check)
+   * Returns true if the lock can be acquired, false if it's held by another job
+   */
+  private async isSourceLockAvailable(source: JobSource): Promise<boolean> {
+    if (!this.connection || source === JobSource.NONE) {
+      return true; // No lock needed
+    }
+
+    const lockKey = this.getLockKeyForSource(source);
+    if (!lockKey) {
+      return true; // No lock configured for this source
+    }
+
+    // Check if lock exists (EXISTS returns 1 if exists, 0 if not)
+    const exists = await this.connection.exists(lockKey);
+    return exists === 0; // Available if doesn't exist
+  }
+
+  /**
+   * Get the Redis lock key for a given source
+   */
+  private getLockKeyForSource(source: JobSource): string | null {
+    switch (source) {
+      case JobSource.BRICKLINK:
+        return this.bricklinkSemaphoreKey;
+      case JobSource.WORLDBRICKS:
+        return this.worldbricksSemaphoreKey;
+      case JobSource.REDDIT:
+        return this.redditSemaphoreKey;
+      case JobSource.NONE:
+      default:
+        return null;
+    }
   }
 
   /**
@@ -884,42 +1111,50 @@ export class QueueService {
     let priority = data.priority ?? JobPriority.NORMAL;
     const jobId = `${JOB_TYPES.SCRAPE_SINGLE}-${data.itemId}`;
 
-    // Downgrade priority if monthly data exists or is marked unavailable
-    if (priority === JobPriority.HIGH) {
-      const bricklinkRepo = getBricklinkRepository();
-      const item = await bricklinkRepo.findByItemId(data.itemId);
+    // Skip all checks if force=true
+    if (data.force) {
+      console.log(
+        `🔥 FORCE SCRAPE: Bypassing all checks for ${data.itemId}`,
+      );
+      priority = JobPriority.HIGH; // Always use HIGH priority for forced scrapes
+    } else {
+      // Downgrade priority if monthly data exists or is marked unavailable
+      if (priority === JobPriority.HIGH) {
+        const bricklinkRepo = getBricklinkRepository();
+        const item = await bricklinkRepo.findByItemId(data.itemId);
 
-      // Check if monthly data is marked as unavailable (legitimately doesn't exist)
-      if (item?.monthlyDataUnavailable) {
-        console.log(
-          `⏬ Downgrading priority for ${data.itemId}: monthly data marked unavailable`,
-        );
-        priority = JobPriority.NORMAL;
-      } // Check if monthly data already exists
-      else if (await bricklinkRepo.hasMonthlyData(data.itemId)) {
-        console.log(
-          `⏬ Downgrading priority for ${data.itemId}: monthly data exists`,
-        );
-        priority = JobPriority.NORMAL;
-      } else {
-        console.log(
-          `✓ Keeping HIGH priority for ${data.itemId}: no monthly data yet`,
-        );
+        // Check if monthly data is marked as unavailable (legitimately doesn't exist)
+        if (item?.monthlyDataUnavailable) {
+          console.log(
+            `⏬ Downgrading priority for ${data.itemId}: monthly data marked unavailable`,
+          );
+          priority = JobPriority.NORMAL;
+        } // Check if monthly data already exists
+        else if (await bricklinkRepo.hasMonthlyData(data.itemId)) {
+          console.log(
+            `⏬ Downgrading priority for ${data.itemId}: monthly data exists`,
+          );
+          priority = JobPriority.NORMAL;
+        } else {
+          console.log(
+            `✓ Keeping HIGH priority for ${data.itemId}: no monthly data yet`,
+          );
+        }
       }
-    }
 
-    // Check if item was recently scraped (unless HIGH priority)
-    if (priority !== JobPriority.HIGH) {
-      const wasRecent = await this.wasRecentlyScrapped(data.itemId, 12);
-      if (wasRecent) {
-        console.log(
-          `⏭️  Item ${data.itemId} was recently scraped, skipping`,
-        );
-        // Return a mock job to indicate it was skipped
-        // In practice, you might want to throw or return a special status
-        throw new Error(
-          `Item ${data.itemId} was scraped within the last 12 hours`,
-        );
+      // Check if item was recently scraped (unless HIGH priority)
+      if (priority !== JobPriority.HIGH) {
+        const wasRecent = await this.wasRecentlyScrapped(data.itemId, 12);
+        if (wasRecent) {
+          console.log(
+            `⏭️  Item ${data.itemId} was recently scraped, skipping`,
+          );
+          // Return a mock job to indicate it was skipped
+          // In practice, you might want to throw or return a special status
+          throw new Error(
+            `Item ${data.itemId} was scraped within the last 12 hours`,
+          );
+        }
       }
     }
 
@@ -965,6 +1200,16 @@ export class QueueService {
 
     for (const job of jobs) {
       let priority = job.priority ?? JobPriority.NORMAL;
+
+      // Skip all checks if force=true
+      if (job.force) {
+        console.log(
+          `🔥 FORCE SCRAPE: Bypassing all checks for ${job.itemId}`,
+        );
+        priority = JobPriority.HIGH; // Always use HIGH priority for forced scrapes
+        filteredJobs.push({ ...job, priority });
+        continue;
+      }
 
       // Downgrade priority if monthly data exists or is marked unavailable
       if (priority === JobPriority.HIGH) {
@@ -1475,6 +1720,83 @@ export class QueueService {
       isPaused: this.worker.isPaused(),
       isRunning: this.worker.isRunning(),
     };
+  }
+
+  /**
+   * Get lock status for all sources
+   * Returns which sources are currently locked and unavailable
+   */
+  async getSourceLockStatus(): Promise<{
+    bricklink: { locked: boolean; key: string };
+    worldbricks: { locked: boolean; key: string };
+    reddit: { locked: boolean; key: string };
+  }> {
+    const bricklinkAvailable = await this.isSourceLockAvailable(
+      JobSource.BRICKLINK,
+    );
+    const worldbricksAvailable = await this.isSourceLockAvailable(
+      JobSource.WORLDBRICKS,
+    );
+    const redditAvailable = await this.isSourceLockAvailable(JobSource.REDDIT);
+
+    return {
+      bricklink: {
+        locked: !bricklinkAvailable,
+        key: this.bricklinkSemaphoreKey,
+      },
+      worldbricks: {
+        locked: !worldbricksAvailable,
+        key: this.worldbricksSemaphoreKey,
+      },
+      reddit: {
+        locked: !redditAvailable,
+        key: this.redditSemaphoreKey,
+      },
+    };
+  }
+
+  /**
+   * Get statistics about source distribution in the queue
+   * Helps identify if one source is dominating the queue
+   */
+  async getSourceDistribution(): Promise<{
+    bricklink: number;
+    worldbricks: number;
+    reddit: number;
+    other: number;
+  }> {
+    if (!this.queue) {
+      return { bricklink: 0, worldbricks: 0, reddit: 0, other: 0 };
+    }
+
+    // Get all waiting jobs (limited to first 1000 for performance)
+    const waitingJobs = await this.queue.getWaiting(0, 1000);
+
+    const distribution = {
+      bricklink: 0,
+      worldbricks: 0,
+      reddit: 0,
+      other: 0,
+    };
+
+    for (const job of waitingJobs) {
+      const source = this.getJobSource(job.name);
+      switch (source) {
+        case JobSource.BRICKLINK:
+          distribution.bricklink++;
+          break;
+        case JobSource.WORLDBRICKS:
+          distribution.worldbricks++;
+          break;
+        case JobSource.REDDIT:
+          distribution.reddit++;
+          break;
+        default:
+          distribution.other++;
+      }
+    }
+
+    return distribution;
   }
 }
 
