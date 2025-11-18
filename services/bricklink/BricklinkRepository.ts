@@ -812,8 +812,13 @@ export class BricklinkRepository {
       used: number | null;
     };
   }> {
-    // Fetch all monthly sales for this item
-    const monthlySales = await this.getMonthlySales(itemId);
+    // Calculate 6 months ago for filtering
+    const sixMonthsAgo = new Date();
+    sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
+    const startMonth = `${sixMonthsAgo.getFullYear()}-${String(sixMonthsAgo.getMonth() + 1).padStart(2, '0')}`;
+
+    // Fetch monthly sales for this item (last 6 months only)
+    const monthlySales = await this.getMonthlySales(itemId, { startMonth });
 
     if (monthlySales.length === 0) {
       return this.getEmptyStatistics();
