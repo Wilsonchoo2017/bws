@@ -149,8 +149,7 @@ export const handler: Handlers = {
 
       const monthsOfInventory = bricklinkData
         ? PostRetirementValueProjector.calculateMonthsOfInventory(
-          // deno-lint-ignore no-explicit-any
-          bricklinkData as any,
+          bricklinkData,
         )
         : null;
 
@@ -174,10 +173,8 @@ export const handler: Handlers = {
         try {
           const projection = PostRetirementValueProjector.projectFutureValue(
             intrinsicValueCents,
-            // deno-lint-ignore no-explicit-any
-            bricklinkData as any,
-            // deno-lint-ignore no-explicit-any
-            worldBricksData as any,
+            bricklinkData,
+            worldBricksData,
             demandScore,
             qualityScore,
           );

@@ -10,9 +10,10 @@
  * - Moats (themes with durable demand)
  */
 
-// Note: Using `any` types because this projector accepts enriched/processed data
-// from repositories, not the raw parser types. The data includes computed fields
-// like avgPrice, salesVelocity, yearRetired, etc. that aren't on the base parser interfaces.
+import type {
+  EnrichedBricklinkData,
+  EnrichedWorldBricksData,
+} from "./types.ts";
 
 export interface ValueProjection {
   /** Current intrinsic value */
@@ -41,10 +42,8 @@ export class PostRetirementValueProjector {
    */
   static projectFutureValue(
     currentIntrinsicValue: number,
-    // deno-lint-ignore no-explicit-any
-    bricklinkData: any | null,
-    // deno-lint-ignore no-explicit-any
-    worldBricksData: any | null,
+    bricklinkData: EnrichedBricklinkData | null,
+    worldBricksData: EnrichedWorldBricksData | null,
     demandScore: number,
     qualityScore: number,
   ): ValueProjection {
@@ -110,8 +109,7 @@ export class PostRetirementValueProjector {
    * Calculate when available supply will run out based on current velocity
    */
   private static calculateSupplyExhaustion(
-    // deno-lint-ignore no-explicit-any
-    bricklinkData: any | null,
+    bricklinkData: EnrichedBricklinkData | null,
   ): number | null {
     if (!bricklinkData) return null;
 
@@ -143,8 +141,7 @@ export class PostRetirementValueProjector {
    * - Supply exhaustion timeline (scarcity drives price)
    */
   private static calculateExpectedCAGR(
-    // deno-lint-ignore no-explicit-any
-    worldBricksData: any | null,
+    worldBricksData: EnrichedWorldBricksData | null,
     demandScore: number,
     qualityScore: number,
     supplyExhaustionMonths: number | null,
@@ -237,10 +234,8 @@ export class PostRetirementValueProjector {
    * Calculate confidence in projection (0-100)
    */
   private static calculateProjectionConfidence(
-    // deno-lint-ignore no-explicit-any
-    bricklinkData: any | null,
-    // deno-lint-ignore no-explicit-any
-    worldBricksData: any | null,
+    bricklinkData: EnrichedBricklinkData | null,
+    worldBricksData: EnrichedWorldBricksData | null,
     demandScore: number,
   ): number {
     let confidence = 50; // Start at medium
@@ -283,8 +278,7 @@ export class PostRetirementValueProjector {
    * Build list of key assumptions
    */
   private static buildAssumptions(
-    // deno-lint-ignore no-explicit-any
-    worldBricksData: any | null,
+    worldBricksData: EnrichedWorldBricksData | null,
     expectedCAGR: number,
     supplyExhaustionMonths: number | null,
     demandScore: number,
@@ -337,8 +331,7 @@ export class PostRetirementValueProjector {
    * Identify key risks to projection
    */
   private static identifyRisks(
-    // deno-lint-ignore no-explicit-any
-    worldBricksData: any | null,
+    worldBricksData: EnrichedWorldBricksData | null,
     demandScore: number,
     qualityScore: number,
     supplyExhaustionMonths: number | null,
@@ -403,8 +396,7 @@ export class PostRetirementValueProjector {
    * Helper: Calculate years since retirement
    */
   private static getYearsRetired(
-    // deno-lint-ignore no-explicit-any
-    worldBricksData: any | null,
+    worldBricksData: EnrichedWorldBricksData | null,
   ): number | null {
     if (!worldBricksData?.yearRetired) return null;
 
@@ -418,8 +410,7 @@ export class PostRetirementValueProjector {
    * Helper: Calculate months of inventory at current sales rate
    */
   static calculateMonthsOfInventory(
-    // deno-lint-ignore no-explicit-any
-    bricklinkData: any | null,
+    bricklinkData: EnrichedBricklinkData | null,
   ): number | null {
     if (!bricklinkData) return null;
 
@@ -441,8 +432,7 @@ export class PostRetirementValueProjector {
    * Criteria: Retiring soon + Strong demand + Limited time to accumulate
    */
   static isPreRetirementOpportunity(
-    // deno-lint-ignore no-explicit-any
-    worldBricksData: any | null,
+    worldBricksData: EnrichedWorldBricksData | null,
     demandScore: number,
   ): boolean {
     if (!worldBricksData) return false;
@@ -459,8 +449,7 @@ export class PostRetirementValueProjector {
    * Retired + 0-5 years + Strong demand = Sweet spot
    */
   static isInAppreciationPhase(
-    // deno-lint-ignore no-explicit-any
-    worldBricksData: any | null,
+    worldBricksData: EnrichedWorldBricksData | null,
     demandScore: number,
   ): boolean {
     if (!worldBricksData) return false;

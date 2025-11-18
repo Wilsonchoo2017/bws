@@ -7,9 +7,10 @@
  * Inspired by Mohnish Pabrai's principle: Only invest within your circle of competence.
  */
 
-// Note: Using `any` types because these validators accept enriched/processed data
-// from repositories, not the raw parser types. The data includes computed fields
-// like avgPrice, salesVelocity, etc. that aren't on the base parser interfaces.
+import type {
+  EnrichedBricklinkData,
+  EnrichedWorldBricksData,
+} from "./types.ts";
 
 export interface DataQualityResult {
   /** Can we proceed with valuation? */
@@ -38,10 +39,8 @@ export class DataQualityValidator {
    * Validate if we have sufficient data to calculate intrinsic value
    */
   static validate(
-    // deno-lint-ignore no-explicit-any
-    bricklinkData: any | null,
-    // deno-lint-ignore no-explicit-any
-    worldBricksData: any | null,
+    bricklinkData: EnrichedBricklinkData | null,
+    worldBricksData: EnrichedWorldBricksData | null,
   ): DataQualityResult {
     const missingCriticalData: string[] = [];
     const missingOptionalData: string[] = [];
@@ -146,10 +145,8 @@ export class DataQualityValidator {
    * Validate pricing data availability
    */
   private static validatePricingData(
-    // deno-lint-ignore no-explicit-any
-    bricklinkData: any | null,
-    // deno-lint-ignore no-explicit-any
-    worldBricksData: any | null,
+    bricklinkData: EnrichedBricklinkData | null,
+    worldBricksData: EnrichedWorldBricksData | null,
   ): { score: number; critical: string[]; optional: string[] } {
     const critical: string[] = [];
     const optional: string[] = [];
@@ -201,8 +198,7 @@ export class DataQualityValidator {
    * Validate sales data availability - MOST CRITICAL for value investing
    */
   private static validateSalesData(
-    // deno-lint-ignore no-explicit-any
-    bricklinkData: any | null,
+    bricklinkData: EnrichedBricklinkData | null,
   ): { score: number; critical: string[]; optional: string[] } {
     const critical: string[] = [];
     const optional: string[] = [];
@@ -255,8 +251,7 @@ export class DataQualityValidator {
    * Validate market depth data
    */
   private static validateMarketData(
-    // deno-lint-ignore no-explicit-any
-    bricklinkData: any | null,
+    bricklinkData: EnrichedBricklinkData | null,
   ): { score: number; critical: string[]; optional: string[] } {
     const critical: string[] = [];
     const optional: string[] = [];
@@ -299,8 +294,7 @@ export class DataQualityValidator {
    * Validate product metadata
    */
   private static validateProductData(
-    // deno-lint-ignore no-explicit-any
-    worldBricksData: any | null,
+    worldBricksData: EnrichedWorldBricksData | null,
   ): { score: number; critical: string[]; optional: string[] } {
     const critical: string[] = [];
     const optional: string[] = [];

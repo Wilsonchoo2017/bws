@@ -1053,10 +1053,8 @@ export class ValueCalculator {
     };
 
     const dataQuality = DataQualityValidator.validate(
-      // deno-lint-ignore no-explicit-any
-      bricklinkData as any,
-      // deno-lint-ignore no-explicit-any
-      worldBricksData as any,
+      bricklinkData,
+      worldBricksData,
     );
 
     // Pabrai approach: Refuse to calculate if data quality is insufficient
