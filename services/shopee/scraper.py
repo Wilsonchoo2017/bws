@@ -3,6 +3,7 @@
 
 import asyncio
 from dataclasses import dataclass
+from urllib.parse import urlparse
 
 from db.connection import get_connection
 from db.schema import init_schema
@@ -191,6 +192,22 @@ async def scrape_shop_page(
             # Parse products (same DOM structure as search results)
             items = await parse_search_results(page, max_items)
 
+            # Extract shop name from URL (e.g. /legoshopmy?... -> "legoshopmy")
+            shop_name = _extract_shop_name(url)
+            if shop_name:
+                items = tuple(
+                    ShopeeProduct(
+                        title=item.title,
+                        price_display=item.price_display,
+                        sold_count=item.sold_count,
+                        rating=item.rating,
+                        shop_name=shop_name,
+                        product_url=item.product_url,
+                        image_url=item.image_url,
+                    )
+                    for item in items
+                )
+
             # Save to database
             _save_to_db(url, items)
 
@@ -230,6 +247,22 @@ def _save_scrape_error(source_url: str, error: str) -> None:
         conn.close()
     except Exception:
         pass
+
+
+def _extract_shop_name(url: str) -> str | None:
+    """Extract the seller/shop name from a Shopee URL.
+
+    e.g. https://shopee.com.my/legoshopmy?page=0&shopCollection=... -> "legoshopmy"
+    """
+    parsed = urlparse(url)
+    path = parsed.path.strip("/")
+    # Shop pages have a single path segment (the shop name)
+    # Product pages have longer paths with -i. in them
+    # Exclude known Shopee system paths
+    system_paths = {"search", "buyer", "verify", "cart", "checkout", "daily_discover"}
+    if path and "/" not in path and "-i." not in path and path not in system_paths:
+        return path
+    return None
 
 
 async def _scroll_to_load(page, max_scrolls: int = 10) -> None:
