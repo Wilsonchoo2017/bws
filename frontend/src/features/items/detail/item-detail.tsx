@@ -26,12 +26,16 @@ interface ItemDetailViewProps {
   setNumber: string;
 }
 
+type EnrichStatus = 'idle' | 'loading' | 'success' | 'error';
+
 export function ItemDetailView({ setNumber }: ItemDetailViewProps) {
   const [item, setItem] = useState<ItemDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [enrichStatus, setEnrichStatus] = useState<EnrichStatus>('idle');
+  const [enrichMessage, setEnrichMessage] = useState<string | null>(null);
 
-  useEffect(() => {
+  const fetchItem = () => {
     fetch(`/api/items/${setNumber}`)
       .then((res) => res.json())
       .then((json) => {
@@ -43,7 +47,46 @@ export function ItemDetailView({ setNumber }: ItemDetailViewProps) {
       })
       .catch((err) => setError(err.message))
       .finally(() => setLoading(false));
+  };
+
+  useEffect(() => {
+    fetchItem();
   }, [setNumber]);
+
+  const handleEnrich = async () => {
+    setEnrichStatus('loading');
+    setEnrichMessage(null);
+
+    try {
+      const res = await fetch('/api/enrichment', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ set_number: setNumber }),
+      });
+      const json = await res.json();
+
+      if (!json.success) {
+        setEnrichStatus('error');
+        setEnrichMessage(json.error ?? 'Enrichment failed');
+        return;
+      }
+
+      setEnrichStatus('success');
+      setEnrichMessage(
+        `Enrichment job queued (${json.data.job_id}). Refresh in a moment to see results.`
+      );
+
+      // Auto-refresh item data after a delay to pick up enrichment results
+      setTimeout(() => {
+        fetchItem();
+      }, 5000);
+    } catch (err) {
+      setEnrichStatus('error');
+      setEnrichMessage(
+        err instanceof Error ? err.message : 'Failed to start enrichment'
+      );
+    }
+  };
 
   if (loading) {
     return (
@@ -100,6 +143,24 @@ export function ItemDetailView({ setNumber }: ItemDetailViewProps) {
             {item.year_released && <span>{item.year_released}</span>}
             {item.theme && <span>{item.theme}</span>}
             {item.parts_count && <span>{item.parts_count} pcs</span>}
+          </div>
+
+          {/* Enrich button */}
+          <div className='mt-3 flex items-center gap-3'>
+            <button
+              onClick={handleEnrich}
+              disabled={enrichStatus === 'loading'}
+              className='rounded-md border border-blue-300 bg-blue-50 px-3 py-1.5 text-sm font-medium text-blue-700 transition-colors hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-blue-700 dark:bg-blue-900/30 dark:text-blue-300 dark:hover:bg-blue-900/50'
+            >
+              {enrichStatus === 'loading' ? 'Enriching...' : 'Enrich Metadata'}
+            </button>
+            {enrichMessage && (
+              <span
+                className={`text-xs ${enrichStatus === 'error' ? 'text-destructive' : 'text-green-600 dark:text-green-400'}`}
+              >
+                {enrichMessage}
+              </span>
+            )}
           </div>
 
           {/* Latest prices summary */}
