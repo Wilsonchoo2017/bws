@@ -5,6 +5,8 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass
 
+from db.connection import get_connection
+from db.schema import init_schema
 from services.shopee.auth import is_logged_in, login
 from services.shopee.browser import shopee_browser, human_delay, new_page
 from services.shopee.humanize import random_click, random_type
@@ -15,6 +17,7 @@ from services.shopee.popups import (
     select_english,
     setup_dialog_handler,
 )
+from services.shopee.repository import record_scrape, upsert_products
 
 SHOPEE_BASE = "https://shopee.com.my"
 
@@ -190,6 +193,9 @@ async def scrape_shop_page(
             # Parse products (same DOM structure as search results)
             items = await parse_search_results(page, max_items)
 
+            # Save to database
+            _save_to_db(url, items)
+
             return ShopeeScrapeResult(
                 success=True,
                 query=url,
@@ -197,11 +203,35 @@ async def scrape_shop_page(
             )
 
     except Exception as e:
+        _save_scrape_error(url, str(e))
         return ShopeeScrapeResult(
             success=False,
             query=url,
             error=str(e),
         )
+
+
+def _save_to_db(source_url: str, items: tuple[ShopeeProduct, ...]) -> None:
+    """Save scraped products to the database."""
+    try:
+        conn = get_connection()
+        init_schema(conn)
+        saved = upsert_products(conn, items, source_url)
+        record_scrape(conn, source_url, saved, success=True)
+        conn.close()
+    except Exception as e:
+        print(f"Warning: failed to save to database: {e}")
+
+
+def _save_scrape_error(source_url: str, error: str) -> None:
+    """Record a failed scrape attempt."""
+    try:
+        conn = get_connection()
+        init_schema(conn)
+        record_scrape(conn, source_url, 0, success=False, error=error)
+        conn.close()
+    except Exception:
+        pass
 
 
 async def _scroll_to_load(page, max_scrolls: int = 10) -> None:

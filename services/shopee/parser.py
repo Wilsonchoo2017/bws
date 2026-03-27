@@ -51,16 +51,29 @@ async def parse_search_results(
                 const priceMatch = text.match(/RM[\\d,]+\\.?\\d*/);
                 const price = priceMatch ? priceMatch[0] : '';
 
-                // Extract sold count
-                const soldMatch = text.match(/(\\d[\\d.]*[kK]?)\\s*sold/);
-                const sold = soldMatch ? soldMatch[1] + ' sold' : null;
+                // Extract rating and sold count.
+                // Shopee concatenates them as "{rating}{soldCount} sold"
+                // e.g. "5.08 sold" = rating 5.0, sold 8
+                //      "4.9563 sold" = rating 4.9, sold 563
+                //      "5.01.2k sold" = rating 5.0, sold 1.2k
+                // Rating is always one digit, dot, one digit (X.X)
+                // Sold count follows immediately after.
+                let rating = null;
+                let sold = null;
 
-                // Extract rating (e.g. "5.0" near a star)
-                const ratingMatch = text.match(/(\\d\\.\\d)\\d*\\s*sold/);
-                const rating = ratingMatch ? ratingMatch[1] : null;
+                const ratingAndSoldMatch = text.match(/(\\d\\.\\d)(\\d[\\d.]*[kK]?)\\s*sold/);
+                if (ratingAndSoldMatch) {
+                    rating = ratingAndSoldMatch[1];
+                    sold = ratingAndSoldMatch[2] + ' sold';
+                } else {
+                    // Fallback: just a sold count without rating
+                    const soldOnlyMatch = text.match(/(\\d[\\d,.]*[kK]?)\\s*sold/);
+                    if (soldOnlyMatch) {
+                        sold = soldOnlyMatch[1] + ' sold';
+                    }
+                }
 
-                // Title is the first meaningful text block
-                // It's usually the longest text segment before the price
+                // Title is the text before the price
                 const allText = text.split('RM')[0].trim();
 
                 results.push({

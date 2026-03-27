@@ -89,6 +89,33 @@ CREATE TABLE IF NOT EXISTS worldbricks_sets (
 );
 """
 
+SHOPEE_PRODUCTS_DDL = """
+CREATE TABLE IF NOT EXISTS shopee_products (
+    id INTEGER PRIMARY KEY,
+    title VARCHAR NOT NULL,
+    price_display VARCHAR,
+    price_cents INTEGER,
+    sold_count VARCHAR,
+    rating VARCHAR,
+    shop_name VARCHAR,
+    product_url VARCHAR UNIQUE,
+    image_url VARCHAR,
+    source_url VARCHAR,
+    scraped_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+"""
+
+SHOPEE_SCRAPE_HISTORY_DDL = """
+CREATE TABLE IF NOT EXISTS shopee_scrape_history (
+    id INTEGER PRIMARY KEY,
+    source_url VARCHAR NOT NULL,
+    items_found INTEGER DEFAULT 0,
+    success BOOLEAN DEFAULT TRUE,
+    error VARCHAR,
+    scraped_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+"""
+
 BRICKRANKER_ITEMS_DDL = """
 CREATE TABLE IF NOT EXISTS brickranker_items (
     id INTEGER PRIMARY KEY,
@@ -113,6 +140,8 @@ CREATE SEQUENCE IF NOT EXISTS bricklink_monthly_sales_id_seq;
 CREATE SEQUENCE IF NOT EXISTS product_analysis_id_seq;
 CREATE SEQUENCE IF NOT EXISTS worldbricks_sets_id_seq;
 CREATE SEQUENCE IF NOT EXISTS brickranker_items_id_seq;
+CREATE SEQUENCE IF NOT EXISTS shopee_products_id_seq;
+CREATE SEQUENCE IF NOT EXISTS shopee_scrape_history_id_seq;
 """
 
 # Index creation statements
@@ -137,6 +166,12 @@ CREATE INDEX IF NOT EXISTS idx_brickranker_set_number
     ON brickranker_items(set_number);
 CREATE INDEX IF NOT EXISTS idx_brickranker_retiring_soon
     ON brickranker_items(retiring_soon);
+CREATE INDEX IF NOT EXISTS idx_shopee_products_url
+    ON shopee_products(product_url);
+CREATE INDEX IF NOT EXISTS idx_shopee_products_source
+    ON shopee_products(source_url);
+CREATE INDEX IF NOT EXISTS idx_shopee_products_scraped
+    ON shopee_products(scraped_at);
 """
 
 ALL_DDL = [
@@ -147,6 +182,8 @@ ALL_DDL = [
     PRODUCT_ANALYSIS_DDL,
     WORLDBRICKS_SETS_DDL,
     BRICKRANKER_ITEMS_DDL,
+    SHOPEE_PRODUCTS_DDL,
+    SHOPEE_SCRAPE_HISTORY_DDL,
     INDEXES_DDL,
 ]
 
