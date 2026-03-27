@@ -64,19 +64,8 @@ def detect_missing_fields(
     check_fields = fields or tuple(MetadataField)
     missing: list[MetadataField] = []
 
-    field_to_column = {
-        MetadataField.TITLE: "title",
-        MetadataField.YEAR_RELEASED: "year_released",
-        MetadataField.YEAR_RETIRED: "year_retired",
-        MetadataField.PARTS_COUNT: "parts_count",
-        MetadataField.THEME: "theme",
-        MetadataField.IMAGE_URL: "image_url",
-        MetadataField.WEIGHT: "weight",
-        MetadataField.RETIRING_SOON: "retiring_soon",
-    }
-
     for f in check_fields:
-        col = field_to_column.get(f)
+        col = _FIELD_TO_COLUMN.get(f)
         if col is None:
             continue
         value = item.get(col)

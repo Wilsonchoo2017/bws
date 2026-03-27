@@ -36,7 +36,7 @@ async def run_worker(manager: JobManager | None = None) -> None:
                 )
                 logger.info("Job %s completed: %d items", job_id, len(items))
             elif job.scraper_id == "enrichment":
-                result = _run_enrichment(job.url)
+                result = await asyncio.to_thread(_run_enrichment, job.url)
                 mgr.mark_completed(
                     job_id,
                     items_found=result["fields_found"],
