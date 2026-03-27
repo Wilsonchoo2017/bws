@@ -4,6 +4,10 @@ from fastapi import APIRouter, HTTPException
 
 from db.connection import get_connection
 from db.schema import init_schema
+from services.bricklink.repository import (
+    get_monthly_sales,
+    get_price_history,
+)
 from services.items.repository import get_all_items, get_item_detail
 from services.shopee.repository import get_all_products
 
@@ -51,3 +55,86 @@ async def get_item(set_number: str):
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/{set_number}/bricklink-prices")
+async def get_item_bricklink_prices(set_number: str):
+    """Get BrickLink price history and monthly sales for an item."""
+    conn = get_connection()
+    try:
+        init_schema(conn)
+
+        # Find bricklink item_id(s) matching this set_number
+        rows = conn.execute(
+            "SELECT item_id FROM bricklink_items WHERE item_id LIKE ?",
+            [f"{set_number}-%"],
+        ).fetchall()
+
+        if not rows:
+            return {"success": True, "data": {"price_history": [], "monthly_sales": []}}
+
+        item_id = rows[0][0]
+
+        history = get_price_history(conn, item_id, limit=50)
+        sales = get_monthly_sales(conn, item_id)
+
+        serialized_history = [
+            {
+                "scraped_at": str(h["scraped_at"]) if h["scraped_at"] else None,
+                "six_month_new": _serialize_box(h["six_month_new"]),
+                "six_month_used": _serialize_box(h["six_month_used"]),
+                "current_new": _serialize_box(h["current_new"]),
+                "current_used": _serialize_box(h["current_used"]),
+            }
+            for h in history
+        ]
+
+        serialized_sales = [
+            {
+                "year": s.year,
+                "month": s.month,
+                "condition": s.condition.value,
+                "times_sold": s.times_sold,
+                "total_quantity": s.total_quantity,
+                "min_price_cents": s.min_price.amount if s.min_price else None,
+                "max_price_cents": s.max_price.amount if s.max_price else None,
+                "avg_price_cents": s.avg_price.amount if s.avg_price else None,
+                "currency": s.currency,
+            }
+            for s in sales
+        ]
+
+        return {
+            "success": True,
+            "data": {
+                "item_id": item_id,
+                "price_history": serialized_history,
+                "monthly_sales": serialized_sales,
+            },
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        conn.close()
+
+
+def _serialize_box(box) -> dict | None:
+    """Serialize a PricingBox to a JSON-friendly dict."""
+    if box is None:
+        return None
+    return {
+        "times_sold": box.times_sold,
+        "total_lots": box.total_lots,
+        "total_qty": box.total_qty,
+        "min_price_cents": box.min_price.amount if box.min_price else None,
+        "avg_price_cents": box.avg_price.amount if box.avg_price else None,
+        "qty_avg_price_cents": box.qty_avg_price.amount if box.qty_avg_price else None,
+        "max_price_cents": box.max_price.amount if box.max_price else None,
+        "currency": (
+            box.avg_price.currency
+            if box.avg_price
+            else (box.min_price.currency if box.min_price else "USD")
+        ),
+    }

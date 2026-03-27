@@ -79,6 +79,11 @@ def get_all_items(conn: "DuckDBPyConnection") -> list[dict]:
                    ROW_NUMBER() OVER (PARTITION BY set_number ORDER BY recorded_at DESC) AS rn
             FROM price_records WHERE source = 'shopee'
         ),
+        latest_toysrus AS (
+            SELECT set_number, price_cents, currency, url, recorded_at,
+                   ROW_NUMBER() OVER (PARTITION BY set_number ORDER BY recorded_at DESC) AS rn
+            FROM price_records WHERE source = 'toysrus'
+        ),
         latest_bricklink_new AS (
             SELECT set_number, price_cents, currency, recorded_at,
                    ROW_NUMBER() OVER (PARTITION BY set_number ORDER BY recorded_at DESC) AS rn
@@ -100,6 +105,10 @@ def get_all_items(conn: "DuckDBPyConnection") -> list[dict]:
             s.currency AS shopee_currency,
             s.url AS shopee_url,
             s.recorded_at AS shopee_last_seen,
+            tr.price_cents AS toysrus_price_cents,
+            tr.currency AS toysrus_currency,
+            tr.url AS toysrus_url,
+            tr.recorded_at AS toysrus_last_seen,
             bn.price_cents AS bricklink_new_cents,
             bn.currency AS bricklink_new_currency,
             bn.recorded_at AS bricklink_new_last_seen,
@@ -108,6 +117,7 @@ def get_all_items(conn: "DuckDBPyConnection") -> list[dict]:
             bu.recorded_at AS bricklink_used_last_seen
         FROM lego_items li
         LEFT JOIN latest_shopee s ON s.set_number = li.set_number AND s.rn = 1
+        LEFT JOIN latest_toysrus tr ON tr.set_number = li.set_number AND tr.rn = 1
         LEFT JOIN latest_bricklink_new bn ON bn.set_number = li.set_number AND bn.rn = 1
         LEFT JOIN latest_bricklink_used bu ON bu.set_number = li.set_number AND bu.rn = 1
         ORDER BY li.updated_at DESC
@@ -116,6 +126,7 @@ def get_all_items(conn: "DuckDBPyConnection") -> list[dict]:
     columns = [
         "set_number", "title", "theme", "year_released", "image_url", "updated_at",
         "shopee_price_cents", "shopee_currency", "shopee_url", "shopee_last_seen",
+        "toysrus_price_cents", "toysrus_currency", "toysrus_url", "toysrus_last_seen",
         "bricklink_new_cents", "bricklink_new_currency", "bricklink_new_last_seen",
         "bricklink_used_cents", "bricklink_used_currency", "bricklink_used_last_seen",
     ]

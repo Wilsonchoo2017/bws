@@ -1,6 +1,7 @@
 """Background worker that processes scrape jobs from the queue."""
 
 
+import asyncio
 import logging
 
 from api.jobs import JobManager, job_manager
@@ -35,6 +36,16 @@ async def run_worker(manager: JobManager | None = None) -> None:
                     items=items,
                 )
                 logger.info("Job %s completed: %d items", job_id, len(items))
+                _queue_enrichment_for_scraped_items(mgr, items)
+            elif job.scraper_id == "toysrus":
+                result = await _run_toysrus_scrape()
+                mgr.mark_completed(
+                    job_id,
+                    items_found=len(result),
+                    items=result,
+                )
+                logger.info("Job %s completed: %d items", job_id, len(result))
+                _queue_enrichment_for_scraped_items(mgr, result)
             elif job.scraper_id == "enrichment":
                 result = await asyncio.to_thread(_run_enrichment, job.url)
                 mgr.mark_completed(
@@ -79,15 +90,49 @@ async def _run_shopee_scrape(url: str) -> list[dict]:
     ]
 
 
-def _run_enrichment(set_number: str) -> dict:
+async def _run_toysrus_scrape() -> list[dict]:
+    """Run the ToysRUs LEGO catalog scrape and return items as dicts."""
+    from db.connection import get_connection
+    from db.schema import init_schema
+    from services.toysrus.scraper import scrape_all_lego
+
+    conn = get_connection()
+    init_schema(conn)
+
+    try:
+        result = await scrape_all_lego(conn=conn)
+    finally:
+        conn.close()
+
+    if not result.success:
+        raise RuntimeError(result.error or "ToysRUs scrape failed")
+
+    return [
+        {
+            "title": p.name,
+            "price_display": f"RM {p.price_myr}",
+            "sold_count": None,
+            "rating": None,
+            "shop_name": "Toys\"R\"Us Malaysia",
+            "product_url": p.url,
+            "image_url": p.image_url,
+        }
+        for p in result.products
+    ]
+
+
+def _run_enrichment(job_url: str) -> dict:
     """Run metadata enrichment for a single LEGO set.
 
-    Synchronous -- called from the async worker loop via the queue.
+    Synchronous -- called from the async worker loop via asyncio.to_thread.
     Uses the enrichment orchestrator with real fetchers.
+
+    job_url format: "75192" (all sources) or "75192:bricklink" (specific source)
     """
     from db.connection import get_connection
     from db.schema import init_schema
     from services.enrichment.circuit_breaker import CircuitBreakerState
+    from services.enrichment.config import SOURCE_CONFIGS
     from services.enrichment.fetchers import (
         fetch_from_bricklink,
         fetch_from_brickranker,
@@ -99,6 +144,23 @@ def _run_enrichment(set_number: str) -> dict:
     )
     from services.enrichment.types import FieldStatus, SourceId
     from services.items.repository import get_item_detail
+
+    # Parse job_url: "75192" or "75192:bricklink"
+    if ":" in job_url:
+        set_number, source_str = job_url.split(":", 1)
+    else:
+        set_number = job_url
+        source_str = None
+
+    all_fetchers = {
+        SourceId.BRICKLINK: fetch_from_bricklink,
+        SourceId.WORLDBRICKS: fetch_from_worldbricks,
+        SourceId.BRICKRANKER: fetch_from_brickranker,
+    }
+
+    # Map source string to SourceId
+    source_map = {s.value: s for s in SourceId}
+    requested_source = source_map.get(source_str) if source_str else None
 
     conn = get_connection()
     init_schema(conn)
@@ -114,17 +176,29 @@ def _run_enrichment(set_number: str) -> dict:
                 "error": f"Item {set_number} not found in lego_items",
             }
 
-        # Build fetchers that close over the DB connection
-        fetchers = {
-            SourceId.BRICKLINK: lambda sn: fetch_from_bricklink(conn, sn),
-            SourceId.WORLDBRICKS: lambda sn: fetch_from_worldbricks(conn, sn),
-            SourceId.BRICKRANKER: lambda sn: fetch_from_brickranker(conn, sn),
-        }
+        # Build fetchers -- all or just the requested source
+        if requested_source:
+            fetcher_fn = all_fetchers.get(requested_source)
+            if not fetcher_fn:
+                return {
+                    "set_number": set_number,
+                    "fields_found": 0,
+                    "fields_total": 0,
+                    "error": f"Unknown source: {source_str}",
+                }
+            fetchers = {requested_source: lambda sn, f=fetcher_fn: f(conn, sn)}
+            # Only enrich fields this source can provide
+            fields = tuple(SOURCE_CONFIGS[requested_source].fields_provided)
+        else:
+            fetchers = {
+                sid: (lambda sn, f=fn: f(conn, sn))
+                for sid, fn in all_fetchers.items()
+            }
+            fields = None
 
         # Run enrichment
-        # TODO: persist circuit breaker state across jobs
         cb_state = CircuitBreakerState()
-        result, _ = enrich(set_number, item, fetchers, cb_state)
+        result, _ = enrich(set_number, item, fetchers, cb_state, fields=fields)
 
         # Store results
         store_enrichment_result(conn, result)
@@ -151,3 +225,30 @@ def _run_enrichment(set_number: str) -> dict:
 
     finally:
         conn.close()
+
+
+def _queue_enrichment_for_scraped_items(
+    manager: JobManager,
+    items: list[dict],
+) -> None:
+    """Extract set numbers from scraped items and queue enrichment jobs."""
+    from services.enrichment.auto import queue_enrichment_batch
+    from services.items.set_number import extract_set_number
+
+    set_numbers: list[str] = []
+    for item in items:
+        title = item.get("title", "")
+        if not title:
+            continue
+        sn = extract_set_number(title)
+        if sn:
+            set_numbers.append(sn)
+
+    if set_numbers:
+        queued = queue_enrichment_batch(manager, set_numbers)
+        if queued > 0:
+            logger.info(
+                "Post-scrape: queued enrichment for %d/%d sets",
+                queued,
+                len(set_numbers),
+            )

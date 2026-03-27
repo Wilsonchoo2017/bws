@@ -10,6 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from api.routes import enrichment, items, scrape
 from api.worker import run_worker
+from services.enrichment.scheduler import run_enrichment_sweep
 
 logging.basicConfig(
     level=logging.INFO,
@@ -21,14 +22,22 @@ logger = logging.getLogger("bws.api")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Start the background worker on app startup, stop on shutdown."""
+    """Start the background worker and enrichment sweep on app startup."""
+    from api.jobs import job_manager
+
     logger.info("Starting BWS API...")
     worker_task = asyncio.create_task(run_worker())
-    logger.info("Background worker started")
+    sweep_task = asyncio.create_task(run_enrichment_sweep(job_manager))
+    logger.info("Background worker and enrichment sweep started")
     yield
+    sweep_task.cancel()
     worker_task.cancel()
     try:
         await worker_task
+    except asyncio.CancelledError:
+        pass
+    try:
+        await sweep_task
     except asyncio.CancelledError:
         pass
     logger.info("BWS API shut down")

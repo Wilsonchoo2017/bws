@@ -30,7 +30,20 @@ SCRAPERS: list[ScraperInfo] = [
                 description="Official LEGO Shop Malaysia collection on Shopee",
             )
         ],
-    )
+    ),
+    ScraperInfo(
+        id="toysrus",
+        name='Toys"R"Us Malaysia',
+        description="Scrape LEGO catalog from toysrus.com.my via Demandware API",
+        targets=[
+            ScrapeTargetInfo(
+                id="lego-catalog",
+                label="LEGO Full Catalog",
+                url="https://www.toysrus.com.my/lego/",
+                description='Full LEGO product catalog on Toys"R"Us Malaysia',
+            )
+        ],
+    ),
 ]
 
 VALID_SCRAPER_IDS = {s.id for s in SCRAPERS}
@@ -66,6 +79,14 @@ async def start_scrape(request: ScrapeRequest):
         raise HTTPException(
             status_code=400,
             detail="URL must be a shopee.com.my URL",
+        )
+
+    if request.scraper_id == "toysrus" and not request.url.startswith(
+        "https://www.toysrus.com.my/"
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail="URL must be a toysrus.com.my URL",
         )
 
     job = job_manager.create_job(request.scraper_id, request.url)

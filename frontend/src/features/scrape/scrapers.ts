@@ -14,6 +14,20 @@ export const SCRAPERS: ScraperConfig[] = [
         description: 'Official LEGO Shop Malaysia collection on Shopee'
       }
     ]
+  },
+  {
+    id: 'toysrus',
+    name: 'Toys"R"Us Malaysia',
+    description:
+      'Scrape LEGO catalog from toysrus.com.my via Demandware API',
+    targets: [
+      {
+        id: 'lego-catalog',
+        label: 'LEGO Full Catalog',
+        url: 'https://www.toysrus.com.my/lego/',
+        description: 'Full LEGO product catalog on Toys"R"Us Malaysia'
+      }
+    ]
   }
 ];
 

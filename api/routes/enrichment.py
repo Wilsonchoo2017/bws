@@ -16,8 +16,12 @@ logger = logging.getLogger("bws.enrichment.routes")
 router = APIRouter(prefix="/enrichment", tags=["enrichment"])
 
 
+VALID_SOURCES = {"bricklink", "worldbricks", "brickranker"}
+
+
 class EnrichRequest(BaseModel):
     set_number: str = Field(..., min_length=1, max_length=20, pattern=r"^\d{3,6}(-\d+)?$")
+    source: str | None = Field(default=None, description="Specific source to enrich from")
 
 
 class EnrichBatchResponse(BaseModel):
@@ -34,7 +38,18 @@ class NeedsEnrichmentResponse(BaseModel):
 @router.post("/enrich", response_model=ScrapeJobResponse)
 async def enrich_item(request: EnrichRequest) -> ScrapeJobResponse:
     """Queue an enrichment job for a single LEGO set."""
-    job = job_manager.create_job("enrichment", request.set_number)
+    if request.source and request.source not in VALID_SOURCES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid source: {request.source}. Must be one of: {', '.join(sorted(VALID_SOURCES))}",
+        )
+
+    # Encode source into job URL: "75192" or "75192:bricklink"
+    job_url = request.set_number
+    if request.source:
+        job_url = f"{request.set_number}:{request.source}"
+
+    job = job_manager.create_job("enrichment", job_url)
     return ScrapeJobResponse(
         job_id=job.job_id,
         status=job.status,

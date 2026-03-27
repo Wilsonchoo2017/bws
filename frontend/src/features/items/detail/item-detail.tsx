@@ -1,9 +1,25 @@
 'use client';
 
+import { ChevronDownIcon } from 'lucide-react';
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import type { ItemDetail, PriceRecord } from '../types';
 import { formatPrice } from '../types';
+import { BricklinkPriceChart } from './bricklink-price-chart';
+
+const ENRICH_SOURCES = [
+  { id: null, label: 'All Sources' },
+  { id: 'bricklink', label: 'Bricklink' },
+  { id: 'worldbricks', label: 'WorldBricks' },
+  { id: 'brickranker', label: 'BrickRanker' },
+] as const;
 
 const SOURCE_LABELS: Record<string, string> = {
   shopee: 'Shopee MY',
@@ -53,15 +69,22 @@ export function ItemDetailView({ setNumber }: ItemDetailViewProps) {
     fetchItem();
   }, [setNumber]);
 
-  const handleEnrich = async () => {
+  const handleEnrich = async (source: string | null) => {
     setEnrichStatus('loading');
     setEnrichMessage(null);
+
+    const body: { set_number: string; source?: string } = {
+      set_number: setNumber,
+    };
+    if (source) {
+      body.source = source;
+    }
 
     try {
       const res = await fetch('/api/enrichment', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ set_number: setNumber }),
+        body: JSON.stringify(body),
       });
       const json = await res.json();
 
@@ -71,9 +94,10 @@ export function ItemDetailView({ setNumber }: ItemDetailViewProps) {
         return;
       }
 
+      const label = source ?? 'all sources';
       setEnrichStatus('success');
       setEnrichMessage(
-        `Enrichment job queued (${json.data.job_id}). Refresh in a moment to see results.`
+        `Enrichment queued from ${label} (${json.data.job_id})`
       );
 
       // Auto-refresh item data after a delay to pick up enrichment results
@@ -145,15 +169,31 @@ export function ItemDetailView({ setNumber }: ItemDetailViewProps) {
             {item.parts_count && <span>{item.parts_count} pcs</span>}
           </div>
 
-          {/* Enrich button */}
+          {/* Enrich dropdown */}
           <div className='mt-3 flex items-center gap-3'>
-            <button
-              onClick={handleEnrich}
-              disabled={enrichStatus === 'loading'}
-              className='rounded-md border border-blue-300 bg-blue-50 px-3 py-1.5 text-sm font-medium text-blue-700 transition-colors hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-blue-700 dark:bg-blue-900/30 dark:text-blue-300 dark:hover:bg-blue-900/50'
-            >
-              {enrichStatus === 'loading' ? 'Enriching...' : 'Enrich Metadata'}
-            </button>
+            <DropdownMenu>
+              <DropdownMenuTrigger
+                disabled={enrichStatus === 'loading'}
+                className='inline-flex items-center gap-1.5 rounded-md border border-blue-300 bg-blue-50 px-3 py-1.5 text-sm font-medium text-blue-700 transition-colors hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-blue-700 dark:bg-blue-900/30 dark:text-blue-300 dark:hover:bg-blue-900/50'
+              >
+                {enrichStatus === 'loading' ? 'Enriching...' : 'Enrich Metadata'}
+                <ChevronDownIcon className='size-3.5' />
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align='start'>
+                <DropdownMenuItem onClick={() => handleEnrich(null)}>
+                  All Sources
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                {ENRICH_SOURCES.filter((s) => s.id !== null).map((s) => (
+                  <DropdownMenuItem
+                    key={s.id}
+                    onClick={() => handleEnrich(s.id)}
+                  >
+                    {s.label}
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
             {enrichMessage && (
               <span
                 className={`text-xs ${enrichStatus === 'error' ? 'text-destructive' : 'text-green-600 dark:text-green-400'}`}
@@ -184,6 +224,9 @@ export function ItemDetailView({ setNumber }: ItemDetailViewProps) {
           </div>
         </div>
       </div>
+
+      {/* BrickLink price analysis charts */}
+      <BricklinkPriceChart setNumber={setNumber} />
 
       {/* Price history table */}
       <div>

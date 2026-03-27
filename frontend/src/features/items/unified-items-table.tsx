@@ -91,6 +91,31 @@ const columns: ColumnDef<UnifiedItem>[] = [
     size: 110
   },
   {
+    accessorKey: 'toysrus_price_cents',
+    header: ({ column }) => (
+      <DataTableColumnHeader column={column} title='TRU' />
+    ),
+    cell: ({ row }) => {
+      const cents = row.getValue('toysrus_price_cents') as number | null;
+      const url = row.original.toysrus_url;
+      const formatted = formatPrice(cents, 'MYR');
+      if (!cents) return <span className='text-muted-foreground'>-</span>;
+      return url ? (
+        <a
+          href={url}
+          target='_blank'
+          rel='noopener noreferrer'
+          className='text-primary font-mono text-sm hover:underline'
+        >
+          {formatted}
+        </a>
+      ) : (
+        <span className='font-mono text-sm'>{formatted}</span>
+      );
+    },
+    size: 110
+  },
+  {
     accessorKey: 'bricklink_new_cents',
     header: ({ column }) => (
       <DataTableColumnHeader column={column} title='BL New' />
