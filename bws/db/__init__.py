@@ -1,0 +1,1 @@
+"""BWS database operations (DuckDB)."""
