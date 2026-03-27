@@ -164,13 +164,13 @@ async def scrape_shop_page(
             page = await new_page(browser)
             setup_dialog_handler(page)
 
-            # Navigate to home first to handle popups/login
-            await page.goto(SHOPEE_BASE, wait_until="domcontentloaded")
+            # Navigate directly to the target URL
+            await page.goto(url, wait_until="domcontentloaded")
             await human_delay(min_ms=2_000, max_ms=4_000)
             await dismiss_popups_loop(page, interval_ms=2_000, max_rounds=5)
             await select_english(page)
 
-            # Handle login if redirected
+            # Handle login if Shopee redirected us
             if "/buyer/login" in page.url:
                 if not await is_logged_in(page):
                     logged_in = await login(page)
@@ -180,11 +180,10 @@ async def scrape_shop_page(
                             query=url,
                             error="Login failed or timed out",
                         )
-
-            # Now navigate to the target shop page
-            await page.goto(url, wait_until="domcontentloaded")
-            await human_delay(min_ms=2_000, max_ms=4_000)
-            await dismiss_popups_loop(page, interval_ms=2_000, max_rounds=3)
+                    # After login, go to the actual target
+                    await page.goto(url, wait_until="domcontentloaded")
+                    await human_delay(min_ms=2_000, max_ms=3_000)
+                    await dismiss_popups_loop(page, interval_ms=2_000, max_rounds=3)
 
             # Scroll down to trigger lazy-loading of product cards
             await _scroll_to_load(page, max_scrolls=10)
