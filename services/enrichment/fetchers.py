@@ -69,7 +69,7 @@ def fetch_from_bricklink(
                 logger.info("Bricklink cache hit for %s (age: %s)", set_number, datetime.now(tz=timezone.utc) - scraped_at)
                 return adapt_bricklink(cached)
     except Exception:
-        pass  # Cache miss, proceed to HTTP
+        logger.debug("Bricklink cache lookup failed for %s, falling back to HTTP", set_number, exc_info=True)
 
     # HTTP scrape
     try:
@@ -120,7 +120,7 @@ def fetch_from_worldbricks(
                 logger.info("WorldBricks cache hit for %s", set_number)
                 return adapt_worldbricks(wb_data)
     except Exception:
-        pass
+        logger.debug("WorldBricks cache lookup failed for %s, falling back to HTTP", set_number, exc_info=True)
 
     # HTTP scrape
     try:
@@ -173,7 +173,7 @@ def fetch_from_brickranker(
                 logger.info("BrickRanker cache hit for %s", set_number)
                 return adapt_brickranker(br_item)
     except Exception:
-        pass
+        logger.debug("BrickRanker cache lookup failed for %s, falling back to HTTP", set_number, exc_info=True)
 
     # HTTP scrape (bulk -- scrapes all items)
     try:
