@@ -139,6 +139,91 @@ async def search_shopee(
         )
 
 
+async def scrape_shop_page(
+    url: str,
+    *,
+    max_items: int = 200,
+) -> ShopeeScrapeResult:
+    """Scrape all products from a Shopee shop/collection page.
+
+    Navigates directly to the given URL (e.g. a shop collection page)
+    and extracts all visible products. Handles popups, login redirects,
+    and scrolls down to load lazy-loaded items.
+
+    Args:
+        url: Full Shopee URL to scrape
+        max_items: Maximum products to extract
+
+    Returns:
+        ShopeeScrapeResult with parsed products or error
+    """
+    try:
+        async with shopee_browser() as browser:
+            page = await new_page(browser)
+            setup_dialog_handler(page)
+
+            # Navigate to home first to handle popups/login
+            await page.goto(SHOPEE_BASE, wait_until="domcontentloaded")
+            await human_delay(min_ms=2_000, max_ms=4_000)
+            await dismiss_popups_loop(page, interval_ms=2_000, max_rounds=5)
+            await select_english(page)
+
+            # Handle login if redirected
+            if "/buyer/login" in page.url:
+                if not await is_logged_in(page):
+                    logged_in = await login(page)
+                    if not logged_in:
+                        return ShopeeScrapeResult(
+                            success=False,
+                            query=url,
+                            error="Login failed or timed out",
+                        )
+
+            # Now navigate to the target shop page
+            await page.goto(url, wait_until="domcontentloaded")
+            await human_delay(min_ms=2_000, max_ms=4_000)
+            await dismiss_popups_loop(page, interval_ms=2_000, max_rounds=3)
+
+            # Scroll down to trigger lazy-loading of product cards
+            await _scroll_to_load(page, max_scrolls=10)
+
+            # Parse products (same DOM structure as search results)
+            items = await parse_search_results(page, max_items)
+
+            return ShopeeScrapeResult(
+                success=True,
+                query=url,
+                items=items,
+            )
+
+    except Exception as e:
+        return ShopeeScrapeResult(
+            success=False,
+            query=url,
+            error=str(e),
+        )
+
+
+async def _scroll_to_load(page, max_scrolls: int = 10) -> None:
+    """Scroll down the page to trigger lazy-loading of products."""
+    for _ in range(max_scrolls):
+        previous_height = await page.evaluate("document.body.scrollHeight")
+        await page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+        await human_delay(min_ms=1_000, max_ms=2_000)
+        new_height = await page.evaluate("document.body.scrollHeight")
+        if new_height == previous_height:
+            break
+
+
+def scrape_shop_page_sync(
+    url: str,
+    *,
+    max_items: int = 200,
+) -> ShopeeScrapeResult:
+    """Synchronous wrapper for scrape_shop_page."""
+    return asyncio.run(scrape_shop_page(url, max_items=max_items))
+
+
 def search_shopee_sync(
     query: str,
     *,

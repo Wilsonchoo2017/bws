@@ -1,10 +1,19 @@
 """Shopee browser automation service."""
 
-from services.shopee.scraper import search_shopee, ShopeeScrapeResult
+from services.shopee.scraper import (
+    ShopeeScrapeResult,
+    scrape_shop_page,
+    scrape_shop_page_sync,
+    search_shopee,
+    search_shopee_sync,
+)
 from services.shopee.parser import ShopeeProduct
 
 __all__ = [
-    "search_shopee",
     "ShopeeScrapeResult",
     "ShopeeProduct",
+    "scrape_shop_page",
+    "scrape_shop_page_sync",
+    "search_shopee",
+    "search_shopee_sync",
 ]
