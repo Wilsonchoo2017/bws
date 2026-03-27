@@ -9,7 +9,7 @@ Core algorithm:
 """
 
 import logging
-from typing import TYPE_CHECKING
+from collections.abc import Callable
 
 from services.enrichment.circuit_breaker import (
     CircuitBreakerState,
@@ -31,15 +31,21 @@ from services.enrichment.types import (
 )
 from services.enrichment.validator import validate_field
 
-if TYPE_CHECKING:
-    from collections.abc import Callable
-
 logger = logging.getLogger("bws.enrichment")
 
-
-# Type alias for the source fetcher function.
 # Each source fetcher takes a set_number and returns a SourceResult.
-SourceFetcher = "Callable[[str], SourceResult]"
+SourceFetcher = Callable[[str], SourceResult]
+
+_FIELD_TO_COLUMN: dict[MetadataField, str] = {
+    MetadataField.TITLE: "title",
+    MetadataField.YEAR_RELEASED: "year_released",
+    MetadataField.YEAR_RETIRED: "year_retired",
+    MetadataField.PARTS_COUNT: "parts_count",
+    MetadataField.THEME: "theme",
+    MetadataField.IMAGE_URL: "image_url",
+    MetadataField.WEIGHT: "weight",
+    MetadataField.RETIRING_SOON: "retiring_soon",
+}
 
 
 def detect_missing_fields(
@@ -167,7 +173,7 @@ def resolve_fields(
 def enrich(
     set_number: str,
     item: dict,
-    fetchers: dict[SourceId, "SourceFetcher"],
+    fetchers: dict[SourceId, SourceFetcher],
     cb_state: CircuitBreakerState,
     *,
     fields: tuple[MetadataField, ...] | None = None,
