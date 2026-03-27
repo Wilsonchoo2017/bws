@@ -4,6 +4,8 @@
 import re
 from typing import TYPE_CHECKING
 
+from services.items.repository import get_or_create_item, record_price
+from services.items.set_number import extract_set_number
 from services.shopee.parser import ShopeeProduct
 
 if TYPE_CHECKING:
@@ -80,6 +82,26 @@ def upsert_products(
             ],
         )
         saved += 1
+
+        # Also write to unified lego_items + price_records
+        set_number = extract_set_number(product.title)
+        if set_number and price_cents:
+            get_or_create_item(
+                conn,
+                set_number,
+                title=product.title.split("(")[0].strip(),
+                image_url=product.image_url,
+            )
+            record_price(
+                conn,
+                set_number,
+                source="shopee",
+                price_cents=price_cents,
+                currency="MYR",
+                title=product.title,
+                url=product.product_url,
+                shop_name=product.shop_name,
+            )
 
     return saved
 

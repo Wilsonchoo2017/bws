@@ -144,6 +144,36 @@ CREATE TABLE IF NOT EXISTS toysrus_price_history (
 );
 """
 
+LEGO_ITEMS_DDL = """
+CREATE TABLE IF NOT EXISTS lego_items (
+    id INTEGER PRIMARY KEY,
+    set_number VARCHAR NOT NULL UNIQUE,
+    title VARCHAR,
+    theme VARCHAR,
+    year_released INTEGER,
+    year_retired INTEGER,
+    parts_count INTEGER,
+    image_url VARCHAR,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+"""
+
+PRICE_RECORDS_DDL = """
+CREATE TABLE IF NOT EXISTS price_records (
+    id INTEGER PRIMARY KEY,
+    set_number VARCHAR NOT NULL,
+    source VARCHAR NOT NULL,
+    price_cents INTEGER NOT NULL,
+    currency VARCHAR NOT NULL DEFAULT 'MYR',
+    title VARCHAR,
+    url VARCHAR,
+    shop_name VARCHAR,
+    condition VARCHAR,
+    recorded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+"""
+
 BRICKRANKER_ITEMS_DDL = """
 CREATE TABLE IF NOT EXISTS brickranker_items (
     id INTEGER PRIMARY KEY,
@@ -172,6 +202,8 @@ CREATE SEQUENCE IF NOT EXISTS shopee_products_id_seq;
 CREATE SEQUENCE IF NOT EXISTS shopee_scrape_history_id_seq;
 CREATE SEQUENCE IF NOT EXISTS toysrus_products_id_seq;
 CREATE SEQUENCE IF NOT EXISTS toysrus_price_history_id_seq;
+CREATE SEQUENCE IF NOT EXISTS lego_items_id_seq;
+CREATE SEQUENCE IF NOT EXISTS price_records_id_seq;
 """
 
 # Index creation statements
@@ -208,6 +240,12 @@ CREATE INDEX IF NOT EXISTS idx_toysrus_products_available
     ON toysrus_products(available);
 CREATE INDEX IF NOT EXISTS idx_toysrus_price_history_sku
     ON toysrus_price_history(sku, scraped_at);
+CREATE INDEX IF NOT EXISTS idx_lego_items_set_number
+    ON lego_items(set_number);
+CREATE INDEX IF NOT EXISTS idx_price_records_set_source
+    ON price_records(set_number, source, recorded_at);
+CREATE INDEX IF NOT EXISTS idx_price_records_recorded
+    ON price_records(recorded_at);
 """
 
 ALL_DDL = [
@@ -222,6 +260,8 @@ ALL_DDL = [
     SHOPEE_SCRAPE_HISTORY_DDL,
     TOYSRUS_PRODUCTS_DDL,
     TOYSRUS_PRICE_HISTORY_DDL,
+    LEGO_ITEMS_DDL,
+    PRICE_RECORDS_DDL,
     INDEXES_DDL,
 ]
 
