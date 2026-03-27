@@ -13,7 +13,9 @@ def get_or_create_item(
     title: str | None = None,
     theme: str | None = None,
     year_released: int | None = None,
+    year_retired: int | None = None,
     parts_count: int | None = None,
+    weight: str | None = None,
     image_url: str | None = None,
 ) -> None:
     """Ensure a lego_items row exists for this set number.
@@ -23,17 +25,22 @@ def get_or_create_item(
     """
     conn.execute(
         """
-        INSERT INTO lego_items (id, set_number, title, theme, year_released, parts_count, image_url)
-        VALUES (nextval('lego_items_id_seq'), ?, ?, ?, ?, ?, ?)
+        INSERT INTO lego_items (
+            id, set_number, title, theme, year_released, year_retired,
+            parts_count, weight, image_url
+        )
+        VALUES (nextval('lego_items_id_seq'), ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT (set_number) DO UPDATE SET
             title = COALESCE(EXCLUDED.title, lego_items.title),
             theme = COALESCE(EXCLUDED.theme, lego_items.theme),
             year_released = COALESCE(EXCLUDED.year_released, lego_items.year_released),
+            year_retired = COALESCE(EXCLUDED.year_retired, lego_items.year_retired),
             parts_count = COALESCE(EXCLUDED.parts_count, lego_items.parts_count),
+            weight = COALESCE(EXCLUDED.weight, lego_items.weight),
             image_url = COALESCE(EXCLUDED.image_url, lego_items.image_url),
-            updated_at = CURRENT_TIMESTAMP
+            updated_at = now()
         """,
-        [set_number, title, theme, year_released, parts_count, image_url],
+        [set_number, title, theme, year_released, year_retired, parts_count, weight, image_url],
     )
 
 
@@ -57,7 +64,7 @@ def record_price(
             title, url, shop_name, condition, recorded_at
         ) VALUES (
             nextval('price_records_id_seq'),
-            ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP
+            ?, ?, ?, ?, ?, ?, ?, ?, now()
         )
         """,
         [set_number, source, price_cents, currency, title, url, shop_name, condition],

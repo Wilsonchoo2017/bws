@@ -153,6 +153,7 @@ CREATE TABLE IF NOT EXISTS lego_items (
     year_released INTEGER,
     year_retired INTEGER,
     parts_count INTEGER,
+    weight VARCHAR,
     image_url VARCHAR,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP

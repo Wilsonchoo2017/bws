@@ -56,7 +56,7 @@ def upsert_products(
                 product_url, image_url, source_url, scraped_at
             ) VALUES (
                 nextval('shopee_products_id_seq'),
-                ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP
+                ?, ?, ?, ?, ?, ?, ?, ?, ?, now()
             )
             ON CONFLICT (product_url) DO UPDATE SET
                 title = EXCLUDED.title,
@@ -67,7 +67,7 @@ def upsert_products(
                 shop_name = EXCLUDED.shop_name,
                 image_url = EXCLUDED.image_url,
                 source_url = EXCLUDED.source_url,
-                scraped_at = CURRENT_TIMESTAMP
+                scraped_at = now()
             """,
             [
                 product.title,
@@ -120,7 +120,7 @@ def record_scrape(
             id, source_url, items_found, success, error, scraped_at
         ) VALUES (
             nextval('shopee_scrape_history_id_seq'),
-            ?, ?, ?, ?, CURRENT_TIMESTAMP
+            ?, ?, ?, ?, now()
         )
         """,
         [source_url, items_found, success, error],
