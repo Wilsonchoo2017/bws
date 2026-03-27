@@ -17,6 +17,8 @@ def get_or_create_item(
     parts_count: int | None = None,
     weight: str | None = None,
     image_url: str | None = None,
+    rrp_cents: int | None = None,
+    rrp_currency: str | None = None,
 ) -> None:
     """Ensure a lego_items row exists for this set number.
 
@@ -27,9 +29,9 @@ def get_or_create_item(
         """
         INSERT INTO lego_items (
             id, set_number, title, theme, year_released, year_retired,
-            parts_count, weight, image_url
+            parts_count, weight, image_url, rrp_cents, rrp_currency
         )
-        VALUES (nextval('lego_items_id_seq'), ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (nextval('lego_items_id_seq'), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT (set_number) DO UPDATE SET
             title = COALESCE(EXCLUDED.title, lego_items.title),
             theme = COALESCE(EXCLUDED.theme, lego_items.theme),
@@ -38,9 +40,12 @@ def get_or_create_item(
             parts_count = COALESCE(EXCLUDED.parts_count, lego_items.parts_count),
             weight = COALESCE(EXCLUDED.weight, lego_items.weight),
             image_url = COALESCE(EXCLUDED.image_url, lego_items.image_url),
+            rrp_cents = COALESCE(EXCLUDED.rrp_cents, lego_items.rrp_cents),
+            rrp_currency = COALESCE(EXCLUDED.rrp_currency, lego_items.rrp_currency),
             updated_at = now()
         """,
-        [set_number, title, theme, year_released, year_retired, parts_count, weight, image_url],
+        [set_number, title, theme, year_released, year_retired, parts_count, weight, image_url,
+         rrp_cents, rrp_currency],
     )
 
 
@@ -100,6 +105,8 @@ def get_all_items(conn: "DuckDBPyConnection") -> list[dict]:
             li.theme,
             li.year_released,
             li.image_url,
+            li.rrp_cents,
+            li.rrp_currency,
             li.updated_at,
             s.price_cents AS shopee_price_cents,
             s.currency AS shopee_currency,
@@ -124,7 +131,8 @@ def get_all_items(conn: "DuckDBPyConnection") -> list[dict]:
     """).fetchall()
 
     columns = [
-        "set_number", "title", "theme", "year_released", "image_url", "updated_at",
+        "set_number", "title", "theme", "year_released", "image_url",
+        "rrp_cents", "rrp_currency", "updated_at",
         "shopee_price_cents", "shopee_currency", "shopee_url", "shopee_last_seen",
         "toysrus_price_cents", "toysrus_currency", "toysrus_url", "toysrus_last_seen",
         "bricklink_new_cents", "bricklink_new_currency", "bricklink_new_last_seen",

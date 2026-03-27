@@ -273,8 +273,8 @@ def create_price_history(
     # Write to unified price_records table
     set_number = item_id.split("-")[0]
     for box, condition in [
-        (data.current_new, "new"),
-        (data.current_used, "used"),
+        (data.six_month_new, "new"),
+        (data.six_month_used, "used"),
     ]:
         if box and box.avg_price:
             record_price(

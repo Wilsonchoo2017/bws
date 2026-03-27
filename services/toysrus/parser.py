@@ -23,12 +23,18 @@ class ToysRUsProduct:
     url: str
     image_url: str
     available: bool
+    original_price_myr: str | None = None
 
 
 _METADATA_PATTERN = re.compile(r"data-metadata='({[^']*})'")
 _URL_PATTERN = re.compile(r'href="(/[^"]*\.html)"[^>]*data-gtm-product-link')
 _IMAGE_PATTERN = re.compile(r'data-src="(https://www\.toysrus\.com\.my/dw/image/[^"]*)"')
 _STATUS_PATTERN = re.compile(r'<div class="status">(\w+)</div>')
+_OUT_OF_STOCK_PATTERN = re.compile(r'class="[^"]*(?:out-of-stock|sold-out|unavailable)[^"]*"', re.IGNORECASE)
+_ADD_TO_CART_PATTERN = re.compile(r'class="[^"]*add-to-cart[^"]*"')
+_ORIGINAL_PRICE_PATTERN = re.compile(
+    r'class="strike-through\s+list">\s*<span\s+class="value"\s+content="([\d.]+)"'
+)
 _TOTAL_PATTERN = re.compile(r"(\d+)\s+products")
 _BADGE_PATTERN = re.compile(r'class="badge[^"]*">\s*(\d+)\s*<')
 
@@ -82,7 +88,19 @@ def _parse_tile(tile_html: str) -> ToysRUsProduct | None:
     image_url = image_match.group(1) if image_match else ""
 
     status_match = _STATUS_PATTERN.search(tile_html)
-    available = status_match.group(1) != "unavailable" if status_match else True
+    if status_match:
+        available = status_match.group(1) != "unavailable"
+    elif _OUT_OF_STOCK_PATTERN.search(tile_html):
+        available = False
+    else:
+        # Default to unavailable when we can't determine status —
+        # only products with a confirmed available status get through
+        has_add_to_cart = _ADD_TO_CART_PATTERN.search(tile_html) is not None
+        available = has_add_to_cart
+
+    # Extract original/undiscounted price from strike-through HTML
+    original_match = _ORIGINAL_PRICE_PATTERN.search(tile_html)
+    original_price_myr = original_match.group(1) if original_match else None
 
     return ToysRUsProduct(
         sku=meta.get("sku", ""),
@@ -94,4 +112,5 @@ def _parse_tile(tile_html: str) -> ToysRUsProduct | None:
         url=url,
         image_url=image_url,
         available=available,
+        original_price_myr=original_price_myr,
     )

@@ -155,6 +155,8 @@ CREATE TABLE IF NOT EXISTS lego_items (
     parts_count INTEGER,
     weight VARCHAR,
     image_url VARCHAR,
+    rrp_cents INTEGER,
+    rrp_currency VARCHAR DEFAULT 'MYR',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
@@ -267,6 +269,23 @@ ALL_DDL = [
 ]
 
 
+def _migrate_lego_items(conn: "DuckDBPyConnection") -> None:
+    """Add columns introduced after initial table creation."""
+    existing = {
+        row[0]
+        for row in conn.execute(
+            "SELECT column_name FROM information_schema.columns "
+            "WHERE table_name = 'lego_items'"
+        ).fetchall()
+    }
+    if "rrp_cents" not in existing:
+        conn.execute("ALTER TABLE lego_items ADD COLUMN rrp_cents INTEGER")
+    if "rrp_currency" not in existing:
+        conn.execute(
+            "ALTER TABLE lego_items ADD COLUMN rrp_currency VARCHAR DEFAULT 'MYR'"
+        )
+
+
 def init_schema(conn: "DuckDBPyConnection") -> None:
     """Initialize the database schema.
 
@@ -277,6 +296,7 @@ def init_schema(conn: "DuckDBPyConnection") -> None:
     """
     for ddl in ALL_DDL:
         conn.execute(ddl)
+    _migrate_lego_items(conn)
 
 
 def drop_all_tables(conn: "DuckDBPyConnection") -> None:

@@ -22,6 +22,8 @@ export interface UnifiedItem {
   theme: string | null;
   year_released: number | null;
   image_url: string | null;
+  rrp_cents: number | null;
+  rrp_currency: string | null;
   updated_at: string | null;
   shopee_price_cents: number | null;
   shopee_currency: string | null;

@@ -123,7 +123,7 @@ function PriceTooltip({ active, payload, label }: any) {
       <p className='mb-1 font-medium'>{label}</p>
       {payload.map((entry: any) => (
         <p key={entry.dataKey} style={{ color: entry.color }}>
-          {entry.name}: ${entry.value?.toFixed(2) ?? 'N/A'}
+          {entry.name}: RM{entry.value?.toFixed(2) ?? 'N/A'}
         </p>
       ))}
     </div>
@@ -182,17 +182,17 @@ export function BricklinkPriceChart({ setNumber }: BricklinkPriceChartProps) {
   const tabs: { key: ChartTab; label: string; disabled: boolean }[] = [
     {
       key: 'monthly-price',
-      label: 'Monthly Avg Price',
+      label: 'Sold Prices',
       disabled: monthlyChart.length === 0,
     },
     {
       key: 'monthly-volume',
-      label: 'Monthly Volume',
+      label: 'Transaction Volume',
       disabled: monthlyChart.length === 0,
     },
     {
       key: 'snapshots',
-      label: 'Scrape Snapshots',
+      label: 'Sold vs Listing',
       disabled: snapshotChart.length === 0,
     },
   ];
@@ -243,14 +243,14 @@ export function BricklinkPriceChart({ setNumber }: BricklinkPriceChartProps) {
               />
               <YAxis
                 tick={{ fontSize: 11 }}
-                tickFormatter={(v) => `$${v}`}
+                tickFormatter={(v) => `RM${v}`}
               />
               <Tooltip content={<PriceTooltip />} />
               <Legend />
               <Area
                 type='monotone'
                 dataKey='new_avg'
-                name='New (Avg)'
+                name='Sold New (Avg)'
                 stroke='#3b82f6'
                 fill='#3b82f6'
                 fillOpacity={0.1}
@@ -260,7 +260,7 @@ export function BricklinkPriceChart({ setNumber }: BricklinkPriceChartProps) {
               <Area
                 type='monotone'
                 dataKey='used_avg'
-                name='Used (Avg)'
+                name='Sold Used (Avg)'
                 stroke='#06b6d4'
                 fill='#06b6d4'
                 fillOpacity={0.1}
@@ -285,13 +285,13 @@ export function BricklinkPriceChart({ setNumber }: BricklinkPriceChartProps) {
               <Legend />
               <Bar
                 dataKey='new_qty'
-                name='New (Qty Sold)'
+                name='New Transactions'
                 fill='#3b82f6'
                 radius={[2, 2, 0, 0]}
               />
               <Bar
                 dataKey='used_qty'
-                name='Used (Qty Sold)'
+                name='Used Transactions'
                 fill='#06b6d4'
                 radius={[2, 2, 0, 0]}
               />
@@ -310,14 +310,15 @@ export function BricklinkPriceChart({ setNumber }: BricklinkPriceChartProps) {
               />
               <YAxis
                 tick={{ fontSize: 11 }}
-                tickFormatter={(v) => `$${v}`}
+                tickFormatter={(v) => `RM${v}`}
               />
               <Tooltip content={<PriceTooltip />} />
               <Legend />
+              {/* Sold prices -- prominent */}
               <Area
                 type='monotone'
-                dataKey='current_new_avg'
-                name='Current New'
+                dataKey='six_month_new_avg'
+                name='Sold New (6mo)'
                 stroke='#3b82f6'
                 fill='#3b82f6'
                 fillOpacity={0.1}
@@ -326,32 +327,31 @@ export function BricklinkPriceChart({ setNumber }: BricklinkPriceChartProps) {
               />
               <Area
                 type='monotone'
-                dataKey='current_used_avg'
-                name='Current Used'
+                dataKey='six_month_used_avg'
+                name='Sold Used (6mo)'
                 stroke='#06b6d4'
                 fill='#06b6d4'
                 fillOpacity={0.1}
                 strokeWidth={2}
                 connectNulls
               />
+              {/* Listing prices -- secondary */}
               <Area
                 type='monotone'
-                dataKey='six_month_new_avg'
-                name='6-Mo New'
-                stroke='#8b5cf6'
-                fill='#8b5cf6'
-                fillOpacity={0.05}
+                dataKey='current_new_avg'
+                name='Listed New'
+                stroke='#9ca3af'
+                fill='none'
                 strokeWidth={1.5}
                 strokeDasharray='5 5'
                 connectNulls
               />
               <Area
                 type='monotone'
-                dataKey='six_month_used_avg'
-                name='6-Mo Used'
-                stroke='#a78bfa'
-                fill='#a78bfa'
-                fillOpacity={0.05}
+                dataKey='current_used_avg'
+                name='Listed Used'
+                stroke='#d1d5db'
+                fill='none'
                 strokeWidth={1.5}
                 strokeDasharray='5 5'
                 connectNulls
@@ -376,42 +376,86 @@ function PriceSummaryBoxes({
   latest: BricklinkPriceData['price_history'][number];
   currency: string;
 }) {
-  const boxes = [
-    { label: 'Current New', box: latest.current_new },
-    { label: 'Current Used', box: latest.current_used },
-    { label: '6-Month New', box: latest.six_month_new },
-    { label: '6-Month Used', box: latest.six_month_used },
+  const soldBoxes = [
+    { label: 'Sold New (6mo)', box: latest.six_month_new },
+    { label: 'Sold Used (6mo)', box: latest.six_month_used },
+  ];
+  const listingBoxes = [
+    { label: 'For Sale New', box: latest.current_new },
+    { label: 'For Sale Used', box: latest.current_used },
   ];
 
   return (
-    <div className='grid grid-cols-2 gap-3 md:grid-cols-4'>
-      {boxes.map(({ label, box }) => (
-        <div
-          key={label}
-          className='border-border rounded-lg border px-3 py-2'
-        >
-          <div className='text-muted-foreground text-xs'>{label}</div>
-          {box ? (
-            <>
-              <div className='mt-0.5 font-mono text-lg font-semibold'>
-                {formatPrice(box.avg_price_cents, currency)}
-              </div>
-              <div className='text-muted-foreground mt-0.5 flex flex-col gap-0.5 text-xs'>
-                <span>
-                  {formatPrice(box.min_price_cents, currency)} -{' '}
-                  {formatPrice(box.max_price_cents, currency)}
-                </span>
-                <span>
-                  {box.times_sold ?? 0} sold, {box.total_lots ?? 0} lots,{' '}
-                  {box.total_qty ?? 0} qty
-                </span>
-              </div>
-            </>
-          ) : (
-            <div className='text-muted-foreground mt-0.5 text-sm'>No data</div>
-          )}
+    <div className='flex flex-col gap-3'>
+      {/* Sold prices -- actual transactions */}
+      <div>
+        <div className='text-muted-foreground mb-1.5 text-xs font-medium uppercase tracking-wide'>
+          Sold Prices (Transactions)
         </div>
-      ))}
+        <div className='grid grid-cols-2 gap-3'>
+          {soldBoxes.map(({ label, box }) => (
+            <div
+              key={label}
+              className='border-border rounded-lg border px-3 py-2'
+            >
+              <div className='text-muted-foreground text-xs'>{label}</div>
+              {box ? (
+                <>
+                  <div className='mt-0.5 font-mono text-lg font-semibold'>
+                    {formatPrice(box.avg_price_cents, currency)}
+                  </div>
+                  <div className='text-muted-foreground mt-0.5 flex flex-col gap-0.5 text-xs'>
+                    <span>
+                      {formatPrice(box.min_price_cents, currency)} -{' '}
+                      {formatPrice(box.max_price_cents, currency)}
+                    </span>
+                    <span>
+                      {box.times_sold ?? 0} transactions, {box.total_qty ?? 0} qty
+                    </span>
+                  </div>
+                </>
+              ) : (
+                <div className='text-muted-foreground mt-0.5 text-sm'>No data</div>
+              )}
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* For sale prices -- current listings */}
+      <div>
+        <div className='text-muted-foreground mb-1.5 text-xs font-medium uppercase tracking-wide'>
+          Current Listings (For Sale)
+        </div>
+        <div className='grid grid-cols-2 gap-3'>
+          {listingBoxes.map(({ label, box }) => (
+            <div
+              key={label}
+              className='border-border rounded-lg border px-3 py-2 opacity-80'
+            >
+              <div className='text-muted-foreground text-xs'>{label}</div>
+              {box ? (
+                <>
+                  <div className='mt-0.5 font-mono text-lg font-semibold'>
+                    {formatPrice(box.avg_price_cents, currency)}
+                  </div>
+                  <div className='text-muted-foreground mt-0.5 flex flex-col gap-0.5 text-xs'>
+                    <span>
+                      {formatPrice(box.min_price_cents, currency)} -{' '}
+                      {formatPrice(box.max_price_cents, currency)}
+                    </span>
+                    <span>
+                      {box.total_lots ?? 0} listings, {box.total_qty ?? 0} qty
+                    </span>
+                  </div>
+                </>
+              ) : (
+                <div className='text-muted-foreground mt-0.5 text-sm'>No data</div>
+              )}
+            </div>
+          ))}
+        </div>
+      </div>
     </div>
   );
 }
@@ -431,14 +475,14 @@ function MonthlySalesTable({
 
   return (
     <div className='mt-4'>
-      <h3 className='mb-2 text-sm font-semibold'>Monthly Sales Breakdown</h3>
+      <h3 className='mb-2 text-sm font-semibold'>Monthly Transaction History</h3>
       <div className='max-h-[300px] overflow-auto rounded border'>
         <table className='w-full text-sm'>
           <thead className='bg-muted/50 sticky top-0'>
             <tr>
               <th className='px-3 py-2 text-left font-medium'>Month</th>
               <th className='px-3 py-2 text-left font-medium'>Condition</th>
-              <th className='px-3 py-2 text-right font-medium'>Sold</th>
+              <th className='px-3 py-2 text-right font-medium'>Txns</th>
               <th className='px-3 py-2 text-right font-medium'>Qty</th>
               <th className='px-3 py-2 text-right font-medium'>Min</th>
               <th className='px-3 py-2 text-right font-medium'>Avg</th>

@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   useReactTable,
   getCoreRowModel,
@@ -12,6 +12,7 @@ import {
 } from '@tanstack/react-table';
 import { DataTable } from '@/components/ui/table/data-table';
 import { DataTableColumnHeader } from '@/components/ui/table/data-table-column-header';
+import { PriceDealFilter } from './price-deal-filter';
 import type { UnifiedItem } from './types';
 import { formatPrice } from './types';
 
@@ -64,6 +65,22 @@ const columns: ColumnDef<UnifiedItem>[] = [
     ),
     cell: ({ row }) => row.getValue('year_released') ?? '-',
     size: 70
+  },
+  {
+    accessorKey: 'rrp_cents',
+    header: ({ column }) => (
+      <DataTableColumnHeader column={column} title='RRP' />
+    ),
+    cell: ({ row }) => {
+      const cents = row.getValue('rrp_cents') as number | null;
+      if (!cents) return <span className='text-muted-foreground'>-</span>;
+      return (
+        <span className='font-mono text-sm'>
+          {formatPrice(cents, row.original.rrp_currency)}
+        </span>
+      );
+    },
+    size: 100
   },
   {
     accessorKey: 'shopee_price_cents',
@@ -168,6 +185,25 @@ export function UnifiedItemsTable() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [sorting, setSorting] = useState<SortingState>([]);
+  const [dealFilter, setDealFilter] = useState<
+    ((items: UnifiedItem[]) => UnifiedItem[]) | null
+  >(null);
+  const [hideNoRetail, setHideNoRetail] = useState(false);
+
+  const filteredData = useMemo(() => {
+    let result = data;
+    if (hideNoRetail) {
+      result = result.filter(
+        (item) =>
+          item.toysrus_price_cents !== null ||
+          item.shopee_price_cents !== null
+      );
+    }
+    if (dealFilter) {
+      result = dealFilter(result);
+    }
+    return result;
+  }, [data, dealFilter, hideNoRetail]);
 
   useEffect(() => {
     fetch('/api/items')
@@ -184,7 +220,7 @@ export function UnifiedItemsTable() {
   }, []);
 
   const table = useReactTable({
-    data,
+    data: filteredData,
     columns,
     state: { sorting },
     onSortingChange: setSorting,
@@ -223,5 +259,21 @@ export function UnifiedItemsTable() {
     );
   }
 
-  return <DataTable table={table} />;
+  return (
+    <div className='flex flex-1 flex-col gap-3 overflow-hidden'>
+      <div className='flex items-center gap-3'>
+        <label className='bg-muted/50 flex cursor-pointer items-center gap-2 rounded-lg border px-4 py-2.5 text-sm font-medium'>
+          <input
+            type='checkbox'
+            checked={hideNoRetail}
+            onChange={() => setHideNoRetail((prev) => !prev)}
+            className='accent-primary h-4 w-4 rounded'
+          />
+          Has retail price
+        </label>
+        <PriceDealFilter onFilterChange={(fn) => setDealFilter(() => fn)} />
+      </div>
+      <DataTable table={table} />
+    </div>
+  );
 }

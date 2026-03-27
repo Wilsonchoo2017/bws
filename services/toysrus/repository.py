@@ -108,14 +108,20 @@ def upsert_product(conn: "DuckDBPyConnection", product: ToysRUsProduct) -> int:
     # Always record price history
     _create_price_history(conn, product.sku, product.price_myr, product.available)
 
-    # Write to unified lego_items + price_records
+    # Only write available products to unified lego_items + price_records
     set_number = extract_set_number(product.name)
-    if set_number:
+    if set_number and product.available:
+        # RRP = original (undiscounted) price if on sale, otherwise the regular price
+        rrp_source = product.original_price_myr or product.price_myr
+        rrp_cents = _parse_myr_cents(rrp_source)
+
         get_or_create_item(
             conn,
             set_number,
             title=product.name,
             image_url=product.image_url,
+            rrp_cents=rrp_cents,
+            rrp_currency="MYR",
         )
         price_cents = _parse_myr_cents(product.price_myr)
         if price_cents:

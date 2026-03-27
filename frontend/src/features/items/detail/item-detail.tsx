@@ -1,6 +1,6 @@
 'use client';
 
-import { ChevronDownIcon } from 'lucide-react';
+import { ChevronDownIcon, ExternalLinkIcon } from 'lucide-react';
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import {
@@ -25,8 +25,18 @@ const SOURCE_LABELS: Record<string, string> = {
   shopee: 'Shopee MY',
   bricklink_new: 'Bricklink (New)',
   bricklink_used: 'Bricklink (Used)',
-  toysrus: 'Toys R Us MY'
+  toysrus: 'Toys R Us MY',
 };
+
+function getSourceUrl(source: string, record: PriceRecord, setNumber: string): string | null {
+  if (record.url) return record.url;
+
+  if (source === 'bricklink_new' || source === 'bricklink_used') {
+    return `https://www.bricklink.com/v2/catalog/catalogitem.page?S=${setNumber}-1#T=P`;
+  }
+
+  return null;
+}
 
 const SOURCE_COLORS: Record<string, string> = {
   shopee: 'bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-300',
@@ -205,22 +215,37 @@ export function ItemDetailView({ setNumber }: ItemDetailViewProps) {
 
           {/* Latest prices summary */}
           <div className='mt-4 flex flex-wrap gap-3'>
-            {Array.from(latestBySource.entries()).map(([source, record]) => (
-              <div
-                key={source}
-                className='border-border rounded-lg border px-3 py-2'
-              >
-                <div className='text-muted-foreground text-xs'>
-                  {SOURCE_LABELS[source] ?? source}
-                </div>
-                <div className='mt-0.5 font-mono text-lg font-semibold'>
-                  {formatPrice(record.price_cents, record.currency)}
-                </div>
-                <div className='text-muted-foreground text-xs'>
-                  {new Date(record.recorded_at).toLocaleDateString()}
-                </div>
-              </div>
-            ))}
+            {Array.from(latestBySource.entries()).map(([source, record]) => {
+              const url = getSourceUrl(source, record, setNumber);
+              const Card = url ? 'a' : 'div';
+              const linkProps = url
+                ? { href: url, target: '_blank', rel: 'noopener noreferrer' }
+                : {};
+              return (
+                <Card
+                  key={source}
+                  {...linkProps}
+                  className={`border-border rounded-lg border px-3 py-2 transition-colors ${
+                    url
+                      ? 'hover:border-foreground/30 hover:bg-muted/50 cursor-pointer'
+                      : ''
+                  }`}
+                >
+                  <div className='text-muted-foreground flex items-center gap-1 text-xs'>
+                    {SOURCE_LABELS[source] ?? source}
+                    {url && (
+                      <ExternalLinkIcon className='size-3 opacity-50' />
+                    )}
+                  </div>
+                  <div className='mt-0.5 font-mono text-lg font-semibold'>
+                    {formatPrice(record.price_cents, record.currency)}
+                  </div>
+                  <div className='text-muted-foreground text-xs'>
+                    {new Date(record.recorded_at).toLocaleDateString()}
+                  </div>
+                </Card>
+              );
+            })}
           </div>
         </div>
       </div>

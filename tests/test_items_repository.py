@@ -104,7 +104,8 @@ class TestGetAllItemsColumnCompleteness:
     """Given the get_all_items query, verify all expected columns are present."""
 
     EXPECTED_COLUMNS = {
-        "set_number", "title", "theme", "year_released", "image_url", "updated_at",
+        "set_number", "title", "theme", "year_released", "image_url",
+        "rrp_cents", "rrp_currency", "updated_at",
         "shopee_price_cents", "shopee_currency", "shopee_url", "shopee_last_seen",
         "toysrus_price_cents", "toysrus_currency", "toysrus_url", "toysrus_last_seen",
         "bricklink_new_cents", "bricklink_new_currency", "bricklink_new_last_seen",

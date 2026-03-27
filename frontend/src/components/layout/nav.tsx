@@ -2,7 +2,8 @@ import Link from 'next/link';
 
 const NAV_ITEMS = [
   { href: '/items', label: 'Items' },
-  { href: '/scrape', label: 'Scrape' }
+  { href: '/scrape', label: 'Scrape' },
+  { href: '/workers', label: 'Workers' },
 ];
 
 export function Nav() {
