@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 
 from db.queries import get_next_id, parse_timestamp
 from services.brickranker.parser import RetirementItem
+from services.items.repository import get_or_create_item
 
 
 if TYPE_CHECKING:
@@ -120,6 +121,16 @@ def upsert_item(conn: "DuckDBPyConnection", item: RetirementItem) -> int:
             now,
             now,
         ],
+    )
+
+    # Write to unified lego_items (metadata only, no prices)
+    get_or_create_item(
+        conn,
+        item.set_number,
+        title=item.set_name,
+        theme=item.theme,
+        year_released=item.year_released,
+        image_url=item.image_url,
     )
 
     return item_id

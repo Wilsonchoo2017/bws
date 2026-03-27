@@ -8,6 +8,7 @@ from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 
 from db.queries import get_next_id, parse_timestamp
+from services.items.repository import get_or_create_item, record_price
 from bws_types.models import (
     BricklinkData,
     BricklinkItem,
@@ -221,6 +222,16 @@ def upsert_item(conn: "DuckDBPyConnection", data: BricklinkData) -> int:
         ],
     )
 
+    # Write to unified lego_items table
+    set_number = data.item_id.split("-")[0]  # "75192-1" -> "75192"
+    get_or_create_item(
+        conn,
+        set_number,
+        title=data.title,
+        year_released=data.year_released,
+        image_url=data.image_url,
+    )
+
     return item_id
 
 
@@ -258,6 +269,22 @@ def create_price_history(
             now,
         ],
     )
+
+    # Write to unified price_records table
+    set_number = item_id.split("-")[0]
+    for box, condition in [
+        (data.current_new, "new"),
+        (data.current_used, "used"),
+    ]:
+        if box and box.avg_price:
+            record_price(
+                conn,
+                set_number,
+                source=f"bricklink_{condition}",
+                price_cents=box.avg_price.amount,
+                currency=box.avg_price.currency,
+                condition=condition,
+            )
 
     return history_id
 

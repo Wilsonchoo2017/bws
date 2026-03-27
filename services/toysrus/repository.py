@@ -7,7 +7,11 @@ Pure functions for CRUD operations on ToysRUs data in DuckDB.
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 
+import re
+
 from db.queries import get_next_id
+from services.items.repository import get_or_create_item, record_price
+from services.items.set_number import extract_set_number
 from services.toysrus.parser import ToysRUsProduct
 
 
@@ -16,6 +20,17 @@ if TYPE_CHECKING:
 
 
 _UTC = timezone.utc
+
+
+def _parse_myr_cents(price_myr: str) -> int | None:
+    """Parse a MYR price string to cents. e.g. '123.45' -> 12345."""
+    match = re.search(r"([\d,]+\.?\d*)", price_myr)
+    if not match:
+        return None
+    try:
+        return int(float(match.group(1).replace(",", "")) * 100)
+    except ValueError:
+        return None
 
 
 def upsert_product(conn: "DuckDBPyConnection", product: ToysRUsProduct) -> int:
@@ -92,6 +107,27 @@ def upsert_product(conn: "DuckDBPyConnection", product: ToysRUsProduct) -> int:
 
     # Always record price history
     _create_price_history(conn, product.sku, product.price_myr, product.available)
+
+    # Write to unified lego_items + price_records
+    set_number = extract_set_number(product.name)
+    if set_number:
+        get_or_create_item(
+            conn,
+            set_number,
+            title=product.name,
+            image_url=product.image_url,
+        )
+        price_cents = _parse_myr_cents(product.price_myr)
+        if price_cents:
+            record_price(
+                conn,
+                set_number,
+                source="toysrus",
+                price_cents=price_cents,
+                currency="MYR",
+                title=product.name,
+                url=product.url,
+            )
 
     return product_id
 

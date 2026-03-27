@@ -7,6 +7,7 @@ from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 
 from db.queries import get_next_id, parse_timestamp
+from services.items.repository import get_or_create_item
 from services.worldbricks.parser import WorldBricksData
 
 
@@ -115,6 +116,16 @@ def upsert_set(conn: "DuckDBPyConnection", data: WorldBricksData) -> int:
             now,
             now,
         ],
+    )
+
+    # Write to unified lego_items (metadata: year_retired, parts_count)
+    get_or_create_item(
+        conn,
+        data.set_number,
+        title=data.set_name,
+        year_released=data.year_released,
+        parts_count=data.parts_count,
+        image_url=data.image_url,
     )
 
     return set_id
