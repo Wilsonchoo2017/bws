@@ -1,6 +1,5 @@
 """Popup detection, language selection, and dismissal for Shopee."""
 
-from __future__ import annotations
 
 from playwright.async_api import Page
 

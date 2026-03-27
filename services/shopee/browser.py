@@ -1,6 +1,5 @@
 """Camoufox browser lifecycle management with anti-detection."""
 
-from __future__ import annotations
 
 import asyncio
 import secrets

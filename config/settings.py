@@ -3,7 +3,6 @@
 Rate limiting, user agents, and other scraper configuration.
 """
 
-from __future__ import annotations
 
 import secrets
 from dataclasses import dataclass

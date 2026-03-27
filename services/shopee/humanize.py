@@ -4,7 +4,6 @@ All click and type actions should go through these functions to randomize
 cursor position within elements, vary timing, and avoid bot-like patterns.
 """
 
-from __future__ import annotations
 
 import secrets
 

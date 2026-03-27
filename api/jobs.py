@@ -1,0 +1,93 @@
+"""Job management -- in-memory queue backed by DuckDB for persistence."""
+
+
+import asyncio
+import uuid
+from collections import OrderedDict
+from datetime import datetime, timezone
+from dataclasses import dataclass, field
+
+from api.schemas import JobStatus
+
+
+@dataclass
+class Job:
+    """A scrape job."""
+
+    job_id: str
+    scraper_id: str
+    url: str
+    status: JobStatus = JobStatus.QUEUED
+    created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    started_at: datetime | None = None
+    completed_at: datetime | None = None
+    items_found: int = 0
+    items: list = field(default_factory=list)
+    error: str | None = None
+
+
+class JobManager:
+    """Manages scrape jobs with an in-memory store and async queue."""
+
+    def __init__(self) -> None:
+        self._jobs: OrderedDict[str, Job] = OrderedDict()
+        self._queue: asyncio.Queue[str] = asyncio.Queue()
+        self._max_history = 100
+
+    def create_job(self, scraper_id: str, url: str) -> Job:
+        """Create a new job and add it to the queue."""
+        job_id = uuid.uuid4().hex[:12]
+        job = Job(job_id=job_id, scraper_id=scraper_id, url=url)
+        self._jobs[job_id] = job
+        self._queue.put_nowait(job_id)
+        self._trim_history()
+        return job
+
+    def get_job(self, job_id: str) -> Job | None:
+        return self._jobs.get(job_id)
+
+    def list_jobs(self, limit: int = 50) -> list[Job]:
+        """List recent jobs, newest first."""
+        jobs = list(self._jobs.values())
+        jobs.reverse()
+        return jobs[:limit]
+
+    def mark_running(self, job_id: str) -> None:
+        job = self._jobs.get(job_id)
+        if job:
+            job.status = JobStatus.RUNNING
+            job.started_at = datetime.now(timezone.utc)
+
+    def mark_completed(
+        self,
+        job_id: str,
+        items_found: int,
+        items: list | None = None,
+    ) -> None:
+        job = self._jobs.get(job_id)
+        if job:
+            job.status = JobStatus.COMPLETED
+            job.completed_at = datetime.now(timezone.utc)
+            job.items_found = items_found
+            if items is not None:
+                job.items = items
+
+    def mark_failed(self, job_id: str, error: str) -> None:
+        job = self._jobs.get(job_id)
+        if job:
+            job.status = JobStatus.FAILED
+            job.completed_at = datetime.now(timezone.utc)
+            job.error = error
+
+    async def dequeue(self) -> str:
+        """Wait for and return the next job ID from the queue."""
+        return await self._queue.get()
+
+    def _trim_history(self) -> None:
+        """Remove oldest jobs if exceeding max history."""
+        while len(self._jobs) > self._max_history:
+            self._jobs.popitem(last=False)
+
+
+# Singleton
+job_manager = JobManager()

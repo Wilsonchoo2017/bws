@@ -116,6 +116,34 @@ CREATE TABLE IF NOT EXISTS shopee_scrape_history (
 );
 """
 
+TOYSRUS_PRODUCTS_DDL = """
+CREATE TABLE IF NOT EXISTS toysrus_products (
+    id INTEGER PRIMARY KEY,
+    sku VARCHAR NOT NULL UNIQUE,
+    name VARCHAR NOT NULL,
+    price_myr VARCHAR,
+    brand VARCHAR,
+    category VARCHAR,
+    age_range VARCHAR,
+    url VARCHAR,
+    image_url VARCHAR,
+    available BOOLEAN DEFAULT TRUE,
+    last_scraped_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+"""
+
+TOYSRUS_PRICE_HISTORY_DDL = """
+CREATE TABLE IF NOT EXISTS toysrus_price_history (
+    id INTEGER PRIMARY KEY,
+    sku VARCHAR NOT NULL,
+    price_myr VARCHAR NOT NULL,
+    available BOOLEAN DEFAULT TRUE,
+    scraped_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+"""
+
 BRICKRANKER_ITEMS_DDL = """
 CREATE TABLE IF NOT EXISTS brickranker_items (
     id INTEGER PRIMARY KEY,
@@ -142,6 +170,8 @@ CREATE SEQUENCE IF NOT EXISTS worldbricks_sets_id_seq;
 CREATE SEQUENCE IF NOT EXISTS brickranker_items_id_seq;
 CREATE SEQUENCE IF NOT EXISTS shopee_products_id_seq;
 CREATE SEQUENCE IF NOT EXISTS shopee_scrape_history_id_seq;
+CREATE SEQUENCE IF NOT EXISTS toysrus_products_id_seq;
+CREATE SEQUENCE IF NOT EXISTS toysrus_price_history_id_seq;
 """
 
 # Index creation statements
@@ -172,6 +202,12 @@ CREATE INDEX IF NOT EXISTS idx_shopee_products_source
     ON shopee_products(source_url);
 CREATE INDEX IF NOT EXISTS idx_shopee_products_scraped
     ON shopee_products(scraped_at);
+CREATE INDEX IF NOT EXISTS idx_toysrus_products_sku
+    ON toysrus_products(sku);
+CREATE INDEX IF NOT EXISTS idx_toysrus_products_available
+    ON toysrus_products(available);
+CREATE INDEX IF NOT EXISTS idx_toysrus_price_history_sku
+    ON toysrus_price_history(sku, scraped_at);
 """
 
 ALL_DDL = [
@@ -184,6 +220,8 @@ ALL_DDL = [
     BRICKRANKER_ITEMS_DDL,
     SHOPEE_PRODUCTS_DDL,
     SHOPEE_SCRAPE_HISTORY_DDL,
+    TOYSRUS_PRODUCTS_DDL,
+    TOYSRUS_PRICE_HISTORY_DDL,
     INDEXES_DDL,
 ]
 

@@ -1,6 +1,5 @@
 """DuckDB persistence for Shopee scraped products."""
 
-from __future__ import annotations
 
 import re
 from typing import TYPE_CHECKING

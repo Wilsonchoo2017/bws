@@ -1,6 +1,5 @@
 """Extract product data from Shopee search results page."""
 
-from __future__ import annotations
 
 from dataclasses import dataclass
 

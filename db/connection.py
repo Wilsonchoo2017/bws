@@ -3,7 +3,6 @@
 Provides functions for creating and managing DuckDB connections.
 """
 
-from __future__ import annotations
 
 from pathlib import Path
 from typing import TYPE_CHECKING

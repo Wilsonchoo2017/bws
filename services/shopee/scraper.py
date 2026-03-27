@@ -1,6 +1,5 @@
 """Shopee search and scraping orchestration."""
 
-from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
