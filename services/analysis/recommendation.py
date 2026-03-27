@@ -5,7 +5,7 @@ Combines demand and availability analysis to generate investment recommendations
 
 from datetime import UTC, datetime
 
-from types.models import (
+from bws_types.models import (
     Action,
     AnalysisScore,
     ProductRecommendation,

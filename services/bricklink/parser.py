@@ -10,14 +10,14 @@ from urllib.parse import parse_qs, urlparse
 
 from bs4 import BeautifulSoup
 
-from types.models import (
+from bws_types.models import (
     BricklinkData,
     Condition,
     MonthlySale,
     PriceData,
     PricingBox,
 )
-from types.price import Cents, dollars_to_cents
+from bws_types.price import Cents, dollars_to_cents
 
 
 # Valid Bricklink item types

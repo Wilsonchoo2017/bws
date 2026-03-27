@@ -7,7 +7,7 @@ from config.value_investing import (
     GATE_MIN_DEMAND_SCORE,
     RETIREMENT_MULTIPLIERS,
 )
-from types.models import MultiplierResult
+from bws_types.models import MultiplierResult
 
 
 def calculate_retirement_multiplier(

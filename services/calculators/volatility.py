@@ -7,7 +7,7 @@ from config.value_investing import (
     VOLATILITY_MAX_DISCOUNT,
     VOLATILITY_RISK_AVERSION,
 )
-from types.models import MultiplierResult
+from bws_types.models import MultiplierResult
 
 
 def calculate_volatility_penalty(

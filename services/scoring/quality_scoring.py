@@ -11,8 +11,8 @@ from config.value_investing import (
     QUALITY_SCORE_WEIGHTS,
     THEME_MULTIPLIERS,
 )
-from types.models import QualityScoreBreakdown
-from types.price import Cents, cents_to_dollars
+from bws_types.models import QualityScoreBreakdown
+from bws_types.price import Cents, cents_to_dollars
 
 
 def _calculate_ppd_score(

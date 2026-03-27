@@ -3,6 +3,8 @@
 Rate limiting, user agents, and other scraper configuration.
 """
 
+from __future__ import annotations
+
 import secrets
 from dataclasses import dataclass
 from pathlib import Path
@@ -113,6 +115,25 @@ def get_random_delay(
     max_delay = max_ms if max_ms is not None else RATE_LIMIT_CONFIG.max_delay_ms
     # secrets.randbelow(n) returns [0, n), so we add min_delay and use range size
     return (min_delay + secrets.randbelow(max_delay - min_delay + 1)) / 1000.0
+
+
+@dataclass(frozen=True)
+class ShopeeSettings:
+    """Shopee browser automation configuration."""
+
+    base_url: str = "https://shopee.com.my"
+    headless: bool = False
+    timeout_ms: int = 30_000
+    user_data_dir: str = str(Path.home() / ".bws" / "shopee-profile")
+    viewport_width: int = 1366
+    viewport_height: int = 768
+    locale: str = "en-MY"
+    timezone_id: str = "Asia/Kuala_Lumpur"
+    min_action_delay_ms: int = 800
+    max_action_delay_ms: int = 2_500
+
+
+SHOPEE_CONFIG = ShopeeSettings()
 
 
 def calculate_backoff(attempt: int) -> float:

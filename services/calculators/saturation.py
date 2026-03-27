@@ -10,7 +10,7 @@ from config.value_investing import (
     SATURATION_MULTIPLIER_MAX,
     SATURATION_MULTIPLIER_MIN,
 )
-from types.models import MultiplierResult
+from bws_types.models import MultiplierResult
 
 
 def _interpolate(value: float, low: float, high: float, low_mult: float, high_mult: float) -> float:

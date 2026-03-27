@@ -27,7 +27,7 @@ from services.bricklink.repository import (
     upsert_item,
     upsert_monthly_sales,
 )
-from types.models import BricklinkData, BricklinkItem, MonthlySale
+from bws_types.models import BricklinkData, BricklinkItem, MonthlySale
 
 
 if TYPE_CHECKING:

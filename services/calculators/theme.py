@@ -7,7 +7,7 @@ from config.value_investing import (
     DEFAULT_THEME_MULTIPLIER,
     THEME_MULTIPLIERS,
 )
-from types.models import MultiplierResult
+from bws_types.models import MultiplierResult
 
 
 def calculate_theme_multiplier(theme: str | None) -> MultiplierResult:

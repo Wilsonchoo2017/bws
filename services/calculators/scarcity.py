@@ -12,7 +12,7 @@ from config.value_investing import (
     SCARCITY_RARE_MONTHS,
     SCARCITY_ULTRA_RARE_MONTHS,
 )
-from types.models import MultiplierResult
+from bws_types.models import MultiplierResult
 
 
 def calculate_scarcity_multiplier(

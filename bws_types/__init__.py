@@ -1,6 +1,6 @@
 """BWS type definitions and models."""
 
-from types.models import (
+from bws_types.models import (
     Action,
     AnalysisScore,
     BricklinkData,
@@ -11,7 +11,7 @@ from types.models import (
     ProductRecommendation,
     Urgency,
 )
-from types.price import Cents, Dollars, cents_to_dollars, dollars_to_cents, format_cents
+from bws_types.price import Cents, Dollars, cents_to_dollars, dollars_to_cents, format_cents
 
 
 __all__ = [

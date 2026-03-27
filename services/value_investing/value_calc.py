@@ -27,8 +27,8 @@ from services.calculators import (
     calculate_volatility_penalty,
 )
 from services.value_investing.types import ValueBreakdown, ValueInputs
-from types.models import MultiplierResult
-from types.price import Cents
+from bws_types.models import MultiplierResult
+from bws_types.price import Cents
 
 
 def calculate_base_value(inputs: ValueInputs) -> tuple[Cents, str]:

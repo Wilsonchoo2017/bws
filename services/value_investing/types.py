@@ -5,8 +5,8 @@ Dataclasses for value calculation inputs and outputs.
 
 from dataclasses import dataclass
 
-from types.models import MultiplierResult
-from types.price import Cents
+from bws_types.models import MultiplierResult
+from bws_types.price import Cents
 
 
 @dataclass(frozen=True)

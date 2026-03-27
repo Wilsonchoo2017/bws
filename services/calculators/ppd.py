@@ -12,8 +12,8 @@ from config.value_investing import (
     PPD_MULTIPLIER_GOOD,
     PPD_MULTIPLIER_POOR,
 )
-from types.models import MultiplierResult
-from types.price import Cents, cents_to_dollars
+from bws_types.models import MultiplierResult
+from bws_types.price import Cents, cents_to_dollars
 
 
 def calculate_ppd_multiplier(

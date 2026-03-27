@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
 
-from types.price import Cents
+from bws_types.price import Cents
 
 
 class WatchStatus(Enum):

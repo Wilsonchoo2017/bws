@@ -4,8 +4,8 @@
 """
 
 from config.value_investing import DEMAND_SCORE_WEIGHTS
-from types.models import DemandScoreBreakdown
-from types.price import Cents
+from bws_types.models import DemandScoreBreakdown
+from bws_types.price import Cents
 
 
 def _calculate_velocity_score(

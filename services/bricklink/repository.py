@@ -8,7 +8,7 @@ from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 
 from db.queries import get_next_id, parse_timestamp
-from types.models import (
+from bws_types.models import (
     BricklinkData,
     BricklinkItem,
     Condition,
@@ -17,7 +17,7 @@ from types.models import (
     PricingBox,
     WatchStatus,
 )
-from types.price import Cents
+from bws_types.price import Cents
 
 
 if TYPE_CHECKING:

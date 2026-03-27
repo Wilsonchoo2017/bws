@@ -3,7 +3,7 @@
 Analyzes sales volume and pricing trends to generate a demand score.
 """
 
-from types.models import AnalysisScore, MonthlySale, PricingBox
+from bws_types.models import AnalysisScore, MonthlySale, PricingBox
 
 
 def _calculate_volume_score(sales: list[MonthlySale]) -> tuple[int, str]:

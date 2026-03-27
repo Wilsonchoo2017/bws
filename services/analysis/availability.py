@@ -5,7 +5,7 @@ Analyzes item availability and retirement status to generate an availability sco
 
 from datetime import UTC, datetime
 
-from types.models import AnalysisScore, BricklinkItem, PricingBox
+from bws_types.models import AnalysisScore, BricklinkItem, PricingBox
 
 
 # Use UTC constant to ensure import is retained

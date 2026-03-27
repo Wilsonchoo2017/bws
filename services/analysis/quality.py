@@ -4,8 +4,8 @@ Analyzes item quality using the 4-component scoring system.
 """
 
 from services.scoring.quality_scoring import calculate_quality_score
-from types.models import AnalysisScore
-from types.price import Cents
+from bws_types.models import AnalysisScore
+from bws_types.price import Cents
 
 
 def analyze_quality(
