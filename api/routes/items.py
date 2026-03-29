@@ -8,8 +8,20 @@ from services.bricklink.repository import (
     get_monthly_sales,
     get_price_history,
 )
+from services.backtesting.kelly import (
+    compute_position_sizing,
+    kelly_to_dict,
+)
+from services.backtesting.screener import (
+    compute_all_signals,
+    compute_item_signals,
+)
 from services.items.repository import get_all_items, get_item_detail
 from services.shopee.repository import get_all_products
+from services.shopee.saturation_repository import (
+    get_all_latest_saturations,
+    get_latest_saturation,
+)
 
 router = APIRouter(prefix="/items", tags=["items"])
 
@@ -27,6 +39,19 @@ async def list_items():
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.get("/signals")
+async def list_signals(condition: str = "new"):
+    """Compute current trading signals for all items."""
+    try:
+        conn = get_connection()
+        init_schema(conn)
+        signals = compute_all_signals(conn, condition=condition)
+        conn.close()
+        return {"success": True, "data": signals, "count": len(signals)}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.get("/shopee")
 async def list_shopee_products():
     """List all raw Shopee products from the database."""
@@ -40,6 +65,71 @@ async def list_shopee_products():
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.get("/saturation")
+async def list_saturations():
+    """List latest Shopee saturation data for all items."""
+    conn = get_connection()
+    try:
+        init_schema(conn)
+        data = get_all_latest_saturations(conn)
+        return {"success": True, "data": data, "count": len(data)}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        conn.close()
+
+
+@router.get("/{set_number}/saturation")
+async def get_item_saturation(set_number: str):
+    """Get Shopee market saturation data for a LEGO set."""
+    conn = get_connection()
+    try:
+        init_schema(conn)
+        data = get_latest_saturation(conn, set_number)
+        return {"success": True, "data": data}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        conn.close()
+
+
+@router.get("/{set_number}/kelly")
+async def get_item_kelly(
+    set_number: str,
+    budget: int | None = None,
+    condition: str = "new",
+):
+    """Compute Kelly Criterion position sizing for a single item."""
+    conn = get_connection()
+    try:
+        init_schema(conn)
+        sizing = compute_position_sizing(
+            conn, set_number, budget_cents=budget, condition=condition
+        )
+        if not sizing:
+            return {"success": True, "data": None}
+        return {"success": True, "data": kelly_to_dict(sizing)}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        conn.close()
+
+
+@router.get("/{set_number}/signals")
+async def get_item_signals(set_number: str, condition: str = "new"):
+    """Compute current trading signals for a single item."""
+    try:
+        conn = get_connection()
+        init_schema(conn)
+        signals = compute_item_signals(conn, set_number, condition=condition)
+        conn.close()
+        if not signals:
+            return {"success": True, "data": None}
+        return {"success": True, "data": signals}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.get("/{set_number}")
 async def get_item(set_number: str):
     """Get a single item with full price history from all sources."""
@@ -47,9 +137,11 @@ async def get_item(set_number: str):
         conn = get_connection()
         init_schema(conn)
         item = get_item_detail(conn, set_number)
-        conn.close()
         if not item:
+            conn.close()
             raise HTTPException(status_code=404, detail=f"Item {set_number} not found")
+        item["saturation"] = get_latest_saturation(conn, set_number)
+        conn.close()
         return {"success": True, "data": item}
     except HTTPException:
         raise

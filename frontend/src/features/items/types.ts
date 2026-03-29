@@ -21,6 +21,7 @@ export interface UnifiedItem {
   title: string | null;
   theme: string | null;
   year_released: number | null;
+  year_retired: number | null;
   image_url: string | null;
   rrp_cents: number | null;
   rrp_currency: string | null;
@@ -98,6 +99,60 @@ export interface BricklinkPriceData {
   item_id: string;
   price_history: PriceHistorySnapshot[];
   monthly_sales: MonthlySaleRecord[];
+}
+
+export interface ItemSignals {
+  item_id: string;
+  set_number: string;
+  title: string | null;
+  theme: string | null;
+  year_released: number | null;
+  year_retired: number | null;
+  rrp_cents: number | null;
+  rrp_currency: string | null;
+  entry_price_cents: number;
+  eval_year: number;
+  eval_month: number;
+  composite_score: number | null;
+  peer_appreciation: number | null;
+  demand_pressure: number | null;
+  supply_velocity: number | null;
+  price_trend: number | null;
+  price_vs_rrp: number | null;
+  lifecycle_position: number | null;
+  stock_level: number | null;
+  momentum: number | null;
+  theme_quality: number | null;
+  community_quality: number | null;
+  collector_premium: number | null;
+  mod_shelf_life: number;
+  mod_subtheme: number;
+  mod_niche: number;
+}
+
+export interface KellyHorizon {
+  horizon: string;
+  win_rate: number;
+  avg_win: number;
+  avg_loss: number;
+  mean_return: number;
+  return_variance: number;
+  kelly_fraction: number;
+  half_kelly: number;
+  sample_count: number;
+}
+
+export interface KellySizing {
+  set_number: string;
+  composite_score: number | null;
+  score_bin: string;
+  entry_price_cents: number;
+  flip: KellyHorizon | null;
+  hold: KellyHorizon | null;
+  recommended_pct: number;
+  recommended_amount_cents: number | null;
+  confidence: 'high' | 'moderate' | 'low' | 'insufficient';
+  warnings: string[];
 }
 
 export function formatPrice(

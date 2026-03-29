@@ -12,6 +12,8 @@ import {
 } from '@/components/ui/dropdown-menu';
 import type { ItemDetail, PriceRecord } from '../types';
 import { formatPrice } from '../types';
+import { KellyPanel } from '../kelly-panel';
+import { SignalsPanel } from '../signals-table';
 import { BricklinkPriceChart } from './bricklink-price-chart';
 
 const ENRICH_SOURCES = [
@@ -175,6 +177,11 @@ export function ItemDetailView({ setNumber }: ItemDetailViewProps) {
           <div className='text-muted-foreground mt-1 flex items-center gap-3 text-sm'>
             <span className='font-mono'>{item.set_number}</span>
             {item.year_released && <span>{item.year_released}</span>}
+            {item.year_retired && (
+              <span className='text-orange-600 dark:text-orange-400'>
+                Retired {item.year_retired}
+              </span>
+            )}
             {item.theme && <span>{item.theme}</span>}
             {item.parts_count && <span>{item.parts_count} pcs</span>}
           </div>
@@ -249,6 +256,12 @@ export function ItemDetailView({ setNumber }: ItemDetailViewProps) {
           </div>
         </div>
       </div>
+
+      {/* Trading signals */}
+      <SignalsPanel setNumber={setNumber} />
+
+      {/* Kelly Criterion position sizing */}
+      <KellyPanel setNumber={setNumber} />
 
       {/* BrickLink price analysis charts */}
       <BricklinkPriceChart setNumber={setNumber} />
