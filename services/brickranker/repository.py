@@ -6,7 +6,7 @@ Pure functions for CRUD operations on BrickRanker data in DuckDB.
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
-from db.queries import get_next_id, parse_timestamp
+from db.queries import parse_timestamp
 from services.brickranker.parser import RetirementItem
 from services.items.repository import get_or_create_item
 
@@ -99,24 +99,15 @@ def upsert_item(conn: "DuckDBPyConnection", item: RetirementItem) -> int:
         )
         return existing["id"]
 
-    # Get a safe ID: use sequence but ensure it doesn't collide
-    max_id_row = conn.execute(
-        "SELECT COALESCE(MAX(id), 0) FROM brickranker_items"
-    ).fetchone()
-    max_existing_id = max_id_row[0] if max_id_row else 0
-    seq_id = get_next_id(conn, "brickranker_items_id_seq")
-    item_id = max(seq_id, max_existing_id + 1)
-
     conn.execute(
         """
         INSERT INTO brickranker_items (
             id, set_number, set_name, year_released, retiring_soon,
             expected_retirement_date, theme, image_url, is_active,
             scraped_at, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (nextval('brickranker_items_id_seq'), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         [
-            item_id,
             item.set_number,
             item.set_name,
             item.year_released,
@@ -140,7 +131,12 @@ def upsert_item(conn: "DuckDBPyConnection", item: RetirementItem) -> int:
         image_url=item.image_url,
     )
 
-    return item_id
+    # Return the auto-generated id
+    row = conn.execute(
+        "SELECT id FROM brickranker_items WHERE set_number = ?",
+        [item.set_number],
+    ).fetchone()
+    return row[0] if row else 0
 
 
 def batch_upsert_items(

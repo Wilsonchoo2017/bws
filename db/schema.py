@@ -3,11 +3,15 @@
 Contains DDL for creating all required tables.
 """
 
+import logging
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 
 if TYPE_CHECKING:
     from duckdb import DuckDBPyConnection
+
+logger = logging.getLogger("bws.schema")
 
 
 # SQL statements for creating tables
@@ -158,6 +162,7 @@ CREATE TABLE IF NOT EXISTS lego_items (
     rrp_cents INTEGER,
     rrp_currency VARCHAR DEFAULT 'MYR',
     retiring_soon BOOLEAN DEFAULT FALSE,
+    last_enriched_at TIMESTAMP,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
@@ -317,6 +322,10 @@ def _migrate_lego_items(conn: "DuckDBPyConnection") -> None:
             "CREATE INDEX IF NOT EXISTS idx_lego_items_set_number "
             "ON lego_items(set_number)"
         )
+    if "last_enriched_at" not in existing:
+        conn.execute(
+            "ALTER TABLE lego_items ADD COLUMN last_enriched_at TIMESTAMP"
+        )
 
 
 _SEQUENCE_TABLE_MAP = [
@@ -341,6 +350,10 @@ def _sync_sequences(conn: "DuckDBPyConnection") -> None:
 
     Prevents primary key collisions when sequences fall behind
     existing data (e.g., after restores or manual inserts).
+
+    DuckDB cannot DROP a sequence that a table DEFAULT depends on,
+    so we first try DROP+CREATE. If that fails (dependency), we
+    advance the sequence by calling nextval in a loop.
     """
     for seq_name, table_name in _SEQUENCE_TABLE_MAP:
         try:
@@ -348,15 +361,139 @@ def _sync_sequences(conn: "DuckDBPyConnection") -> None:
                 f"SELECT COALESCE(MAX(id), 0) FROM {table_name}"  # noqa: S608
             ).fetchone()
             max_id = row[0] if row else 0
-            if max_id > 0:
-                # Drop and recreate sequence starting after max id
+            if max_id <= 0:
+                continue
+
+            target = max_id + 1
+            try:
                 conn.execute(f"DROP SEQUENCE IF EXISTS {seq_name}")
                 conn.execute(
-                    f"CREATE SEQUENCE {seq_name} START {max_id + 1}"
+                    f"CREATE SEQUENCE {seq_name} START {target}"
                 )
+            except Exception:  # noqa: BLE001
+                # Sequence has a table DEFAULT dependency -- advance it instead
+                curr = 0
+                while curr < target:
+                    curr = conn.execute(
+                        f"SELECT nextval('{seq_name}')"  # noqa: S608
+                    ).fetchone()[0]
         except Exception:  # noqa: BLE001
             # Table may not exist yet on first init
             pass
+
+
+def _rebuild_all_tables(conn: "DuckDBPyConnection") -> None:
+    """Rebuild all non-empty tables to repair PK index corruption.
+
+    DuckDB fatal crashes (e.g., ungraceful server stop mid-write) can
+    corrupt the ART index backing PRIMARY KEYs, causing subsequent
+    UPDATEs to fail with uncatchable FATAL 'duplicate key' errors.
+
+    These errors call abort() and cannot be caught by Python try/except,
+    so we must rebuild proactively when corruption is suspected.
+    """
+    tables = conn.execute(
+        "SELECT table_name FROM information_schema.tables "
+        "WHERE table_schema = 'main' AND table_type = 'BASE TABLE'"
+    ).fetchall()
+
+    for (table_name,) in tables:
+        try:
+            count = conn.execute(
+                f"SELECT COUNT(*) FROM {table_name}"  # noqa: S608
+            ).fetchone()
+            if not count or count[0] == 0:
+                continue
+            _rebuild_table(conn, table_name)
+        except Exception:  # noqa: BLE001
+            logger.exception("Failed to rebuild %s", table_name)
+
+
+def _rebuild_table(conn: "DuckDBPyConnection", table_name: str) -> None:
+    """Rebuild a table by copying data, dropping, and recreating.
+
+    Preserves all data. Drops and recreates all indexes.
+    Uses explicit column names to handle tables where migrations
+    added columns in a different order than the DDL.
+    """
+    tmp = f"{table_name}_rebuild"
+    conn.execute(
+        f"CREATE TABLE {tmp} AS SELECT * FROM {table_name}"  # noqa: S608
+    )
+
+    # Get column names from the backup (source of truth for data)
+    backup_cols = [
+        row[0]
+        for row in conn.execute(
+            "SELECT column_name FROM information_schema.columns "
+            f"WHERE table_name = '{tmp}' ORDER BY ordinal_position"  # noqa: S608
+        ).fetchall()
+    ]
+
+    # Drop all indexes on this table
+    indexes = conn.execute(
+        "SELECT index_name FROM duckdb_indexes() "
+        f"WHERE table_name = '{table_name}'"  # noqa: S608
+    ).fetchall()
+    for (idx_name,) in indexes:
+        conn.execute(f"DROP INDEX IF EXISTS {idx_name}")
+
+    conn.execute(f"DROP TABLE {table_name}")
+
+    # Find the DDL for this table and recreate it
+    table_ddl_map = {
+        "bricklink_items": BRICKLINK_ITEMS_DDL,
+        "bricklink_price_history": BRICKLINK_PRICE_HISTORY_DDL,
+        "bricklink_monthly_sales": BRICKLINK_MONTHLY_SALES_DDL,
+        "product_analysis": PRODUCT_ANALYSIS_DDL,
+        "worldbricks_sets": WORLDBRICKS_SETS_DDL,
+        "brickranker_items": BRICKRANKER_ITEMS_DDL,
+        "shopee_products": SHOPEE_PRODUCTS_DDL,
+        "shopee_saturation": SHOPEE_SATURATION_DDL,
+        "shopee_scrape_history": SHOPEE_SCRAPE_HISTORY_DDL,
+        "toysrus_products": TOYSRUS_PRODUCTS_DDL,
+        "toysrus_price_history": TOYSRUS_PRICE_HISTORY_DDL,
+        "lego_items": LEGO_ITEMS_DDL,
+        "price_records": PRICE_RECORDS_DDL,
+    }
+
+    ddl = table_ddl_map.get(table_name)
+    if ddl:
+        conn.execute(ddl)
+    else:
+        conn.execute(
+            f"CREATE TABLE {table_name} AS "  # noqa: S608
+            f"SELECT * FROM {tmp} WHERE 1=0"
+        )
+
+    # Run migrations to add any columns not in the DDL
+    if table_name == "lego_items":
+        _migrate_lego_items(conn)
+
+    # Get new table columns to find the intersection
+    new_cols = {
+        row[0]
+        for row in conn.execute(
+            "SELECT column_name FROM information_schema.columns "
+            f"WHERE table_name = '{table_name}'"  # noqa: S608
+        ).fetchall()
+    }
+
+    # Only copy columns that exist in both source and target
+    shared_cols = [c for c in backup_cols if c in new_cols]
+    cols_str = ", ".join(shared_cols)
+
+    conn.execute(
+        f"INSERT INTO {table_name} ({cols_str}) "  # noqa: S608
+        f"SELECT {cols_str} FROM {tmp}"
+    )
+    conn.execute(f"DROP TABLE {tmp}")
+
+    # Recreate indexes via the INDEXES_DDL (idempotent)
+    for stmt in INDEXES_DDL.strip().split(";"):
+        stmt = stmt.strip()
+        if stmt and table_name in stmt:
+            conn.execute(stmt)
 
 
 def init_schema(conn: "DuckDBPyConnection") -> None:
@@ -371,6 +508,11 @@ def init_schema(conn: "DuckDBPyConnection") -> None:
         conn.execute(ddl)
     _migrate_lego_items(conn)
     _sync_sequences(conn)
+    # Flush WAL to reduce corruption risk on ungraceful shutdown
+    try:
+        conn.execute("CHECKPOINT")
+    except Exception:  # noqa: BLE001
+        pass
 
 
 def drop_all_tables(conn: "DuckDBPyConnection") -> None:

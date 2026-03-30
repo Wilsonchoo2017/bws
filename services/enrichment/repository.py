@@ -19,6 +19,10 @@ def get_items_needing_enrichment(
 ) -> list[dict]:
     """Find lego_items rows with any NULL metadata fields.
 
+    Excludes retiring_soon from the NULL check -- retirement status is
+    not actively sought during enrichment.  Items enriched within the
+    last 90 days are also skipped.
+
     Returns items ordered by most recently created first (newest items
     get enriched first).
     """
@@ -33,6 +37,8 @@ def get_items_needing_enrichment(
            OR li.year_released IS NULL
            OR li.parts_count IS NULL
            OR li.image_url IS NULL)
+          AND (li.last_enriched_at IS NULL
+               OR li.last_enriched_at < now() - INTERVAL '90 days')
           AND EXISTS (
               SELECT 1 FROM price_records pr
               WHERE pr.set_number = li.set_number
@@ -58,12 +64,23 @@ def store_enrichment_result(
     """Write enrichment results back to lego_items via COALESCE upsert.
 
     Only writes fields that were successfully found.
+    Always stamps last_enriched_at so the 90-day cooldown applies.
     """
     found = {
         r.field: r.value
         for r in result.field_results
         if r.status == FieldStatus.FOUND
     }
+
+    # Always stamp last_enriched_at even when no fields were found,
+    # so we don't retry the same item every sweep.
+    conn.execute(
+        """
+        UPDATE lego_items SET last_enriched_at = now()
+        WHERE set_number = ?
+        """,
+        [result.set_number],
+    )
 
     if not found:
         return

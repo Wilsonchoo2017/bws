@@ -68,11 +68,23 @@ async def run_worker(manager: JobManager | None = None) -> None:
                     items_found=result["fields_found"],
                     items=[result],
                 )
+                found_fields = [
+                    d["field"] for d in result.get("field_details", [])
+                    if d["status"] == "found"
+                ]
+                missing_fields = [
+                    d["field"] for d in result.get("field_details", [])
+                    if d["status"] in ("not_found", "failed")
+                ]
+                found_str = ", ".join(found_fields) if found_fields else "none"
+                missing_str = ", ".join(missing_fields) if missing_fields else "none"
                 logger.info(
-                    "Enrichment job %s completed: %d/%d fields found",
+                    "Enrichment job %s completed: %d/%d fields found [found: %s] [missing: %s]",
                     job_id,
                     result["fields_found"],
                     result["fields_total"],
+                    found_str,
+                    missing_str,
                 )
                 await _check_deal_signals()
             else:

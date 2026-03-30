@@ -48,20 +48,34 @@ _FIELD_TO_COLUMN: dict[MetadataField, str] = {
 }
 
 
+# Fields excluded from automatic missing-data detection.
+# Retirement status is not actively sought -- it is only stored when a
+# source happens to return it (e.g. BrickRanker scraped for THEME).
+_PASSIVE_FIELDS: frozenset[MetadataField] = frozenset({MetadataField.RETIRING_SOON})
+
+# Default fields to check when detecting missing metadata.
+_DEFAULT_ENRICHMENT_FIELDS: tuple[MetadataField, ...] = tuple(
+    f for f in MetadataField if f not in _PASSIVE_FIELDS
+)
+
+
 def detect_missing_fields(
     item: dict,
     fields: tuple[MetadataField, ...] | None = None,
 ) -> tuple[MetadataField, ...]:
     """Detect which metadata fields are missing (NULL) for an item.
 
+    By default, excludes passive fields like RETIRING_SOON -- those are
+    only stored opportunistically when a source returns them.
+
     Args:
         item: Dict from lego_items table (keys match column names)
-        fields: Optional subset of fields to check (default: all)
+        fields: Optional subset of fields to check (default: all non-passive)
 
     Returns:
         Tuple of missing MetadataField values
     """
-    check_fields = fields or tuple(MetadataField)
+    check_fields = fields or _DEFAULT_ENRICHMENT_FIELDS
     missing: list[MetadataField] = []
 
     for f in check_fields:
