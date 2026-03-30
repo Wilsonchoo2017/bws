@@ -24,15 +24,20 @@ def get_items_needing_enrichment(
     """
     result = conn.execute(
         """
-        SELECT set_number, title, theme, year_released, year_retired,
-               parts_count, weight, image_url
-        FROM lego_items
-        WHERE title IS NULL
-           OR theme IS NULL
-           OR year_released IS NULL
-           OR parts_count IS NULL
-           OR image_url IS NULL
-        ORDER BY created_at DESC
+        SELECT li.set_number, li.title, li.theme, li.year_released,
+               li.year_retired, li.parts_count, li.weight, li.image_url
+        FROM lego_items li
+        WHERE (li.title IS NULL
+           OR li.theme IS NULL
+           OR li.year_released IS NULL
+           OR li.parts_count IS NULL
+           OR li.image_url IS NULL)
+          AND EXISTS (
+              SELECT 1 FROM price_records pr
+              WHERE pr.set_number = li.set_number
+                AND pr.source IN ('toysrus', 'shopee')
+          )
+        ORDER BY li.created_at DESC
         LIMIT ?
         """,
         [limit],

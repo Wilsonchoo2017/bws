@@ -93,10 +93,10 @@ def _parse_tile(tile_html: str) -> ToysRUsProduct | None:
     elif _OUT_OF_STOCK_PATTERN.search(tile_html):
         available = False
     else:
-        # Default to unavailable when we can't determine status —
-        # only products with a confirmed available status get through
-        has_add_to_cart = _ADD_TO_CART_PATTERN.search(tile_html) is not None
-        available = has_add_to_cart
+        # Available product tiles in the AJAX listing have no explicit
+        # availability markers — only unavailable ones carry a status div
+        # or out-of-stock CSS class.  Default to available.
+        available = True
 
     # Extract original/undiscounted price from strike-through HTML
     original_match = _ORIGINAL_PRICE_PATTERN.search(tile_html)

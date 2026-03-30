@@ -67,6 +67,21 @@ const columns: ColumnDef<UnifiedItem>[] = [
     size: 70
   },
   {
+    accessorKey: 'year_retired',
+    header: ({ column }) => (
+      <DataTableColumnHeader column={column} title='Retired' />
+    ),
+    cell: ({ row }) => {
+      const yr = row.getValue('year_retired') as number | null;
+      return yr ? (
+        <span className='text-orange-600 dark:text-orange-400'>{yr}</span>
+      ) : (
+        <span className='text-muted-foreground'>-</span>
+      );
+    },
+    size: 80
+  },
+  {
     accessorKey: 'rrp_cents',
     header: ({ column }) => (
       <DataTableColumnHeader column={column} title='RRP' />
@@ -189,6 +204,7 @@ export function UnifiedItemsTable() {
     ((items: UnifiedItem[]) => UnifiedItem[]) | null
   >(null);
   const [hideNoRetail, setHideNoRetail] = useState(false);
+  const [retirementFilter, setRetirementFilter] = useState<'all' | 'retired' | 'active'>('all');
 
   const filteredData = useMemo(() => {
     let result = data;
@@ -199,11 +215,16 @@ export function UnifiedItemsTable() {
           item.shopee_price_cents !== null
       );
     }
+    if (retirementFilter === 'retired') {
+      result = result.filter((item) => item.year_retired !== null);
+    } else if (retirementFilter === 'active') {
+      result = result.filter((item) => item.year_retired === null);
+    }
     if (dealFilter) {
       result = dealFilter(result);
     }
     return result;
-  }, [data, dealFilter, hideNoRetail]);
+  }, [data, dealFilter, hideNoRetail, retirementFilter]);
 
   useEffect(() => {
     fetch('/api/items')
@@ -271,6 +292,15 @@ export function UnifiedItemsTable() {
           />
           Has retail price
         </label>
+        <select
+          value={retirementFilter}
+          onChange={(e) => setRetirementFilter(e.target.value as 'all' | 'retired' | 'active')}
+          className='bg-muted/50 rounded-lg border px-4 py-2.5 text-sm font-medium'
+        >
+          <option value='all'>All sets</option>
+          <option value='retired'>Retired only</option>
+          <option value='active'>Active only</option>
+        </select>
         <PriceDealFilter onFilterChange={(fn) => setDealFilter(() => fn)} />
       </div>
       <DataTable table={table} />

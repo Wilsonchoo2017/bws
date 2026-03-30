@@ -31,8 +31,13 @@ async def run_enrichment_sweep(
         batch_size,
     )
 
+    first_run = True
     while True:
-        await asyncio.sleep(interval_minutes * 60)
+        if first_run:
+            first_run = False
+            logger.info("Enrichment sweep: running initial sweep on startup")
+        else:
+            await asyncio.sleep(interval_minutes * 60)
 
         try:
             from db.connection import get_connection

@@ -104,6 +104,7 @@ def get_all_items(conn: "DuckDBPyConnection") -> list[dict]:
             li.title,
             li.theme,
             li.year_released,
+            li.year_retired,
             li.image_url,
             li.rrp_cents,
             li.rrp_currency,
@@ -131,7 +132,7 @@ def get_all_items(conn: "DuckDBPyConnection") -> list[dict]:
     """).fetchall()
 
     columns = [
-        "set_number", "title", "theme", "year_released", "image_url",
+        "set_number", "title", "theme", "year_released", "year_retired", "image_url",
         "rrp_cents", "rrp_currency", "updated_at",
         "shopee_price_cents", "shopee_currency", "shopee_url", "shopee_last_seen",
         "toysrus_price_cents", "toysrus_currency", "toysrus_url", "toysrus_last_seen",

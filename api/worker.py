@@ -37,6 +37,7 @@ async def run_worker(manager: JobManager | None = None) -> None:
                 )
                 logger.info("Job %s completed: %d items", job_id, len(items))
                 _queue_enrichment_for_scraped_items(mgr, items)
+                await _check_deal_signals()
             elif job.scraper_id == "toysrus":
                 result = await _run_toysrus_scrape()
                 mgr.mark_completed(
@@ -46,6 +47,7 @@ async def run_worker(manager: JobManager | None = None) -> None:
                 )
                 logger.info("Job %s completed: %d items", job_id, len(result))
                 _queue_enrichment_for_scraped_items(mgr, result)
+                await _check_deal_signals()
             elif job.scraper_id == "shopee_saturation":
                 result = await _run_saturation_batch(job.url)
                 mgr.mark_completed(
@@ -72,6 +74,7 @@ async def run_worker(manager: JobManager | None = None) -> None:
                     result["fields_found"],
                     result["fields_total"],
                 )
+                await _check_deal_signals()
             else:
                 mgr.mark_failed(job_id, f"Unknown scraper: {job.scraper_id}")
 
@@ -278,6 +281,25 @@ def _run_enrichment(job_url: str) -> dict:
 
     finally:
         conn.close()
+
+
+async def _check_deal_signals() -> None:
+    """Run signal check and send Ntfy notifications for strong deals."""
+    from db.connection import get_connection
+    from db.schema import init_schema
+    from services.notifications.deal_notifier import check_and_notify
+
+    try:
+        conn = get_connection()
+        init_schema(conn)
+        try:
+            sent = await asyncio.to_thread(check_and_notify, conn)
+            if sent:
+                logger.info("Deal check: sent %d notifications", sent)
+        finally:
+            conn.close()
+    except Exception:
+        logger.exception("Deal signal check failed")
 
 
 def _queue_enrichment_for_scraped_items(
