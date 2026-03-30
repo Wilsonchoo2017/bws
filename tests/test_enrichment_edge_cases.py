@@ -49,7 +49,8 @@ class TestEdgeCases:
 
     def test_3_3_re_enrichment_after_field_cleared(self, make_item):
         """Given set had year_retired cleared to NULL.
-        When enrichment runs, detects year_retired missing, queries WorldBricks."""
+        When enrichment runs, detects year_retired missing.
+        Since YEAR_RETIRED has no sources, result is empty."""
         item = make_item(
             title="Palace Cinema",
             theme="Creator Expert",
@@ -61,29 +62,24 @@ class TestEdgeCases:
             retiring_soon=False,
         )
 
-        def worldbricks_fetcher(set_number: str) -> SourceResult:
-            return SourceResult(
-                source=SourceId.WORLDBRICKS,
-                success=True,
-                fields={MetadataField.YEAR_RETIRED: 2016},
-            )
-
         result, _ = enrich(
             "10305",
             item,
-            {SourceId.WORLDBRICKS: worldbricks_fetcher},
+            {SourceId.BRICKLINK: lambda sn: SourceResult(
+                source=SourceId.BRICKLINK, success=True, fields={},
+            )},
             CircuitBreakerState(),
             fields=(MetadataField.YEAR_RETIRED,),
         )
 
+        # YEAR_RETIRED has no sources in FIELD_SOURCE_PRIORITY, so it is SKIPPED
         retired_r = next(
             r for r in result.field_results if r.field == MetadataField.YEAR_RETIRED
         )
-        assert retired_r.status == FieldStatus.FOUND
-        assert retired_r.value == 2016
+        assert retired_r.status == FieldStatus.SKIPPED
 
     def test_3_4_garbage_year_rejected(self):
-        """Given WorldBricks returns year_released=9999.
+        """Given source returns year_released=9999.
         Then validation rejects it (outside valid range)."""
         assert validate_field(MetadataField.YEAR_RELEASED, 9999) is None
 
@@ -92,79 +88,63 @@ class TestEdgeCases:
         Then validation rejects it."""
         assert validate_field(MetadataField.PARTS_COUNT, -5) is None
 
-    def test_3_4_garbage_data_falls_through(self):
-        """Given Bricklink returns year=9999 (invalid), WorldBricks returns year=2019.
-        Then resolve_fields skips invalid and uses WorldBricks."""
+    def test_3_4_garbage_data_rejected(self):
+        """Given Bricklink returns year=9999 (invalid).
+        Then resolve_fields rejects invalid value."""
         bricklink_result = SourceResult(
             source=SourceId.BRICKLINK,
             success=True,
             fields={MetadataField.YEAR_RELEASED: 9999},
         )
-        worldbricks_result = SourceResult(
-            source=SourceId.WORLDBRICKS,
-            success=True,
-            fields={MetadataField.YEAR_RELEASED: 2019},
-        )
 
         field_results = resolve_fields(
             (MetadataField.YEAR_RELEASED,),
-            {SourceId.BRICKLINK: bricklink_result, SourceId.WORLDBRICKS: worldbricks_result},
+            {SourceId.BRICKLINK: bricklink_result},
         )
 
-        assert field_results[0].status == FieldStatus.FOUND
-        assert field_results[0].value == 2019
-        assert field_results[0].source == SourceId.WORLDBRICKS
+        assert field_results[0].status == FieldStatus.NOT_FOUND
+        assert field_results[0].value is None
 
-    def test_3_5_conflicting_data_uses_primary(self):
-        """Given Bricklink returns year=2017, WorldBricks returns year=2019.
-        Then resolve uses Bricklink (higher priority)."""
+    def test_3_5_bricklink_provides_year(self):
+        """Given Bricklink returns year=2017.
+        Then resolve uses Bricklink value."""
         bricklink_result = SourceResult(
             source=SourceId.BRICKLINK,
             success=True,
             fields={MetadataField.YEAR_RELEASED: 2017},
         )
-        worldbricks_result = SourceResult(
-            source=SourceId.WORLDBRICKS,
-            success=True,
-            fields={MetadataField.YEAR_RELEASED: 2019},
-        )
 
         field_results = resolve_fields(
             (MetadataField.YEAR_RELEASED,),
-            {SourceId.BRICKLINK: bricklink_result, SourceId.WORLDBRICKS: worldbricks_result},
+            {SourceId.BRICKLINK: bricklink_result},
         )
 
         assert field_results[0].value == 2017
         assert field_results[0].source == SourceId.BRICKLINK
 
     def test_3_6_partial_data_from_multi_field_scrape(self):
-        """Given WorldBricks returns year_released=2013 but dimensions=None.
-        Then year stored, dimensions NOT_FOUND, no re-scrape."""
-        worldbricks_result = SourceResult(
-            source=SourceId.WORLDBRICKS,
+        """Given BrickLink returns year_released=2013 but parts_count=None.
+        Then year stored, parts_count NOT_FOUND, no re-scrape."""
+        bricklink_result = SourceResult(
+            source=SourceId.BRICKLINK,
             success=True,
             fields={
                 MetadataField.YEAR_RELEASED: 2013,
-                MetadataField.YEAR_RETIRED: None,
-                MetadataField.PARTS_COUNT: 271,
+                MetadataField.PARTS_COUNT: None,
             },
         )
 
         field_results = resolve_fields(
-            (MetadataField.YEAR_RELEASED, MetadataField.YEAR_RETIRED, MetadataField.PARTS_COUNT),
-            {SourceId.WORLDBRICKS: worldbricks_result},
+            (MetadataField.YEAR_RELEASED, MetadataField.PARTS_COUNT),
+            {SourceId.BRICKLINK: bricklink_result},
         )
 
         year_r = next(r for r in field_results if r.field == MetadataField.YEAR_RELEASED)
         assert year_r.status == FieldStatus.FOUND
         assert year_r.value == 2013
 
-        retired_r = next(r for r in field_results if r.field == MetadataField.YEAR_RETIRED)
-        assert retired_r.status == FieldStatus.NOT_FOUND
-
         parts_r = next(r for r in field_results if r.field == MetadataField.PARTS_COUNT)
-        assert parts_r.status == FieldStatus.FOUND
-        assert parts_r.value == 271
+        assert parts_r.status == FieldStatus.NOT_FOUND
 
     def test_3_7_whitespace_title_normalized_to_none(self):
         """Given Bricklink returns title='   '.
@@ -176,24 +156,19 @@ class TestEdgeCases:
         Then validation normalizes to None."""
         assert validate_field(MetadataField.WEIGHT, "") is None
 
-    def test_3_7_whitespace_falls_through(self):
-        """Given Bricklink returns title='   ', WorldBricks returns 'Small Cottage'.
-        Then resolve uses WorldBricks."""
+    def test_3_7_whitespace_title_not_found(self):
+        """Given Bricklink returns title='   '.
+        Then resolve returns NOT_FOUND since no other sources available."""
         bricklink_result = SourceResult(
             source=SourceId.BRICKLINK,
             success=True,
             fields={MetadataField.TITLE: "   "},
         )
-        worldbricks_result = SourceResult(
-            source=SourceId.WORLDBRICKS,
-            success=True,
-            fields={MetadataField.TITLE: "Small Cottage"},
-        )
 
         field_results = resolve_fields(
             (MetadataField.TITLE,),
-            {SourceId.BRICKLINK: bricklink_result, SourceId.WORLDBRICKS: worldbricks_result},
+            {SourceId.BRICKLINK: bricklink_result},
         )
 
-        assert field_results[0].value == "Small Cottage"
-        assert field_results[0].source == SourceId.WORLDBRICKS
+        assert field_results[0].status == FieldStatus.NOT_FOUND
+        assert field_results[0].value is None

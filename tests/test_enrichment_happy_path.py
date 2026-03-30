@@ -70,17 +70,16 @@ class TestDetermineSourcesNeeded:
         assert SourceId.BRICKLINK in sources
 
     def test_deduplication(self):
-        """Given title and year_released missing (both from Bricklink+WorldBricks),
+        """Given title and year_released missing (both from Bricklink),
         each source appears only once."""
         cb = CircuitBreakerState()
         sources = determine_sources_needed(
             (MetadataField.TITLE, MetadataField.YEAR_RELEASED), cb
         )
         assert sources.count(SourceId.BRICKLINK) == 1
-        assert sources.count(SourceId.WORLDBRICKS) == 1
 
     def test_stable_ordering(self):
-        """Sources are always returned in BRICKLINK, WORLDBRICKS, BRICKRANKER order."""
+        """Sources are always returned in BRICKLINK, BRICKRANKER order."""
         cb = CircuitBreakerState()
         sources = determine_sources_needed(
             (MetadataField.THEME, MetadataField.YEAR_RELEASED), cb
@@ -101,7 +100,7 @@ class TestHappyPath:
 
     def test_1_1_single_missing_field_primary_succeeds(self, make_item):
         """Given set with year_released=NULL, Bricklink returns year=2017.
-        Then year stored, WorldBricks never called, job COMPLETED."""
+        Then year stored, job COMPLETED."""
         item = make_item(
             title="Millennium Falcon",
             theme="Star Wars",
@@ -111,8 +110,6 @@ class TestHappyPath:
             retiring_soon=False,
         )
 
-        worldbricks_called = False
-
         def bricklink_fetcher(set_number: str) -> SourceResult:
             return SourceResult(
                 source=SourceId.BRICKLINK,
@@ -120,19 +117,10 @@ class TestHappyPath:
                 fields={MetadataField.YEAR_RELEASED: 2017},
             )
 
-        def worldbricks_fetcher(set_number: str) -> SourceResult:
-            nonlocal worldbricks_called
-            worldbricks_called = True
-            return SourceResult(
-                source=SourceId.WORLDBRICKS,
-                success=True,
-                fields={MetadataField.YEAR_RELEASED: 2017},
-            )
-
         result, _ = enrich(
             "75192",
             item,
-            {SourceId.BRICKLINK: bricklink_fetcher, SourceId.WORLDBRICKS: worldbricks_fetcher},
+            {SourceId.BRICKLINK: bricklink_fetcher},
             CircuitBreakerState(),
             fields=(MetadataField.YEAR_RELEASED,),
         )
@@ -143,49 +131,37 @@ class TestHappyPath:
         assert year_result.status == FieldStatus.FOUND
         assert year_result.value == 2017
         assert year_result.source == SourceId.BRICKLINK
-        # WorldBricks should still be called because determine_sources_needed
-        # adds both sources -- but resolve_fields should pick Bricklink first.
-        # The key assertion: the resolved value comes from BRICKLINK.
 
     def test_1_2_multiple_fields_one_source(self, make_item):
-        """Given year_released, parts_count, dimensions all NULL (WorldBricks fields).
-        When WorldBricks returns data, all found fields stored, one scrape only."""
+        """Given year_released, parts_count all NULL (Bricklink fields).
+        When Bricklink returns data, all found fields stored, one scrape only."""
         item = make_item()
         call_count = 0
 
-        def worldbricks_fetcher(set_number: str) -> SourceResult:
+        def bricklink_fetcher(set_number: str) -> SourceResult:
             nonlocal call_count
             call_count += 1
             return SourceResult(
-                source=SourceId.WORLDBRICKS,
+                source=SourceId.BRICKLINK,
                 success=True,
                 fields={
                     MetadataField.YEAR_RELEASED: 2022,
-                    MetadataField.YEAR_RETIRED: None,  # legitimately not retired
                     MetadataField.PARTS_COUNT: 1254,
                 },
-            )
-
-        def bricklink_fetcher(set_number: str) -> SourceResult:
-            return SourceResult(
-                source=SourceId.BRICKLINK,
-                success=True,
-                fields={MetadataField.YEAR_RELEASED: 2022},
             )
 
         result, _ = enrich(
             "10497",
             item,
-            {SourceId.WORLDBRICKS: worldbricks_fetcher, SourceId.BRICKLINK: bricklink_fetcher},
+            {SourceId.BRICKLINK: bricklink_fetcher},
             CircuitBreakerState(),
             fields=(
                 MetadataField.YEAR_RELEASED,
-                MetadataField.YEAR_RETIRED,
                 MetadataField.PARTS_COUNT,
             ),
         )
 
-        assert call_count == 1  # WorldBricks called only once
+        assert call_count == 1  # Bricklink called only once
 
         year_r = next(r for r in result.field_results if r.field == MetadataField.YEAR_RELEASED)
         assert year_r.status == FieldStatus.FOUND
@@ -194,10 +170,6 @@ class TestHappyPath:
         parts_r = next(r for r in result.field_results if r.field == MetadataField.PARTS_COUNT)
         assert parts_r.status == FieldStatus.FOUND
         assert parts_r.value == 1254
-
-        # year_retired: WorldBricks returned None -- NOT_FOUND (no other source)
-        retired_r = next(r for r in result.field_results if r.field == MetadataField.YEAR_RETIRED)
-        assert retired_r.status == FieldStatus.NOT_FOUND
 
     def test_1_3_multiple_fields_multiple_sources(self, make_item):
         """Given set needs theme (BrickRanker), year_released (Bricklink), weight (Bricklink).
@@ -238,7 +210,7 @@ class TestHappyPath:
 
     def test_1_4_stop_on_first_success(self, make_item):
         """Given Bricklink returns year_released=2019.
-        Then WorldBricks value for year_released is NOT used."""
+        Then Bricklink value is used."""
         item = make_item()
 
         bricklink_result = SourceResult(
@@ -246,19 +218,14 @@ class TestHappyPath:
             success=True,
             fields={MetadataField.YEAR_RELEASED: 2019},
         )
-        worldbricks_result = SourceResult(
-            source=SourceId.WORLDBRICKS,
-            success=True,
-            fields={MetadataField.YEAR_RELEASED: 2020},  # different value
-        )
 
         field_results = resolve_fields(
             (MetadataField.YEAR_RELEASED,),
-            {SourceId.BRICKLINK: bricklink_result, SourceId.WORLDBRICKS: worldbricks_result},
+            {SourceId.BRICKLINK: bricklink_result},
         )
 
         assert len(field_results) == 1
-        assert field_results[0].value == 2019  # Bricklink (higher priority)
+        assert field_results[0].value == 2019
         assert field_results[0].source == SourceId.BRICKLINK
 
     def test_1_5_full_enrichment_new_item(self, make_item):
@@ -275,15 +242,6 @@ class TestHappyPath:
                     MetadataField.YEAR_RELEASED: 2013,
                     MetadataField.IMAGE_URL: "https://img.bricklink.com/31009.png",
                     MetadataField.WEIGHT: "0.5 kg",
-                },
-            )
-
-        def worldbricks_fetcher(set_number: str) -> SourceResult:
-            return SourceResult(
-                source=SourceId.WORLDBRICKS,
-                success=True,
-                fields={
-                    MetadataField.YEAR_RETIRED: 2014,
                     MetadataField.PARTS_COUNT: 271,
                 },
             )
@@ -303,17 +261,15 @@ class TestHappyPath:
             item,
             {
                 SourceId.BRICKLINK: bricklink_fetcher,
-                SourceId.WORLDBRICKS: worldbricks_fetcher,
                 SourceId.BRICKRANKER: brickranker_fetcher,
             },
             CircuitBreakerState(),
         )
 
-        assert len(result.sources_called) == 3
+        assert len(result.sources_called) == 2
         found_fields = {r.field for r in result.field_results if r.status == FieldStatus.FOUND}
         assert MetadataField.TITLE in found_fields
         assert MetadataField.YEAR_RELEASED in found_fields
-        assert MetadataField.YEAR_RETIRED in found_fields
         assert MetadataField.PARTS_COUNT in found_fields
         assert MetadataField.THEME in found_fields
         assert MetadataField.IMAGE_URL in found_fields

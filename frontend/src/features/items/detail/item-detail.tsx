@@ -19,7 +19,6 @@ import { BricklinkPriceChart } from './bricklink-price-chart';
 const ENRICH_SOURCES = [
   { id: null, label: 'All Sources' },
   { id: 'bricklink', label: 'Bricklink' },
-  { id: 'worldbricks', label: 'WorldBricks' },
   { id: 'brickranker', label: 'BrickRanker' },
 ] as const;
 

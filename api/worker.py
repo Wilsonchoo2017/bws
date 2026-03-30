@@ -204,7 +204,6 @@ def _run_enrichment(job_url: str) -> dict:
     from services.enrichment.fetchers import (
         fetch_from_bricklink,
         fetch_from_brickranker,
-        fetch_from_worldbricks,
     )
     from services.enrichment.orchestrator import enrich
     from services.enrichment.repository import (
@@ -222,7 +221,6 @@ def _run_enrichment(job_url: str) -> dict:
 
     all_fetchers = {
         SourceId.BRICKLINK: fetch_from_bricklink,
-        SourceId.WORLDBRICKS: fetch_from_worldbricks,
         SourceId.BRICKRANKER: fetch_from_brickranker,
     }
 

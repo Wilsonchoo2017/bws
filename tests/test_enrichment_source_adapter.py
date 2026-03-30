@@ -7,11 +7,9 @@ from services.brickranker.parser import RetirementItem
 from services.enrichment.source_adapter import (
     adapt_bricklink,
     adapt_brickranker,
-    adapt_worldbricks,
     make_failed_result,
 )
 from services.enrichment.types import MetadataField, SourceId
-from services.worldbricks.parser import WorldBricksData
 
 
 class TestAdaptBricklink:
@@ -38,27 +36,6 @@ class TestAdaptBricklink:
         assert result.success
         assert result.fields[MetadataField.TITLE] is None
         assert result.fields[MetadataField.YEAR_RELEASED] is None
-
-
-class TestAdaptWorldBricks:
-    def test_extracts_all_fields(self):
-        data = WorldBricksData(
-            set_number="31009",
-            set_name="Small Cottage",
-            year_released=2013,
-            year_retired=2014,
-            parts_count=271,
-            dimensions="26x19x14 cm",
-            image_url="https://worldbricks.com/31009.jpg",
-        )
-        result = adapt_worldbricks(data)
-        assert result.success
-        assert result.source == SourceId.WORLDBRICKS
-        assert result.fields[MetadataField.TITLE] == "Small Cottage"
-        assert result.fields[MetadataField.YEAR_RELEASED] == 2013
-        assert result.fields[MetadataField.YEAR_RETIRED] == 2014
-        assert result.fields[MetadataField.PARTS_COUNT] == 271
-        assert result.fields[MetadataField.IMAGE_URL] == "https://worldbricks.com/31009.jpg"
 
 
 class TestAdaptBrickRanker:

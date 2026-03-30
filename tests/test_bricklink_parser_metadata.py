@@ -45,8 +45,21 @@ def _make_item_html(
         parts.append(f"<script>{theme_js}</script>")
 
     if breadcrumbs:
-        links = "".join(f'<a href="#">{b}</a>' for b in breadcrumbs)
-        parts.append(f'<div id="content-area">{links}</div>')
+        # Mimic real BrickLink breadcrumb structure with catString in theme hrefs
+        links = []
+        cat_idx = 0
+        for b in breadcrumbs:
+            if b in ("Catalog", "Sets"):
+                links.append(f'<a href="//www.bricklink.com/{b.lower()}.asp">{b}</a>')
+            elif b and not b[0].isdigit():
+                # Theme link with catString parameter
+                cat_idx += 1
+                links.append(
+                    f'<a href="//www.bricklink.com/catalogList.asp?catType=S&catString={cat_idx}">{b}</a>'
+                )
+            else:
+                links.append(f"<span>{b}</span>")
+        parts.append("".join(links))
 
     return _wrap_html("\n".join(parts))
 
@@ -129,6 +142,14 @@ class TestExtractTheme:
         html = _make_item_html(theme_js="var catString = '';")
         result = parse_item_info(html)
         assert result["theme"] is None
+
+    def test_breadcrumb_subtheme_returns_top_level(self):
+        """#10b: Given breadcrumbs with sub-theme, returns top-level theme."""
+        html = _make_item_html(
+            breadcrumbs=["Catalog", "Sets", "Jurassic World", "Jurassic Park", "76960-1"]
+        )
+        result = parse_item_info(html)
+        assert result["theme"] == "Jurassic World"
 
     def test_finds_catstring_in_correct_script(self):
         """#13: Given multiple script tags, only one has catString."""

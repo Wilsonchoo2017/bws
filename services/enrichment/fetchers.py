@@ -13,7 +13,6 @@ from typing import TYPE_CHECKING
 from services.enrichment.source_adapter import (
     adapt_bricklink,
     adapt_brickranker,
-    adapt_worldbricks,
     make_failed_result,
 )
 from services.enrichment.types import SourceId, SourceResult
@@ -92,55 +91,6 @@ def fetch_from_bricklink(
     except Exception as e:
         logger.exception("Bricklink fetch failed for %s", set_number)
         return make_failed_result(SourceId.BRICKLINK, str(e))
-
-
-def fetch_from_worldbricks(
-    conn: "DuckDBPyConnection",
-    set_number: str,
-    *,
-    freshness: timedelta = _DEFAULT_FRESHNESS,
-) -> SourceResult:
-    """Fetch metadata from WorldBricks (cache-first, then HTTP)."""
-    # Check cache: worldbricks_sets table
-    try:
-        from services.worldbricks.repository import get_set
-
-        cached = get_set(conn, set_number)
-        if cached and cached.get("scraped_at"):
-            scraped_at = cached["scraped_at"]
-            if isinstance(scraped_at, datetime) and (datetime.now(tz=timezone.utc) - scraped_at) < freshness:
-                from services.worldbricks.parser import WorldBricksData
-                wb_data = WorldBricksData(
-                    set_number=cached["set_number"],
-                    set_name=cached.get("set_name"),
-                    year_released=cached.get("year_released"),
-                    year_retired=cached.get("year_retired"),
-                    parts_count=cached.get("parts_count"),
-                    dimensions=cached.get("dimensions"),
-                    image_url=cached.get("image_url"),
-                )
-                logger.info("WorldBricks cache hit for %s", set_number)
-                return adapt_worldbricks(wb_data)
-    except Exception:
-        logger.debug("WorldBricks cache lookup failed for %s, falling back to HTTP", set_number, exc_info=True)
-
-    # HTTP scrape
-    try:
-        from services.worldbricks.scraper import scrape_set_sync
-
-        scrape_result = scrape_set_sync(conn, set_number, save=True)
-
-        if not scrape_result.success:
-            return make_failed_result(SourceId.WORLDBRICKS, scrape_result.error or "Unknown error")
-
-        if scrape_result.data is None:
-            return make_failed_result(SourceId.WORLDBRICKS, "No data returned")
-
-        return adapt_worldbricks(scrape_result.data)
-
-    except Exception as e:
-        logger.exception("WorldBricks fetch failed for %s", set_number)
-        return make_failed_result(SourceId.WORLDBRICKS, str(e))
 
 
 def fetch_from_brickranker(

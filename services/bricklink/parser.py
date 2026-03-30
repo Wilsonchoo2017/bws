@@ -181,12 +181,34 @@ def _extract_parts_count(soup: BeautifulSoup) -> int | None:
 def _extract_theme(soup: BeautifulSoup) -> str | None:
     """Extract theme from the catalog item page.
 
-    BrickLink embeds itemType and itemCatName in JavaScript variables on the page.
-    Falls back to breadcrumb links containing the theme.
+    Strategies (in order):
+    1. Breadcrumb links with catString URL parameter -- the first such link
+       after the "Sets" link is the top-level theme (e.g. "Jurassic World").
+    2. JavaScript variable catString or itemCatName (legacy, may not exist).
     """
-    # Try JavaScript variable: catString or itemCatName
-    scripts = soup.find_all("script")
-    for script in scripts:
+    # Strategy 1: Breadcrumb links with catString in the href.
+    # BrickLink breadcrumbs: Catalog > Sets > Theme > SubTheme > item
+    # Theme links contain "catString=" in their href.
+    cat_links = soup.find_all("a", href=re.compile(r"catString="))
+    if cat_links:
+        # The first catString link is the top-level theme
+        theme = cat_links[0].get_text(strip=True)
+        if theme:
+            return theme
+
+    # Strategy 2: Any link immediately after a "Sets" link in any context
+    all_links = soup.find_all("a")
+    found_sets = False
+    for link in all_links:
+        text = link.get_text(strip=True)
+        if text == "Sets":
+            found_sets = True
+            continue
+        if found_sets and text and text not in ("Catalog", "Items", ""):
+            return text
+
+    # Strategy 3: JavaScript variables (legacy fallback)
+    for script in soup.find_all("script"):
         text = script.string or ""
         match = re.search(r"var\s+catString\s*=\s*['\"]([^'\"]+)['\"]", text)
         if match:
@@ -198,17 +220,6 @@ def _extract_theme(soup: BeautifulSoup) -> str | None:
             theme = match.group(1).strip()
             if theme:
                 return theme
-
-    # Fallback: breadcrumb links after "Sets" category
-    breadcrumbs = soup.select("div#content-area a, nav a")
-    found_sets = False
-    for link in breadcrumbs:
-        text = link.get_text(strip=True)
-        if text == "Sets":
-            found_sets = True
-            continue
-        if found_sets and text and text not in ("Catalog", "Items", ""):
-            return text
 
     return None
 

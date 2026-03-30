@@ -98,7 +98,7 @@ def determine_sources_needed(
     Groups missing fields by source priority, deduplicates sources,
     and filters out circuit-broken sources.
 
-    Returns sources in a stable order: BRICKLINK, WORLDBRICKS, BRICKRANKER.
+    Returns sources in a stable order: BRICKLINK, BRICKRANKER.
     """
     needed: set[SourceId] = set()
 
@@ -110,7 +110,7 @@ def determine_sources_needed(
                 needed.add(source_id)
 
     # Stable ordering
-    order = (SourceId.BRICKLINK, SourceId.WORLDBRICKS, SourceId.BRICKRANKER)
+    order = (SourceId.BRICKLINK, SourceId.BRICKRANKER)
     return tuple(s for s in order if s in needed)
 
 

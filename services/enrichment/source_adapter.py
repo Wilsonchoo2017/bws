@@ -6,7 +6,6 @@ Pure functions mapping source-specific data models to the unified MetadataField 
 from bws_types.models import BricklinkData
 from services.brickranker.parser import RetirementItem
 from services.enrichment.types import MetadataField, SourceId, SourceResult
-from services.worldbricks.parser import WorldBricksData
 
 
 def adapt_bricklink(data: BricklinkData) -> SourceResult:
@@ -21,22 +20,6 @@ def adapt_bricklink(data: BricklinkData) -> SourceResult:
     }
     return SourceResult(
         source=SourceId.BRICKLINK,
-        success=True,
-        fields=fields,
-    )
-
-
-def adapt_worldbricks(data: WorldBricksData) -> SourceResult:
-    """Extract enrichment fields from WorldBricksData."""
-    fields: dict[MetadataField, str | int | bool | None] = {
-        MetadataField.TITLE: data.set_name,
-        MetadataField.YEAR_RELEASED: data.year_released,
-        MetadataField.YEAR_RETIRED: data.year_retired,
-        MetadataField.PARTS_COUNT: data.parts_count,
-        MetadataField.IMAGE_URL: data.image_url,
-    }
-    return SourceResult(
-        source=SourceId.WORLDBRICKS,
         success=True,
         fields=fields,
     )

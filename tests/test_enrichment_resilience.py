@@ -28,7 +28,7 @@ class TestCircuitBreaker:
         """Given fresh circuit breaker. Then all sources available."""
         cb = CircuitBreakerState()
         assert is_available(cb, SourceId.BRICKLINK, cooldown_seconds=1800)
-        assert is_available(cb, SourceId.WORLDBRICKS, cooldown_seconds=1800)
+        assert is_available(cb, SourceId.BRICKRANKER, cooldown_seconds=1800)
 
     def test_single_failure_does_not_trip(self):
         """Given 1 failure (threshold=5). Then source still available."""
@@ -41,12 +41,12 @@ class TestCircuitBreaker:
         """Given 5 consecutive failures (threshold=5). Then breaker trips."""
         cb = CircuitBreakerState()
         for _ in range(5):
-            cb = record_failure(cb, SourceId.WORLDBRICKS, threshold=5)
+            cb = record_failure(cb, SourceId.BRICKRANKER, threshold=5)
 
-        state = cb.get_state(SourceId.WORLDBRICKS)
+        state = cb.get_state(SourceId.BRICKRANKER)
         assert state.is_open
         assert state.consecutive_failures == 5
-        assert not is_available(cb, SourceId.WORLDBRICKS, cooldown_seconds=1800)
+        assert not is_available(cb, SourceId.BRICKRANKER, cooldown_seconds=1800)
 
     def test_success_resets_failures(self):
         """Given 4 failures then 1 success. Then counter resets."""
@@ -64,7 +64,7 @@ class TestCircuitBreaker:
         old_time = datetime.now(tz=timezone.utc) - timedelta(seconds=3600)
         cb = CircuitBreakerState(
             states={
-                SourceId.WORLDBRICKS: SourceState(
+                SourceId.BRICKRANKER: SourceState(
                     consecutive_failures=5,
                     last_failure_at=old_time,
                     is_open=True,
@@ -72,29 +72,29 @@ class TestCircuitBreaker:
             }
         )
         # Cooldown is 1800s, 3600s have passed
-        assert is_available(cb, SourceId.WORLDBRICKS, cooldown_seconds=1800)
+        assert is_available(cb, SourceId.BRICKRANKER, cooldown_seconds=1800)
 
     def test_cooldown_not_expired_blocks(self):
         """Given tripped breaker with recent failure. Then source blocked."""
         recent_time = datetime.now(tz=timezone.utc) - timedelta(seconds=60)
         cb = CircuitBreakerState(
             states={
-                SourceId.WORLDBRICKS: SourceState(
+                SourceId.BRICKRANKER: SourceState(
                     consecutive_failures=5,
                     last_failure_at=recent_time,
                     is_open=True,
                 )
             }
         )
-        assert not is_available(cb, SourceId.WORLDBRICKS, cooldown_seconds=1800)
+        assert not is_available(cb, SourceId.BRICKRANKER, cooldown_seconds=1800)
 
     def test_other_sources_unaffected(self):
-        """Given WorldBricks tripped. Then Bricklink still available."""
+        """Given BrickRanker tripped. Then Bricklink still available."""
         cb = CircuitBreakerState()
         for _ in range(5):
-            cb = record_failure(cb, SourceId.WORLDBRICKS, threshold=5)
+            cb = record_failure(cb, SourceId.BRICKRANKER, threshold=5)
 
-        assert not is_available(cb, SourceId.WORLDBRICKS, cooldown_seconds=1800)
+        assert not is_available(cb, SourceId.BRICKRANKER, cooldown_seconds=1800)
         assert is_available(cb, SourceId.BRICKLINK, cooldown_seconds=1800)
 
 
@@ -102,48 +102,48 @@ class TestResilienceIntegration:
     """GROUP 6: Resilience integration tests."""
 
     def test_6_2_circuit_breaker_skips_source(self, make_item):
-        """Given WorldBricks circuit breaker open.
-        When enrichment needs year_retired (WorldBricks-only).
-        Then WorldBricks skipped, field marked SKIPPED."""
+        """Given Bricklink circuit breaker open.
+        When enrichment needs weight (Bricklink-only).
+        Then Bricklink skipped, field marked SKIPPED."""
         item = make_item()
 
-        # Pre-trip WorldBricks circuit breaker
+        # Pre-trip Bricklink circuit breaker
         cb = CircuitBreakerState()
         for _ in range(5):
-            cb = record_failure(cb, SourceId.WORLDBRICKS, threshold=5)
+            cb = record_failure(cb, SourceId.BRICKLINK, threshold=5)
 
-        worldbricks_called = False
+        bricklink_called = False
 
-        def worldbricks_fetcher(set_number: str) -> SourceResult:
-            nonlocal worldbricks_called
-            worldbricks_called = True
+        def bricklink_fetcher(set_number: str) -> SourceResult:
+            nonlocal bricklink_called
+            bricklink_called = True
             return SourceResult(
-                source=SourceId.WORLDBRICKS, success=True, fields={}
+                source=SourceId.BRICKLINK, success=True, fields={}
             )
 
         result, _ = enrich(
             "10305",
             item,
-            {SourceId.WORLDBRICKS: worldbricks_fetcher},
+            {SourceId.BRICKLINK: bricklink_fetcher},
             cb,
-            fields=(MetadataField.YEAR_RETIRED,),
+            fields=(MetadataField.WEIGHT,),
         )
 
-        assert not worldbricks_called
-        retired_r = next(
-            r for r in result.field_results if r.field == MetadataField.YEAR_RETIRED
+        assert not bricklink_called
+        weight_r = next(
+            r for r in result.field_results if r.field == MetadataField.WEIGHT
         )
-        assert retired_r.status == FieldStatus.SKIPPED
+        assert weight_r.status == FieldStatus.SKIPPED
 
     def test_6_2_circuit_breaker_determine_sources_excludes_tripped(self):
-        """Given WorldBricks tripped.
+        """Given Bricklink tripped.
         Then determine_sources_needed excludes it."""
         cb = CircuitBreakerState()
         for _ in range(5):
-            cb = record_failure(cb, SourceId.WORLDBRICKS, threshold=5)
+            cb = record_failure(cb, SourceId.BRICKLINK, threshold=5)
 
-        sources = determine_sources_needed((MetadataField.YEAR_RETIRED,), cb)
-        assert SourceId.WORLDBRICKS not in sources
+        sources = determine_sources_needed((MetadataField.WEIGHT,), cb)
+        assert SourceId.BRICKLINK not in sources
 
     def test_6_3_enrichment_updates_cb_on_failure(self, make_item):
         """Given Bricklink fails during enrichment.
@@ -200,7 +200,6 @@ class TestResilienceIntegration:
         cb = CircuitBreakerState()
         for _ in range(5):
             cb = record_failure(cb, SourceId.BRICKLINK, threshold=5)
-            cb = record_failure(cb, SourceId.WORLDBRICKS, threshold=5)
 
         call_count = 0
 
@@ -212,7 +211,7 @@ class TestResilienceIntegration:
         result, _ = enrich(
             "75192",
             item,
-            {SourceId.BRICKLINK: any_fetcher, SourceId.WORLDBRICKS: any_fetcher},
+            {SourceId.BRICKLINK: any_fetcher},
             cb,
             fields=(MetadataField.YEAR_RELEASED,),
         )

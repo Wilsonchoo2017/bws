@@ -16,7 +16,7 @@ logger = logging.getLogger("bws.enrichment.routes")
 router = APIRouter(prefix="/enrichment", tags=["enrichment"])
 
 
-VALID_SOURCES = {"bricklink", "worldbricks", "brickranker"}
+VALID_SOURCES = {"bricklink", "brickranker"}
 
 
 class EnrichRequest(BaseModel):

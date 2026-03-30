@@ -27,10 +27,21 @@ def conn():
 
 
 class TestGetItemsNeedingEnrichment:
+    @staticmethod
+    def _add_price_record(conn, set_number: str) -> None:
+        """Insert a dummy price record so the item passes the EXISTS filter."""
+        conn.execute(
+            "INSERT INTO price_records (id, set_number, source, price_cents, currency) "
+            "VALUES (nextval('price_records_id_seq'), ?, 'shopee', 10000, 'MYR')",
+            [set_number],
+        )
+
     def test_finds_items_with_null_fields(self, conn):
         """Given items with NULL metadata. Then detected as needing enrichment."""
         get_or_create_item(conn, "75192")
         get_or_create_item(conn, "42151", title="Bugatti", year_released=2023)
+        self._add_price_record(conn, "75192")
+        self._add_price_record(conn, "42151")
 
         items = get_items_needing_enrichment(conn)
         set_numbers = [i["set_number"] for i in items]
@@ -48,6 +59,7 @@ class TestGetItemsNeedingEnrichment:
             parts_count=271,
             image_url="https://example.com/31009.png",
         )
+        self._add_price_record(conn, "31009")
 
         items = get_items_needing_enrichment(conn)
         set_numbers = [i["set_number"] for i in items]
@@ -55,7 +67,9 @@ class TestGetItemsNeedingEnrichment:
 
     def test_respects_limit(self, conn):
         for i in range(10):
-            get_or_create_item(conn, str(10000 + i))
+            sn = str(10000 + i)
+            get_or_create_item(conn, sn)
+            self._add_price_record(conn, sn)
 
         items = get_items_needing_enrichment(conn, limit=3)
         assert len(items) == 3
@@ -152,7 +166,7 @@ class TestStoreEnrichmentResult:
                     field=MetadataField.YEAR_RETIRED,
                     status=FieldStatus.FOUND,
                     value=2014,
-                    source=SourceId.WORLDBRICKS,
+                    source=SourceId.BRICKLINK,
                 ),
                 FieldResult(
                     field=MetadataField.WEIGHT,

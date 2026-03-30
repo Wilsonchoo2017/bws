@@ -43,22 +43,17 @@ class TestDataQuality:
         assert validate_field(MetadataField.YEAR_RELEASED, too_far) is None
 
     def test_5_2_cross_source_consistency_uses_primary(self):
-        """Given Bricklink says year=2017, WorldBricks says year=2019.
+        """Given Bricklink says year=2017.
         Then primary (Bricklink) value used."""
         bricklink_result = SourceResult(
             source=SourceId.BRICKLINK,
             success=True,
             fields={MetadataField.YEAR_RELEASED: 2017},
         )
-        worldbricks_result = SourceResult(
-            source=SourceId.WORLDBRICKS,
-            success=True,
-            fields={MetadataField.YEAR_RELEASED: 2019},
-        )
 
         field_results = resolve_fields(
             (MetadataField.YEAR_RELEASED,),
-            {SourceId.BRICKLINK: bricklink_result, SourceId.WORLDBRICKS: worldbricks_result},
+            {SourceId.BRICKLINK: bricklink_result},
         )
 
         assert field_results[0].value == 2017
@@ -80,23 +75,18 @@ class TestDataQuality:
         url = "http://example.com/image.jpg"
         assert is_valid_image_url(url)
 
-    def test_5_5_image_url_resolve_rejects_bad(self):
-        """Given Bricklink returns valid URL, WorldBricks returns base64 placeholder.
+    def test_5_5_image_url_resolve_accepts_valid(self):
+        """Given Bricklink returns valid URL.
         Then resolve picks Bricklink URL."""
         bricklink_result = SourceResult(
             source=SourceId.BRICKLINK,
             success=True,
             fields={MetadataField.IMAGE_URL: "https://img.bricklink.com/75192.png"},
         )
-        worldbricks_result = SourceResult(
-            source=SourceId.WORLDBRICKS,
-            success=True,
-            fields={MetadataField.IMAGE_URL: "data:image/gif;base64,R0lGODlh"},
-        )
 
         field_results = resolve_fields(
             (MetadataField.IMAGE_URL,),
-            {SourceId.BRICKLINK: bricklink_result, SourceId.WORLDBRICKS: worldbricks_result},
+            {SourceId.BRICKLINK: bricklink_result},
         )
 
         assert field_results[0].value == "https://img.bricklink.com/75192.png"

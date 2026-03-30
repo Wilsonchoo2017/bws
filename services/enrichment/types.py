@@ -21,7 +21,6 @@ class SourceId(Enum):
     """Identifier for each metadata source."""
 
     BRICKLINK = "bricklink"
-    WORLDBRICKS = "worldbricks"
     BRICKRANKER = "brickranker"
 
 

@@ -80,21 +80,6 @@ CREATE TABLE IF NOT EXISTS product_analysis (
 );
 """
 
-WORLDBRICKS_SETS_DDL = """
-CREATE TABLE IF NOT EXISTS worldbricks_sets (
-    id INTEGER PRIMARY KEY,
-    set_number VARCHAR NOT NULL UNIQUE,
-    set_name VARCHAR,
-    year_released INTEGER,
-    year_retired INTEGER,
-    parts_count INTEGER,
-    dimensions VARCHAR,
-    image_url VARCHAR,
-    scraped_at TIMESTAMP,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-"""
-
 SHOPEE_PRODUCTS_DDL = """
 CREATE TABLE IF NOT EXISTS shopee_products (
     id INTEGER PRIMARY KEY,
@@ -225,7 +210,6 @@ CREATE SEQUENCE IF NOT EXISTS bricklink_items_id_seq;
 CREATE SEQUENCE IF NOT EXISTS bricklink_price_history_id_seq;
 CREATE SEQUENCE IF NOT EXISTS bricklink_monthly_sales_id_seq;
 CREATE SEQUENCE IF NOT EXISTS product_analysis_id_seq;
-CREATE SEQUENCE IF NOT EXISTS worldbricks_sets_id_seq;
 CREATE SEQUENCE IF NOT EXISTS brickranker_items_id_seq;
 CREATE SEQUENCE IF NOT EXISTS shopee_products_id_seq;
 CREATE SEQUENCE IF NOT EXISTS shopee_saturation_id_seq;
@@ -252,8 +236,6 @@ CREATE INDEX IF NOT EXISTS idx_product_analysis_action
     ON product_analysis(action);
 CREATE INDEX IF NOT EXISTS idx_product_analysis_score
     ON product_analysis(overall_score);
-CREATE INDEX IF NOT EXISTS idx_worldbricks_set_number
-    ON worldbricks_sets(set_number);
 CREATE INDEX IF NOT EXISTS idx_brickranker_set_number
     ON brickranker_items(set_number);
 CREATE INDEX IF NOT EXISTS idx_brickranker_retiring_soon
@@ -286,7 +268,6 @@ ALL_DDL = [
     BRICKLINK_PRICE_HISTORY_DDL,
     BRICKLINK_MONTHLY_SALES_DDL,
     PRODUCT_ANALYSIS_DDL,
-    WORLDBRICKS_SETS_DDL,
     BRICKRANKER_ITEMS_DDL,
     SHOPEE_PRODUCTS_DDL,
     SHOPEE_SATURATION_DDL,
@@ -350,7 +331,6 @@ _SEQUENCE_TABLE_MAP = [
     ("bricklink_price_history_id_seq", "bricklink_price_history"),
     ("bricklink_monthly_sales_id_seq", "bricklink_monthly_sales"),
     ("product_analysis_id_seq", "product_analysis"),
-    ("worldbricks_sets_id_seq", "worldbricks_sets"),
     ("brickranker_items_id_seq", "brickranker_items"),
     ("shopee_products_id_seq", "shopee_products"),
     ("shopee_saturation_id_seq", "shopee_saturation"),
@@ -463,7 +443,6 @@ def _rebuild_table(conn: "DuckDBPyConnection", table_name: str) -> None:
         "bricklink_price_history": BRICKLINK_PRICE_HISTORY_DDL,
         "bricklink_monthly_sales": BRICKLINK_MONTHLY_SALES_DDL,
         "product_analysis": PRODUCT_ANALYSIS_DDL,
-        "worldbricks_sets": WORLDBRICKS_SETS_DDL,
         "brickranker_items": BRICKRANKER_ITEMS_DDL,
         "shopee_products": SHOPEE_PRODUCTS_DDL,
         "shopee_saturation": SHOPEE_SATURATION_DDL,
@@ -545,13 +524,11 @@ def drop_all_tables(conn: "DuckDBPyConnection") -> None:
     conn.execute("DROP TABLE IF EXISTS bricklink_monthly_sales;")
     conn.execute("DROP TABLE IF EXISTS bricklink_price_history;")
     conn.execute("DROP TABLE IF EXISTS bricklink_items;")
-    conn.execute("DROP TABLE IF EXISTS worldbricks_sets;")
     conn.execute("DROP TABLE IF EXISTS brickranker_items;")
     conn.execute("DROP SEQUENCE IF EXISTS bricklink_items_id_seq;")
     conn.execute("DROP SEQUENCE IF EXISTS bricklink_price_history_id_seq;")
     conn.execute("DROP SEQUENCE IF EXISTS bricklink_monthly_sales_id_seq;")
     conn.execute("DROP SEQUENCE IF EXISTS product_analysis_id_seq;")
-    conn.execute("DROP SEQUENCE IF EXISTS worldbricks_sets_id_seq;")
     conn.execute("DROP SEQUENCE IF EXISTS brickranker_items_id_seq;")
 
 
@@ -569,7 +546,6 @@ def get_table_stats(conn: "DuckDBPyConnection") -> dict[str, int]:
         "bricklink_price_history",
         "bricklink_monthly_sales",
         "product_analysis",
-        "worldbricks_sets",
         "brickranker_items",
     ]
     stats = {}

@@ -21,7 +21,6 @@ class TestSourceSpecificEnrichment:
         When enrichment runs with only Bricklink fields.
         Then only Bricklink fetcher called, only Bricklink fields attempted."""
         item = make_item()
-        worldbricks_called = False
 
         def bricklink_fetcher(sn: str) -> SourceResult:
             return SourceResult(
@@ -35,11 +34,6 @@ class TestSourceSpecificEnrichment:
                 },
             )
 
-        def worldbricks_fetcher(sn: str) -> SourceResult:
-            nonlocal worldbricks_called
-            worldbricks_called = True
-            return SourceResult(source=SourceId.WORLDBRICKS, success=True, fields={})
-
         fields = tuple(SOURCE_CONFIGS[SourceId.BRICKLINK].fields_provided)
 
         result, _ = enrich(
@@ -50,9 +44,7 @@ class TestSourceSpecificEnrichment:
             fields=fields,
         )
 
-        assert not worldbricks_called
         assert SourceId.BRICKLINK in result.sources_called
-        assert SourceId.WORLDBRICKS not in result.sources_called
 
         # Should have results for Bricklink fields only
         result_fields = {r.field for r in result.field_results}
@@ -60,48 +52,8 @@ class TestSourceSpecificEnrichment:
         assert MetadataField.YEAR_RELEASED in result_fields
         assert MetadataField.WEIGHT in result_fields
         assert MetadataField.IMAGE_URL in result_fields
-        # Should NOT have WorldBricks-only fields
-        assert MetadataField.YEAR_RETIRED not in result_fields
-        # PARTS_COUNT and THEME are now also provided by BrickLink
         assert MetadataField.PARTS_COUNT in result_fields
         assert MetadataField.THEME in result_fields
-
-    def test_worldbricks_only_calls_worldbricks(self, make_item):
-        """Given source=worldbricks.
-        When enrichment runs.
-        Then only WorldBricks fetcher called."""
-        item = make_item()
-
-        def worldbricks_fetcher(sn: str) -> SourceResult:
-            return SourceResult(
-                source=SourceId.WORLDBRICKS,
-                success=True,
-                fields={
-                    MetadataField.YEAR_RETIRED: 2023,
-                    MetadataField.PARTS_COUNT: 7541,
-                },
-            )
-
-        fields = tuple(SOURCE_CONFIGS[SourceId.WORLDBRICKS].fields_provided)
-
-        result, _ = enrich(
-            "75192",
-            item,
-            {SourceId.WORLDBRICKS: worldbricks_fetcher},
-            CircuitBreakerState(),
-            fields=fields,
-        )
-
-        assert SourceId.WORLDBRICKS in result.sources_called
-        assert len(result.sources_called) == 1
-
-        retired_r = next(
-            (r for r in result.field_results if r.field == MetadataField.YEAR_RETIRED),
-            None,
-        )
-        assert retired_r is not None
-        assert retired_r.status == FieldStatus.FOUND
-        assert retired_r.value == 2023
 
     def test_brickranker_only_calls_brickranker(self, make_item):
         """Given source=brickranker.
@@ -156,8 +108,8 @@ class TestJobUrlParsing:
         assert source == "bricklink"
 
     def test_set_number_with_suffix_and_source(self):
-        """Given '75192-1:worldbricks'. Then parsed correctly."""
-        job_url = "75192-1:worldbricks"
+        """Given '75192-1:brickranker'. Then parsed correctly."""
+        job_url = "75192-1:brickranker"
         set_number, source = job_url.split(":", 1)
         assert set_number == "75192-1"
-        assert source == "worldbricks"
+        assert source == "brickranker"

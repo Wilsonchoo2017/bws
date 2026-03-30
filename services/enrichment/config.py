@@ -23,12 +23,12 @@ class SourceConfig:
 
 # Which sources provide which fields, in priority order per field.
 FIELD_SOURCE_PRIORITY: dict[MetadataField, tuple[SourceId, ...]] = {
-    MetadataField.TITLE: (SourceId.BRICKLINK, SourceId.WORLDBRICKS),
-    MetadataField.YEAR_RELEASED: (SourceId.BRICKLINK, SourceId.WORLDBRICKS),
-    MetadataField.YEAR_RETIRED: (SourceId.WORLDBRICKS,),
-    MetadataField.PARTS_COUNT: (SourceId.WORLDBRICKS, SourceId.BRICKLINK),
+    MetadataField.TITLE: (SourceId.BRICKLINK,),
+    MetadataField.YEAR_RELEASED: (SourceId.BRICKLINK,),
+    MetadataField.YEAR_RETIRED: (),
+    MetadataField.PARTS_COUNT: (SourceId.BRICKLINK,),
     MetadataField.THEME: (SourceId.BRICKRANKER, SourceId.BRICKLINK),
-    MetadataField.IMAGE_URL: (SourceId.BRICKLINK, SourceId.WORLDBRICKS),
+    MetadataField.IMAGE_URL: (SourceId.BRICKLINK,),
     MetadataField.WEIGHT: (SourceId.BRICKLINK,),
     MetadataField.RETIRING_SOON: (SourceId.BRICKRANKER,),
 }
@@ -43,16 +43,6 @@ SOURCE_CONFIGS: dict[SourceId, SourceConfig] = {
             MetadataField.WEIGHT,
             MetadataField.PARTS_COUNT,
             MetadataField.THEME,
-        }),
-    ),
-    SourceId.WORLDBRICKS: SourceConfig(
-        source_id=SourceId.WORLDBRICKS,
-        fields_provided=frozenset({
-            MetadataField.TITLE,
-            MetadataField.YEAR_RELEASED,
-            MetadataField.YEAR_RETIRED,
-            MetadataField.PARTS_COUNT,
-            MetadataField.IMAGE_URL,
         }),
     ),
     SourceId.BRICKRANKER: SourceConfig(

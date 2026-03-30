@@ -70,10 +70,9 @@ class TestConfigPriority:
     """FIELD_SOURCE_PRIORITY and SOURCE_CONFIGS updated for new fields."""
 
     def test_parts_count_priority_order(self):
-        """#20: PARTS_COUNT: WorldBricks first, BrickLink second."""
+        """#20: PARTS_COUNT: BrickLink only."""
         sources = FIELD_SOURCE_PRIORITY[MetadataField.PARTS_COUNT]
-        assert sources[0] == SourceId.WORLDBRICKS
-        assert sources[1] == SourceId.BRICKLINK
+        assert sources == (SourceId.BRICKLINK,)
 
     def test_theme_priority_order(self):
         """#21: THEME: BrickRanker first, BrickLink second."""
@@ -96,12 +95,11 @@ class TestConfigPriority:
 class TestDetermineSourcesWithFallback:
     """determine_sources_needed returns fallback sources."""
 
-    def test_parts_count_missing_both_sources(self):
+    def test_parts_count_missing_bricklink_source(self):
         """#23: Given PARTS_COUNT missing, all healthy.
-        Then both WorldBricks and BrickLink returned."""
+        Then BrickLink returned."""
         cb = CircuitBreakerState()
         sources = determine_sources_needed((MetadataField.PARTS_COUNT,), cb)
-        assert SourceId.WORLDBRICKS in sources
         assert SourceId.BRICKLINK in sources
 
     def test_theme_missing_brickranker_broken(self):
@@ -122,23 +120,6 @@ class TestDetermineSourcesWithFallback:
         assert SourceId.BRICKRANKER not in sources
         assert SourceId.BRICKLINK in sources
 
-    def test_parts_count_missing_worldbricks_broken(self):
-        """#25: Given PARTS_COUNT missing, WorldBricks circuit-broken.
-        Then BrickLink returned as fallback."""
-        from datetime import datetime, timezone
-
-        cb = CircuitBreakerState(
-            states={
-                SourceId.WORLDBRICKS: SourceState(
-                    consecutive_failures=10,
-                    last_failure_at=datetime.now(tz=timezone.utc),
-                    is_open=True,
-                ),
-            },
-        )
-        sources = determine_sources_needed((MetadataField.PARTS_COUNT,), cb)
-        assert SourceId.WORLDBRICKS not in sources
-        assert SourceId.BRICKLINK in sources
 
 
 # ---------------------------------------------------------------------------
@@ -149,34 +130,9 @@ class TestDetermineSourcesWithFallback:
 class TestResolveFieldsFallback:
     """resolve_fields uses priority order with BrickLink as fallback."""
 
-    def test_worldbricks_wins_for_parts_count(self):
-        """#26: Given WorldBricks returns 305, BrickLink returns 300.
-        Then WorldBricks value used (higher priority)."""
-        wb_result = SourceResult(
-            source=SourceId.WORLDBRICKS,
-            success=True,
-            fields={MetadataField.PARTS_COUNT: 305},
-        )
-        bl_result = SourceResult(
-            source=SourceId.BRICKLINK,
-            success=True,
-            fields={MetadataField.PARTS_COUNT: 300},
-        )
-        field_results = resolve_fields(
-            (MetadataField.PARTS_COUNT,),
-            {SourceId.WORLDBRICKS: wb_result, SourceId.BRICKLINK: bl_result},
-        )
-        assert field_results[0].value == 305
-        assert field_results[0].source == SourceId.WORLDBRICKS
-
-    def test_bricklink_fallback_for_parts_count(self):
-        """#27: Given WorldBricks returns None, BrickLink returns 305.
-        Then BrickLink value used (fallback)."""
-        wb_result = SourceResult(
-            source=SourceId.WORLDBRICKS,
-            success=True,
-            fields={MetadataField.PARTS_COUNT: None},
-        )
+    def test_bricklink_provides_parts_count(self):
+        """#26: Given BrickLink returns 305.
+        Then BrickLink value used."""
         bl_result = SourceResult(
             source=SourceId.BRICKLINK,
             success=True,
@@ -184,7 +140,7 @@ class TestResolveFieldsFallback:
         )
         field_results = resolve_fields(
             (MetadataField.PARTS_COUNT,),
-            {SourceId.WORLDBRICKS: wb_result, SourceId.BRICKLINK: bl_result},
+            {SourceId.BRICKLINK: bl_result},
         )
         assert field_results[0].value == 305
         assert field_results[0].source == SourceId.BRICKLINK
@@ -229,14 +185,9 @@ class TestResolveFieldsFallback:
         assert field_results[0].value == "Disney"
         assert field_results[0].source == SourceId.BRICKLINK
 
-    def test_both_sources_none_parts_count(self):
-        """#30: Given both sources return None for PARTS_COUNT.
+    def test_bricklink_none_parts_count(self):
+        """#30: Given BrickLink returns None for PARTS_COUNT.
         Then field status is NOT_FOUND."""
-        wb_result = SourceResult(
-            source=SourceId.WORLDBRICKS,
-            success=True,
-            fields={MetadataField.PARTS_COUNT: None},
-        )
         bl_result = SourceResult(
             source=SourceId.BRICKLINK,
             success=True,
@@ -244,7 +195,7 @@ class TestResolveFieldsFallback:
         )
         field_results = resolve_fields(
             (MetadataField.PARTS_COUNT,),
-            {SourceId.WORLDBRICKS: wb_result, SourceId.BRICKLINK: bl_result},
+            {SourceId.BRICKLINK: bl_result},
         )
         assert field_results[0].status == FieldStatus.NOT_FOUND
         assert field_results[0].value is None
@@ -511,8 +462,8 @@ class TestEndToEndFallback:
     """Full enrichment flow with BrickLink as fallback source."""
 
     def test_bricklink_fallback_when_primary_sources_empty(self, make_item):
-        """#40: Given WorldBricks has no parts_count, BrickRanker has no theme,
-        but BrickLink has both.
+        """#40: Given BrickRanker has no theme, but BrickLink has both
+        parts_count and theme.
         When enrichment runs.
         Then parts_count and theme found via BrickLink fallback."""
         item = make_item()
@@ -531,16 +482,6 @@ class TestEndToEndFallback:
                 },
             )
 
-        def worldbricks_fetcher(sn: str) -> SourceResult:
-            return SourceResult(
-                source=SourceId.WORLDBRICKS,
-                success=True,
-                fields={
-                    MetadataField.PARTS_COUNT: None,  # not found
-                    MetadataField.YEAR_RETIRED: None,
-                },
-            )
-
         def brickranker_fetcher(sn: str) -> SourceResult:
             return SourceResult(
                 source=SourceId.BRICKRANKER,
@@ -556,7 +497,6 @@ class TestEndToEndFallback:
             item,
             {
                 SourceId.BRICKLINK: bricklink_fetcher,
-                SourceId.WORLDBRICKS: worldbricks_fetcher,
                 SourceId.BRICKRANKER: brickranker_fetcher,
             },
             CircuitBreakerState(),
@@ -576,10 +516,10 @@ class TestEndToEndFallback:
         assert theme_r.value == "Disney"
         assert theme_r.source == SourceId.BRICKLINK
 
-    def test_primary_source_wins_when_available(self, make_item):
-        """#41: Given WorldBricks has parts_count=305, BrickLink also has 300.
+    def test_bricklink_provides_parts_count_in_e2e(self, make_item):
+        """#41: Given BrickLink has parts_count=305.
         When enrichment runs.
-        Then WorldBricks value used (priority), not BrickLink."""
+        Then BrickLink value used."""
         item = make_item()
 
         def bricklink_fetcher(sn: str) -> SourceResult:
@@ -591,18 +531,8 @@ class TestEndToEndFallback:
                     MetadataField.YEAR_RELEASED: 2023,
                     MetadataField.IMAGE_URL: "https://example.com/img.png",
                     MetadataField.WEIGHT: "500g",
-                    MetadataField.PARTS_COUNT: 300,
-                    MetadataField.THEME: "Technic",
-                },
-            )
-
-        def worldbricks_fetcher(sn: str) -> SourceResult:
-            return SourceResult(
-                source=SourceId.WORLDBRICKS,
-                success=True,
-                fields={
                     MetadataField.PARTS_COUNT: 305,
-                    MetadataField.YEAR_RETIRED: 2025,
+                    MetadataField.THEME: "Technic",
                 },
             )
 
@@ -621,7 +551,6 @@ class TestEndToEndFallback:
             item,
             {
                 SourceId.BRICKLINK: bricklink_fetcher,
-                SourceId.WORLDBRICKS: worldbricks_fetcher,
                 SourceId.BRICKRANKER: brickranker_fetcher,
             },
             CircuitBreakerState(),
@@ -631,7 +560,7 @@ class TestEndToEndFallback:
             r for r in result.field_results if r.field == MetadataField.PARTS_COUNT
         )
         assert parts_r.value == 305
-        assert parts_r.source == SourceId.WORLDBRICKS
+        assert parts_r.source == SourceId.BRICKLINK
 
     def test_brickranker_wins_for_theme_when_available(self, make_item):
         """#42: Given BrickRanker has theme='Star Wars', BrickLink also has it.
