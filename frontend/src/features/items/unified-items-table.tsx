@@ -12,6 +12,7 @@ import {
 } from '@tanstack/react-table';
 import { DataTable } from '@/components/ui/table/data-table';
 import { DataTableColumnHeader } from '@/components/ui/table/data-table-column-header';
+import { EnrichMissingButton } from './enrich-missing-button';
 import { PriceDealFilter } from './price-deal-filter';
 import type { UnifiedItem } from './types';
 import { formatPrice } from './types';
@@ -381,6 +382,7 @@ export function UnifiedItemsTable() {
           <option value='retiring_soon'>Retiring soon</option>
         </select>
         <PriceDealFilter onFilterChange={(fn) => setDealFilter(() => fn)} />
+        <EnrichMissingButton setNumbers={filteredData.map((i) => i.set_number)} />
         <div className='ml-auto flex items-center gap-2'>
           <input
             type='text'

@@ -14,6 +14,11 @@ def item_exists(conn: "DuckDBPyConnection", set_number: str) -> bool:
     return row is not None
 
 
+def _bricklink_image_url(set_number: str) -> str:
+    """Construct BrickLink image URL from set number."""
+    return f"https://img.bricklink.com/ItemImage/SN/0/{set_number}-1.png"
+
+
 def get_or_create_item(
     conn: "DuckDBPyConnection",
     set_number: str,
@@ -28,20 +33,26 @@ def get_or_create_item(
     rrp_cents: int | None = None,
     rrp_currency: str | None = None,
     retiring_soon: bool | None = None,
+    minifig_count: int | None = None,
+    dimensions: str | None = None,
 ) -> None:
     """Ensure a lego_items row exists for this set number.
 
     On conflict, updates fields only if the new value is not None
     (preserves existing data, enriches with new sources).
+    If no image_url is provided, falls back to BrickLink constructed URL.
     """
+    if image_url is None:
+        image_url = _bricklink_image_url(set_number)
+
     conn.execute(
         """
         INSERT INTO lego_items (
             id, set_number, title, theme, year_released, year_retired,
             parts_count, weight, image_url, rrp_cents, rrp_currency,
-            retiring_soon
+            retiring_soon, minifig_count, dimensions
         )
-        VALUES (nextval('lego_items_id_seq'), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (nextval('lego_items_id_seq'), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT (set_number) DO UPDATE SET
             title = COALESCE(EXCLUDED.title, lego_items.title),
             theme = COALESCE(EXCLUDED.theme, lego_items.theme),
@@ -53,10 +64,12 @@ def get_or_create_item(
             rrp_cents = COALESCE(EXCLUDED.rrp_cents, lego_items.rrp_cents),
             rrp_currency = COALESCE(EXCLUDED.rrp_currency, lego_items.rrp_currency),
             retiring_soon = COALESCE(EXCLUDED.retiring_soon, lego_items.retiring_soon),
+            minifig_count = COALESCE(EXCLUDED.minifig_count, lego_items.minifig_count),
+            dimensions = COALESCE(EXCLUDED.dimensions, lego_items.dimensions),
             updated_at = now()
         """,
         [set_number, title, theme, year_released, year_retired, parts_count, weight, image_url,
-         rrp_cents, rrp_currency, retiring_soon],
+         rrp_cents, rrp_currency, retiring_soon, minifig_count, dimensions],
     )
 
 

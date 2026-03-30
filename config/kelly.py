@@ -31,6 +31,10 @@ MIN_SAMPLE_COUNT: int = 10
 CONFIDENCE_HIGH_SAMPLES: int = 50
 CONFIDENCE_MODERATE_SAMPLES: int = 30
 
+# Discount factor applied to half-Kelly when using neighbor-bin fallback.
+# 0.6 means the neighbor's recommendation is reduced by 40%.
+NEIGHBOR_FALLBACK_DISCOUNT: float = 0.6
+
 # Return horizons grouped by strategy
 FLIP_HORIZONS: tuple[str, ...] = ("return_flip_1m", "return_flip_2m")
 HOLD_HORIZONS: tuple[str, ...] = (

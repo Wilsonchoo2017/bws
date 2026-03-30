@@ -20,6 +20,7 @@ from config.kelly import (
     KELLY_FRACTION,
     MAX_POSITION_PCT,
     MIN_SAMPLE_COUNT,
+    NEIGHBOR_FALLBACK_DISCOUNT,
     SCORE_BIN_LABELS,
     SCORE_BINS,
 )
@@ -205,6 +206,40 @@ def _assess_confidence(
     return "insufficient"
 
 
+def _find_neighbor_bin(
+    score_bin: str,
+    kelly_table: dict[str, dict[str, KellyParams]],
+) -> tuple[str, dict[str, KellyParams]] | None:
+    """Find the nearest populated neighbor bin by distance in the ordered bin list.
+
+    Returns (neighbor_label, neighbor_horizons) or None if no neighbor has data.
+    """
+    ordered_labels = [SCORE_BIN_LABELS[b] for b in SCORE_BINS]
+    try:
+        idx = ordered_labels.index(score_bin)
+    except ValueError:
+        return None
+
+    for distance in range(1, len(ordered_labels)):
+        for neighbor_idx in (idx - distance, idx + distance):
+            if 0 <= neighbor_idx < len(ordered_labels):
+                label = ordered_labels[neighbor_idx]
+                if label in kelly_table:
+                    return (label, kelly_table[label])
+    return None
+
+
+def _discount_kelly_params(
+    params: KellyParams,
+    discount: float,
+) -> KellyParams:
+    """Return a new KellyParams with half_kelly scaled by the discount factor."""
+    return replace(
+        params,
+        half_kelly=round(params.half_kelly * discount, 4),
+    )
+
+
 def size_position(
     item_signals: dict[str, Any],
     kelly_table: dict[str, dict[str, KellyParams]],
@@ -221,24 +256,42 @@ def size_position(
     # Look up the bin in the Kelly table
     bin_horizons = kelly_table.get(score_bin, {})
 
+    is_fallback = False
+    neighbor_label: str | None = None
+
     if not bin_horizons:
-        return PositionSizing(
-            set_number=set_number,
-            composite_score=composite,
-            score_bin=score_bin,
-            entry_price_cents=entry_price,
-            flip=None,
-            hold=None,
-            recommended_pct=0.0,
-            recommended_amount_cents=None,
-            confidence="insufficient",
-            warnings=("No backtest data for this score range",),
-        )
+        neighbor = _find_neighbor_bin(score_bin, kelly_table)
+        if neighbor is None:
+            return PositionSizing(
+                set_number=set_number,
+                composite_score=composite,
+                score_bin=score_bin,
+                entry_price_cents=entry_price,
+                flip=None,
+                hold=None,
+                recommended_pct=0.0,
+                recommended_amount_cents=None,
+                confidence="insufficient",
+                warnings=(
+                    "No backtest data for this score range or any adjacent range",
+                ),
+            )
+        neighbor_label, bin_horizons = neighbor
+        is_fallback = True
 
     flip = _pick_best_horizon(bin_horizons, FLIP_HORIZONS)
     hold = _pick_best_horizon(bin_horizons, HOLD_HORIZONS)
 
+    if is_fallback:
+        if flip is not None:
+            flip = _discount_kelly_params(flip, NEIGHBOR_FALLBACK_DISCOUNT)
+        if hold is not None:
+            hold = _discount_kelly_params(hold, NEIGHBOR_FALLBACK_DISCOUNT)
+
     confidence = _assess_confidence(flip, hold)
+
+    if is_fallback and confidence in ("high", "moderate"):
+        confidence = "low"
 
     # Pick the strategy with higher half-Kelly
     flip_hk = flip.half_kelly if flip else 0.0
@@ -256,6 +309,16 @@ def size_position(
     # Cap at max position
     final_pct = min(adjusted_pct, MAX_POSITION_PCT)
     final_pct = round(final_pct, 4)
+
+    if is_fallback and neighbor_label is not None:
+        warnings.append(
+            f"Extrapolated from {neighbor_label} data "
+            f"(no historical trades in {score_bin})"
+        )
+        warnings.append(
+            f"Recommendation discounted by "
+            f"{1 - NEIGHBOR_FALLBACK_DISCOUNT:.0%} due to score range mismatch"
+        )
 
     if adjusted_pct > MAX_POSITION_PCT:
         warnings.append(

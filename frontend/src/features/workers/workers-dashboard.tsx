@@ -61,8 +61,25 @@ export function WorkersDashboard() {
     };
   }, [autoRefresh, fetchJobs]);
 
+  const clearJobs = useCallback(async () => {
+    try {
+      const res = await fetch('/api/workers', { method: 'DELETE' });
+      const json = await res.json();
+      if (json.success) {
+        await fetchJobs();
+      }
+    } catch {
+      // refresh anyway to show current state
+      await fetchJobs();
+    }
+  }, [fetchJobs]);
+
   const hasActive = jobs.some(
     (j) => j.status === 'queued' || j.status === 'running'
+  );
+
+  const hasFinished = jobs.some(
+    (j) => j.status === 'completed' || j.status === 'failed'
   );
 
   const filtered =
@@ -122,6 +139,11 @@ export function WorkersDashboard() {
             />
             <span className='text-muted-foreground'>Auto-refresh</span>
           </label>
+          {hasFinished && (
+            <Button variant='outline' size='sm' onClick={clearJobs}>
+              Clear
+            </Button>
+          )}
           <Button variant='outline' size='sm' onClick={fetchJobs}>
             Refresh
           </Button>

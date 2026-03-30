@@ -57,4 +57,12 @@ def validate_field(
     if field == MetadataField.RETIRING_SOON:
         return value if isinstance(value, bool) else None
 
+    if field == MetadataField.MINIFIG_COUNT:
+        return value if isinstance(value, int) and 1 <= value <= 100 else None
+
+    if field == MetadataField.DIMENSIONS:
+        if isinstance(value, str):
+            return normalize_string(value)
+        return None
+
     return value

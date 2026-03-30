@@ -13,6 +13,7 @@ from bs4 import BeautifulSoup
 from bws_types.models import (
     BricklinkData,
     Condition,
+    MinifigureInfo,
     MonthlySale,
     PriceData,
     PricingBox,
@@ -224,6 +225,44 @@ def _extract_theme(soup: BeautifulSoup) -> str | None:
     return None
 
 
+def _extract_minifig_count(soup: BeautifulSoup) -> int | None:
+    """Extract minifigure count from HTML.
+
+    BrickLink shows minifig count like '2 Minifigures' in the item info section.
+    """
+    minifig_pattern = re.compile(r"(\d[\d,]*)\s+Minifigures?", re.IGNORECASE)
+    for text_node in soup.find_all(string=minifig_pattern):
+        match = minifig_pattern.search(text_node)
+        if match:
+            count = int(match.group(1).replace(",", ""))
+            if 1 <= count <= 100:
+                return count
+    return None
+
+
+def _extract_dimensions(html: str) -> str | None:
+    """Extract item dimensions from HTML.
+
+    BrickLink shows dimensions like 'Item Dim.: 26.2 x 14 x 7.2 cm'.
+    """
+    match = re.search(
+        r"Item\s+Dim\.?:?\s*([\d.]+\s*x\s*[\d.]+\s*x\s*[\d.]+\s*cm)",
+        html,
+        re.IGNORECASE,
+    )
+    if match:
+        return match.group(1).strip()
+    return None
+
+
+def _extract_has_instructions(html: str) -> bool | None:
+    """Extract whether instructions are included from HTML."""
+    match = re.search(r"Instructions:\s*(Yes|No)", html, re.IGNORECASE)
+    if match:
+        return match.group(1).lower() == "yes"
+    return None
+
+
 def _extract_year_released(html: str) -> int | None:
     """Extract year released from HTML."""
     match = re.search(r"Year Released:.*?(\d{4})", html, re.IGNORECASE)
@@ -291,6 +330,26 @@ def parse_item_info(html: str) -> dict[str, str | int | None]:
     image_url = _extract_image_url(soup)
     parts_count = _extract_parts_count(soup)
     theme = _extract_theme(soup)
+    minifig_count = _extract_minifig_count(soup)
+    dimensions = _extract_dimensions(html)
+    has_instructions = _extract_has_instructions(html)
+
+    # Fallback: construct predictable BrickLink image URL for sets
+    if image_url is None:
+        item_id_elem = soup.select_one("span#item-no-info")
+        if item_id_elem:
+            raw_id = item_id_elem.get_text(strip=True)
+        else:
+            # Try extracting from the page URL or meta tags
+            meta = soup.find("meta", {"property": "og:url"})
+            raw_id = None
+            if meta and meta.get("content"):
+                parts = str(meta["content"]).rstrip("/").split("/")
+                if parts:
+                    raw_id = parts[-1]
+        if raw_id:
+            # BrickLink set images: https://img.bricklink.com/ItemImage/SN/0/{id}.png
+            image_url = f"https://img.bricklink.com/ItemImage/SN/0/{raw_id}.png"
 
     return {
         "title": title,
@@ -299,6 +358,9 @@ def parse_item_info(html: str) -> dict[str, str | int | None]:
         "image_url": image_url,
         "parts_count": parts_count,
         "theme": theme,
+        "minifig_count": minifig_count,
+        "dimensions": dimensions,
+        "has_instructions": has_instructions,
     }
 
 
@@ -538,11 +600,92 @@ def parse_full_item(
         image_url=item_info.get("image_url"),  # type: ignore[arg-type]
         parts_count=item_info.get("parts_count"),  # type: ignore[arg-type]
         theme=item_info.get("theme"),  # type: ignore[arg-type]
+        minifig_count=item_info.get("minifig_count"),  # type: ignore[arg-type]
+        dimensions=item_info.get("dimensions"),  # type: ignore[arg-type]
+        has_instructions=item_info.get("has_instructions"),  # type: ignore[arg-type]
         six_month_new=pricing.get("six_month_new"),
         six_month_used=pricing.get("six_month_used"),
         current_new=pricing.get("current_new"),
         current_used=pricing.get("current_used"),
     )
+
+
+def build_minifig_inventory_url(item_id: str) -> str:
+    """Build the URL for a set's minifigure inventory page.
+
+    Args:
+        item_id: Set item ID (e.g., "77256-1")
+
+    Returns:
+        Minifigure inventory URL
+    """
+    return f"https://www.bricklink.com/catalogItemInv.asp?S={item_id}&viewItemType=M"
+
+
+def parse_minifig_inventory(html: str) -> list[MinifigureInfo]:
+    """Parse the minifigure inventory page to extract minifig list.
+
+    Parses the catalogItemInv.asp page filtered by viewItemType=M.
+
+    Args:
+        html: HTML content from the minifigure inventory page
+
+    Returns:
+        List of MinifigureInfo with minifig_id, name, image_url, quantity
+    """
+    soup = BeautifulSoup(html, "lxml")
+    minifigs: list[MinifigureInfo] = []
+
+    # Find links to minifigure catalog pages (M= parameter)
+    minifig_link_pattern = re.compile(r"catalogitem\.page\?M=([^&\"'#]+)", re.IGNORECASE)
+
+    # BrickLink inventory tables have rows with minifig links
+    for link in soup.find_all("a", href=minifig_link_pattern):
+        href = link.get("href", "")
+        match = minifig_link_pattern.search(href)
+        if not match:
+            continue
+
+        minifig_id = match.group(1).strip()
+        if not minifig_id:
+            continue
+
+        # Get name from the link text or nearby text
+        name = link.get_text(strip=True) or None
+
+        # Find image in the same row
+        image_url: str | None = None
+        row = link.find_parent("tr")
+        if row:
+            img = row.find("img")
+            if img and img.get("src"):
+                src = str(img["src"])
+                if "img.bricklink.com" in src or "brickimg" in src:
+                    image_url = _normalize_image_url(src)
+
+        # Find quantity -- look for a cell with just a number in the same row
+        quantity = 1
+        if row:
+            for cell in row.find_all("td"):
+                cell_text = cell.get_text(strip=True)
+                if re.fullmatch(r"\d+", cell_text):
+                    qty = int(cell_text)
+                    if 1 <= qty <= 50:
+                        quantity = qty
+                        break
+
+        # Deduplicate: skip if we already have this minifig_id
+        if any(m.minifig_id == minifig_id for m in minifigs):
+            continue
+
+        minifigs.append(MinifigureInfo(
+            minifig_id=minifig_id,
+            name=name,
+            image_url=image_url,
+            quantity=quantity,
+        ))
+
+    return minifigs
 
 
 def is_valid_bricklink_url(url: str) -> bool:

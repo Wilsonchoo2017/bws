@@ -5,11 +5,7 @@ import { Button } from '@/components/ui/button';
 
 type Status = 'idle' | 'loading' | 'success' | 'error';
 
-interface EnrichMissingButtonProps {
-  setNumbers?: string[];
-}
-
-export function EnrichMissingButton({ setNumbers }: EnrichMissingButtonProps) {
+export function EnrichPortfolioButton() {
   const [status, setStatus] = useState<Status>('idle');
   const [message, setMessage] = useState<string | null>(null);
 
@@ -18,16 +14,7 @@ export function EnrichMissingButton({ setNumbers }: EnrichMissingButtonProps) {
     setMessage(null);
 
     try {
-      const hasFilter = setNumbers && setNumbers.length > 0;
-      const res = await fetch('/api/enrichment/enrich-missing', {
-        method: 'POST',
-        ...(hasFilter
-          ? {
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ set_numbers: setNumbers }),
-            }
-          : {}),
-      });
+      const res = await fetch('/api/portfolio/enrich', { method: 'POST' });
       const json = await res.json();
 
       if (!json.success) {
@@ -36,22 +23,20 @@ export function EnrichMissingButton({ setNumbers }: EnrichMissingButtonProps) {
         return;
       }
 
-      const { queued, set_numbers: queued_numbers } = json.data;
+      const { queued, set_numbers } = json.data;
+      setStatus('success');
       if (queued === 0) {
-        setStatus('success');
-        setMessage('All items already have metadata');
+        setMessage('No portfolio sets found');
       } else {
-        setStatus('success');
-        setMessage(`Queued ${queued}: ${queued_numbers.slice(0, 5).join(', ')}${queued > 5 ? '...' : ''}`);
+        setMessage(
+          `Queued ${queued}: ${set_numbers.slice(0, 5).join(', ')}${queued > 5 ? '...' : ''}`
+        );
       }
     } catch (err) {
       setStatus('error');
       setMessage(err instanceof Error ? err.message : 'Network error');
     }
   };
-
-  const count = setNumbers?.length;
-  const label = count ? `Enrich Filtered (${count})` : 'Enrich Missing';
 
   return (
     <div className='flex items-center gap-3'>
@@ -68,7 +53,7 @@ export function EnrichMissingButton({ setNumbers }: EnrichMissingButtonProps) {
         onClick={handleClick}
         disabled={status === 'loading'}
       >
-        {status === 'loading' ? 'Enriching...' : label}
+        {status === 'loading' ? 'Enriching...' : 'Enrich All'}
       </Button>
     </div>
   );

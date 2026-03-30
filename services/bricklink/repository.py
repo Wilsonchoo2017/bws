@@ -13,6 +13,8 @@ from bws_types.models import (
     BricklinkData,
     BricklinkItem,
     Condition,
+    MinifigureData,
+    MinifigureInfo,
     MonthlySale,
     PriceData,
     PricingBox,
@@ -176,6 +178,9 @@ def upsert_item(conn: "DuckDBPyConnection", data: BricklinkData) -> int:
                 image_url = ?,
                 parts_count = ?,
                 theme = ?,
+                minifig_count = ?,
+                dimensions = ?,
+                has_instructions = ?,
                 last_scraped_at = ?,
                 next_scrape_at = ?,
                 updated_at = ?
@@ -188,6 +193,9 @@ def upsert_item(conn: "DuckDBPyConnection", data: BricklinkData) -> int:
                 data.image_url,
                 data.parts_count,
                 data.theme,
+                data.minifig_count,
+                data.dimensions,
+                data.has_instructions,
                 now,
                 (datetime.now(tz=_UTC) + timedelta(days=existing.scrape_interval_days)).isoformat(),
                 now,
@@ -205,10 +213,10 @@ def upsert_item(conn: "DuckDBPyConnection", data: BricklinkData) -> int:
         """
         INSERT INTO bricklink_items (
             id, item_id, item_type, title, weight, year_released, image_url,
-            parts_count, theme,
+            parts_count, theme, minifig_count, dimensions, has_instructions,
             watch_status, scrape_interval_days, last_scraped_at, next_scrape_at,
             created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         [
             item_id,
@@ -220,6 +228,9 @@ def upsert_item(conn: "DuckDBPyConnection", data: BricklinkData) -> int:
             data.image_url,
             data.parts_count,
             data.theme,
+            data.minifig_count,
+            data.dimensions,
+            data.has_instructions,
             "active",
             scrape_interval,
             now,
@@ -237,6 +248,8 @@ def upsert_item(conn: "DuckDBPyConnection", data: BricklinkData) -> int:
         title=data.title,
         year_released=data.year_released,
         image_url=data.image_url,
+        minifig_count=data.minifig_count,
+        dimensions=data.dimensions,
     )
 
     return item_id
@@ -499,6 +512,249 @@ def list_items(
 
     results = conn.execute(query, params).fetchall()
     return [_row_to_bricklink_item(row) for row in results]
+
+
+def upsert_minifigure(
+    conn: "DuckDBPyConnection",
+    data: MinifigureData,
+) -> int:
+    """Insert or update a minifigure in the master catalog.
+
+    Args:
+        conn: DuckDB connection
+        data: MinifigureData with minifig info and prices
+
+    Returns:
+        ID of the inserted/updated minifigure
+    """
+    now = datetime.now(tz=_UTC).isoformat()
+    existing = conn.execute(
+        "SELECT id FROM minifigures WHERE minifig_id = ?",
+        [data.minifig_id],
+    ).fetchone()
+
+    if existing:
+        conn.execute(
+            """
+            UPDATE minifigures
+            SET name = COALESCE(?, name),
+                image_url = COALESCE(?, image_url),
+                year_released = COALESCE(?, year_released),
+                last_scraped_at = ?,
+                updated_at = ?
+            WHERE minifig_id = ?
+            """,
+            [data.name, data.image_url, data.year_released, now, now, data.minifig_id],
+        )
+        return existing[0]
+
+    minifig_db_id = get_next_id(conn, "minifigures_id_seq")
+    conn.execute(
+        """
+        INSERT INTO minifigures (id, minifig_id, name, image_url, year_released,
+                                 last_scraped_at, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        [minifig_db_id, data.minifig_id, data.name, data.image_url,
+         data.year_released, now, now, now],
+    )
+    return minifig_db_id
+
+
+def upsert_set_minifigures(
+    conn: "DuckDBPyConnection",
+    set_item_id: str,
+    minifigs: list[MinifigureInfo],
+) -> int:
+    """Insert or update the minifigure inventory for a set.
+
+    Args:
+        conn: DuckDB connection
+        set_item_id: Set item ID (e.g., "77256-1")
+        minifigs: List of MinifigureInfo
+
+    Returns:
+        Number of records upserted
+    """
+    now = datetime.now(tz=_UTC).isoformat()
+    count = 0
+
+    for mf in minifigs:
+        existing = conn.execute(
+            "SELECT id FROM set_minifigures WHERE set_item_id = ? AND minifig_id = ?",
+            [set_item_id, mf.minifig_id],
+        ).fetchone()
+
+        if existing:
+            conn.execute(
+                """
+                UPDATE set_minifigures
+                SET quantity = ?, scraped_at = ?
+                WHERE id = ?
+                """,
+                [mf.quantity, now, existing[0]],
+            )
+        else:
+            sm_id = get_next_id(conn, "set_minifigures_id_seq")
+            conn.execute(
+                """
+                INSERT INTO set_minifigures (id, set_item_id, minifig_id, quantity, scraped_at)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                [sm_id, set_item_id, mf.minifig_id, mf.quantity, now],
+            )
+        count += 1
+
+    return count
+
+
+def create_minifig_price_history(
+    conn: "DuckDBPyConnection",
+    minifig_id: str,
+    data: MinifigureData,
+) -> int:
+    """Create a price history record for a minifigure.
+
+    Args:
+        conn: DuckDB connection
+        minifig_id: Minifigure ID
+        data: MinifigureData with pricing info
+
+    Returns:
+        ID of the created record
+    """
+    history_id = get_next_id(conn, "minifig_price_history_id_seq")
+    now = datetime.now(tz=_UTC).isoformat()
+
+    conn.execute(
+        """
+        INSERT INTO minifig_price_history (
+            id, minifig_id, six_month_new, six_month_used,
+            current_new, current_used, scraped_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?)
+        """,
+        [
+            history_id,
+            minifig_id,
+            _pricing_box_to_json(data.six_month_new),
+            _pricing_box_to_json(data.six_month_used),
+            _pricing_box_to_json(data.current_new),
+            _pricing_box_to_json(data.current_used),
+            now,
+        ],
+    )
+    return history_id
+
+
+def get_set_minifigures(
+    conn: "DuckDBPyConnection",
+    set_item_id: str,
+) -> list[dict]:
+    """Get minifigures for a set with their latest prices.
+
+    Args:
+        conn: DuckDB connection
+        set_item_id: Set item ID (e.g., "77256-1")
+
+    Returns:
+        List of dicts with minifig info and latest prices
+    """
+    results = conn.execute(
+        """
+        WITH latest_prices AS (
+            SELECT minifig_id,
+                   six_month_new, six_month_used, current_new, current_used,
+                   scraped_at,
+                   ROW_NUMBER() OVER (PARTITION BY minifig_id ORDER BY scraped_at DESC) AS rn
+            FROM minifig_price_history
+        )
+        SELECT
+            sm.minifig_id,
+            m.name,
+            m.image_url,
+            sm.quantity,
+            m.year_released,
+            lp.current_new,
+            lp.current_used,
+            lp.six_month_new,
+            lp.six_month_used,
+            lp.scraped_at
+        FROM set_minifigures sm
+        JOIN minifigures m ON m.minifig_id = sm.minifig_id
+        LEFT JOIN latest_prices lp ON lp.minifig_id = sm.minifig_id AND lp.rn = 1
+        WHERE sm.set_item_id = ?
+        ORDER BY sm.minifig_id
+        """,
+        [set_item_id],
+    ).fetchall()
+
+    minifigs = []
+    for row in results:
+        current_new = _json_to_pricing_box(row[5])
+        current_used = _json_to_pricing_box(row[6])
+
+        minifigs.append({
+            "minifig_id": row[0],
+            "name": row[1],
+            "image_url": row[2],
+            "quantity": row[3],
+            "year_released": row[4],
+            "current_new_avg_cents": (
+                current_new.avg_price.amount if current_new and current_new.avg_price else None
+            ),
+            "current_used_avg_cents": (
+                current_used.avg_price.amount if current_used and current_used.avg_price else None
+            ),
+            "currency": (
+                current_new.avg_price.currency
+                if current_new and current_new.avg_price
+                else "USD"
+            ),
+            "last_scraped_at": str(row[9]) if row[9] else None,
+        })
+
+    return minifigs
+
+
+def get_minifig_price_history(
+    conn: "DuckDBPyConnection",
+    minifig_id: str,
+    limit: int = 10,
+) -> list[dict]:
+    """Get price history for a minifigure.
+
+    Args:
+        conn: DuckDB connection
+        minifig_id: Minifigure ID
+        limit: Maximum number of records
+
+    Returns:
+        List of price history records as dicts
+    """
+    results = conn.execute(
+        """
+        SELECT id, minifig_id, six_month_new, six_month_used,
+               current_new, current_used, scraped_at
+        FROM minifig_price_history
+        WHERE minifig_id = ?
+        ORDER BY scraped_at DESC
+        LIMIT ?
+        """,
+        [minifig_id, limit],
+    ).fetchall()
+
+    return [
+        {
+            "id": row[0],
+            "minifig_id": row[1],
+            "six_month_new": _json_to_pricing_box(row[2]),
+            "six_month_used": _json_to_pricing_box(row[3]),
+            "current_new": _json_to_pricing_box(row[4]),
+            "current_used": _json_to_pricing_box(row[5]),
+            "scraped_at": parse_timestamp(row[6]),
+        }
+        for row in results
+    ]
 
 
 def update_watch_status(

@@ -8,7 +8,7 @@ from api.jobs import JobManager
 from api.schemas import JobStatus
 from db.connection import get_memory_connection
 from db.schema import init_schema
-from services.items.repository import get_or_create_item
+from services.items.repository import get_or_create_item, record_price
 
 
 @pytest.fixture
@@ -33,9 +33,11 @@ class TestEnrichmentSweep:
         from services.enrichment.auto import queue_enrichment_batch
         from services.enrichment.repository import get_items_needing_enrichment
 
-        # Create items with missing metadata
+        # Create items with missing metadata (need price records to pass EXISTS filter)
         get_or_create_item(conn, "75192")
+        record_price(conn, "75192", source="toysrus", price_cents=329900, currency="MYR")
         get_or_create_item(conn, "42151", title="Bugatti")
+        record_price(conn, "42151", source="shopee", price_cents=24900, currency="MYR")
 
         items = get_items_needing_enrichment(conn, limit=10)
         set_numbers = [item["set_number"] for item in items]
@@ -77,6 +79,7 @@ class TestEnrichmentSweep:
         from services.enrichment.repository import get_items_needing_enrichment
 
         get_or_create_item(conn, "75192")
+        record_price(conn, "75192", source="toysrus", price_cents=329900, currency="MYR")
         manager.create_job("enrichment", "75192")
 
         items = get_items_needing_enrichment(conn, limit=10)

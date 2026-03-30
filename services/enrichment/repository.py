@@ -96,4 +96,6 @@ def store_enrichment_result(
         weight=found.get(MetadataField.WEIGHT),
         image_url=found.get(MetadataField.IMAGE_URL),
         retiring_soon=found.get(MetadataField.RETIRING_SOON),
+        minifig_count=found.get(MetadataField.MINIFIG_COUNT),
+        dimensions=found.get(MetadataField.DIMENSIONS),
     )

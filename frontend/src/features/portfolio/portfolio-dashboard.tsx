@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useCallback, useState } from 'react';
-import { EnrichMissingButton } from '@/features/items/enrich-missing-button';
+import { EnrichPortfolioButton } from './enrich-portfolio-button';
 import { PortfolioSummaryCards } from './portfolio-summary-cards';
 import { HoldingsTable } from './holdings-table';
 import { AddTransactionForm } from './add-transaction-form';
@@ -31,7 +31,7 @@ export function PortfolioDashboard() {
           </Link>
         </div>
         <div className='flex items-center gap-2'>
-          <EnrichMissingButton />
+          <EnrichPortfolioButton />
           <AddTransactionForm onSuccess={handleTxnAdded} />
         </div>
       </div>

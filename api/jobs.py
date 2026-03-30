@@ -79,6 +79,17 @@ class JobManager:
             job.completed_at = datetime.now(timezone.utc)
             job.error = error
 
+    def clear_finished(self) -> int:
+        """Remove all completed and failed jobs. Returns count removed."""
+        to_remove = [
+            jid
+            for jid, job in self._jobs.items()
+            if job.status in (JobStatus.COMPLETED, JobStatus.FAILED)
+        ]
+        for jid in to_remove:
+            del self._jobs[jid]
+        return len(to_remove)
+
     async def dequeue(self) -> str:
         """Wait for and return the next job ID from the queue."""
         return await self._queue.get()

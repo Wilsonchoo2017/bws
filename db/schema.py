@@ -216,6 +216,42 @@ CREATE TABLE IF NOT EXISTS portfolio_snapshots (
 );
 """
 
+MINIFIGURES_DDL = """
+CREATE TABLE IF NOT EXISTS minifigures (
+    id INTEGER PRIMARY KEY,
+    minifig_id VARCHAR NOT NULL UNIQUE,
+    name VARCHAR,
+    image_url VARCHAR,
+    year_released INTEGER,
+    last_scraped_at TIMESTAMP,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+"""
+
+SET_MINIFIGURES_DDL = """
+CREATE TABLE IF NOT EXISTS set_minifigures (
+    id INTEGER PRIMARY KEY,
+    set_item_id VARCHAR NOT NULL,
+    minifig_id VARCHAR NOT NULL,
+    quantity INTEGER DEFAULT 1,
+    scraped_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(set_item_id, minifig_id)
+);
+"""
+
+MINIFIG_PRICE_HISTORY_DDL = """
+CREATE TABLE IF NOT EXISTS minifig_price_history (
+    id INTEGER PRIMARY KEY,
+    minifig_id VARCHAR NOT NULL,
+    six_month_new JSON,
+    six_month_used JSON,
+    current_new JSON,
+    current_used JSON,
+    scraped_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+"""
+
 BRICKRANKER_ITEMS_DDL = """
 CREATE TABLE IF NOT EXISTS brickranker_items (
     id INTEGER PRIMARY KEY,
@@ -239,6 +275,9 @@ CREATE SEQUENCE IF NOT EXISTS bricklink_price_history_id_seq;
 CREATE SEQUENCE IF NOT EXISTS bricklink_monthly_sales_id_seq;
 CREATE SEQUENCE IF NOT EXISTS product_analysis_id_seq;
 CREATE SEQUENCE IF NOT EXISTS brickranker_items_id_seq;
+CREATE SEQUENCE IF NOT EXISTS minifigures_id_seq;
+CREATE SEQUENCE IF NOT EXISTS set_minifigures_id_seq;
+CREATE SEQUENCE IF NOT EXISTS minifig_price_history_id_seq;
 CREATE SEQUENCE IF NOT EXISTS shopee_products_id_seq;
 CREATE SEQUENCE IF NOT EXISTS shopee_saturation_id_seq;
 CREATE SEQUENCE IF NOT EXISTS shopee_scrape_history_id_seq;
@@ -268,6 +307,14 @@ CREATE INDEX IF NOT EXISTS idx_product_analysis_score
     ON product_analysis(overall_score);
 CREATE INDEX IF NOT EXISTS idx_brickranker_set_number
     ON brickranker_items(set_number);
+CREATE INDEX IF NOT EXISTS idx_minifigures_minifig_id
+    ON minifigures(minifig_id);
+CREATE INDEX IF NOT EXISTS idx_set_minifigures_set
+    ON set_minifigures(set_item_id);
+CREATE INDEX IF NOT EXISTS idx_set_minifigures_minifig
+    ON set_minifigures(minifig_id);
+CREATE INDEX IF NOT EXISTS idx_minifig_price_history_item
+    ON minifig_price_history(minifig_id, scraped_at);
 CREATE INDEX IF NOT EXISTS idx_brickranker_retiring_soon
     ON brickranker_items(retiring_soon);
 CREATE INDEX IF NOT EXISTS idx_shopee_products_url
@@ -305,6 +352,9 @@ ALL_DDL = [
     BRICKLINK_MONTHLY_SALES_DDL,
     PRODUCT_ANALYSIS_DDL,
     BRICKRANKER_ITEMS_DDL,
+    MINIFIGURES_DDL,
+    SET_MINIFIGURES_DDL,
+    MINIFIG_PRICE_HISTORY_DDL,
     SHOPEE_PRODUCTS_DDL,
     SHOPEE_SATURATION_DDL,
     SHOPEE_SCRAPE_HISTORY_DDL,
@@ -331,6 +381,12 @@ def _migrate_bricklink_items(conn: "DuckDBPyConnection") -> None:
         conn.execute("ALTER TABLE bricklink_items ADD COLUMN parts_count INTEGER")
     if "theme" not in existing:
         conn.execute("ALTER TABLE bricklink_items ADD COLUMN theme VARCHAR")
+    if "minifig_count" not in existing:
+        conn.execute("ALTER TABLE bricklink_items ADD COLUMN minifig_count INTEGER")
+    if "dimensions" not in existing:
+        conn.execute("ALTER TABLE bricklink_items ADD COLUMN dimensions VARCHAR")
+    if "has_instructions" not in existing:
+        conn.execute("ALTER TABLE bricklink_items ADD COLUMN has_instructions BOOLEAN")
 
 
 def _migrate_lego_items(conn: "DuckDBPyConnection") -> None:
@@ -362,6 +418,10 @@ def _migrate_lego_items(conn: "DuckDBPyConnection") -> None:
         conn.execute(
             "ALTER TABLE lego_items ADD COLUMN last_enriched_at TIMESTAMP"
         )
+    if "minifig_count" not in existing:
+        conn.execute("ALTER TABLE lego_items ADD COLUMN minifig_count INTEGER")
+    if "dimensions" not in existing:
+        conn.execute("ALTER TABLE lego_items ADD COLUMN dimensions VARCHAR")
 
 
 _SEQUENCE_TABLE_MAP = [
@@ -370,6 +430,9 @@ _SEQUENCE_TABLE_MAP = [
     ("bricklink_monthly_sales_id_seq", "bricklink_monthly_sales"),
     ("product_analysis_id_seq", "product_analysis"),
     ("brickranker_items_id_seq", "brickranker_items"),
+    ("minifigures_id_seq", "minifigures"),
+    ("set_minifigures_id_seq", "set_minifigures"),
+    ("minifig_price_history_id_seq", "minifig_price_history"),
     ("shopee_products_id_seq", "shopee_products"),
     ("shopee_saturation_id_seq", "shopee_saturation"),
     ("shopee_scrape_history_id_seq", "shopee_scrape_history"),
@@ -484,6 +547,9 @@ def _rebuild_table(conn: "DuckDBPyConnection", table_name: str) -> None:
         "bricklink_monthly_sales": BRICKLINK_MONTHLY_SALES_DDL,
         "product_analysis": PRODUCT_ANALYSIS_DDL,
         "brickranker_items": BRICKRANKER_ITEMS_DDL,
+        "minifigures": MINIFIGURES_DDL,
+        "set_minifigures": SET_MINIFIGURES_DDL,
+        "minifig_price_history": MINIFIG_PRICE_HISTORY_DDL,
         "shopee_products": SHOPEE_PRODUCTS_DDL,
         "shopee_saturation": SHOPEE_SATURATION_DDL,
         "shopee_scrape_history": SHOPEE_SCRAPE_HISTORY_DDL,
@@ -567,6 +633,12 @@ def drop_all_tables(conn: "DuckDBPyConnection") -> None:
     conn.execute("DROP TABLE IF EXISTS bricklink_price_history;")
     conn.execute("DROP TABLE IF EXISTS bricklink_items;")
     conn.execute("DROP TABLE IF EXISTS brickranker_items;")
+    conn.execute("DROP TABLE IF EXISTS minifig_price_history;")
+    conn.execute("DROP TABLE IF EXISTS set_minifigures;")
+    conn.execute("DROP TABLE IF EXISTS minifigures;")
+    conn.execute("DROP SEQUENCE IF EXISTS minifigures_id_seq;")
+    conn.execute("DROP SEQUENCE IF EXISTS set_minifigures_id_seq;")
+    conn.execute("DROP SEQUENCE IF EXISTS minifig_price_history_id_seq;")
     conn.execute("DROP SEQUENCE IF EXISTS bricklink_items_id_seq;")
     conn.execute("DROP SEQUENCE IF EXISTS bricklink_price_history_id_seq;")
     conn.execute("DROP SEQUENCE IF EXISTS bricklink_monthly_sales_id_seq;")
@@ -593,6 +665,9 @@ def get_table_stats(conn: "DuckDBPyConnection") -> dict[str, int]:
         "bricklink_monthly_sales",
         "product_analysis",
         "brickranker_items",
+        "minifigures",
+        "set_minifigures",
+        "minifig_price_history",
         "portfolio_transactions",
         "portfolio_snapshots",
     ]

@@ -31,6 +31,8 @@ FIELD_SOURCE_PRIORITY: dict[MetadataField, tuple[SourceId, ...]] = {
     MetadataField.IMAGE_URL: (SourceId.BRICKLINK,),
     MetadataField.WEIGHT: (SourceId.BRICKLINK,),
     MetadataField.RETIRING_SOON: (SourceId.BRICKRANKER,),
+    MetadataField.MINIFIG_COUNT: (SourceId.BRICKLINK,),
+    MetadataField.DIMENSIONS: (SourceId.BRICKLINK,),
 }
 
 SOURCE_CONFIGS: dict[SourceId, SourceConfig] = {
@@ -43,6 +45,8 @@ SOURCE_CONFIGS: dict[SourceId, SourceConfig] = {
             MetadataField.WEIGHT,
             MetadataField.PARTS_COUNT,
             MetadataField.THEME,
+            MetadataField.MINIFIG_COUNT,
+            MetadataField.DIMENSIONS,
         }),
     ),
     SourceId.BRICKRANKER: SourceConfig(

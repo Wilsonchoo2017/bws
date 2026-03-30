@@ -10,13 +10,20 @@ from services.enrichment.types import MetadataField, SourceId, SourceResult
 
 def adapt_bricklink(data: BricklinkData) -> SourceResult:
     """Extract enrichment fields from BricklinkData."""
+    image_url = data.image_url
+    # Fallback: construct BrickLink image URL from item_id if scraper missed it
+    if image_url is None and data.item_id:
+        image_url = f"https://img.bricklink.com/ItemImage/SN/0/{data.item_id}.png"
+
     fields: dict[MetadataField, str | int | bool | None] = {
         MetadataField.TITLE: data.title,
         MetadataField.YEAR_RELEASED: data.year_released,
-        MetadataField.IMAGE_URL: data.image_url,
+        MetadataField.IMAGE_URL: image_url,
         MetadataField.WEIGHT: data.weight,
         MetadataField.PARTS_COUNT: data.parts_count,
         MetadataField.THEME: data.theme,
+        MetadataField.MINIFIG_COUNT: data.minifig_count,
+        MetadataField.DIMENSIONS: data.dimensions,
     }
     return SourceResult(
         source=SourceId.BRICKLINK,

@@ -15,6 +15,7 @@ import { formatPrice } from '../types';
 import { KellyPanel } from '../kelly-panel';
 import { SignalsPanel } from '../signals-table';
 import { BricklinkPriceChart } from './bricklink-price-chart';
+import { MinifiguresPanel } from './minifigures-panel';
 
 const ENRICH_SOURCES = [
   { id: null, label: 'All Sources' },
@@ -183,6 +184,8 @@ export function ItemDetailView({ setNumber }: ItemDetailViewProps) {
             )}
             {item.theme && <span>{item.theme}</span>}
             {item.parts_count && <span>{item.parts_count} pcs</span>}
+            {item.minifig_count && <span>{item.minifig_count} figs</span>}
+            {item.dimensions && <span>{item.dimensions}</span>}
           </div>
 
           {/* Enrich dropdown */}
@@ -261,6 +264,9 @@ export function ItemDetailView({ setNumber }: ItemDetailViewProps) {
 
       {/* Kelly Criterion position sizing */}
       <KellyPanel setNumber={setNumber} />
+
+      {/* Minifigures */}
+      <MinifiguresPanel setNumber={setNumber} />
 
       {/* BrickLink price analysis charts */}
       <BricklinkPriceChart setNumber={setNumber} />

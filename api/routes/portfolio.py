@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field
 from api.jobs import job_manager
 from db.connection import get_connection
 from db.schema import init_schema
-from services.items.repository import get_or_create_item, item_exists
+from services.items.repository import get_or_create_item
 from services.portfolio.repository import (
     create_transaction,
     delete_transaction,
@@ -45,12 +45,15 @@ async def add_transaction(request: CreateTransactionRequest) -> dict:
     try:
         init_schema(conn)
 
-        # Auto-create lego_items entry and queue enrichment for new sets
-        is_new = not item_exists(conn, request.set_number)
+        # Auto-create lego_items entry and queue enrichment if metadata missing
         get_or_create_item(conn, request.set_number)
-        if is_new:
+        row = conn.execute(
+            "SELECT title, theme, image_url FROM lego_items WHERE set_number = ?",
+            [request.set_number],
+        ).fetchone()
+        if row and (row[0] is None or row[1] is None or row[2] is None):
             job_manager.create_job("enrichment", request.set_number)
-            logger.info("Queued enrichment for new set %s", request.set_number)
+            logger.info("Queued enrichment for set %s", request.set_number)
 
         txn_id = create_transaction(
             conn,
@@ -167,6 +170,55 @@ async def holding_detail(
         raise
     except Exception:
         logger.exception("Failed to get holding detail for %s", set_number)
+        raise HTTPException(status_code=500, detail="Internal server error")
+    finally:
+        conn.close()
+
+
+@router.post("/enrich")
+async def enrich_portfolio_items() -> dict:
+    """Queue enrichment for all portfolio sets missing metadata."""
+    conn = get_connection()
+    try:
+        init_schema(conn)
+        # Ensure all portfolio sets exist in lego_items first
+        missing_items = conn.execute(
+            """
+            SELECT DISTINCT pt.set_number
+            FROM portfolio_transactions pt
+            LEFT JOIN lego_items li ON li.set_number = pt.set_number
+            WHERE li.set_number IS NULL
+            """
+        ).fetchall()
+        for (sn,) in missing_items:
+            get_or_create_item(conn, sn)
+
+        # Queue enrichment for ALL portfolio sets (force re-enrich)
+        # Reset last_enriched_at so the enrichment worker won't skip them
+        conn.execute(
+            """
+            UPDATE lego_items SET last_enriched_at = NULL
+            WHERE set_number IN (
+                SELECT DISTINCT set_number FROM portfolio_transactions
+            )
+            """
+        )
+
+        rows = conn.execute(
+            "SELECT DISTINCT set_number FROM portfolio_transactions"
+        ).fetchall()
+
+        queued = []
+        for (set_number,) in rows:
+            job_manager.create_job("enrichment", set_number)
+            queued.append(set_number)
+
+        return {
+            "success": True,
+            "data": {"queued": len(queued), "set_numbers": queued},
+        }
+    except Exception:
+        logger.exception("Failed to enrich portfolio items")
         raise HTTPException(status_code=500, detail="Internal server error")
     finally:
         conn.close()

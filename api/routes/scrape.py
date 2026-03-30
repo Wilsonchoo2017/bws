@@ -114,6 +114,13 @@ async def start_scrape(request: ScrapeRequest):
     return _job_to_response(job)
 
 
+@router.delete("/jobs")
+async def clear_jobs():
+    """Clear all completed and failed jobs from history."""
+    removed = job_manager.clear_finished()
+    return {"cleared": removed}
+
+
 @router.get("/jobs", response_model=list[ScrapeJobResponse])
 async def list_jobs(limit: int = 50):
     """List recent scrape jobs."""

@@ -28,6 +28,8 @@ class TestEdgeCases:
             image_url="https://example.com/img.png",
             weight="14.2 kg",
             retiring_soon=False,
+            minifig_count=7,
+            dimensions="58.2 x 49.0 x 21.0 cm",
         )
 
         call_count = 0

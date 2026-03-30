@@ -45,6 +45,8 @@ _FIELD_TO_COLUMN: dict[MetadataField, str] = {
     MetadataField.IMAGE_URL: "image_url",
     MetadataField.WEIGHT: "weight",
     MetadataField.RETIRING_SOON: "retiring_soon",
+    MetadataField.MINIFIG_COUNT: "minifig_count",
+    MetadataField.DIMENSIONS: "dimensions",
 }
 
 

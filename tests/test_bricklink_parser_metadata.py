@@ -182,12 +182,18 @@ class TestParseItemInfoIntegration:
         assert result["year_released"] == 2023
 
     def test_minimal_html_all_keys_present(self):
-        """#15: Given empty HTML, all 6 keys present with None values."""
+        """#15: Given empty HTML, all 9 keys present with None values."""
         result = parse_item_info("<html><body></body></html>")
-        expected_keys = {"title", "weight", "year_released", "image_url", "parts_count", "theme"}
+        expected_keys = {
+            "title", "weight", "year_released", "image_url", "parts_count", "theme",
+            "minifig_count", "dimensions", "has_instructions",
+        }
         assert set(result.keys()) == expected_keys
         assert result["parts_count"] is None
         assert result["theme"] is None
+        assert result["minifig_count"] is None
+        assert result["dimensions"] is None
+        assert result["has_instructions"] is None
 
 
 class TestParseFullItem:

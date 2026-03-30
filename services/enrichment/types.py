@@ -35,6 +35,8 @@ class MetadataField(Enum):
     IMAGE_URL = "image_url"
     WEIGHT = "weight"
     RETIRING_SOON = "retiring_soon"
+    MINIFIG_COUNT = "minifig_count"
+    DIMENSIONS = "dimensions"
 
 
 @dataclass(frozen=True)

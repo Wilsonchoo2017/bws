@@ -69,6 +69,30 @@ class PricingBox:
 
 
 @dataclass(frozen=True)
+class MinifigureInfo:
+    """A minifigure found in a set's inventory."""
+
+    minifig_id: str  # e.g., "sc139"
+    name: str | None = None
+    image_url: str | None = None
+    quantity: int = 1
+
+
+@dataclass(frozen=True)
+class MinifigureData:
+    """Complete minifigure with prices."""
+
+    minifig_id: str
+    name: str | None = None
+    image_url: str | None = None
+    year_released: int | None = None
+    six_month_new: PricingBox | None = None
+    six_month_used: PricingBox | None = None
+    current_new: PricingBox | None = None
+    current_used: PricingBox | None = None
+
+
+@dataclass(frozen=True)
 class BricklinkData:
     """Complete Bricklink item data from scraping."""
 
@@ -80,6 +104,9 @@ class BricklinkData:
     image_url: str | None = None
     parts_count: int | None = None
     theme: str | None = None
+    minifig_count: int | None = None
+    dimensions: str | None = None
+    has_instructions: bool | None = None
     six_month_new: PricingBox | None = None
     six_month_used: PricingBox | None = None
     current_new: PricingBox | None = None

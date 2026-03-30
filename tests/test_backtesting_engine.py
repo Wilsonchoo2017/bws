@@ -57,7 +57,8 @@ def backtest_db() -> duckdb.DuckDBPyConnection:
             year_retired INTEGER,
             parts_count INTEGER,
             rrp_cents INTEGER,
-            rrp_currency VARCHAR
+            rrp_currency VARCHAR,
+            retiring_soon BOOLEAN DEFAULT FALSE
         )
     """)
 

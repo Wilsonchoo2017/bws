@@ -17,17 +17,22 @@ from config.settings import (
 )
 from services.bricklink.parser import (
     build_item_url,
+    build_minifig_inventory_url,
     build_price_guide_url,
     parse_bricklink_url,
     parse_full_item,
+    parse_minifig_inventory,
     parse_monthly_sales,
 )
 from services.bricklink.repository import (
+    create_minifig_price_history,
     create_price_history,
     upsert_item,
+    upsert_minifigure,
     upsert_monthly_sales,
+    upsert_set_minifigures,
 )
-from bws_types.models import BricklinkData, BricklinkItem, MonthlySale
+from bws_types.models import BricklinkData, BricklinkItem, MinifigureData, MonthlySale
 
 
 if TYPE_CHECKING:
@@ -42,6 +47,19 @@ class ScrapeResult:
     item_id: str
     data: BricklinkData | None = None
     monthly_sales: tuple[MonthlySale, ...] | None = None
+    error: str | None = None
+
+
+@dataclass(frozen=True)
+class MinifigScrapeResult:
+    """Result of scraping minifigures for a set."""
+
+    success: bool
+    set_item_id: str
+    minifig_count: int = 0
+    minifigures_scraped: int = 0
+    minifigures: tuple[MinifigureData, ...] = ()
+    total_value_cents: int | None = None
     error: str | None = None
 
 
@@ -189,6 +207,146 @@ async def scrape_item_by_id(
     """
     url = build_price_guide_url(item_type, item_id)
     return await scrape_item(conn, url, save=save, client=client)
+
+
+async def scrape_set_minifigures(
+    conn: "DuckDBPyConnection",
+    item_id: str,
+    *,
+    save: bool = True,
+    scrape_prices: bool = True,
+    client: httpx.AsyncClient | None = None,
+) -> MinifigScrapeResult:
+    """Scrape minifigure inventory and prices for a LEGO set.
+
+    Args:
+        conn: DuckDB connection
+        item_id: Set item ID (e.g., "77256-1")
+        save: Whether to save results to database
+        scrape_prices: Whether to fetch individual minifig prices
+        client: Optional HTTP client
+
+    Returns:
+        MinifigScrapeResult with minifig data
+    """
+    should_close_client = client is None
+    if client is None:
+        client = httpx.AsyncClient(timeout=60.0)
+
+    try:
+        # Fetch minifigure inventory page
+        inventory_url = build_minifig_inventory_url(item_id)
+        inventory_html = await _fetch_page(client, inventory_url)
+
+        # Parse inventory
+        minifig_infos = parse_minifig_inventory(inventory_html)
+
+        if not minifig_infos:
+            return MinifigScrapeResult(
+                success=True,
+                set_item_id=item_id,
+                minifig_count=0,
+            )
+
+        # Save set-minifig relationships
+        if save:
+            upsert_set_minifigures(conn, item_id, minifig_infos)
+
+        # Scrape individual minifig prices
+        minifig_data_list: list[MinifigureData] = []
+        total_value_cents = 0
+        has_value = False
+
+        for mf_info in minifig_infos:
+            if not scrape_prices:
+                minifig_data_list.append(MinifigureData(
+                    minifig_id=mf_info.minifig_id,
+                    name=mf_info.name,
+                    image_url=mf_info.image_url,
+                ))
+                continue
+
+            await asyncio.sleep(get_random_delay())
+
+            try:
+                # Fetch minifig catalog page
+                mf_item_url = build_item_url("M", mf_info.minifig_id)
+                mf_item_html = await _fetch_page(client, mf_item_url)
+
+                await asyncio.sleep(get_random_delay())
+
+                # Fetch minifig price guide
+                mf_price_url = build_price_guide_url("M", mf_info.minifig_id)
+                mf_price_html = await _fetch_page(client, mf_price_url)
+
+                # Parse using existing parser (supports M type)
+                mf_full = parse_full_item(mf_item_html, mf_price_html, "M", mf_info.minifig_id)
+
+                mf_data = MinifigureData(
+                    minifig_id=mf_info.minifig_id,
+                    name=mf_full.title or mf_info.name,
+                    image_url=mf_full.image_url or mf_info.image_url,
+                    year_released=mf_full.year_released,
+                    six_month_new=mf_full.six_month_new,
+                    six_month_used=mf_full.six_month_used,
+                    current_new=mf_full.current_new,
+                    current_used=mf_full.current_used,
+                )
+                minifig_data_list.append(mf_data)
+
+                # Accumulate total value (current new avg price * quantity)
+                if mf_data.current_new and mf_data.current_new.avg_price:
+                    total_value_cents += mf_data.current_new.avg_price.amount * mf_info.quantity
+                    has_value = True
+
+                # Save minifig data
+                if save:
+                    upsert_minifigure(conn, mf_data)
+                    create_minifig_price_history(conn, mf_info.minifig_id, mf_data)
+
+            except (httpx.HTTPStatusError, httpx.RequestError, ValueError, TimeoutError) as e:
+                # Log but continue with other minifigs
+                minifig_data_list.append(MinifigureData(
+                    minifig_id=mf_info.minifig_id,
+                    name=mf_info.name,
+                    image_url=mf_info.image_url,
+                ))
+                continue
+
+        return MinifigScrapeResult(
+            success=True,
+            set_item_id=item_id,
+            minifig_count=len(minifig_infos),
+            minifigures_scraped=sum(
+                1 for m in minifig_data_list if m.current_new is not None
+            ),
+            minifigures=tuple(minifig_data_list),
+            total_value_cents=total_value_cents if has_value else None,
+        )
+
+    except httpx.HTTPStatusError as e:
+        error_msg = f"HTTP {e.response.status_code}: {e.response.reason_phrase}"
+        return MinifigScrapeResult(success=False, set_item_id=item_id, error=error_msg)
+    except httpx.RequestError as e:
+        return MinifigScrapeResult(success=False, set_item_id=item_id, error=f"Request error: {e}")
+    except (TimeoutError, OSError) as e:
+        return MinifigScrapeResult(success=False, set_item_id=item_id, error=f"Network error: {e}")
+    finally:
+        if should_close_client:
+            await client.aclose()
+
+
+def scrape_set_minifigures_sync(
+    conn: "DuckDBPyConnection",
+    item_id: str,
+    *,
+    save: bool = True,
+    scrape_prices: bool = True,
+) -> MinifigScrapeResult:
+    """Synchronous wrapper for scrape_set_minifigures."""
+    return asyncio.run(
+        scrape_set_minifigures(conn, item_id, save=save, scrape_prices=scrape_prices)
+    )
 
 
 async def scrape_batch(

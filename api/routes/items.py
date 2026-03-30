@@ -8,7 +8,9 @@ from db.schema import init_schema
 from services.bricklink.repository import (
     get_monthly_sales,
     get_price_history,
+    get_set_minifigures,
 )
+from services.bricklink.scraper import scrape_set_minifigures
 from services.backtesting.kelly import (
     compute_position_sizing,
     kelly_to_dict,
@@ -176,6 +178,89 @@ async def get_item(set_number: str):
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/{set_number}/minifigures")
+async def get_item_minifigures(set_number: str):
+    """Get minifigure inventory and values for a LEGO set."""
+    conn = get_connection()
+    try:
+        init_schema(conn)
+
+        # Find bricklink item_id matching this set_number
+        rows = conn.execute(
+            "SELECT item_id FROM bricklink_items WHERE item_id LIKE ?",
+            [f"{set_number}-%"],
+        ).fetchall()
+
+        if not rows:
+            return {"success": True, "data": {"minifig_count": 0, "minifigures": []}}
+
+        item_id = rows[0][0]
+        minifigs = get_set_minifigures(conn, item_id)
+
+        # Compute total value
+        total_value_cents = 0
+        has_value = False
+        for mf in minifigs:
+            if mf["current_new_avg_cents"] is not None:
+                total_value_cents += mf["current_new_avg_cents"] * mf["quantity"]
+                has_value = True
+
+        return {
+            "success": True,
+            "data": {
+                "set_item_id": item_id,
+                "minifig_count": len(minifigs),
+                "total_value_cents": total_value_cents if has_value else None,
+                "total_value_currency": minifigs[0]["currency"] if minifigs else "USD",
+                "minifigures": minifigs,
+            },
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        conn.close()
+
+
+@router.post("/{set_number}/minifigures/scrape")
+async def scrape_item_minifigures(set_number: str):
+    """Trigger minifigure scraping for a LEGO set."""
+    conn = get_connection()
+    try:
+        init_schema(conn)
+
+        # Find bricklink item_id
+        rows = conn.execute(
+            "SELECT item_id FROM bricklink_items WHERE item_id LIKE ?",
+            [f"{set_number}-%"],
+        ).fetchall()
+
+        if not rows:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Set {set_number} not found in BrickLink data. Scrape the set first.",
+            )
+
+        item_id = rows[0][0]
+        result = await scrape_set_minifigures(conn, item_id, save=True, scrape_prices=True)
+
+        return {
+            "success": result.success,
+            "data": {
+                "set_item_id": result.set_item_id,
+                "minifig_count": result.minifig_count,
+                "minifigures_scraped": result.minifigures_scraped,
+                "total_value_cents": result.total_value_cents,
+            },
+            "error": result.error,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        conn.close()
 
 
 @router.get("/{set_number}/bricklink-prices")

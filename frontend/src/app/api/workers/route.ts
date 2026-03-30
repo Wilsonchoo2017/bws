@@ -25,3 +25,28 @@ export async function GET(request: NextRequest) {
     );
   }
 }
+
+export async function DELETE() {
+  try {
+    const res = await fetch(`${API_BASE}/api/scrape/jobs`, {
+      method: 'DELETE',
+    });
+    const data = await res.json();
+
+    if (!res.ok) {
+      return NextResponse.json(
+        { success: false, error: data.detail || 'Failed to clear jobs' },
+        { status: res.status }
+      );
+    }
+
+    return NextResponse.json({ success: true, data });
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message : 'Failed to connect to API';
+    return NextResponse.json(
+      { success: false, error: message },
+      { status: 500 }
+    );
+  }
+}

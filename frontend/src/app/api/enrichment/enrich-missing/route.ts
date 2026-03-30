@@ -1,13 +1,20 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { type NextRequest, NextResponse } from 'next/server';
 
 const API_BASE = process.env.BWS_API_URL || 'http://localhost:8005';
 
 export async function POST(request: NextRequest) {
   try {
-    const res = await fetch(
-      `${API_BASE}/api/enrichment/enrich-missing`,
-      { method: 'POST' }
-    );
+    let body: string | undefined;
+    const contentType = request.headers.get('content-type');
+    if (contentType?.includes('application/json')) {
+      body = JSON.stringify(await request.json());
+    }
+
+    const res = await fetch(`${API_BASE}/api/enrichment/enrich-missing`, {
+      method: 'POST',
+      headers: body ? { 'Content-Type': 'application/json' } : {},
+      body,
+    });
     const data = await res.json();
 
     if (!res.ok) {

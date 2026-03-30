@@ -155,3 +155,5 @@ def fetch_from_brickranker(
     except Exception as e:
         logger.exception("BrickRanker fetch failed for %s", set_number)
         return make_failed_result(SourceId.BRICKRANKER, str(e))
+
+

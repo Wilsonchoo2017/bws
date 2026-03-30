@@ -61,8 +61,30 @@ export interface ItemDetail {
   year_released: number | null;
   year_retired: number | null;
   parts_count: number | null;
+  minifig_count: number | null;
+  dimensions: string | null;
   image_url: string | null;
   prices: PriceRecord[];
+}
+
+export interface MinifigurePrice {
+  minifig_id: string;
+  name: string | null;
+  image_url: string | null;
+  quantity: number;
+  year_released: number | null;
+  current_new_avg_cents: number | null;
+  current_used_avg_cents: number | null;
+  currency: string;
+  last_scraped_at: string | null;
+}
+
+export interface SetMinifigureData {
+  set_item_id: string;
+  minifig_count: number;
+  total_value_cents: number | null;
+  total_value_currency: string;
+  minifigures: MinifigurePrice[];
 }
 
 export interface PricingBoxData {

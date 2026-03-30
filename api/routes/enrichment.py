@@ -24,6 +24,13 @@ class EnrichRequest(BaseModel):
     source: str | None = Field(default=None, description="Specific source to enrich from")
 
 
+class EnrichBatchRequest(BaseModel):
+    set_numbers: list[str] | None = Field(
+        default=None,
+        description="Specific set numbers to enrich. If omitted, enriches all items with missing metadata.",
+    )
+
+
 class EnrichBatchResponse(BaseModel):
     queued: int
     set_numbers: list[str]
@@ -64,12 +71,37 @@ async def enrich_item(request: EnrichRequest) -> ScrapeJobResponse:
 
 
 @router.post("/enrich-missing", response_model=EnrichBatchResponse)
-async def enrich_missing() -> EnrichBatchResponse:
-    """Scan for all items with missing metadata and queue enrichment jobs."""
+async def enrich_missing(
+    request: EnrichBatchRequest | None = None,
+) -> EnrichBatchResponse:
+    """Enrich items with missing metadata.
+
+    If request.set_numbers is provided, only enrich those specific sets.
+    Otherwise, enrich all items with missing metadata.
+    """
     conn = get_connection()
     try:
         init_schema(conn)
-        items = get_items_needing_enrichment(conn, limit=10000)
+
+        if request and request.set_numbers:
+            # Enrich specific sets -- skip the price_records filter
+            placeholders = ", ".join(["?"] * len(request.set_numbers))
+            rows = conn.execute(
+                f"""
+                SELECT li.set_number
+                FROM lego_items li
+                WHERE li.set_number IN ({placeholders})
+                  AND (li.title IS NULL
+                    OR li.theme IS NULL
+                    OR li.year_released IS NULL
+                    OR li.parts_count IS NULL
+                    OR li.image_url IS NULL)
+                """,  # noqa: S608
+                request.set_numbers,
+            ).fetchall()
+            items = [{"set_number": r[0]} for r in rows]
+        else:
+            items = get_items_needing_enrichment(conn, limit=10000)
     except Exception:
         logger.exception("Failed to fetch items needing enrichment")
         raise HTTPException(status_code=500, detail="Internal server error")
