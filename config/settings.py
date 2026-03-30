@@ -135,6 +135,23 @@ class ShopeeSettings:
 SHOPEE_CONFIG = ShopeeSettings()
 
 
+@dataclass(frozen=True)
+class SaturationSettings:
+    """Shopee saturation checker configuration."""
+
+    min_search_delay_ms: int = 30_000    # 30s between searches
+    max_search_delay_ms: int = 90_000    # 90s max
+    max_searches_per_session: int = 12   # close browser after this many
+    session_cooldown_min_ms: int = 60_000   # 60s min between sessions
+    session_cooldown_max_ms: int = 120_000  # 120s max between sessions
+    stale_threshold_days: int = 7        # skip items checked within 7 days
+    circuit_breaker_threshold: int = 5   # trip after 5 consecutive failures
+    circuit_breaker_cooldown_s: int = 1800  # 30 minute cooldown
+
+
+SATURATION_CONFIG = SaturationSettings()
+
+
 def calculate_backoff(attempt: int) -> float:
     """Calculate exponential backoff delay in seconds.
 

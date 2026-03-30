@@ -11,6 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from api.routes import enrichment, items, scrape
 from api.worker import run_worker
 from services.enrichment.scheduler import run_enrichment_sweep
+from services.shopee.saturation_scheduler import run_saturation_sweep
 
 logging.basicConfig(
     level=logging.INFO,
@@ -28,18 +29,17 @@ async def lifespan(app: FastAPI):
     logger.info("Starting BWS API...")
     worker_task = asyncio.create_task(run_worker())
     sweep_task = asyncio.create_task(run_enrichment_sweep(job_manager))
-    logger.info("Background worker and enrichment sweep started")
+    saturation_task = asyncio.create_task(run_saturation_sweep(job_manager))
+    logger.info("Background worker, enrichment sweep, and saturation sweep started")
     yield
+    saturation_task.cancel()
     sweep_task.cancel()
     worker_task.cancel()
-    try:
-        await worker_task
-    except asyncio.CancelledError:
-        pass
-    try:
-        await sweep_task
-    except asyncio.CancelledError:
-        pass
+    for task in (worker_task, sweep_task, saturation_task):
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
     logger.info("BWS API shut down")
 
 

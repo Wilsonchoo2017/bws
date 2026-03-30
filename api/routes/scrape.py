@@ -44,6 +44,19 @@ SCRAPERS: list[ScraperInfo] = [
             )
         ],
     ),
+    ScraperInfo(
+        id="shopee_saturation",
+        name="Shopee Saturation Checker",
+        description="Check market saturation on Shopee for items with retail pricing",
+        targets=[
+            ScrapeTargetInfo(
+                id="batch",
+                label="All Items (Batch)",
+                url="batch",
+                description="Check all items with RRP that haven't been checked recently",
+            )
+        ],
+    ),
 ]
 
 VALID_SCRAPER_IDS = {s.id for s in SCRAPERS}
@@ -87,6 +100,14 @@ async def start_scrape(request: ScrapeRequest):
         raise HTTPException(
             status_code=400,
             detail="URL must be a toysrus.com.my URL",
+        )
+
+    if request.scraper_id == "shopee_saturation" and not (
+        request.url == "batch" or request.url.replace("-", "").isalnum()
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail='URL must be "batch" or a LEGO set number',
         )
 
     job = job_manager.create_job(request.scraper_id, request.url)

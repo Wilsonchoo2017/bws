@@ -177,6 +177,24 @@ CREATE TABLE IF NOT EXISTS price_records (
 );
 """
 
+SHOPEE_SATURATION_DDL = """
+CREATE TABLE IF NOT EXISTS shopee_saturation (
+    id INTEGER PRIMARY KEY,
+    set_number VARCHAR NOT NULL,
+    listings_count INTEGER NOT NULL,
+    unique_sellers INTEGER NOT NULL,
+    min_price_cents INTEGER,
+    max_price_cents INTEGER,
+    avg_price_cents INTEGER,
+    median_price_cents INTEGER,
+    price_spread_pct FLOAT,
+    saturation_score FLOAT NOT NULL,
+    saturation_level VARCHAR NOT NULL,
+    search_query VARCHAR NOT NULL,
+    scraped_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+"""
+
 BRICKRANKER_ITEMS_DDL = """
 CREATE TABLE IF NOT EXISTS brickranker_items (
     id INTEGER PRIMARY KEY,
@@ -202,6 +220,7 @@ CREATE SEQUENCE IF NOT EXISTS product_analysis_id_seq;
 CREATE SEQUENCE IF NOT EXISTS worldbricks_sets_id_seq;
 CREATE SEQUENCE IF NOT EXISTS brickranker_items_id_seq;
 CREATE SEQUENCE IF NOT EXISTS shopee_products_id_seq;
+CREATE SEQUENCE IF NOT EXISTS shopee_saturation_id_seq;
 CREATE SEQUENCE IF NOT EXISTS shopee_scrape_history_id_seq;
 CREATE SEQUENCE IF NOT EXISTS toysrus_products_id_seq;
 CREATE SEQUENCE IF NOT EXISTS toysrus_price_history_id_seq;
@@ -237,6 +256,8 @@ CREATE INDEX IF NOT EXISTS idx_shopee_products_source
     ON shopee_products(source_url);
 CREATE INDEX IF NOT EXISTS idx_shopee_products_scraped
     ON shopee_products(scraped_at);
+CREATE INDEX IF NOT EXISTS idx_shopee_saturation_set
+    ON shopee_saturation(set_number, scraped_at);
 CREATE INDEX IF NOT EXISTS idx_toysrus_products_sku
     ON toysrus_products(sku);
 CREATE INDEX IF NOT EXISTS idx_toysrus_products_available
@@ -260,6 +281,7 @@ ALL_DDL = [
     WORLDBRICKS_SETS_DDL,
     BRICKRANKER_ITEMS_DDL,
     SHOPEE_PRODUCTS_DDL,
+    SHOPEE_SATURATION_DDL,
     SHOPEE_SCRAPE_HISTORY_DDL,
     TOYSRUS_PRODUCTS_DDL,
     TOYSRUS_PRICE_HISTORY_DDL,

@@ -46,6 +46,19 @@ async def run_worker(manager: JobManager | None = None) -> None:
                 )
                 logger.info("Job %s completed: %d items", job_id, len(result))
                 _queue_enrichment_for_scraped_items(mgr, result)
+            elif job.scraper_id == "shopee_saturation":
+                result = await _run_saturation_batch(job.url)
+                mgr.mark_completed(
+                    job_id,
+                    items_found=result["successful"],
+                    items=[result],
+                )
+                logger.info(
+                    "Saturation job %s completed: %d/%d successful",
+                    job_id,
+                    result["successful"],
+                    result["total"],
+                )
             elif job.scraper_id == "enrichment":
                 result = await asyncio.to_thread(_run_enrichment, job.url)
                 mgr.mark_completed(
@@ -119,6 +132,46 @@ async def _run_toysrus_scrape() -> list[dict]:
         }
         for p in result.products
     ]
+
+
+async def _run_saturation_batch(job_url: str) -> dict:
+    """Run Shopee saturation check batch.
+
+    job_url format: "batch" (check all stale items) or "75192" (single set)
+    """
+    from db.connection import get_connection
+    from db.schema import init_schema
+    from services.shopee.saturation_repository import get_items_needing_saturation_check
+    from services.shopee.saturation_scraper import run_saturation_batch
+
+    conn = get_connection()
+    init_schema(conn)
+    try:
+        if job_url == "batch":
+            items = get_items_needing_saturation_check(conn)
+        else:
+            row = conn.execute(
+                "SELECT set_number, title, rrp_cents FROM lego_items WHERE set_number = ?",
+                [job_url],
+            ).fetchone()
+            items = (
+                [{"set_number": row[0], "title": row[1], "rrp_cents": row[2]}]
+                if row
+                else []
+            )
+    finally:
+        conn.close()
+
+    if not items:
+        return {"successful": 0, "failed": 0, "skipped": 0, "total": 0}
+
+    result = await run_saturation_batch(items)
+    return {
+        "successful": result.successful,
+        "failed": result.failed,
+        "skipped": result.skipped,
+        "total": result.total_items,
+    }
 
 
 def _run_enrichment(job_url: str) -> dict:
