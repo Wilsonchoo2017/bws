@@ -8,7 +8,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from api.routes import enrichment, items, scrape
+from api.routes import enrichment, items, portfolio, scrape
 from api.worker import run_worker
 from services.enrichment.scheduler import run_enrichment_sweep
 from services.shopee.saturation_scheduler import run_saturation_sweep
@@ -61,6 +61,7 @@ app.add_middleware(
 app.include_router(scrape.router, prefix="/api")
 app.include_router(items.router, prefix="/api")
 app.include_router(enrichment.router, prefix="/api")
+app.include_router(portfolio.router, prefix="/api")
 
 
 @app.get("/api/health")

@@ -188,6 +188,34 @@ CREATE TABLE IF NOT EXISTS shopee_saturation (
 );
 """
 
+PORTFOLIO_TRANSACTIONS_DDL = """
+CREATE TABLE IF NOT EXISTS portfolio_transactions (
+    id INTEGER PRIMARY KEY,
+    set_number VARCHAR NOT NULL,
+    txn_type VARCHAR NOT NULL,
+    quantity INTEGER NOT NULL,
+    price_cents INTEGER NOT NULL,
+    currency VARCHAR NOT NULL DEFAULT 'MYR',
+    condition VARCHAR NOT NULL DEFAULT 'new',
+    txn_date TIMESTAMP NOT NULL,
+    notes VARCHAR,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+"""
+
+PORTFOLIO_SNAPSHOTS_DDL = """
+CREATE TABLE IF NOT EXISTS portfolio_snapshots (
+    id INTEGER PRIMARY KEY,
+    snapshot_date DATE NOT NULL,
+    total_cost_cents BIGINT NOT NULL,
+    total_market_value_cents BIGINT NOT NULL,
+    unrealized_pl_cents BIGINT NOT NULL,
+    realized_pl_cents BIGINT NOT NULL,
+    holdings_count INTEGER NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+"""
+
 BRICKRANKER_ITEMS_DDL = """
 CREATE TABLE IF NOT EXISTS brickranker_items (
     id INTEGER PRIMARY KEY,
@@ -218,6 +246,8 @@ CREATE SEQUENCE IF NOT EXISTS toysrus_products_id_seq;
 CREATE SEQUENCE IF NOT EXISTS toysrus_price_history_id_seq;
 CREATE SEQUENCE IF NOT EXISTS lego_items_id_seq;
 CREATE SEQUENCE IF NOT EXISTS price_records_id_seq;
+CREATE SEQUENCE IF NOT EXISTS portfolio_transactions_id_seq;
+CREATE SEQUENCE IF NOT EXISTS portfolio_snapshots_id_seq;
 """
 
 # Index creation statements
@@ -260,6 +290,12 @@ CREATE INDEX IF NOT EXISTS idx_price_records_set_source
     ON price_records(set_number, source, recorded_at);
 CREATE INDEX IF NOT EXISTS idx_price_records_recorded
     ON price_records(recorded_at);
+CREATE INDEX IF NOT EXISTS idx_portfolio_txn_set
+    ON portfolio_transactions(set_number, txn_date);
+CREATE INDEX IF NOT EXISTS idx_portfolio_txn_date
+    ON portfolio_transactions(txn_date);
+CREATE INDEX IF NOT EXISTS idx_portfolio_snapshots_date
+    ON portfolio_snapshots(snapshot_date);
 """
 
 ALL_DDL = [
@@ -276,6 +312,8 @@ ALL_DDL = [
     TOYSRUS_PRICE_HISTORY_DDL,
     LEGO_ITEMS_DDL,
     PRICE_RECORDS_DDL,
+    PORTFOLIO_TRANSACTIONS_DDL,
+    PORTFOLIO_SNAPSHOTS_DDL,
     INDEXES_DDL,
 ]
 
@@ -339,6 +377,8 @@ _SEQUENCE_TABLE_MAP = [
     ("toysrus_price_history_id_seq", "toysrus_price_history"),
     ("lego_items_id_seq", "lego_items"),
     ("price_records_id_seq", "price_records"),
+    ("portfolio_transactions_id_seq", "portfolio_transactions"),
+    ("portfolio_snapshots_id_seq", "portfolio_snapshots"),
 ]
 
 
@@ -451,6 +491,8 @@ def _rebuild_table(conn: "DuckDBPyConnection", table_name: str) -> None:
         "toysrus_price_history": TOYSRUS_PRICE_HISTORY_DDL,
         "lego_items": LEGO_ITEMS_DDL,
         "price_records": PRICE_RECORDS_DDL,
+        "portfolio_transactions": PORTFOLIO_TRANSACTIONS_DDL,
+        "portfolio_snapshots": PORTFOLIO_SNAPSHOTS_DDL,
     }
 
     ddl = table_ddl_map.get(table_name)
@@ -530,6 +572,10 @@ def drop_all_tables(conn: "DuckDBPyConnection") -> None:
     conn.execute("DROP SEQUENCE IF EXISTS bricklink_monthly_sales_id_seq;")
     conn.execute("DROP SEQUENCE IF EXISTS product_analysis_id_seq;")
     conn.execute("DROP SEQUENCE IF EXISTS brickranker_items_id_seq;")
+    conn.execute("DROP TABLE IF EXISTS portfolio_transactions;")
+    conn.execute("DROP TABLE IF EXISTS portfolio_snapshots;")
+    conn.execute("DROP SEQUENCE IF EXISTS portfolio_transactions_id_seq;")
+    conn.execute("DROP SEQUENCE IF EXISTS portfolio_snapshots_id_seq;")
 
 
 def get_table_stats(conn: "DuckDBPyConnection") -> dict[str, int]:
@@ -547,6 +593,8 @@ def get_table_stats(conn: "DuckDBPyConnection") -> dict[str, int]:
         "bricklink_monthly_sales",
         "product_analysis",
         "brickranker_items",
+        "portfolio_transactions",
+        "portfolio_snapshots",
     ]
     stats = {}
     for table in tables:
