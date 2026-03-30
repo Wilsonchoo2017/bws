@@ -25,7 +25,8 @@ def get_items_needing_enrichment(
     result = conn.execute(
         """
         SELECT li.set_number, li.title, li.theme, li.year_released,
-               li.year_retired, li.parts_count, li.weight, li.image_url
+               li.year_retired, li.parts_count, li.weight, li.image_url,
+               li.retiring_soon
         FROM lego_items li
         WHERE (li.title IS NULL
            OR li.theme IS NULL
@@ -45,7 +46,7 @@ def get_items_needing_enrichment(
 
     columns = [
         "set_number", "title", "theme", "year_released", "year_retired",
-        "parts_count", "weight", "image_url",
+        "parts_count", "weight", "image_url", "retiring_soon",
     ]
     return [dict(zip(columns, row)) for row in result]
 
@@ -77,4 +78,5 @@ def store_enrichment_result(
         parts_count=found.get(MetadataField.PARTS_COUNT),
         weight=found.get(MetadataField.WEIGHT),
         image_url=found.get(MetadataField.IMAGE_URL),
+        retiring_soon=found.get(MetadataField.RETIRING_SOON),
     )

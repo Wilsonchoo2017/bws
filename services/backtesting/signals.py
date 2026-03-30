@@ -11,6 +11,7 @@ import pandas as pd
 
 from config.value_investing import (
     DEFAULT_THEME_MULTIPLIER,
+    RETIREMENT_MULTIPLIERS,
     THEME_MULTIPLIERS,
     get_retirement_multiplier,
     get_theme_multiplier,
@@ -225,10 +226,13 @@ def compute_lifecycle_position(
     year_released: int | None,
     year_retired: int | None,
     eval_year: int,
+    retiring_soon: bool = False,
 ) -> float | None:
     """Signal 6: Lifecycle position based on retirement status.
 
     High score = post-retirement (J-curve appreciation zone).
+    retiring_soon acts as a leading indicator, boosting active sets
+    that are about to retire.
     """
     if year_released is None:
         return None
@@ -236,6 +240,8 @@ def compute_lifecycle_position(
     if year_retired is not None:
         years_post = eval_year - year_retired
         multiplier = get_retirement_multiplier(years_post)
+    elif retiring_soon:
+        multiplier = RETIREMENT_MULTIPLIERS.retiring_soon
     else:
         age = eval_year - year_released
         if age >= 4:

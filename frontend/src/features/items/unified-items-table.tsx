@@ -82,6 +82,21 @@ const columns: ColumnDef<UnifiedItem>[] = [
     size: 80
   },
   {
+    accessorKey: 'retiring_soon',
+    header: ({ column }) => (
+      <DataTableColumnHeader column={column} title='Retiring' />
+    ),
+    cell: ({ row }) => {
+      const soon = row.getValue('retiring_soon') as boolean | null;
+      return soon ? (
+        <span className='rounded bg-red-100 px-1.5 py-0.5 text-xs font-semibold text-red-700 dark:bg-red-900/30 dark:text-red-400'>SOON</span>
+      ) : (
+        <span className='text-muted-foreground'>-</span>
+      );
+    },
+    size: 80
+  },
+  {
     accessorKey: 'rrp_cents',
     header: ({ column }) => (
       <DataTableColumnHeader column={column} title='RRP' />
@@ -200,14 +215,26 @@ export function UnifiedItemsTable() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [sorting, setSorting] = useState<SortingState>([]);
+  const [searchQuery, setSearchQuery] = useState('');
   const [dealFilter, setDealFilter] = useState<
     ((items: UnifiedItem[]) => UnifiedItem[]) | null
   >(null);
   const [hideNoRetail, setHideNoRetail] = useState(false);
-  const [retirementFilter, setRetirementFilter] = useState<'all' | 'retired' | 'active'>('all');
+  const [retirementFilter, setRetirementFilter] = useState<'all' | 'retired' | 'active' | 'retiring_soon'>('all');
+  const [newSetNumber, setNewSetNumber] = useState('');
+  const [adding, setAdding] = useState(false);
+  const [addError, setAddError] = useState<string | null>(null);
 
   const filteredData = useMemo(() => {
     let result = data;
+    if (searchQuery.trim()) {
+      const q = searchQuery.trim().toLowerCase();
+      result = result.filter(
+        (item) =>
+          item.set_number.toLowerCase().includes(q) ||
+          (item.title?.toLowerCase().includes(q) ?? false)
+      );
+    }
     if (hideNoRetail) {
       result = result.filter(
         (item) =>
@@ -219,14 +246,16 @@ export function UnifiedItemsTable() {
       result = result.filter((item) => item.year_retired !== null);
     } else if (retirementFilter === 'active') {
       result = result.filter((item) => item.year_retired === null);
+    } else if (retirementFilter === 'retiring_soon') {
+      result = result.filter((item) => item.retiring_soon === true && item.year_retired === null);
     }
     if (dealFilter) {
       result = dealFilter(result);
     }
     return result;
-  }, [data, dealFilter, hideNoRetail, retirementFilter]);
+  }, [data, searchQuery, dealFilter, hideNoRetail, retirementFilter]);
 
-  useEffect(() => {
+  const fetchItems = () => {
     fetch('/api/items')
       .then((res) => res.json())
       .then((json) => {
@@ -238,7 +267,49 @@ export function UnifiedItemsTable() {
       })
       .catch((err) => setError(err.message))
       .finally(() => setLoading(false));
+  };
+
+  useEffect(() => {
+    fetchItems();
   }, []);
+
+  const SET_NUMBER_PATTERN = /^\d{3,6}(-\d+)?$/;
+
+  const handleAddItem = async () => {
+    const trimmed = newSetNumber.trim();
+    setAddError(null);
+
+    if (!trimmed) {
+      setAddError('Set number is required');
+      return;
+    }
+    if (!SET_NUMBER_PATTERN.test(trimmed)) {
+      setAddError('Invalid format (3-6 digits, optional -N suffix)');
+      return;
+    }
+
+    setAdding(true);
+    try {
+      const res = await fetch('/api/items', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ set_number: trimmed }),
+      });
+      const json = await res.json();
+
+      if (!res.ok) {
+        setAddError(json.error || 'Failed to add item');
+        return;
+      }
+
+      setNewSetNumber('');
+      fetchItems();
+    } catch (err) {
+      setAddError(err instanceof Error ? err.message : 'Failed to add item');
+    } finally {
+      setAdding(false);
+    }
+  };
 
   const table = useReactTable({
     data: filteredData,
@@ -283,6 +354,13 @@ export function UnifiedItemsTable() {
   return (
     <div className='flex flex-1 flex-col gap-3 overflow-hidden'>
       <div className='flex items-center gap-3'>
+        <input
+          type='text'
+          placeholder='Search set number or title...'
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
+          className='bg-muted/50 rounded-lg border px-4 py-2.5 text-sm font-medium w-64 placeholder:text-muted-foreground'
+        />
         <label className='bg-muted/50 flex cursor-pointer items-center gap-2 rounded-lg border px-4 py-2.5 text-sm font-medium'>
           <input
             type='checkbox'
@@ -294,14 +372,40 @@ export function UnifiedItemsTable() {
         </label>
         <select
           value={retirementFilter}
-          onChange={(e) => setRetirementFilter(e.target.value as 'all' | 'retired' | 'active')}
+          onChange={(e) => setRetirementFilter(e.target.value as 'all' | 'retired' | 'active' | 'retiring_soon')}
           className='bg-muted/50 rounded-lg border px-4 py-2.5 text-sm font-medium'
         >
           <option value='all'>All sets</option>
           <option value='retired'>Retired only</option>
           <option value='active'>Active only</option>
+          <option value='retiring_soon'>Retiring soon</option>
         </select>
         <PriceDealFilter onFilterChange={(fn) => setDealFilter(() => fn)} />
+        <div className='ml-auto flex items-center gap-2'>
+          <input
+            type='text'
+            placeholder='Add set #...'
+            value={newSetNumber}
+            onChange={(e) => {
+              setNewSetNumber(e.target.value);
+              setAddError(null);
+            }}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') handleAddItem();
+            }}
+            className='bg-muted/50 rounded-lg border px-3 py-2.5 text-sm font-mono w-32 placeholder:text-muted-foreground'
+          />
+          <button
+            onClick={handleAddItem}
+            disabled={adding}
+            className='bg-primary text-primary-foreground rounded-lg px-4 py-2.5 text-sm font-medium disabled:opacity-50'
+          >
+            {adding ? 'Adding...' : 'Add'}
+          </button>
+          {addError && (
+            <span className='text-destructive text-sm'>{addError}</span>
+          )}
+        </div>
       </div>
       <DataTable table={table} />
     </div>

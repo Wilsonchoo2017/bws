@@ -1,6 +1,7 @@
 """Items API routes."""
 
 from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel, Field
 
 from db.connection import get_connection
 from db.schema import init_schema
@@ -16,7 +17,7 @@ from services.backtesting.screener import (
     compute_all_signals,
     compute_item_signals,
 )
-from services.items.repository import get_all_items, get_item_detail
+from services.items.repository import get_all_items, get_item_detail, get_or_create_item, item_exists
 from services.shopee.repository import get_all_products
 from services.shopee.saturation_repository import (
     get_all_latest_saturations,
@@ -24,6 +25,34 @@ from services.shopee.saturation_repository import (
 )
 
 router = APIRouter(prefix="/items", tags=["items"])
+
+
+class AddItemRequest(BaseModel):
+    set_number: str = Field(
+        ..., min_length=1, max_length=20, pattern=r"^\d{3,6}(-\d+)?$"
+    )
+
+
+@router.post("", status_code=201)
+async def add_item(request: AddItemRequest):
+    """Add a new LEGO set to the catalog by set number."""
+    conn = get_connection()
+    try:
+        init_schema(conn)
+        if item_exists(conn, request.set_number):
+            raise HTTPException(
+                status_code=409,
+                detail=f"Item {request.set_number} already exists",
+            )
+        get_or_create_item(conn, request.set_number)
+        item = get_item_detail(conn, request.set_number)
+        return {"success": True, "data": item, "message": f"Item {request.set_number} created"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        conn.close()
 
 
 @router.get("")

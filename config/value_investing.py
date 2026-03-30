@@ -28,6 +28,7 @@ MAX_ONLY_DISCOUNT = 0.6
 class RetirementMultipliers:
     """J-curve retirement premium multipliers by years post-retirement."""
 
+    retiring_soon: float = 1.10  # Pre-retirement (leading indicator)
     year_0_1: float = 0.95  # Initial discount (market oversupply)
     year_1_2: float = 1.00  # Baseline
     year_2_5: float = 1.15  # Growth phase

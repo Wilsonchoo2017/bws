@@ -157,6 +157,7 @@ CREATE TABLE IF NOT EXISTS lego_items (
     image_url VARCHAR,
     rrp_cents INTEGER,
     rrp_currency VARCHAR DEFAULT 'MYR',
+    retiring_soon BOOLEAN DEFAULT FALSE,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
@@ -306,6 +307,56 @@ def _migrate_lego_items(conn: "DuckDBPyConnection") -> None:
         conn.execute(
             "ALTER TABLE lego_items ADD COLUMN rrp_currency VARCHAR DEFAULT 'MYR'"
         )
+    if "retiring_soon" not in existing:
+        # DuckDB cannot ALTER a table with dependent indexes
+        conn.execute("DROP INDEX IF EXISTS idx_lego_items_set_number")
+        conn.execute(
+            "ALTER TABLE lego_items ADD COLUMN retiring_soon BOOLEAN DEFAULT FALSE"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_lego_items_set_number "
+            "ON lego_items(set_number)"
+        )
+
+
+_SEQUENCE_TABLE_MAP = [
+    ("bricklink_items_id_seq", "bricklink_items"),
+    ("bricklink_price_history_id_seq", "bricklink_price_history"),
+    ("bricklink_monthly_sales_id_seq", "bricklink_monthly_sales"),
+    ("product_analysis_id_seq", "product_analysis"),
+    ("worldbricks_sets_id_seq", "worldbricks_sets"),
+    ("brickranker_items_id_seq", "brickranker_items"),
+    ("shopee_products_id_seq", "shopee_products"),
+    ("shopee_saturation_id_seq", "shopee_saturation"),
+    ("shopee_scrape_history_id_seq", "shopee_scrape_history"),
+    ("toysrus_products_id_seq", "toysrus_products"),
+    ("toysrus_price_history_id_seq", "toysrus_price_history"),
+    ("lego_items_id_seq", "lego_items"),
+    ("price_records_id_seq", "price_records"),
+]
+
+
+def _sync_sequences(conn: "DuckDBPyConnection") -> None:
+    """Sync all sequences to max(id) + 1 of their tables.
+
+    Prevents primary key collisions when sequences fall behind
+    existing data (e.g., after restores or manual inserts).
+    """
+    for seq_name, table_name in _SEQUENCE_TABLE_MAP:
+        try:
+            row = conn.execute(
+                f"SELECT COALESCE(MAX(id), 0) FROM {table_name}"  # noqa: S608
+            ).fetchone()
+            max_id = row[0] if row else 0
+            if max_id > 0:
+                # Drop and recreate sequence starting after max id
+                conn.execute(f"DROP SEQUENCE IF EXISTS {seq_name}")
+                conn.execute(
+                    f"CREATE SEQUENCE {seq_name} START {max_id + 1}"
+                )
+        except Exception:  # noqa: BLE001
+            # Table may not exist yet on first init
+            pass
 
 
 def init_schema(conn: "DuckDBPyConnection") -> None:
@@ -319,6 +370,7 @@ def init_schema(conn: "DuckDBPyConnection") -> None:
     for ddl in ALL_DDL:
         conn.execute(ddl)
     _migrate_lego_items(conn)
+    _sync_sequences(conn)
 
 
 def drop_all_tables(conn: "DuckDBPyConnection") -> None:

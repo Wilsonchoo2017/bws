@@ -6,6 +6,14 @@ if TYPE_CHECKING:
     from duckdb import DuckDBPyConnection
 
 
+def item_exists(conn: "DuckDBPyConnection", set_number: str) -> bool:
+    """Check whether a lego_items row exists for this set number."""
+    row = conn.execute(
+        "SELECT 1 FROM lego_items WHERE set_number = ?", [set_number]
+    ).fetchone()
+    return row is not None
+
+
 def get_or_create_item(
     conn: "DuckDBPyConnection",
     set_number: str,
@@ -19,6 +27,7 @@ def get_or_create_item(
     image_url: str | None = None,
     rrp_cents: int | None = None,
     rrp_currency: str | None = None,
+    retiring_soon: bool | None = None,
 ) -> None:
     """Ensure a lego_items row exists for this set number.
 
@@ -29,9 +38,10 @@ def get_or_create_item(
         """
         INSERT INTO lego_items (
             id, set_number, title, theme, year_released, year_retired,
-            parts_count, weight, image_url, rrp_cents, rrp_currency
+            parts_count, weight, image_url, rrp_cents, rrp_currency,
+            retiring_soon
         )
-        VALUES (nextval('lego_items_id_seq'), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (nextval('lego_items_id_seq'), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT (set_number) DO UPDATE SET
             title = COALESCE(EXCLUDED.title, lego_items.title),
             theme = COALESCE(EXCLUDED.theme, lego_items.theme),
@@ -42,10 +52,11 @@ def get_or_create_item(
             image_url = COALESCE(EXCLUDED.image_url, lego_items.image_url),
             rrp_cents = COALESCE(EXCLUDED.rrp_cents, lego_items.rrp_cents),
             rrp_currency = COALESCE(EXCLUDED.rrp_currency, lego_items.rrp_currency),
+            retiring_soon = COALESCE(EXCLUDED.retiring_soon, lego_items.retiring_soon),
             updated_at = now()
         """,
         [set_number, title, theme, year_released, year_retired, parts_count, weight, image_url,
-         rrp_cents, rrp_currency],
+         rrp_cents, rrp_currency, retiring_soon],
     )
 
 
@@ -105,6 +116,7 @@ def get_all_items(conn: "DuckDBPyConnection") -> list[dict]:
             li.theme,
             li.year_released,
             li.year_retired,
+            li.retiring_soon,
             li.image_url,
             li.rrp_cents,
             li.rrp_currency,
@@ -132,7 +144,7 @@ def get_all_items(conn: "DuckDBPyConnection") -> list[dict]:
     """).fetchall()
 
     columns = [
-        "set_number", "title", "theme", "year_released", "year_retired", "image_url",
+        "set_number", "title", "theme", "year_released", "year_retired", "retiring_soon", "image_url",
         "rrp_cents", "rrp_currency", "updated_at",
         "shopee_price_cents", "shopee_currency", "shopee_url", "shopee_last_seen",
         "toysrus_price_cents", "toysrus_currency", "toysrus_url", "toysrus_last_seen",

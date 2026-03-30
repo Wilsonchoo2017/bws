@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 
-const API_BASE = process.env.BWS_API_URL || 'http://localhost:8000';
+const API_BASE = process.env.BWS_API_URL || 'http://localhost:8005';
 
 export async function GET() {
   try {

@@ -64,14 +64,12 @@ async def enrich_item(request: EnrichRequest) -> ScrapeJobResponse:
 
 
 @router.post("/enrich-missing", response_model=EnrichBatchResponse)
-async def enrich_missing(
-    limit: int = Query(default=20, ge=1, le=200),
-) -> EnrichBatchResponse:
-    """Scan for items with missing metadata and queue enrichment jobs."""
+async def enrich_missing() -> EnrichBatchResponse:
+    """Scan for all items with missing metadata and queue enrichment jobs."""
     conn = get_connection()
     try:
         init_schema(conn)
-        items = get_items_needing_enrichment(conn, limit=limit)
+        items = get_items_needing_enrichment(conn, limit=10000)
     except Exception:
         logger.exception("Failed to fetch items needing enrichment")
         raise HTTPException(status_code=500, detail="Internal server error")

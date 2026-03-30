@@ -1,12 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-const API_BASE = process.env.BWS_API_URL || 'http://localhost:8000';
+const API_BASE = process.env.BWS_API_URL || 'http://localhost:8005';
 
 export async function POST(request: NextRequest) {
   try {
-    const limit = request.nextUrl.searchParams.get('limit') || '20';
     const res = await fetch(
-      `${API_BASE}/api/enrichment/enrich-missing?limit=${limit}`,
+      `${API_BASE}/api/enrichment/enrich-missing`,
       { method: 'POST' }
     );
     const data = await res.json();

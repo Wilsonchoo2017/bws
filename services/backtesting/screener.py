@@ -74,6 +74,7 @@ def _compute_item_signals(
     year_retired = _safe_get_int(item_meta, "year_retired")
     rrp_cents = _safe_get_int(item_meta, "rrp_cents")
     rrp_currency = _safe_get(item_meta, "rrp_currency")
+    retiring_soon = _safe_get_bool(item_meta, "retiring_soon")
 
     signals = {
         "peer_appreciation": compute_peer_appreciation(
@@ -92,7 +93,7 @@ def _compute_item_signals(
             item_sales, eval_year, eval_month, rrp_cents, rrp_currency
         ),
         "lifecycle_position": compute_lifecycle_position(
-            year_released, year_retired, eval_year
+            year_released, year_retired, eval_year, retiring_soon
         ),
         "stock_level": compute_stock_level(
             snapshots, item_id, eval_year, eval_month
@@ -236,6 +237,15 @@ def _safe_get(df: pd.DataFrame, col: str) -> str | None:
     if pd.isna(val):
         return None
     return str(val)
+
+
+def _safe_get_bool(df: pd.DataFrame, col: str) -> bool:
+    if df.empty or col not in df.columns:
+        return False
+    val = df.iloc[0][col]
+    if pd.isna(val):
+        return False
+    return bool(val)
 
 
 def _safe_get_int(df: pd.DataFrame, col: str) -> int | None:

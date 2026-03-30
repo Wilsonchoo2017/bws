@@ -99,7 +99,14 @@ def upsert_item(conn: "DuckDBPyConnection", item: RetirementItem) -> int:
         )
         return existing["id"]
 
-    item_id = get_next_id(conn, "brickranker_items_id_seq")
+    # Get a safe ID: use sequence but ensure it doesn't collide
+    max_id_row = conn.execute(
+        "SELECT COALESCE(MAX(id), 0) FROM brickranker_items"
+    ).fetchone()
+    max_existing_id = max_id_row[0] if max_id_row else 0
+    seq_id = get_next_id(conn, "brickranker_items_id_seq")
+    item_id = max(seq_id, max_existing_id + 1)
+
     conn.execute(
         """
         INSERT INTO brickranker_items (

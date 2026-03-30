@@ -22,6 +22,7 @@ export interface UnifiedItem {
   theme: string | null;
   year_released: number | null;
   year_retired: number | null;
+  retiring_soon: boolean | null;
   image_url: string | null;
   rrp_cents: number | null;
   rrp_currency: string | null;

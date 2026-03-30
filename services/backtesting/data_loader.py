@@ -48,6 +48,7 @@ def load_item_metadata(conn: "DuckDBPyConnection") -> pd.DataFrame:
             li.theme,
             COALESCE(li.year_released, bi.year_released) AS year_released,
             li.year_retired,
+            COALESCE(li.retiring_soon, FALSE) AS retiring_soon,
             li.parts_count,
             li.rrp_cents,
             li.rrp_currency
