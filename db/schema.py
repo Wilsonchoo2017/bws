@@ -24,6 +24,8 @@ CREATE TABLE IF NOT EXISTS bricklink_items (
     weight VARCHAR,
     year_released INTEGER,
     image_url VARCHAR,
+    parts_count INTEGER,
+    theme VARCHAR,
     watch_status VARCHAR DEFAULT 'active',
     scrape_interval_days INTEGER DEFAULT 7,
     last_scraped_at TIMESTAMP,
@@ -297,6 +299,21 @@ ALL_DDL = [
 ]
 
 
+def _migrate_bricklink_items(conn: "DuckDBPyConnection") -> None:
+    """Add parts_count and theme columns to bricklink_items."""
+    existing = {
+        row[0]
+        for row in conn.execute(
+            "SELECT column_name FROM information_schema.columns "
+            "WHERE table_name = 'bricklink_items'"
+        ).fetchall()
+    }
+    if "parts_count" not in existing:
+        conn.execute("ALTER TABLE bricklink_items ADD COLUMN parts_count INTEGER")
+    if "theme" not in existing:
+        conn.execute("ALTER TABLE bricklink_items ADD COLUMN theme VARCHAR")
+
+
 def _migrate_lego_items(conn: "DuckDBPyConnection") -> None:
     """Add columns introduced after initial table creation."""
     existing = {
@@ -467,6 +484,8 @@ def _rebuild_table(conn: "DuckDBPyConnection", table_name: str) -> None:
         )
 
     # Run migrations to add any columns not in the DDL
+    if table_name == "bricklink_items":
+        _migrate_bricklink_items(conn)
     if table_name == "lego_items":
         _migrate_lego_items(conn)
 
@@ -506,6 +525,7 @@ def init_schema(conn: "DuckDBPyConnection") -> None:
     """
     for ddl in ALL_DDL:
         conn.execute(ddl)
+    _migrate_bricklink_items(conn)
     _migrate_lego_items(conn)
     _sync_sequences(conn)
     # Flush WAL to reduce corruption risk on ungraceful shutdown

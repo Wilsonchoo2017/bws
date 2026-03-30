@@ -162,6 +162,57 @@ def extract_price_box(box_text: str) -> PricingBox | None:
     )
 
 
+def _extract_parts_count(soup: BeautifulSoup) -> int | None:
+    """Extract parts count from HTML.
+
+    BrickLink shows parts count in a span like '305 Parts' within the item info section.
+    """
+    # Look for text matching "N Parts" pattern in the page
+    parts_pattern = re.compile(r"(\d[\d,]*)\s+Parts?", re.IGNORECASE)
+    for text_node in soup.find_all(string=parts_pattern):
+        match = parts_pattern.search(text_node)
+        if match:
+            count = int(match.group(1).replace(",", ""))
+            if 1 <= count <= 20_000:
+                return count
+    return None
+
+
+def _extract_theme(soup: BeautifulSoup) -> str | None:
+    """Extract theme from the catalog item page.
+
+    BrickLink embeds itemType and itemCatName in JavaScript variables on the page.
+    Falls back to breadcrumb links containing the theme.
+    """
+    # Try JavaScript variable: catString or itemCatName
+    scripts = soup.find_all("script")
+    for script in scripts:
+        text = script.string or ""
+        match = re.search(r"var\s+catString\s*=\s*['\"]([^'\"]+)['\"]", text)
+        if match:
+            theme = match.group(1).strip()
+            if theme:
+                return theme
+        match = re.search(r"itemCatName\s*[:=]\s*['\"]([^'\"]+)['\"]", text)
+        if match:
+            theme = match.group(1).strip()
+            if theme:
+                return theme
+
+    # Fallback: breadcrumb links after "Sets" category
+    breadcrumbs = soup.select("div#content-area a, nav a")
+    found_sets = False
+    for link in breadcrumbs:
+        text = link.get_text(strip=True)
+        if text == "Sets":
+            found_sets = True
+            continue
+        if found_sets and text and text not in ("Catalog", "Items", ""):
+            return text
+
+    return None
+
+
 def _extract_year_released(html: str) -> int | None:
     """Extract year released from HTML."""
     match = re.search(r"Year Released:.*?(\d{4})", html, re.IGNORECASE)
@@ -227,12 +278,16 @@ def parse_item_info(html: str) -> dict[str, str | int | None]:
 
     year_released = _extract_year_released(html)
     image_url = _extract_image_url(soup)
+    parts_count = _extract_parts_count(soup)
+    theme = _extract_theme(soup)
 
     return {
         "title": title,
         "weight": weight,
         "year_released": year_released,
         "image_url": image_url,
+        "parts_count": parts_count,
+        "theme": theme,
     }
 
 
@@ -470,6 +525,8 @@ def parse_full_item(
         weight=item_info.get("weight"),  # type: ignore[arg-type]
         year_released=item_info.get("year_released"),  # type: ignore[arg-type]
         image_url=item_info.get("image_url"),  # type: ignore[arg-type]
+        parts_count=item_info.get("parts_count"),  # type: ignore[arg-type]
+        theme=item_info.get("theme"),  # type: ignore[arg-type]
         six_month_new=pricing.get("six_month_new"),
         six_month_used=pricing.get("six_month_used"),
         current_new=pricing.get("current_new"),

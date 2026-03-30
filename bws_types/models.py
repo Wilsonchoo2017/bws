@@ -78,6 +78,8 @@ class BricklinkData:
     weight: str | None = None
     year_released: int | None = None
     image_url: str | None = None
+    parts_count: int | None = None
+    theme: str | None = None
     six_month_new: PricingBox | None = None
     six_month_used: PricingBox | None = None
     current_new: PricingBox | None = None

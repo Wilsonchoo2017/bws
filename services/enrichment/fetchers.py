@@ -42,7 +42,7 @@ def fetch_from_bricklink(
         row = conn.execute(
             """
             SELECT item_id, item_type, title, weight, year_released, image_url,
-                   last_scraped_at
+                   parts_count, theme, last_scraped_at
             FROM bricklink_items
             WHERE item_id = ? OR item_id = ?
             ORDER BY last_scraped_at DESC NULLS LAST
@@ -51,8 +51,8 @@ def fetch_from_bricklink(
             [set_number, f"{set_number}-1"],
         ).fetchone()
 
-        if row and row[6] is not None:
-            scraped_at = row[6]
+        if row and row[8] is not None:
+            scraped_at = row[8]
             if isinstance(scraped_at, str):
                 from db.queries import parse_timestamp
                 scraped_at = parse_timestamp(scraped_at)
@@ -65,6 +65,8 @@ def fetch_from_bricklink(
                     weight=row[3],
                     year_released=row[4],
                     image_url=row[5],
+                    parts_count=row[6],
+                    theme=row[7],
                 )
                 logger.info("Bricklink cache hit for %s (age: %s)", set_number, datetime.now(tz=timezone.utc) - scraped_at)
                 return adapt_bricklink(cached)

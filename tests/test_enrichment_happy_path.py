@@ -63,10 +63,11 @@ class TestDetermineSourcesNeeded:
     """Tests for determine_sources_needed."""
 
     def test_single_field_single_source(self):
-        """Given theme is missing, only BrickRanker is needed."""
+        """Given theme is missing, BrickRanker and BrickLink are needed."""
         cb = CircuitBreakerState()
         sources = determine_sources_needed((MetadataField.THEME,), cb)
-        assert sources == (SourceId.BRICKRANKER,)
+        assert SourceId.BRICKRANKER in sources
+        assert SourceId.BRICKLINK in sources
 
     def test_deduplication(self):
         """Given title and year_released missing (both from Bricklink+WorldBricks),

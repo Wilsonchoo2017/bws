@@ -16,6 +16,8 @@ def adapt_bricklink(data: BricklinkData) -> SourceResult:
         MetadataField.YEAR_RELEASED: data.year_released,
         MetadataField.IMAGE_URL: data.image_url,
         MetadataField.WEIGHT: data.weight,
+        MetadataField.PARTS_COUNT: data.parts_count,
+        MetadataField.THEME: data.theme,
     }
     return SourceResult(
         source=SourceId.BRICKLINK,

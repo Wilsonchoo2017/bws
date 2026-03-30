@@ -62,7 +62,9 @@ class TestSourceSpecificEnrichment:
         assert MetadataField.IMAGE_URL in result_fields
         # Should NOT have WorldBricks-only fields
         assert MetadataField.YEAR_RETIRED not in result_fields
-        assert MetadataField.PARTS_COUNT not in result_fields
+        # PARTS_COUNT and THEME are now also provided by BrickLink
+        assert MetadataField.PARTS_COUNT in result_fields
+        assert MetadataField.THEME in result_fields
 
     def test_worldbricks_only_calls_worldbricks(self, make_item):
         """Given source=worldbricks.

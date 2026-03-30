@@ -10,10 +10,13 @@ import numpy as np
 import pandas as pd
 
 from config.value_investing import (
+    DEFAULT_THEME_ANNUAL_GROWTH,
     DEFAULT_THEME_MULTIPLIER,
     RETIREMENT_MULTIPLIERS,
     THEME_MULTIPLIERS,
     get_retirement_multiplier,
+    get_subtheme_annual_growth,
+    get_theme_annual_growth,
     get_theme_multiplier,
 )
 
@@ -344,6 +347,37 @@ def compute_theme_quality(theme: str | None) -> float | None:
     multiplier = get_theme_multiplier(theme)
     # Convert multiplier (0.50-1.45) to 0-100 score
     return min(100.0, max(0.0, (multiplier - 0.50) / (1.45 - 0.50) * 100))
+
+
+def compute_theme_growth(
+    theme: str | None,
+    subtheme: str | None = None,
+) -> float | None:
+    """Signal 12: Theme-level annual price growth rate.
+
+    High score = theme prices are appreciating strongly year-over-year.
+    Based on historical BrickLink market data across all sets in a theme.
+    Uses sub-theme growth when available for higher granularity.
+    """
+    if theme is None:
+        return None
+
+    # Prefer sub-theme growth (more granular) when available
+    subtheme_growth = get_subtheme_annual_growth(theme, subtheme)
+    growth_pct = subtheme_growth if subtheme_growth is not None else get_theme_annual_growth(theme)
+
+    # Map annual growth % to 0-100 score
+    if growth_pct >= 15.0:
+        return 95.0
+    if growth_pct >= 10.0:
+        return 80.0
+    if growth_pct >= 7.0:
+        return 65.0
+    if growth_pct >= 5.0:
+        return 50.0
+    if growth_pct >= 3.0:
+        return 35.0
+    return 20.0
 
 
 def compute_community_quality(

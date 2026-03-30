@@ -174,6 +174,8 @@ def upsert_item(conn: "DuckDBPyConnection", data: BricklinkData) -> int:
                 weight = ?,
                 year_released = ?,
                 image_url = ?,
+                parts_count = ?,
+                theme = ?,
                 last_scraped_at = ?,
                 next_scrape_at = ?,
                 updated_at = ?
@@ -184,6 +186,8 @@ def upsert_item(conn: "DuckDBPyConnection", data: BricklinkData) -> int:
                 data.weight,
                 data.year_released,
                 data.image_url,
+                data.parts_count,
+                data.theme,
                 now,
                 (datetime.now(tz=_UTC) + timedelta(days=existing.scrape_interval_days)).isoformat(),
                 now,
@@ -201,9 +205,10 @@ def upsert_item(conn: "DuckDBPyConnection", data: BricklinkData) -> int:
         """
         INSERT INTO bricklink_items (
             id, item_id, item_type, title, weight, year_released, image_url,
+            parts_count, theme,
             watch_status, scrape_interval_days, last_scraped_at, next_scrape_at,
             created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         [
             item_id,
@@ -213,6 +218,8 @@ def upsert_item(conn: "DuckDBPyConnection", data: BricklinkData) -> int:
             data.weight,
             data.year_released,
             data.image_url,
+            data.parts_count,
+            data.theme,
             "active",
             scrape_interval,
             now,
