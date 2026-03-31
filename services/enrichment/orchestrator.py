@@ -20,6 +20,7 @@ from services.enrichment.circuit_breaker import (
 from services.enrichment.config import (
     FIELD_SOURCE_PRIORITY,
     SOURCE_CONFIGS,
+    is_placeholder_title,
 )
 from services.enrichment.types import (
     EnrichmentResult,
@@ -86,6 +87,8 @@ def detect_missing_fields(
             continue
         value = item.get(col)
         if value is None:
+            missing.append(f)
+        elif f == MetadataField.TITLE and is_placeholder_title(value):
             missing.append(f)
 
     return tuple(missing)

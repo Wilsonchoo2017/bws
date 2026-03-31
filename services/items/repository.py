@@ -104,17 +104,30 @@ def record_price(
 
 
 def get_all_items(conn: "DuckDBPyConnection") -> list[dict]:
-    """Get all LEGO items with latest price from each source."""
+    """Get all LEGO items with best/latest price from each retail source.
+
+    Shopee: picks the cheapest price across all shops (best deal).
+    ToysRUs, Mighty Utan: picks the latest price.
+    BrickLink: picks the latest new/used price.
+    """
     result = conn.execute("""
-        WITH latest_shopee AS (
-            SELECT set_number, price_cents, currency, url, recorded_at,
-                   ROW_NUMBER() OVER (PARTITION BY set_number ORDER BY recorded_at DESC) AS rn
+        WITH best_shopee AS (
+            SELECT set_number, price_cents, currency, url, shop_name, recorded_at,
+                   ROW_NUMBER() OVER (
+                       PARTITION BY set_number
+                       ORDER BY price_cents ASC, recorded_at DESC
+                   ) AS rn
             FROM price_records WHERE source = 'shopee'
         ),
         latest_toysrus AS (
             SELECT set_number, price_cents, currency, url, recorded_at,
                    ROW_NUMBER() OVER (PARTITION BY set_number ORDER BY recorded_at DESC) AS rn
             FROM price_records WHERE source = 'toysrus'
+        ),
+        latest_mightyutan AS (
+            SELECT set_number, price_cents, currency, url, recorded_at,
+                   ROW_NUMBER() OVER (PARTITION BY set_number ORDER BY recorded_at DESC) AS rn
+            FROM price_records WHERE source = 'mightyutan'
         ),
         latest_bricklink_new AS (
             SELECT set_number, price_cents, currency, recorded_at,
@@ -125,6 +138,12 @@ def get_all_items(conn: "DuckDBPyConnection") -> list[dict]:
             SELECT set_number, price_cents, currency, recorded_at,
                    ROW_NUMBER() OVER (PARTITION BY set_number ORDER BY recorded_at DESC) AS rn
             FROM price_records WHERE source = 'bricklink_used'
+        ),
+        shopee_listing_counts AS (
+            SELECT set_number, COUNT(DISTINCT shop_name) AS shopee_shop_count
+            FROM price_records
+            WHERE source = 'shopee' AND shop_name IS NOT NULL
+            GROUP BY set_number
         )
         SELECT
             li.set_number,
@@ -133,7 +152,10 @@ def get_all_items(conn: "DuckDBPyConnection") -> list[dict]:
             li.year_released,
             li.year_retired,
             li.retiring_soon,
-            COALESCE(li.image_url, 'https://img.bricklink.com/ItemImage/SN/0/' || li.set_number || '-1.png') AS image_url,
+            CASE
+                WHEN ia.status = 'downloaded' THEN '/api/images/set/' || li.set_number
+                ELSE COALESCE(li.image_url, 'https://img.bricklink.com/ItemImage/SN/0/' || li.set_number || '-1.png')
+            END AS image_url,
             li.rrp_cents,
             li.rrp_currency,
             li.updated_at,
@@ -142,11 +164,17 @@ def get_all_items(conn: "DuckDBPyConnection") -> list[dict]:
             s.price_cents AS shopee_price_cents,
             s.currency AS shopee_currency,
             s.url AS shopee_url,
+            s.shop_name AS shopee_shop_name,
             s.recorded_at AS shopee_last_seen,
+            COALESCE(sc.shopee_shop_count, 0) AS shopee_shop_count,
             tr.price_cents AS toysrus_price_cents,
             tr.currency AS toysrus_currency,
             tr.url AS toysrus_url,
             tr.recorded_at AS toysrus_last_seen,
+            mu.price_cents AS mightyutan_price_cents,
+            mu.currency AS mightyutan_currency,
+            mu.url AS mightyutan_url,
+            mu.recorded_at AS mightyutan_last_seen,
             bn.price_cents AS bricklink_new_cents,
             bn.currency AS bricklink_new_currency,
             bn.recorded_at AS bricklink_new_last_seen,
@@ -154,18 +182,23 @@ def get_all_items(conn: "DuckDBPyConnection") -> list[dict]:
             bu.currency AS bricklink_used_currency,
             bu.recorded_at AS bricklink_used_last_seen
         FROM lego_items li
-        LEFT JOIN latest_shopee s ON s.set_number = li.set_number AND s.rn = 1
+        LEFT JOIN best_shopee s ON s.set_number = li.set_number AND s.rn = 1
+        LEFT JOIN shopee_listing_counts sc ON sc.set_number = li.set_number
         LEFT JOIN latest_toysrus tr ON tr.set_number = li.set_number AND tr.rn = 1
+        LEFT JOIN latest_mightyutan mu ON mu.set_number = li.set_number AND mu.rn = 1
         LEFT JOIN latest_bricklink_new bn ON bn.set_number = li.set_number AND bn.rn = 1
         LEFT JOIN latest_bricklink_used bu ON bu.set_number = li.set_number AND bu.rn = 1
+        LEFT JOIN image_assets ia ON ia.asset_type = 'set' AND ia.item_id = li.set_number
         ORDER BY li.updated_at DESC
-    """).fetchall()
+    """).fetchall()  # noqa: S608
 
     columns = [
         "set_number", "title", "theme", "year_released", "year_retired", "retiring_soon", "image_url",
         "rrp_cents", "rrp_currency", "updated_at", "minifig_count", "dimensions",
-        "shopee_price_cents", "shopee_currency", "shopee_url", "shopee_last_seen",
+        "shopee_price_cents", "shopee_currency", "shopee_url", "shopee_shop_name",
+        "shopee_last_seen", "shopee_shop_count",
         "toysrus_price_cents", "toysrus_currency", "toysrus_url", "toysrus_last_seen",
+        "mightyutan_price_cents", "mightyutan_currency", "mightyutan_url", "mightyutan_last_seen",
         "bricklink_new_cents", "bricklink_new_currency", "bricklink_new_last_seen",
         "bricklink_used_cents", "bricklink_used_currency", "bricklink_used_last_seen",
     ]
@@ -182,6 +215,16 @@ def get_item_detail(conn: "DuckDBPyConnection", set_number: str) -> dict | None:
 
     desc = conn.execute("SELECT * FROM lego_items LIMIT 0").description
     item = dict(zip([d[0] for d in desc], row))
+
+    # Resolve local image URL if downloaded
+    ia_row = conn.execute(
+        "SELECT status FROM image_assets WHERE asset_type = 'set' AND item_id = ?",
+        [set_number],
+    ).fetchone()
+    if ia_row and ia_row[0] == "downloaded":
+        item["image_url"] = f"/api/images/set/{set_number}"
+    elif not item.get("image_url"):
+        item["image_url"] = _bricklink_image_url(set_number)
 
     prices = conn.execute(
         """

@@ -97,29 +97,35 @@ def upsert_item(conn: "DuckDBPyConnection", item: RetirementItem) -> int:
                 item.set_number,
             ],
         )
-        return existing["id"]
+        item_id = existing["id"]
+    else:
+        conn.execute(
+            """
+            INSERT INTO brickranker_items (
+                id, set_number, set_name, year_released, retiring_soon,
+                expected_retirement_date, theme, image_url, is_active,
+                scraped_at, created_at
+            ) VALUES (nextval('brickranker_items_id_seq'), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                item.set_number,
+                item.set_name,
+                item.year_released,
+                item.retiring_soon,
+                item.expected_retirement_date,
+                item.theme,
+                item.image_url,
+                True,
+                now,
+                now,
+            ],
+        )
 
-    conn.execute(
-        """
-        INSERT INTO brickranker_items (
-            id, set_number, set_name, year_released, retiring_soon,
-            expected_retirement_date, theme, image_url, is_active,
-            scraped_at, created_at
-        ) VALUES (nextval('brickranker_items_id_seq'), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """,
-        [
-            item.set_number,
-            item.set_name,
-            item.year_released,
-            item.retiring_soon,
-            item.expected_retirement_date,
-            item.theme,
-            item.image_url,
-            True,
-            now,
-            now,
-        ],
-    )
+        row = conn.execute(
+            "SELECT id FROM brickranker_items WHERE set_number = ?",
+            [item.set_number],
+        ).fetchone()
+        item_id = row[0] if row else 0
 
     # Write to unified lego_items (metadata only, no prices)
     get_or_create_item(
@@ -129,14 +135,10 @@ def upsert_item(conn: "DuckDBPyConnection", item: RetirementItem) -> int:
         theme=item.theme,
         year_released=item.year_released,
         image_url=item.image_url,
+        retiring_soon=item.retiring_soon,
     )
 
-    # Return the auto-generated id
-    row = conn.execute(
-        "SELECT id FROM brickranker_items WHERE set_number = ?",
-        [item.set_number],
-    ).fetchone()
-    return row[0] if row else 0
+    return item_id
 
 
 def batch_upsert_items(

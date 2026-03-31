@@ -4,7 +4,10 @@ Rate limiting, user agents, and other scraper configuration.
 """
 
 
+import asyncio
+import logging
 import secrets
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -12,14 +15,20 @@ from pathlib import Path
 # Database path (isolated from MoonBridge)
 BWS_DB_PATH = Path.home() / ".bws" / "bws.duckdb"
 
+# Local image storage
+BWS_IMAGES_PATH = Path.home() / ".bws" / "images"
+BWS_IMAGES_SETS_PATH = BWS_IMAGES_PATH / "sets"
+BWS_IMAGES_MINIFIGS_PATH = BWS_IMAGES_PATH / "minifigs"
+BWS_IMAGES_PARTS_PATH = BWS_IMAGES_PATH / "parts"
+
 
 @dataclass(frozen=True)
 class RateLimitSettings:
     """Rate limiting configuration."""
 
-    min_delay_ms: int = 10_000  # 10 seconds
-    max_delay_ms: int = 30_000  # 30 seconds
-    max_requests_per_hour: int = 15
+    min_delay_ms: int = 5_000  # 5 seconds
+    max_delay_ms: int = 15_000  # 15 seconds
+    max_requests_per_hour: int = 1_000
 
 
 @dataclass(frozen=True)
@@ -152,6 +161,24 @@ class SaturationSettings:
 SATURATION_CONFIG = SaturationSettings()
 
 
+@dataclass(frozen=True)
+class CarousellSettings:
+    """Carousell browser automation configuration."""
+
+    base_url: str = "https://www.carousell.com.my"
+    headless: bool = False
+    timeout_ms: int = 30_000
+    user_data_dir: str = str(Path.home() / ".bws" / "carousell-profile")
+    viewport_width: int = 1366
+    viewport_height: int = 768
+    locale: str = "en-MY"
+    timezone_id: str = "Asia/Kuala_Lumpur"
+    captcha_timeout_s: int = 120  # seconds to wait for human captcha solve
+
+
+CAROUSELL_CONFIG = CarousellSettings()
+
+
 def calculate_backoff(attempt: int) -> float:
     """Calculate exponential backoff delay in seconds.
 
@@ -163,3 +190,84 @@ def calculate_backoff(attempt: int) -> float:
     """
     delay_ms = RETRY_CONFIG.initial_backoff_ms * (RETRY_CONFIG.backoff_multiplier ** (attempt - 1))
     return min(delay_ms, RETRY_CONFIG.max_backoff_ms) / 1000.0
+
+
+class HourlyRateLimiter:
+    """Sliding-window rate limiter with quota-exceeded circuit breaker.
+
+    Tracks request timestamps and enforces max requests per hour.
+    When trip_quota_exceeded() is called, blocks all requests for 1 hour.
+    """
+
+    COOLDOWN_SECONDS = 3600.0  # 1 hour
+
+    def __init__(self, max_per_hour: int) -> None:
+        self._max_per_hour = max_per_hour
+        self._timestamps: list[float] = []
+        self._lock = asyncio.Lock()
+        self._blocked_until: float = 0.0
+
+    def _prune(self, now: float) -> None:
+        """Remove timestamps older than 1 hour."""
+        cutoff = now - 3600.0
+        while self._timestamps and self._timestamps[0] <= cutoff:
+            self._timestamps.pop(0)
+
+    def trip_quota_exceeded(self) -> None:
+        """Block all requests for 1 hour starting now."""
+        self._blocked_until = time.monotonic() + self.COOLDOWN_SECONDS
+        logging.getLogger("bws.bricklink").warning(
+            "Quota exceeded — pausing BrickLink requests for 1 hour"
+        )
+
+    def is_blocked(self) -> bool:
+        """Check if the limiter is currently in cooldown."""
+        return time.monotonic() < self._blocked_until
+
+    async def acquire(self) -> None:
+        """Wait until a request slot is available, then record it."""
+        async with self._lock:
+            now = time.monotonic()
+
+            # Wait out quota cooldown if active
+            if now < self._blocked_until:
+                wait = self._blocked_until - now
+                logging.getLogger("bws.bricklink").info(
+                    "BrickLink quota cooldown: %.0fs remaining", wait,
+                )
+                await asyncio.sleep(wait)
+                now = time.monotonic()
+
+            self._prune(now)
+
+            if len(self._timestamps) >= self._max_per_hour:
+                wait = self._timestamps[0] - (now - 3600.0)
+                if wait > 0:
+                    await asyncio.sleep(wait)
+                    now = time.monotonic()
+                    self._prune(now)
+
+            self._timestamps.append(now)
+
+
+BRICKLINK_RATE_LIMITER = HourlyRateLimiter(RATE_LIMIT_CONFIG.max_requests_per_hour)
+
+
+@dataclass(frozen=True)
+class BrickeconomySettings:
+    """BrickEconomy browser automation configuration."""
+
+    base_url: str = "https://www.brickeconomy.com"
+    headless: bool = False
+    timeout_ms: int = 30_000
+    locale: str = "en-US"
+    captcha_timeout_s: int = 120
+    min_delay_ms: int = 8_000
+    max_delay_ms: int = 20_000
+    max_requests_per_hour: int = 60
+
+
+BRICKECONOMY_CONFIG = BrickeconomySettings()
+BRICKECONOMY_RATE_LIMITER = HourlyRateLimiter(
+    BRICKECONOMY_CONFIG.max_requests_per_hour
+)

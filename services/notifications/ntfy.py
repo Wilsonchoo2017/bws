@@ -23,8 +23,9 @@ class NtfyMessage:
 
 def send_notification(msg: NtfyMessage) -> bool:
     """Send a notification to Ntfy. Returns True on success."""
-    url = f"{NTFY_BASE_URL}/{NTFY_TOPIC}"
+    url = NTFY_BASE_URL
     payload = {
+        "topic": NTFY_TOPIC,
         "title": msg.title,
         "message": msg.message,
         "priority": msg.priority,

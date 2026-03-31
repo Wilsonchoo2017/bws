@@ -327,6 +327,33 @@ class TestListAndFilter:
         assert len(retiring) == 1
         assert retiring[0]["set_number"] == "10001"
 
+    def test_given_retiring_item_when_upsert_then_lego_items_retiring_soon_set(self, conn):
+        """Given a retiring item, when upserting, then lego_items.retiring_soon is True."""
+        upsert_item(conn, _make_retirement_item("10001", "Retiring Set", retiring_soon=True))
+
+        row = conn.execute(
+            "SELECT retiring_soon FROM lego_items WHERE set_number = '10001'"
+        ).fetchone()
+        assert row is not None
+        assert row[0] is True
+
+    def test_given_existing_item_when_update_retiring_soon_then_lego_items_updated(self, conn):
+        """Given an existing item, when updating retiring_soon via upsert,
+        then lego_items reflects the change."""
+        upsert_item(conn, _make_retirement_item("10001", "Set A", retiring_soon=False))
+
+        row = conn.execute(
+            "SELECT retiring_soon FROM lego_items WHERE set_number = '10001'"
+        ).fetchone()
+        assert row[0] is False
+
+        upsert_item(conn, _make_retirement_item("10001", "Set A", retiring_soon=True))
+
+        row = conn.execute(
+            "SELECT retiring_soon FROM lego_items WHERE set_number = '10001'"
+        ).fetchone()
+        assert row[0] is True
+
     def test_given_items_when_count_then_correct_stats(self, conn):
         upsert_item(conn, _make_retirement_item("10001", "A", retiring_soon=True))
         upsert_item(conn, _make_retirement_item("10002", "B", retiring_soon=False))

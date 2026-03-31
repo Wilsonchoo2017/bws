@@ -2,8 +2,8 @@
 
 import pytest
 
-from services.enrichment.config import is_valid_image_url, is_valid_year
-from services.enrichment.orchestrator import resolve_fields
+from services.enrichment.config import is_placeholder_title, is_valid_image_url, is_valid_year
+from services.enrichment.orchestrator import detect_missing_fields, resolve_fields
 from services.enrichment.types import (
     FieldStatus,
     MetadataField,
@@ -121,3 +121,56 @@ class TestDataQuality:
     def test_theme_strips_whitespace(self):
         """Given theme with whitespace. Then stripped."""
         assert validate_field(MetadataField.THEME, " Star Wars ") == "Star Wars"
+
+
+class TestPlaceholderTitleDetection:
+    """Placeholder titles like 'Image Coming Soon' should be treated as missing."""
+
+    def test_is_placeholder_returns_true_for_known_patterns(self):
+        assert is_placeholder_title("Image Coming Soon") is True
+        assert is_placeholder_title("  image coming soon  ") is True
+        assert is_placeholder_title("IMAGE COMING SOON") is True
+
+    def test_is_placeholder_returns_true_for_none(self):
+        assert is_placeholder_title(None) is True
+
+    def test_is_placeholder_returns_false_for_real_titles(self):
+        assert is_placeholder_title("Millennium Falcon") is False
+        assert is_placeholder_title("Elsa's Ice Palace") is False
+
+    def test_validate_field_rejects_placeholder_title(self):
+        assert validate_field(MetadataField.TITLE, "Image Coming Soon") is None
+        assert validate_field(MetadataField.TITLE, "  image coming soon  ") is None
+
+    def test_validate_field_accepts_real_title(self):
+        assert validate_field(MetadataField.TITLE, "Millennium Falcon") == "Millennium Falcon"
+
+    def test_detect_missing_fields_includes_placeholder_title(self, make_item):
+        """Given an item with a placeholder title, detect_missing_fields treats it as missing."""
+        item = make_item(
+            title="Image Coming Soon",
+            theme="Star Wars",
+            year_released=2017,
+            parts_count=7541,
+            image_url="https://example.com/img.png",
+            weight="14.2 kg",
+            minifig_count=7,
+            dimensions="58.2 x 49.0 x 21.0 cm",
+        )
+        missing = detect_missing_fields(item)
+        assert MetadataField.TITLE in missing
+
+    def test_detect_missing_fields_excludes_real_title(self, make_item):
+        """Given an item with a real title, it is not flagged as missing."""
+        item = make_item(
+            title="Millennium Falcon",
+            theme="Star Wars",
+            year_released=2017,
+            parts_count=7541,
+            image_url="https://example.com/img.png",
+            weight="14.2 kg",
+            minifig_count=7,
+            dimensions="58.2 x 49.0 x 21.0 cm",
+        )
+        missing = detect_missing_fields(item)
+        assert MetadataField.TITLE not in missing

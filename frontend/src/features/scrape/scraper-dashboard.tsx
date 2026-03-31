@@ -28,6 +28,23 @@ export function ScraperDashboard({ scraper }: ScraperDashboardProps) {
     const poll = async () => {
       try {
         const res = await fetch(`/api/scrape/jobs/${jobId}`);
+
+        if (res.status === 404) {
+          clearInterval(pollRefs.current[targetId]);
+          delete pollRefs.current[targetId];
+          setJobs((prev) => ({
+            ...prev,
+            [targetId]: {
+              jobId,
+              status: 'failed',
+              items: [],
+              itemsFound: 0,
+              error: 'Job lost (server restarted)'
+            }
+          }));
+          return;
+        }
+
         const data = await res.json();
 
         setJobs((prev) => ({

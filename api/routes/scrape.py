@@ -83,6 +83,32 @@ SCRAPERS: list[ScraperInfo] = [
             ),
         ],
     ),
+    ScraperInfo(
+        id="carousell",
+        name="Carousell Malaysia",
+        description="Search Carousell.com.my for LEGO listings -- seller count, prices, conditions",
+        targets=[
+            ScrapeTargetInfo(
+                id="search-example",
+                label="Search by Set Number",
+                url="40346",
+                description="Search Carousell for a LEGO set number (e.g. 40346)",
+            ),
+        ],
+    ),
+    ScraperInfo(
+        id="brickeconomy",
+        name="BrickEconomy",
+        description="Scrape set value history, sale trends, and metadata from BrickEconomy.com",
+        targets=[
+            ScrapeTargetInfo(
+                id="single-set",
+                label="Single Set by Number",
+                url="40346-1",
+                description="Scrape BrickEconomy page for a LEGO set (e.g. 40346-1)",
+            ),
+        ],
+    ),
 ]
 
 VALID_SCRAPER_IDS = {s.id for s in SCRAPERS}
@@ -150,6 +176,12 @@ async def start_scrape(request: ScrapeRequest):
             detail="URL must be a BrickLink catalogList.asp URL",
         )
 
+    if request.scraper_id == "carousell" and not request.url.strip():
+        raise HTTPException(
+            status_code=400,
+            detail="Search query must not be empty",
+        )
+
     job = job_manager.create_job(request.scraper_id, request.url)
     return _job_to_response(job)
 
@@ -201,4 +233,5 @@ def _job_to_response(job) -> ScrapeJobResponse:
         items_found=job.items_found,
         error=job.error,
         progress=job.progress,
+        worker_no=job.worker_no,
     )

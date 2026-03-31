@@ -269,9 +269,128 @@ def main() -> None:
     if flip_results and hold_results:
         print_verdict(flip_results, hold_results)
 
+    # Signal audit (optional)
+    if "--audit" in sys.argv or "--optimize" in sys.argv:
+        _run_signal_audit(df, primary_flip, primary_hold)
+
+    # ML optimization (optional)
+    if "--optimize" in sys.argv:
+        _run_optimization(df)
+
     print(f"\n{'=' * 70}")
     print("  Backtest complete.")
     print(f"{'=' * 70}\n")
+
+
+def _run_signal_audit(
+    df: pd.DataFrame,
+    primary_flip: str | None,
+    primary_hold: str | None,
+) -> None:
+    """Run signal significance audit."""
+    from services.backtesting.signal_audit import audit_signals, print_audit_report
+
+    print_header("SIGNAL SIGNIFICANCE AUDIT")
+
+    # Audit against flip returns (most data available)
+    if primary_flip:
+        flip_audit = audit_signals(df, primary_flip)
+        print_audit_report(flip_audit)
+
+    # Audit against hold returns if available
+    if primary_hold:
+        hold_valid = df[primary_hold].notna().sum()
+        if hold_valid >= 10:
+            hold_audit = audit_signals(df, primary_hold)
+            print_audit_report(hold_audit)
+        else:
+            print(f"\n  Skipping hold audit: only {hold_valid} samples "
+                  f"with {primary_hold} data (need 10+)")
+            print("  Action: Scrape more BrickLink price history "
+                  "to build 12+ month coverage per item.")
+
+
+def _run_optimization(df: pd.DataFrame) -> None:
+    """Run ML signal weight optimization on backtest results."""
+    from config.kelly import SIGNAL_WEIGHTS
+    from services.backtesting.evaluation import (
+        evaluate_all_strategies,
+        print_evaluation_report,
+        print_weight_comparison,
+    )
+    from services.backtesting.features import engineer_features
+    from services.backtesting.optimizer import (
+        extract_signal_weights,
+        optimize_weights,
+    )
+    from services.backtesting.returns import add_apr_columns, compute_best_apr
+
+    print_header("ML SIGNAL WEIGHT OPTIMIZATION")
+
+    # Step 1: Compute APR
+    print("  Computing annualized returns (APR)...")
+    df = add_apr_columns(df)
+    df = compute_best_apr(df)
+
+    apr_valid = df["best_hold_apr"].notna().sum()
+    print(f"  Samples with hold APR: {apr_valid}")
+
+    if apr_valid < 50:
+        print("  WARNING: < 50 samples with APR data.")
+        print("  Results will be directional only. Add more BrickLink history.")
+
+    # Step 2: Engineer features
+    print("  Engineering features...")
+    df, feature_cols = engineer_features(df)
+    print(f"  Feature count: {len(feature_cols)}")
+
+    # Step 3: Train models
+    print("  Training models (Ridge, Lasso, GBRT)...")
+    results = optimize_weights(df, feature_cols)
+
+    if not results:
+        print("  Optimization failed: insufficient data.")
+        return
+
+    # Step 4: Print results per model
+    for r in results:
+        print_subheader(f"{r.model_name} Results")
+        print(f"  Train R2: {r.train_score:.3f}  |  Test R2: {r.test_score:.3f}")
+        print(f"  Test top-quintile APR: {r.test_apr_mean:+.1%}")
+        print(f"  Test hit rate: {r.test_hit_rate:.0%}")
+        print(f"  Test quintile spread: {r.test_quintile_spread:+.1%}")
+        print(f"  Samples: train={r.n_train}, test={r.n_test}")
+
+    # Step 5: Extract best model's weights and compare
+    best = results[0]
+    ml_weights = extract_signal_weights(best)
+
+    print_subheader(f"Weight Comparison: Hand-tuned vs {best.model_name}")
+    print_weight_comparison(dict(SIGNAL_WEIGHTS), ml_weights, best.model_name)
+
+    # Step 6: Evaluate strategies side-by-side
+    print_subheader("Strategy Comparison (on full dataset)")
+    strategies = {
+        "Hand-tuned": dict(SIGNAL_WEIGHTS),
+        best.model_name: ml_weights,
+    }
+    metrics = evaluate_all_strategies(df, strategies, "best_hold_apr")
+    print_evaluation_report(metrics)
+
+    # Step 7: Print adoption instructions
+    print("\n  To adopt ML weights, update config/kelly.py:")
+    print(f"  ML_SIGNAL_WEIGHTS = {_format_weights(ml_weights)}")
+    print(f'  ML_WEIGHTS_SOURCE = "{best.model_name}"')
+
+
+def _format_weights(weights: dict[str, float]) -> str:
+    """Format weights dict for copy-paste into config."""
+    lines = ["{\n"]
+    for signal in SIGNAL_NAMES:
+        if signal in weights:
+            lines.append(f'    "{signal}": {weights[signal]},\n')
+    lines.append("}")
+    return "".join(lines)
 
 
 if __name__ == "__main__":

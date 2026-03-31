@@ -381,65 +381,37 @@ def upsert_monthly_sales(
     count = 0
 
     for sale in sales:
-        # Check if record exists
-        existing = conn.execute(
+        sale_id = get_next_id(conn, "bricklink_monthly_sales_id_seq")
+        conn.execute(
             """
-            SELECT id FROM bricklink_monthly_sales
-            WHERE item_id = ? AND year = ? AND month = ? AND condition = ?
+            INSERT INTO bricklink_monthly_sales (
+                id, item_id, year, month, condition, times_sold, total_quantity,
+                min_price, max_price, avg_price, currency, scraped_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT (item_id, year, month, condition) DO UPDATE SET
+                times_sold = EXCLUDED.times_sold,
+                total_quantity = EXCLUDED.total_quantity,
+                min_price = EXCLUDED.min_price,
+                max_price = EXCLUDED.max_price,
+                avg_price = EXCLUDED.avg_price,
+                currency = EXCLUDED.currency,
+                scraped_at = EXCLUDED.scraped_at
             """,
-            [item_id, sale.year, sale.month, sale.condition.value],
-        ).fetchone()
-
-        if existing:
-            # Update
-            conn.execute(
-                """
-                UPDATE bricklink_monthly_sales
-                SET times_sold = ?,
-                    total_quantity = ?,
-                    min_price = ?,
-                    max_price = ?,
-                    avg_price = ?,
-                    currency = ?,
-                    scraped_at = ?
-                WHERE id = ?
-                """,
-                [
-                    sale.times_sold,
-                    sale.total_quantity,
-                    sale.min_price.amount if sale.min_price else None,
-                    sale.max_price.amount if sale.max_price else None,
-                    sale.avg_price.amount if sale.avg_price else None,
-                    sale.currency,
-                    now,
-                    existing[0],
-                ],
-            )
-        else:
-            # Insert
-            sale_id = get_next_id(conn, "bricklink_monthly_sales_id_seq")
-            conn.execute(
-                """
-                INSERT INTO bricklink_monthly_sales (
-                    id, item_id, year, month, condition, times_sold, total_quantity,
-                    min_price, max_price, avg_price, currency, scraped_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                [
-                    sale_id,
-                    item_id,
-                    sale.year,
-                    sale.month,
-                    sale.condition.value,
-                    sale.times_sold,
-                    sale.total_quantity,
-                    sale.min_price.amount if sale.min_price else None,
-                    sale.max_price.amount if sale.max_price else None,
-                    sale.avg_price.amount if sale.avg_price else None,
-                    sale.currency,
-                    now,
-                ],
-            )
+            [
+                sale_id,
+                item_id,
+                sale.year,
+                sale.month,
+                sale.condition.value,
+                sale.times_sold,
+                sale.total_quantity,
+                sale.min_price.amount if sale.min_price else None,
+                sale.max_price.amount if sale.max_price else None,
+                sale.avg_price.amount if sale.avg_price else None,
+                sale.currency,
+                now,
+            ],
+        )
         count += 1
 
     return count

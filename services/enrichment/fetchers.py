@@ -6,6 +6,7 @@ Each fetcher:
 3. Returns a unified SourceResult
 """
 
+import calendar
 import logging
 from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING
@@ -24,6 +25,16 @@ logger = logging.getLogger("bws.enrichment.fetchers")
 
 # Default freshness: skip HTTP if cached data is younger than this
 _DEFAULT_FRESHNESS = timedelta(hours=24)
+
+
+def _freshness_until_end_of_month() -> timedelta:
+    """Return a timedelta from now until the end of the current month."""
+    now = datetime.now(tz=timezone.utc)
+    last_day = calendar.monthrange(now.year, now.month)[1]
+    end_of_month = now.replace(day=last_day, hour=23, minute=59, second=59)
+    remaining = end_of_month - now
+    # At minimum 1 day, so we don't re-scrape on the last second of the month
+    return max(remaining, timedelta(days=1))
 
 
 def fetch_from_bricklink(
@@ -74,6 +85,13 @@ def fetch_from_bricklink(
     except Exception:
         logger.debug("Bricklink cache lookup failed for %s, falling back to HTTP", set_number, exc_info=True)
 
+    # Short-circuit if BrickLink quota cooldown is active
+    from config.settings import BRICKLINK_RATE_LIMITER
+
+    if BRICKLINK_RATE_LIMITER.is_blocked():
+        logger.warning("BrickLink quota cooldown active, skipping HTTP for %s", set_number)
+        return make_failed_result(SourceId.BRICKLINK, "Quota cooldown active")
+
     # HTTP scrape
     try:
         from services.bricklink.repository import has_recent_pricing
@@ -106,13 +124,18 @@ def fetch_from_brickranker(
     conn: "DuckDBPyConnection",
     set_number: str,
     *,
-    freshness: timedelta = _DEFAULT_FRESHNESS,
+    freshness: timedelta | None = None,
 ) -> SourceResult:
     """Fetch metadata from BrickRanker (cache-first, then HTTP).
+
+    Retirement data rarely changes, so cache is valid until end of month.
 
     BrickRanker is a bulk scraper -- it fetches ALL retirement items at once.
     So we strongly prefer cache to avoid unnecessary full-page scrapes.
     """
+    if freshness is None:
+        freshness = _freshness_until_end_of_month()
+
     # Check cache: brickranker_items table
     try:
         from services.brickranker.repository import get_item

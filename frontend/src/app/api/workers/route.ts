@@ -1,11 +1,10 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextResponse } from 'next/server';
 
 const API_BASE = process.env.BWS_API_URL || 'http://localhost:8005';
 
-export async function GET(request: NextRequest) {
+export async function GET() {
   try {
-    const limit = request.nextUrl.searchParams.get('limit') || '100';
-    const res = await fetch(`${API_BASE}/api/scrape/jobs?limit=${limit}`);
+    const res = await fetch(`${API_BASE}/api/scrape/jobs`);
     const data = await res.json();
 
     if (!res.ok) {

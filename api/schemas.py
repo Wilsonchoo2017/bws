@@ -29,6 +29,7 @@ class ScrapeJobResponse(BaseModel):
     items_found: int = 0
     error: str | None = None
     progress: str | None = None
+    worker_no: int | None = None
 
 
 class ScrapeItemResponse(BaseModel):

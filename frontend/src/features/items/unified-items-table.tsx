@@ -12,9 +12,19 @@ import {
 } from '@tanstack/react-table';
 import { DataTable } from '@/components/ui/table/data-table';
 import { DataTableColumnHeader } from '@/components/ui/table/data-table-column-header';
+import { Button } from '@/components/ui/button';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue
+} from '@/components/ui/select';
 import { EnrichMissingButton } from './enrich-missing-button';
 import { ScrapeMissingMinifigsButton } from './scrape-missing-minifigs-button';
 import { EnrichMissingDimensionsButton } from './enrich-missing-dimensions-button';
+import { SyncRetirementButton } from './sync-retirement-button';
+import { ScrapeMissingMetadataButton } from './scrape-missing-metadata-button';
 import { PriceDealFilter } from './price-deal-filter';
 import type { UnifiedItem } from './types';
 import { formatPrice } from './types';
@@ -70,34 +80,48 @@ const columns: ColumnDef<UnifiedItem>[] = [
     size: 70
   },
   {
+    id: 'retirement',
     accessorKey: 'year_retired',
     header: ({ column }) => (
-      <DataTableColumnHeader column={column} title='Retired' />
+      <DataTableColumnHeader column={column} title='Retirement' />
     ),
     cell: ({ row }) => {
-      const yr = row.getValue('year_retired') as number | null;
-      return yr ? (
-        <span className='text-orange-600 dark:text-orange-400'>{yr}</span>
-      ) : (
-        <span className='text-muted-foreground'>-</span>
-      );
+      const yr = row.original.year_retired;
+      const soon = row.original.retiring_soon;
+      if (yr) {
+        return (
+          <span className='text-orange-600 dark:text-orange-400'>{yr}</span>
+        );
+      }
+      if (soon) {
+        return (
+          <span className='rounded bg-red-100 px-1.5 py-0.5 text-xs font-semibold text-red-700 dark:bg-red-900/30 dark:text-red-400'>SOON</span>
+        );
+      }
+      return <span className='text-muted-foreground'>-</span>;
     },
-    size: 80
+    size: 90
   },
   {
-    accessorKey: 'retiring_soon',
+    accessorKey: 'composite_score',
     header: ({ column }) => (
-      <DataTableColumnHeader column={column} title='Retiring' />
+      <DataTableColumnHeader column={column} title='Score' />
     ),
     cell: ({ row }) => {
-      const soon = row.getValue('retiring_soon') as boolean | null;
-      return soon ? (
-        <span className='rounded bg-red-100 px-1.5 py-0.5 text-xs font-semibold text-red-700 dark:bg-red-900/30 dark:text-red-400'>SOON</span>
-      ) : (
-        <span className='text-muted-foreground'>-</span>
+      const score = row.getValue('composite_score') as number | null;
+      if (score == null || Number.isNaN(score)) return <span className='text-muted-foreground'>-</span>;
+      const color =
+        score >= 65 ? 'text-emerald-600 dark:text-emerald-500' :
+        score >= 50 ? 'text-yellow-600 dark:text-yellow-400' :
+        score >= 35 ? 'text-orange-500' :
+        'text-red-500';
+      return (
+        <span className={`font-mono text-sm font-semibold ${color}`}>
+          {Math.round(score)}
+        </span>
       );
     },
-    size: 80
+    size: 70
   },
   {
     accessorKey: 'rrp_cents',
@@ -123,6 +147,45 @@ const columns: ColumnDef<UnifiedItem>[] = [
     cell: ({ row }) => {
       const cents = row.getValue('shopee_price_cents') as number | null;
       const url = row.original.shopee_url;
+      const shopName = row.original.shopee_shop_name;
+      const shopCount = row.original.shopee_shop_count ?? 0;
+      const formatted = formatPrice(cents, 'MYR');
+      if (!cents) return <span className='text-muted-foreground'>-</span>;
+      return (
+        <div className='flex flex-col gap-0.5'>
+          {url ? (
+            <a
+              href={url}
+              target='_blank'
+              rel='noopener noreferrer'
+              className='text-primary font-mono text-sm hover:underline'
+            >
+              {formatted}
+            </a>
+          ) : (
+            <span className='font-mono text-sm'>{formatted}</span>
+          )}
+          {shopName && (
+            <span className='text-muted-foreground truncate text-[10px] leading-tight max-w-[120px]'>
+              {shopName}
+              {shopCount > 1 && (
+                <span className='ml-0.5 text-[9px]'>+{shopCount - 1}</span>
+              )}
+            </span>
+          )}
+        </div>
+      );
+    },
+    size: 130
+  },
+  {
+    accessorKey: 'toysrus_price_cents',
+    header: ({ column }) => (
+      <DataTableColumnHeader column={column} title='TRU' />
+    ),
+    cell: ({ row }) => {
+      const cents = row.getValue('toysrus_price_cents') as number | null;
+      const url = row.original.toysrus_url;
       const formatted = formatPrice(cents, 'MYR');
       if (!cents) return <span className='text-muted-foreground'>-</span>;
       return url ? (
@@ -141,13 +204,13 @@ const columns: ColumnDef<UnifiedItem>[] = [
     size: 110
   },
   {
-    accessorKey: 'toysrus_price_cents',
+    accessorKey: 'mightyutan_price_cents',
     header: ({ column }) => (
-      <DataTableColumnHeader column={column} title='TRU' />
+      <DataTableColumnHeader column={column} title='MU' />
     ),
     cell: ({ row }) => {
-      const cents = row.getValue('toysrus_price_cents') as number | null;
-      const url = row.original.toysrus_url;
+      const cents = row.getValue('mightyutan_price_cents') as number | null;
+      const url = row.original.mightyutan_url;
       const formatted = formatPrice(cents, 'MYR');
       if (!cents) return <span className='text-muted-foreground'>-</span>;
       return url ? (
@@ -227,6 +290,7 @@ export function UnifiedItemsTable() {
   const [newSetNumber, setNewSetNumber] = useState('');
   const [adding, setAdding] = useState(false);
   const [addError, setAddError] = useState<string | null>(null);
+  const [scoreFilter, setScoreFilter] = useState<'all' | '65+' | '50+' | '35+' | '<35' | 'no_score'>('all');
 
   const filteredData = useMemo(() => {
     let result = data;
@@ -242,7 +306,8 @@ export function UnifiedItemsTable() {
       result = result.filter(
         (item) =>
           item.toysrus_price_cents !== null ||
-          item.shopee_price_cents !== null
+          item.shopee_price_cents !== null ||
+          item.mightyutan_price_cents !== null
       );
     }
     if (retirementFilter === 'retired') {
@@ -252,11 +317,22 @@ export function UnifiedItemsTable() {
     } else if (retirementFilter === 'retiring_soon') {
       result = result.filter((item) => item.retiring_soon === true && item.year_retired === null);
     }
+    if (scoreFilter === '65+') {
+      result = result.filter((item) => item.composite_score !== null && item.composite_score >= 65);
+    } else if (scoreFilter === '50+') {
+      result = result.filter((item) => item.composite_score !== null && item.composite_score >= 50);
+    } else if (scoreFilter === '35+') {
+      result = result.filter((item) => item.composite_score !== null && item.composite_score >= 35);
+    } else if (scoreFilter === '<35') {
+      result = result.filter((item) => item.composite_score !== null && item.composite_score < 35);
+    } else if (scoreFilter === 'no_score') {
+      result = result.filter((item) => item.composite_score === null);
+    }
     if (dealFilter) {
       result = dealFilter(result);
     }
     return result;
-  }, [data, searchQuery, dealFilter, hideNoRetail, retirementFilter]);
+  }, [data, searchQuery, dealFilter, hideNoRetail, retirementFilter, scoreFilter]);
 
   const minifigMissing = useMemo(
     () => filteredData.filter(i => i.minifig_count === null).map(i => i.set_number),
@@ -268,18 +344,46 @@ export function UnifiedItemsTable() {
     [filteredData]
   );
 
-  const fetchItems = () => {
-    fetch('/api/items')
-      .then((res) => res.json())
-      .then((json) => {
-        if (json.success) {
-          setData(json.data);
-        } else {
-          setError(json.error ?? 'Failed to load items');
+  const metadataMissing = useMemo(
+    () => filteredData
+      .filter(i => i.title === null || i.theme === null || i.year_released === null || i.image_url === null)
+      .map(i => i.set_number),
+    [filteredData]
+  );
+
+  const fetchItems = async () => {
+    try {
+      const [itemsRes, signalsRes] = await Promise.all([
+        fetch('/api/items').then((r) => r.json()),
+        fetch('/api/items/signals').then((r) => r.json()).catch(() => null),
+      ]);
+
+      if (!itemsRes.success) {
+        setError(itemsRes.error ?? 'Failed to load items');
+        return;
+      }
+
+      const scoreMap = new Map<string, number>();
+      if (signalsRes?.success && Array.isArray(signalsRes.data)) {
+        for (const sig of signalsRes.data) {
+          const setNum = (sig.set_number ?? sig.item_id?.replace(/-\d+$/, '')) as string | undefined;
+          if (setNum && sig.composite_score != null && !Number.isNaN(sig.composite_score)) {
+            scoreMap.set(setNum, sig.composite_score);
+          }
         }
-      })
-      .catch((err) => setError(err.message))
-      .finally(() => setLoading(false));
+      }
+
+      const merged = (itemsRes.data as UnifiedItem[]).map((item) => ({
+        ...item,
+        composite_score: scoreMap.get(item.set_number) ?? null,
+      }));
+
+      setData(merged);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load items');
+    } finally {
+      setLoading(false);
+    }
   };
 
   useEffect(() => {
@@ -331,7 +435,11 @@ export function UnifiedItemsTable() {
     onSortingChange: setSorting,
     getCoreRowModel: getCoreRowModel(),
     getPaginationRowModel: getPaginationRowModel(),
-    getSortedRowModel: getSortedRowModel()
+    getSortedRowModel: getSortedRowModel(),
+    initialState: {
+      pagination: { pageSize: 100 },
+      columnVisibility: { rrp_cents: false },
+    },
   });
 
   if (loading) {
@@ -366,61 +474,84 @@ export function UnifiedItemsTable() {
 
   return (
     <div className='flex flex-1 flex-col gap-3 overflow-hidden'>
-      <div className='flex items-center gap-3'>
-        <input
-          type='text'
-          placeholder='Search set number or title...'
-          value={searchQuery}
-          onChange={(e) => setSearchQuery(e.target.value)}
-          className='bg-muted/50 rounded-lg border px-4 py-2.5 text-sm font-medium w-64 placeholder:text-muted-foreground'
-        />
-        <label className='bg-muted/50 flex cursor-pointer items-center gap-2 rounded-lg border px-4 py-2.5 text-sm font-medium'>
-          <input
-            type='checkbox'
-            checked={hideNoRetail}
-            onChange={() => setHideNoRetail((prev) => !prev)}
-            className='accent-primary h-4 w-4 rounded'
-          />
-          Has retail price
-        </label>
-        <select
-          value={retirementFilter}
-          onChange={(e) => setRetirementFilter(e.target.value as 'all' | 'retired' | 'active' | 'retiring_soon')}
-          className='bg-muted/50 rounded-lg border px-4 py-2.5 text-sm font-medium'
-        >
-          <option value='all'>All sets</option>
-          <option value='retired'>Retired only</option>
-          <option value='active'>Active only</option>
-          <option value='retiring_soon'>Retiring soon</option>
-        </select>
-        <PriceDealFilter onFilterChange={(fn) => setDealFilter(() => fn)} />
-        <EnrichMissingButton setNumbers={filteredData.map((i) => i.set_number)} />
-        <ScrapeMissingMinifigsButton setNumbers={minifigMissing} />
-        <EnrichMissingDimensionsButton setNumbers={dimensionsMissing} />
-        <div className='ml-auto flex items-center gap-2'>
+      <div className='flex flex-col gap-2'>
+        {/* Row 1: Filters */}
+        <div className='flex items-center gap-3'>
           <input
             type='text'
-            placeholder='Add set #...'
-            value={newSetNumber}
-            onChange={(e) => {
-              setNewSetNumber(e.target.value);
-              setAddError(null);
-            }}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') handleAddItem();
-            }}
-            className='bg-muted/50 rounded-lg border px-3 py-2.5 text-sm font-mono w-32 placeholder:text-muted-foreground'
+            placeholder='Search set number or title...'
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className='border-input bg-transparent rounded-md border px-3 py-2 text-sm shadow-xs w-64 h-9 placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] outline-none'
           />
-          <button
-            onClick={handleAddItem}
-            disabled={adding}
-            className='bg-primary text-primary-foreground rounded-lg px-4 py-2.5 text-sm font-medium disabled:opacity-50'
+          <Select
+            value={retirementFilter}
+            onValueChange={(val) => setRetirementFilter(val as 'all' | 'retired' | 'active' | 'retiring_soon')}
           >
-            {adding ? 'Adding...' : 'Add'}
-          </button>
-          {addError && (
-            <span className='text-destructive text-sm'>{addError}</span>
-          )}
+            <SelectTrigger className='w-[160px]'>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value='all'>All sets</SelectItem>
+              <SelectItem value='retired'>Retired only</SelectItem>
+              <SelectItem value='active'>Active only</SelectItem>
+              <SelectItem value='retiring_soon'>Retiring soon</SelectItem>
+            </SelectContent>
+          </Select>
+          <Select
+            value={scoreFilter}
+            onValueChange={(val) => setScoreFilter(val as typeof scoreFilter)}
+          >
+            <SelectTrigger className='w-[150px]'>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value='all'>All scores</SelectItem>
+              <SelectItem value='65+'>Score 65+</SelectItem>
+              <SelectItem value='50+'>Score 50+</SelectItem>
+              <SelectItem value='35+'>Score 35+</SelectItem>
+              <SelectItem value='<35'>Score &lt;35</SelectItem>
+              <SelectItem value='no_score'>No score</SelectItem>
+            </SelectContent>
+          </Select>
+          <Button
+            variant={hideNoRetail ? 'default' : 'outline'}
+            size='default'
+            onClick={() => setHideNoRetail((prev) => !prev)}
+          >
+            Has retail price
+          </Button>
+          <PriceDealFilter onFilterChange={(fn) => setDealFilter(() => fn)} />
+        </div>
+
+        {/* Row 2: Actions + Add Item */}
+        <div className='flex items-center gap-2'>
+          <ScrapeMissingMetadataButton setNumbers={metadataMissing} />
+          <EnrichMissingButton setNumbers={filteredData.map((i) => i.set_number)} />
+          <ScrapeMissingMinifigsButton setNumbers={minifigMissing} />
+          <EnrichMissingDimensionsButton setNumbers={dimensionsMissing} />
+          <SyncRetirementButton />
+          <div className='ml-auto flex items-center gap-2'>
+            <input
+              type='text'
+              placeholder='Add set #...'
+              value={newSetNumber}
+              onChange={(e) => {
+                setNewSetNumber(e.target.value);
+                setAddError(null);
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') handleAddItem();
+              }}
+              className='border-input bg-transparent rounded-md border px-3 py-2 text-sm font-mono shadow-xs w-32 h-9 placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] outline-none'
+            />
+            <Button onClick={handleAddItem} disabled={adding}>
+              {adding ? 'Adding...' : 'Add'}
+            </Button>
+            {addError && (
+              <span className='text-destructive text-sm'>{addError}</span>
+            )}
+          </div>
         </div>
       </div>
       <DataTable table={table} />

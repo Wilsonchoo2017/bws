@@ -13,7 +13,6 @@ import pandas as pd
 from config.kelly import APPLY_MODIFIERS, DEFAULT_SIGNAL_WEIGHT, SIGNAL_WEIGHTS
 from services.backtesting.data_loader import (
     load_item_metadata,
-    load_minifig_data,
     load_monthly_sales,
     load_price_snapshots,
 )
@@ -28,7 +27,6 @@ from services.backtesting.signals import (
     compute_demand_pressure,
     compute_lifecycle_position,
     compute_listing_ratio,
-    compute_minifig_appeal,
     compute_new_used_spread,
     compute_price_trend,
     compute_price_vs_rrp,
@@ -37,7 +35,6 @@ from services.backtesting.signals import (
     compute_supply_velocity,
     compute_theme_growth,
     compute_value_opportunity,
-    compute_volume_price_confirm,
 )
 
 if TYPE_CHECKING:
@@ -51,7 +48,7 @@ def _compute_item_signals(
     item_sales: pd.DataFrame,
     item_meta: pd.DataFrame,
     snapshots: pd.DataFrame | None,
-    minifig_data: dict | None = None,
+    signal_weights: dict[str, float] | None = None,
 ) -> dict | None:
     """Compute all signals for a single item at its latest available month.
 
@@ -108,18 +105,11 @@ def _compute_item_signals(
         "value_opportunity": compute_value_opportunity(
             item_sales, eval_year, eval_month
         ),
-        "minifig_appeal": compute_minifig_appeal(
-            (minifig_data or {}).get(item_id),
-            int(entry_price),
-        ),
         "price_wall": compute_price_wall(
             snapshots, item_id, eval_year, eval_month
         ),
         "listing_ratio": compute_listing_ratio(
             snapshots, item_id, item_sales, eval_year, eval_month
-        ),
-        "volume_price_confirm": compute_volume_price_confirm(
-            item_sales, eval_year, eval_month
         ),
         "new_used_spread": compute_new_used_spread(
             snapshots, item_id, eval_year, eval_month
@@ -133,11 +123,12 @@ def _compute_item_signals(
     }
 
     # Weighted composite score
+    weights = signal_weights if signal_weights is not None else SIGNAL_WEIGHTS
     weighted_sum = 0.0
     weight_sum = 0.0
     for name, value in signals.items():
         if value is not None:
-            w = SIGNAL_WEIGHTS.get(name, DEFAULT_SIGNAL_WEIGHT)
+            w = weights.get(name, DEFAULT_SIGNAL_WEIGHT)
             weighted_sum += value * w
             weight_sum += w
 
@@ -176,6 +167,7 @@ def compute_item_signals(
     conn: "DuckDBPyConnection",
     set_number: str,
     condition: str = "new",
+    signal_weights: dict[str, float] | None = None,
 ) -> dict | None:
     """Compute current signals for a single item by set_number."""
     all_sales = load_monthly_sales(conn)
@@ -189,8 +181,6 @@ def compute_item_signals(
             exc_info=True,
         )
         snapshots = None
-
-    mfig_data = load_minifig_data(conn)
 
     condition_sales = all_sales[all_sales["condition"] == condition]
     if condition_sales.empty:
@@ -215,7 +205,8 @@ def compute_item_signals(
         item_sales = condition_sales[condition_sales["item_id"] == candidate]
         if not item_sales.empty:
             return _compute_item_signals(
-                candidate, item_sales, item_meta, snapshots, mfig_data
+                candidate, item_sales, item_meta, snapshots,
+                signal_weights,
             )
 
     return None
@@ -224,6 +215,7 @@ def compute_item_signals(
 def compute_all_signals(
     conn: "DuckDBPyConnection",
     condition: str = "new",
+    signal_weights: dict[str, float] | None = None,
 ) -> list[dict]:
     """Compute current signals for all items with sufficient data."""
     all_sales = load_monthly_sales(conn)
@@ -237,8 +229,6 @@ def compute_all_signals(
             exc_info=True,
         )
         snapshots = None
-
-    mfig_data = load_minifig_data(conn)
 
     condition_sales = all_sales[all_sales["condition"] == condition]
     if condition_sales.empty:
@@ -254,7 +244,8 @@ def compute_all_signals(
             item_meta = metadata[metadata["set_number"] == base_id]
 
         result = _compute_item_signals(
-            str(item_id), item_sales, item_meta, snapshots, mfig_data
+            str(item_id), item_sales, item_meta, snapshots,
+            signal_weights,
         )
         if result is not None:
             results.append(result)

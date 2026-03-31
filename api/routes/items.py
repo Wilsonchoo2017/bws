@@ -1,5 +1,7 @@
 """Items API routes."""
 
+import math
+
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
@@ -28,6 +30,14 @@ from services.shopee.saturation_repository import (
 )
 
 router = APIRouter(prefix="/items", tags=["items"])
+
+
+def _sanitize_nan(data: list[dict]) -> list[dict]:
+    """Replace NaN float values with None for JSON-safe serialization."""
+    return [
+        {k: (None if isinstance(v, float) and math.isnan(v) else v) for k, v in row.items()}
+        for row in data
+    ]
 
 
 class AddItemRequest(BaseModel):
@@ -79,7 +89,7 @@ async def list_signals(condition: str = "new"):
         init_schema(conn)
         signals = compute_all_signals(conn, condition=condition)
         conn.close()
-        return {"success": True, "data": signals, "count": len(signals)}
+        return {"success": True, "data": _sanitize_nan(signals), "count": len(signals)}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -157,7 +167,7 @@ async def get_item_signals(set_number: str, condition: str = "new"):
         conn.close()
         if not signals:
             return {"success": True, "data": None}
-        return {"success": True, "data": signals}
+        return {"success": True, "data": _sanitize_nan([signals])[0]}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

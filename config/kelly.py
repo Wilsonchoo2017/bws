@@ -51,10 +51,8 @@ SIGNAL_WEIGHTS: dict[str, float] = {
     "collector_premium": 1.0,
     "theme_growth": 1.2,
     "value_opportunity": 1.8,
-    "minifig_appeal": 1.3,
     "price_wall": 1.0,
     "listing_ratio": 1.2,
-    "volume_price_confirm": 1.3,
     "new_used_spread": 1.2,
 }
 
@@ -72,3 +70,11 @@ HOLD_HORIZONS: tuple[str, ...] = (
     "return_hold_24m",
     "return_hold_36m",
 )
+
+# ---------------------------------------------------------------------------
+# ML-optimized weights (updated by running: python -m services.backtesting.runner --optimize)
+# ---------------------------------------------------------------------------
+# Initially identical to hand-tuned weights. After optimization, replace with
+# learned values and update ML_WEIGHTS_SOURCE to the model name.
+ML_SIGNAL_WEIGHTS: dict[str, float] = dict(SIGNAL_WEIGHTS)
+ML_WEIGHTS_SOURCE: str = "handtuned"

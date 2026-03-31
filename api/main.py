@@ -8,9 +8,10 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from api.routes import enrichment, items, portfolio, scrape
+from api.routes import enrichment, images, items, portfolio, scrape
 from api.worker import run_worker
 from services.enrichment.scheduler import run_enrichment_sweep
+from services.images.sweep import run_image_download_sweep
 from services.shopee.saturation_scheduler import run_saturation_sweep
 
 logging.basicConfig(
@@ -30,12 +31,14 @@ async def lifespan(app: FastAPI):
     worker_task = asyncio.create_task(run_worker())
     sweep_task = asyncio.create_task(run_enrichment_sweep(job_manager))
     saturation_task = asyncio.create_task(run_saturation_sweep(job_manager))
-    logger.info("Background worker, enrichment sweep, and saturation sweep started")
+    image_task = asyncio.create_task(run_image_download_sweep())
+    logger.info("Background worker, enrichment sweep, saturation sweep, and image sweep started")
     yield
+    image_task.cancel()
     saturation_task.cancel()
     sweep_task.cancel()
     worker_task.cancel()
-    for task in (worker_task, sweep_task, saturation_task):
+    for task in (worker_task, sweep_task, saturation_task, image_task):
         try:
             await task
         except asyncio.CancelledError:
@@ -62,6 +65,7 @@ app.include_router(scrape.router, prefix="/api")
 app.include_router(items.router, prefix="/api")
 app.include_router(enrichment.router, prefix="/api")
 app.include_router(portfolio.router, prefix="/api")
+app.include_router(images.router, prefix="/api")
 
 
 @app.get("/api/health")

@@ -26,12 +26,14 @@ SIGNAL_NAMES: tuple[str, ...] = (
     "collector_premium",
     "theme_growth",
     "value_opportunity",
-    "minifig_appeal",
     "price_wall",
     "listing_ratio",
-    "volume_price_confirm",
     "new_used_spread",
 )
+
+# Dropped signals (insufficient data coverage or no statistical significance):
+# - minifig_appeal: 39% coverage, p=0.32, importance=0.004
+# - volume_price_confirm: 29% coverage, p=0.57, importance=0.001
 
 MODIFIER_NAMES: tuple[str, ...] = (
     "mod_shelf_life",
@@ -47,7 +49,7 @@ class SignalSnapshot:
     item_id: str
     year: int
     month: int
-    # 14 signals (0-100 each, None if insufficient data)
+    # 12 signals (0-100 each, None if insufficient data)
     demand_pressure: float | None = None
     supply_velocity: float | None = None
     price_trend: float | None = None
@@ -57,10 +59,8 @@ class SignalSnapshot:
     collector_premium: float | None = None
     theme_growth: float | None = None
     value_opportunity: float | None = None
-    minifig_appeal: float | None = None
     price_wall: float | None = None
     listing_ratio: float | None = None
-    volume_price_confirm: float | None = None
     new_used_spread: float | None = None
     # 3 modifiers (multipliers, default 1.0)
     mod_shelf_life: float = 1.0

@@ -19,7 +19,6 @@ from services.backtesting.signals import (
     compute_demand_pressure,
     compute_lifecycle_position,
     compute_listing_ratio,
-    compute_minifig_appeal,
     compute_new_used_spread,
     compute_price_trend,
     compute_price_vs_rrp,
@@ -28,7 +27,6 @@ from services.backtesting.signals import (
     compute_supply_velocity,
     compute_theme_growth,
     compute_value_opportunity,
-    compute_volume_price_confirm,
 )
 from services.backtesting.types import BacktestConfig, SignalSnapshot, TradeResult
 
@@ -58,8 +56,6 @@ def run_backtest(
     if config is None:
         config = BacktestConfig()
 
-    from services.backtesting.data_loader import load_minifig_data
-
     # Load all data upfront (once)
     all_sales = load_monthly_sales(conn)
     metadata = load_item_metadata(conn)
@@ -67,7 +63,6 @@ def run_backtest(
         snapshots = load_price_snapshots(conn)
     except Exception:
         snapshots = None
-    minifig_data = load_minifig_data(conn)
 
     # Filter to requested condition
     condition_sales = all_sales[all_sales["condition"] == config.condition]
@@ -146,19 +141,12 @@ def run_backtest(
                 value_opportunity=compute_value_opportunity(
                     item_sales, eval_year, eval_month
                 ),
-                minifig_appeal=compute_minifig_appeal(
-                    minifig_data.get(str(item_id)),
-                    int(entry_price),
-                ),
                 price_wall=compute_price_wall(
                     snapshots, str(item_id), eval_year, eval_month
                 ),
                 listing_ratio=compute_listing_ratio(
                     snapshots, str(item_id), item_sales,
                     eval_year, eval_month,
-                ),
-                volume_price_confirm=compute_volume_price_confirm(
-                    item_sales, eval_year, eval_month
                 ),
                 new_used_spread=compute_new_used_spread(
                     snapshots, str(item_id), eval_year, eval_month

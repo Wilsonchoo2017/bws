@@ -108,6 +108,36 @@ CREATE TABLE IF NOT EXISTS shopee_scrape_history (
 );
 """
 
+MIGHTYUTAN_PRODUCTS_DDL = """
+CREATE TABLE IF NOT EXISTS mightyutan_products (
+    id INTEGER PRIMARY KEY,
+    sku VARCHAR NOT NULL UNIQUE,
+    name VARCHAR NOT NULL,
+    price_myr VARCHAR,
+    original_price_myr VARCHAR,
+    url VARCHAR,
+    image_url VARCHAR,
+    available BOOLEAN DEFAULT TRUE,
+    quantity INTEGER DEFAULT 0,
+    total_sold INTEGER DEFAULT 0,
+    rating VARCHAR,
+    rating_count INTEGER DEFAULT 0,
+    last_scraped_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+"""
+
+MIGHTYUTAN_PRICE_HISTORY_DDL = """
+CREATE TABLE IF NOT EXISTS mightyutan_price_history (
+    id INTEGER PRIMARY KEY,
+    sku VARCHAR NOT NULL,
+    price_myr VARCHAR NOT NULL,
+    available BOOLEAN DEFAULT TRUE,
+    scraped_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+"""
+
 TOYSRUS_PRODUCTS_DDL = """
 CREATE TABLE IF NOT EXISTS toysrus_products (
     id INTEGER PRIMARY KEY,
@@ -253,6 +283,24 @@ CREATE TABLE IF NOT EXISTS minifig_price_history (
 );
 """
 
+IMAGE_ASSETS_DDL = """
+CREATE TABLE IF NOT EXISTS image_assets (
+    id INTEGER PRIMARY KEY,
+    asset_type VARCHAR NOT NULL,
+    item_id VARCHAR NOT NULL,
+    source_url VARCHAR NOT NULL,
+    local_path VARCHAR NOT NULL,
+    file_size_bytes INTEGER,
+    content_type VARCHAR DEFAULT 'image/png',
+    downloaded_at TIMESTAMP,
+    status VARCHAR DEFAULT 'pending',
+    error VARCHAR,
+    retry_count INTEGER DEFAULT 0,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(asset_type, item_id)
+);
+"""
+
 BRICKRANKER_ITEMS_DDL = """
 CREATE TABLE IF NOT EXISTS brickranker_items (
     id INTEGER PRIMARY KEY,
@@ -270,6 +318,38 @@ CREATE TABLE IF NOT EXISTS brickranker_items (
 """
 
 # Sequence tables for auto-increment IDs
+BRICKECONOMY_SNAPSHOTS_DDL = """
+CREATE TABLE IF NOT EXISTS brickeconomy_snapshots (
+    id INTEGER PRIMARY KEY,
+    set_number VARCHAR NOT NULL,
+    scraped_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    title VARCHAR,
+    theme VARCHAR,
+    subtheme VARCHAR,
+    year_released INTEGER,
+    pieces INTEGER,
+    minifigs INTEGER,
+    availability VARCHAR,
+    image_url VARCHAR,
+    brickeconomy_url VARCHAR,
+    rrp_usd_cents INTEGER,
+    rrp_gbp_cents INTEGER,
+    rrp_eur_cents INTEGER,
+    value_new_cents INTEGER,
+    value_used_cents INTEGER,
+    annual_growth_pct FLOAT,
+    rating_value VARCHAR,
+    review_count INTEGER,
+    future_estimate_cents INTEGER,
+    future_estimate_date VARCHAR,
+    distribution_mean_cents INTEGER,
+    distribution_stddev_cents INTEGER,
+    value_chart_json JSON,
+    sales_trend_json JSON,
+    candlestick_json JSON
+);
+"""
+
 SEQUENCES_DDL = """
 CREATE SEQUENCE IF NOT EXISTS bricklink_items_id_seq;
 CREATE SEQUENCE IF NOT EXISTS bricklink_price_history_id_seq;
@@ -282,12 +362,16 @@ CREATE SEQUENCE IF NOT EXISTS minifig_price_history_id_seq;
 CREATE SEQUENCE IF NOT EXISTS shopee_products_id_seq;
 CREATE SEQUENCE IF NOT EXISTS shopee_saturation_id_seq;
 CREATE SEQUENCE IF NOT EXISTS shopee_scrape_history_id_seq;
+CREATE SEQUENCE IF NOT EXISTS mightyutan_products_id_seq;
+CREATE SEQUENCE IF NOT EXISTS mightyutan_price_history_id_seq;
 CREATE SEQUENCE IF NOT EXISTS toysrus_products_id_seq;
 CREATE SEQUENCE IF NOT EXISTS toysrus_price_history_id_seq;
 CREATE SEQUENCE IF NOT EXISTS lego_items_id_seq;
 CREATE SEQUENCE IF NOT EXISTS price_records_id_seq;
 CREATE SEQUENCE IF NOT EXISTS portfolio_transactions_id_seq;
 CREATE SEQUENCE IF NOT EXISTS portfolio_snapshots_id_seq;
+CREATE SEQUENCE IF NOT EXISTS image_assets_id_seq;
+CREATE SEQUENCE IF NOT EXISTS brickeconomy_snapshots_id_seq;
 """
 
 # Index creation statements
@@ -326,6 +410,12 @@ CREATE INDEX IF NOT EXISTS idx_shopee_products_scraped
     ON shopee_products(scraped_at);
 CREATE INDEX IF NOT EXISTS idx_shopee_saturation_set
     ON shopee_saturation(set_number, scraped_at);
+CREATE INDEX IF NOT EXISTS idx_mightyutan_products_sku
+    ON mightyutan_products(sku);
+CREATE INDEX IF NOT EXISTS idx_mightyutan_products_available
+    ON mightyutan_products(available);
+CREATE INDEX IF NOT EXISTS idx_mightyutan_price_history_sku
+    ON mightyutan_price_history(sku, scraped_at);
 CREATE INDEX IF NOT EXISTS idx_toysrus_products_sku
     ON toysrus_products(sku);
 CREATE INDEX IF NOT EXISTS idx_toysrus_products_available
@@ -344,6 +434,14 @@ CREATE INDEX IF NOT EXISTS idx_portfolio_txn_date
     ON portfolio_transactions(txn_date);
 CREATE INDEX IF NOT EXISTS idx_portfolio_snapshots_date
     ON portfolio_snapshots(snapshot_date);
+CREATE INDEX IF NOT EXISTS idx_image_assets_type_item
+    ON image_assets(asset_type, item_id);
+CREATE INDEX IF NOT EXISTS idx_image_assets_status
+    ON image_assets(status);
+CREATE INDEX IF NOT EXISTS idx_be_snapshots_set
+    ON brickeconomy_snapshots(set_number, scraped_at);
+CREATE INDEX IF NOT EXISTS idx_be_snapshots_scraped
+    ON brickeconomy_snapshots(scraped_at);
 """
 
 ALL_DDL = [
@@ -352,6 +450,7 @@ ALL_DDL = [
     BRICKLINK_PRICE_HISTORY_DDL,
     BRICKLINK_MONTHLY_SALES_DDL,
     PRODUCT_ANALYSIS_DDL,
+    IMAGE_ASSETS_DDL,
     BRICKRANKER_ITEMS_DDL,
     MINIFIGURES_DDL,
     SET_MINIFIGURES_DDL,
@@ -359,12 +458,15 @@ ALL_DDL = [
     SHOPEE_PRODUCTS_DDL,
     SHOPEE_SATURATION_DDL,
     SHOPEE_SCRAPE_HISTORY_DDL,
+    MIGHTYUTAN_PRODUCTS_DDL,
+    MIGHTYUTAN_PRICE_HISTORY_DDL,
     TOYSRUS_PRODUCTS_DDL,
     TOYSRUS_PRICE_HISTORY_DDL,
     LEGO_ITEMS_DDL,
     PRICE_RECORDS_DDL,
     PORTFOLIO_TRANSACTIONS_DDL,
     PORTFOLIO_SNAPSHOTS_DDL,
+    BRICKECONOMY_SNAPSHOTS_DDL,
     INDEXES_DDL,
 ]
 
@@ -452,12 +554,16 @@ _SEQUENCE_TABLE_MAP = [
     ("shopee_products_id_seq", "shopee_products"),
     ("shopee_saturation_id_seq", "shopee_saturation"),
     ("shopee_scrape_history_id_seq", "shopee_scrape_history"),
+    ("mightyutan_products_id_seq", "mightyutan_products"),
+    ("mightyutan_price_history_id_seq", "mightyutan_price_history"),
     ("toysrus_products_id_seq", "toysrus_products"),
     ("toysrus_price_history_id_seq", "toysrus_price_history"),
     ("lego_items_id_seq", "lego_items"),
     ("price_records_id_seq", "price_records"),
     ("portfolio_transactions_id_seq", "portfolio_transactions"),
     ("portfolio_snapshots_id_seq", "portfolio_snapshots"),
+    ("image_assets_id_seq", "image_assets"),
+    ("brickeconomy_snapshots_id_seq", "brickeconomy_snapshots"),
 ]
 
 
@@ -467,9 +573,8 @@ def _sync_sequences(conn: "DuckDBPyConnection") -> None:
     Prevents primary key collisions when sequences fall behind
     existing data (e.g., after restores or manual inserts).
 
-    DuckDB cannot DROP a sequence that a table DEFAULT depends on,
-    so we first try DROP+CREATE. If that fails (dependency), we
-    advance the sequence by calling nextval in a loop.
+    Advances sequences by calling nextval rather than DROP+CREATE,
+    which is safe for concurrent connections (nextval is atomic).
     """
     for seq_name, table_name in _SEQUENCE_TABLE_MAP:
         try:
@@ -481,20 +586,13 @@ def _sync_sequences(conn: "DuckDBPyConnection") -> None:
                 continue
 
             target = max_id + 1
-            try:
-                conn.execute(f"DROP SEQUENCE IF EXISTS {seq_name}")
-                conn.execute(
-                    f"CREATE SEQUENCE {seq_name} START {target}"
-                )
-            except Exception:  # noqa: BLE001
-                # Sequence has a table DEFAULT dependency -- advance it instead
-                curr = 0
-                while curr < target:
-                    curr = conn.execute(
-                        f"SELECT nextval('{seq_name}')"  # noqa: S608
-                    ).fetchone()[0]
+            curr = 0
+            while curr < target:
+                curr = conn.execute(
+                    f"SELECT nextval('{seq_name}')"  # noqa: S608
+                ).fetchone()[0]
         except Exception:  # noqa: BLE001
-            # Table may not exist yet on first init
+            # Table or sequence may not exist yet on first init
             pass
 
 
@@ -569,12 +667,16 @@ def _rebuild_table(conn: "DuckDBPyConnection", table_name: str) -> None:
         "shopee_products": SHOPEE_PRODUCTS_DDL,
         "shopee_saturation": SHOPEE_SATURATION_DDL,
         "shopee_scrape_history": SHOPEE_SCRAPE_HISTORY_DDL,
+        "mightyutan_products": MIGHTYUTAN_PRODUCTS_DDL,
+        "mightyutan_price_history": MIGHTYUTAN_PRICE_HISTORY_DDL,
         "toysrus_products": TOYSRUS_PRODUCTS_DDL,
         "toysrus_price_history": TOYSRUS_PRICE_HISTORY_DDL,
         "lego_items": LEGO_ITEMS_DDL,
         "price_records": PRICE_RECORDS_DDL,
         "portfolio_transactions": PORTFOLIO_TRANSACTIONS_DDL,
         "portfolio_snapshots": PORTFOLIO_SNAPSHOTS_DDL,
+        "image_assets": IMAGE_ASSETS_DDL,
+        "brickeconomy_snapshots": BRICKECONOMY_SNAPSHOTS_DDL,
     }
 
     ddl = table_ddl_map.get(table_name)
@@ -663,10 +765,14 @@ def drop_all_tables(conn: "DuckDBPyConnection") -> None:
     conn.execute("DROP SEQUENCE IF EXISTS bricklink_monthly_sales_id_seq;")
     conn.execute("DROP SEQUENCE IF EXISTS product_analysis_id_seq;")
     conn.execute("DROP SEQUENCE IF EXISTS brickranker_items_id_seq;")
+    conn.execute("DROP TABLE IF EXISTS image_assets;")
+    conn.execute("DROP SEQUENCE IF EXISTS image_assets_id_seq;")
     conn.execute("DROP TABLE IF EXISTS portfolio_transactions;")
     conn.execute("DROP TABLE IF EXISTS portfolio_snapshots;")
     conn.execute("DROP SEQUENCE IF EXISTS portfolio_transactions_id_seq;")
     conn.execute("DROP SEQUENCE IF EXISTS portfolio_snapshots_id_seq;")
+    conn.execute("DROP TABLE IF EXISTS brickeconomy_snapshots;")
+    conn.execute("DROP SEQUENCE IF EXISTS brickeconomy_snapshots_id_seq;")
 
 
 def get_table_stats(conn: "DuckDBPyConnection") -> dict[str, int]:
@@ -689,6 +795,8 @@ def get_table_stats(conn: "DuckDBPyConnection") -> dict[str, int]:
         "minifig_price_history",
         "portfolio_transactions",
         "portfolio_snapshots",
+        "image_assets",
+        "brickeconomy_snapshots",
     ]
     stats = {}
     for table in tables:

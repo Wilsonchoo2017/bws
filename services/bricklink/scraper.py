@@ -4,6 +4,7 @@ Coordinates fetching HTML and parsing data from Bricklink.
 """
 
 import asyncio
+import logging
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import timedelta
@@ -12,6 +13,9 @@ from typing import TYPE_CHECKING
 import httpx
 
 from config.settings import (
+    BRICKLINK_RATE_LIMITER,
+    RETRY_CONFIG,
+    calculate_backoff,
     get_random_accept_language,
     get_random_delay,
     get_random_user_agent,
@@ -95,8 +99,21 @@ def _get_headers() -> dict[str, str]:
     }
 
 
+class BricklinkQuotaExceeded(Exception):
+    """Raised when BrickLink returns a quota exceeded redirect."""
+
+
+def _is_quota_exceeded(response: httpx.Response) -> bool:
+    """Check if BrickLink redirected to a quota exceeded error page."""
+    return "error.page" in str(response.url) and "code=429" in str(response.url)
+
+
 async def _fetch_page(client: httpx.AsyncClient, url: str) -> str:
-    """Fetch a page with browser-like headers.
+    """Fetch a page with browser-like headers and exponential backoff.
+
+    Retries on HTTP 429/503 status codes and BrickLink's quota exceeded
+    redirect (302 -> error.page?code=429 returning 200).
+    Backoff starts at 30s and doubles each attempt.
 
     Args:
         client: HTTP client
@@ -106,11 +123,31 @@ async def _fetch_page(client: httpx.AsyncClient, url: str) -> str:
         HTML content
 
     Raises:
-        httpx.HTTPStatusError: If request fails
+        httpx.HTTPStatusError: If request fails after retries
+        BricklinkQuotaExceeded: If quota exceeded after all retries
     """
-    response = await client.get(url, headers=_get_headers(), follow_redirects=True)
-    response.raise_for_status()
-    return response.text
+    for attempt in range(1, RETRY_CONFIG.max_retries + 1):
+        await BRICKLINK_RATE_LIMITER.acquire()
+        response = await client.get(url, headers=_get_headers(), follow_redirects=True)
+
+        is_rate_limited = response.status_code in (429, 503) or _is_quota_exceeded(response)
+
+        if is_rate_limited:
+            if attempt < RETRY_CONFIG.max_retries:
+                backoff = calculate_backoff(attempt)
+                logging.getLogger("bws.bricklink").warning(
+                    "Rate limited (attempt %d/%d), backing off %.0fs: %s",
+                    attempt, RETRY_CONFIG.max_retries, backoff, url,
+                )
+                await asyncio.sleep(backoff)
+                continue
+            BRICKLINK_RATE_LIMITER.trip_quota_exceeded()
+            raise BricklinkQuotaExceeded(f"Quota exceeded after {RETRY_CONFIG.max_retries} retries: {url}")
+
+        response.raise_for_status()
+        return response.text
+    # Unreachable, but satisfies type checker
+    raise BricklinkQuotaExceeded(f"Quota exceeded: {url}")
 
 
 async def scrape_item(
@@ -192,6 +229,8 @@ async def scrape_item(
             monthly_sales=monthly_sales,
         )
 
+    except BricklinkQuotaExceeded as e:
+        return ScrapeResult(success=False, item_id=item_id, error=str(e))
     except httpx.HTTPStatusError as e:
         error_msg = f"HTTP {e.response.status_code}: {e.response.reason_phrase}"
         return ScrapeResult(success=False, item_id=item_id, error=error_msg)
@@ -335,6 +374,8 @@ async def scrape_set_minifigures(
                     if not skip_mf_pricing:
                         create_minifig_price_history(conn, mf_info.minifig_id, mf_data)
 
+            except BricklinkQuotaExceeded:
+                raise  # Stop all scraping on quota exceeded
             except (httpx.HTTPStatusError, httpx.RequestError, ValueError, TimeoutError) as e:
                 # Log but continue with other minifigs
                 minifig_data_list.append(MinifigureData(
@@ -355,6 +396,8 @@ async def scrape_set_minifigures(
             total_value_cents=total_value_cents if has_value else None,
         )
 
+    except BricklinkQuotaExceeded as e:
+        return MinifigScrapeResult(success=False, set_item_id=item_id, error=str(e))
     except httpx.HTTPStatusError as e:
         error_msg = f"HTTP {e.response.status_code}: {e.response.reason_phrase}"
         return MinifigScrapeResult(success=False, set_item_id=item_id, error=error_msg)
@@ -455,6 +498,8 @@ async def scrape_catalog_list(
             items=tuple(unique_items),
         )
 
+    except BricklinkQuotaExceeded as e:
+        return CatalogScrapeResult(success=False, error=str(e))
     except httpx.HTTPStatusError as e:
         error_msg = f"HTTP {e.response.status_code}: {e.response.reason_phrase}"
         return CatalogScrapeResult(success=False, error=error_msg)

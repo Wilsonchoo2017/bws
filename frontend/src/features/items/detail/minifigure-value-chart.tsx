@@ -72,7 +72,7 @@ export function MinifigureValueChart({ setNumber }: MinifigureValueChartProps) {
     <div>
       <h2 className='mb-3 text-lg font-semibold'>Minifigure Value Trend</h2>
       <div className='h-64 w-full'>
-        <ResponsiveContainer width='100%' height='100%'>
+        <ResponsiveContainer width='100%' height='100%' minWidth={0} minHeight={0}>
           <AreaChart data={chartData}>
             <CartesianGrid strokeDasharray='3 3' opacity={0.3} />
             <XAxis

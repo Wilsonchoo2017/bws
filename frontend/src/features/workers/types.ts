@@ -10,6 +10,8 @@ export interface WorkerJob {
   completed_at: string | null;
   items_found: number;
   error: string | null;
+  progress: string | null;
+  worker_no: number | null;
 }
 
 export function formatDuration(start: string | null, end: string | null): string {

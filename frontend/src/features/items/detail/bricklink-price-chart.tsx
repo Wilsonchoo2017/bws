@@ -233,7 +233,7 @@ export function BricklinkPriceChart({ setNumber }: BricklinkPriceChartProps) {
       {/* Chart area */}
       <div className='h-72 w-full'>
         {tab === 'monthly-price' && monthlyChart.length > 0 && (
-          <ResponsiveContainer width='100%' height='100%'>
+          <ResponsiveContainer width='100%' height='100%' minWidth={0} minHeight={0}>
             <AreaChart data={monthlyChart}>
               <CartesianGrid strokeDasharray='3 3' opacity={0.3} />
               <XAxis
@@ -272,7 +272,7 @@ export function BricklinkPriceChart({ setNumber }: BricklinkPriceChartProps) {
         )}
 
         {tab === 'monthly-volume' && monthlyChart.length > 0 && (
-          <ResponsiveContainer width='100%' height='100%'>
+          <ResponsiveContainer width='100%' height='100%' minWidth={0} minHeight={0}>
             <BarChart data={monthlyChart}>
               <CartesianGrid strokeDasharray='3 3' opacity={0.3} />
               <XAxis
@@ -300,7 +300,7 @@ export function BricklinkPriceChart({ setNumber }: BricklinkPriceChartProps) {
         )}
 
         {tab === 'snapshots' && snapshotChart.length > 0 && (
-          <ResponsiveContainer width='100%' height='100%'>
+          <ResponsiveContainer width='100%' height='100%' minWidth={0} minHeight={0}>
             <AreaChart data={snapshotChart}>
               <CartesianGrid strokeDasharray='3 3' opacity={0.3} />
               <XAxis

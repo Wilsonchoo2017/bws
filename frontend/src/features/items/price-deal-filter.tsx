@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { Button } from '@/components/ui/button';
 import type { UnifiedItem } from './types';
 
 interface PriceDealFilterProps {
@@ -28,10 +29,12 @@ export function PriceDealFilter({ onFilterChange }: PriceDealFilterProps) {
 
         const truPrice = item.toysrus_price_cents;
         const shopeePrice = item.shopee_price_cents;
+        const muPrice = item.mightyutan_price_cents;
 
         return (
           (truPrice !== null && truPrice <= maxPrice) ||
-          (shopeePrice !== null && shopeePrice <= maxPrice)
+          (shopeePrice !== null && shopeePrice <= maxPrice) ||
+          (muPrice !== null && muPrice <= maxPrice)
         );
       })
     );
@@ -51,37 +54,31 @@ export function PriceDealFilter({ onFilterChange }: PriceDealFilterProps) {
   };
 
   return (
-    <div className='bg-muted/50 flex items-center gap-4 rounded-lg border px-4 py-2.5'>
-      <label className='flex cursor-pointer items-center gap-2 text-sm font-medium'>
-        <input
-          type='checkbox'
-          checked={enabled}
-          onChange={handleToggle}
-          className='accent-primary h-4 w-4 rounded'
-        />
+    <div className='flex items-center gap-3'>
+      <Button
+        variant={enabled ? 'default' : 'outline'}
+        size='default'
+        onClick={handleToggle}
+      >
         Deals Filter
-      </label>
+      </Button>
 
       {enabled && (
-        <>
-          <div className='bg-border h-5 w-px' />
-
-          <label className='flex items-center gap-1.5 text-sm'>
-            <span className='text-muted-foreground whitespace-nowrap'>
-              Retail below BL New by
-            </span>
-            <input
-              type='number'
-              value={threshold}
-              onChange={(e) => handleThresholdChange(e.target.value)}
-              min={0}
-              max={100}
-              step={5}
-              className='border-input bg-background w-16 rounded-md border px-2 py-1 text-center font-mono text-sm'
-            />
-            <span className='text-muted-foreground'>%</span>
-          </label>
-        </>
+        <label className='flex items-center gap-1.5 text-sm'>
+          <span className='text-muted-foreground whitespace-nowrap'>
+            below BL New by
+          </span>
+          <input
+            type='number'
+            value={threshold}
+            onChange={(e) => handleThresholdChange(e.target.value)}
+            min={0}
+            max={100}
+            step={5}
+            className='border-input bg-transparent w-16 rounded-md border px-2 py-1 text-center font-mono text-sm shadow-xs'
+          />
+          <span className='text-muted-foreground'>%</span>
+        </label>
       )}
     </div>
   );

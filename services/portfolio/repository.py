@@ -76,10 +76,14 @@ def list_transactions(
                pt.price_cents, pt.currency, pt.condition, pt.txn_date,
                pt.notes, pt.created_at,
                li.title,
-               COALESCE(li.image_url, 'https://img.bricklink.com/ItemImage/SN/0/' || pt.set_number || '-1.png') AS image_url,
+               CASE
+                   WHEN ia.status = 'downloaded' THEN '/api/images/set/' || pt.set_number
+                   ELSE COALESCE(li.image_url, 'https://img.bricklink.com/ItemImage/SN/0/' || pt.set_number || '-1.png')
+               END AS image_url,
                li.theme
         FROM portfolio_transactions pt
         LEFT JOIN lego_items li ON li.set_number = pt.set_number
+        LEFT JOIN image_assets ia ON ia.asset_type = 'set' AND ia.item_id = pt.set_number
         {where}
         ORDER BY pt.txn_date DESC, pt.id DESC
         LIMIT ? OFFSET ?
@@ -103,10 +107,14 @@ def get_transaction(conn: "DuckDBPyConnection", txn_id: int) -> dict | None:
                pt.price_cents, pt.currency, pt.condition, pt.txn_date,
                pt.notes, pt.created_at,
                li.title,
-               COALESCE(li.image_url, 'https://img.bricklink.com/ItemImage/SN/0/' || pt.set_number || '-1.png') AS image_url,
+               CASE
+                   WHEN ia.status = 'downloaded' THEN '/api/images/set/' || pt.set_number
+                   ELSE COALESCE(li.image_url, 'https://img.bricklink.com/ItemImage/SN/0/' || pt.set_number || '-1.png')
+               END AS image_url,
                li.theme
         FROM portfolio_transactions pt
         LEFT JOIN lego_items li ON li.set_number = pt.set_number
+        LEFT JOIN image_assets ia ON ia.asset_type = 'set' AND ia.item_id = pt.set_number
         WHERE pt.id = ?
         """,
         [txn_id],
@@ -370,7 +378,7 @@ def _latest_prices(
 ) -> dict[str, int]:
     """Get latest market price per set from price_records.
 
-    Priority: shopee > toysrus > bricklink_new.
+    Priority: shopee > toysrus > mightyutan > bricklink_new.
     """
     if not set_numbers:
         return {}
@@ -386,8 +394,9 @@ def _latest_prices(
                            CASE source
                                WHEN 'shopee' THEN 1
                                WHEN 'toysrus' THEN 2
-                               WHEN 'bricklink_new' THEN 3
-                               ELSE 4
+                               WHEN 'mightyutan' THEN 3
+                               WHEN 'bricklink_new' THEN 4
+                               ELSE 5
                            END,
                            recorded_at DESC
                    ) AS rn
@@ -411,11 +420,15 @@ def _item_metadata(
     placeholders = ", ".join(["?"] * len(set_numbers))
     rows = conn.execute(
         f"""
-        SELECT set_number, title,
-               COALESCE(image_url, 'https://img.bricklink.com/ItemImage/SN/0/' || set_number || '-1.png') AS image_url,
-               theme
-        FROM lego_items
-        WHERE set_number IN ({placeholders})
+        SELECT li.set_number, li.title,
+               CASE
+                   WHEN ia.status = 'downloaded' THEN '/api/images/set/' || li.set_number
+                   ELSE COALESCE(li.image_url, 'https://img.bricklink.com/ItemImage/SN/0/' || li.set_number || '-1.png')
+               END AS image_url,
+               li.theme
+        FROM lego_items li
+        LEFT JOIN image_assets ia ON ia.asset_type = 'set' AND ia.item_id = li.set_number
+        WHERE li.set_number IN ({placeholders})
         """,  # noqa: S608
         set_numbers,
     ).fetchall()

@@ -13,10 +13,8 @@ const SIGNALS = [
   { key: 'collector_premium', label: 'Collector Premium', desc: 'Price spread health (bid-ask)' },
   { key: 'theme_growth', label: 'Theme Growth', desc: 'Historical annual theme appreciation rate' },
   { key: 'value_opportunity', label: 'Value Opportunity', desc: 'Buy-the-dip: price below trailing average' },
-  { key: 'minifig_appeal', label: 'Minifig Appeal', desc: 'Minifigure value, exclusivity, and arbitrage' },
   { key: 'price_wall', label: 'Price Wall', desc: 'Inventory clustering above/below average price' },
   { key: 'listing_ratio', label: 'Listing Ratio', desc: 'Months of inventory vs transaction velocity' },
-  { key: 'volume_price_confirm', label: 'Vol-Price Confirm', desc: 'Volume confirms or contradicts price direction' },
   { key: 'new_used_spread', label: 'New-Used Spread', desc: 'Used-to-new price ratio and trend' },
 ] as const;
 

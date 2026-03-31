@@ -28,20 +28,28 @@ export interface UnifiedItem {
   rrp_currency: string | null;
   updated_at: string | null;
   minifig_count: number | null;
+  dimensions: string | null;
   shopee_price_cents: number | null;
   shopee_currency: string | null;
   shopee_url: string | null;
+  shopee_shop_name: string | null;
   shopee_last_seen: string | null;
+  shopee_shop_count: number;
   toysrus_price_cents: number | null;
   toysrus_currency: string | null;
   toysrus_url: string | null;
   toysrus_last_seen: string | null;
+  mightyutan_price_cents: number | null;
+  mightyutan_currency: string | null;
+  mightyutan_url: string | null;
+  mightyutan_last_seen: string | null;
   bricklink_new_cents: number | null;
   bricklink_new_currency: string | null;
   bricklink_new_last_seen: string | null;
   bricklink_used_cents: number | null;
   bricklink_used_currency: string | null;
   bricklink_used_last_seen: string | null;
+  composite_score: number | null;
 }
 
 export interface PriceRecord {
@@ -153,10 +161,8 @@ export interface ItemSignals {
   collector_premium: number | null;
   theme_growth: number | null;
   value_opportunity: number | null;
-  minifig_appeal: number | null;
   price_wall: number | null;
   listing_ratio: number | null;
-  volume_price_confirm: number | null;
   new_used_spread: number | null;
   mod_shelf_life: number;
   mod_subtheme: number;

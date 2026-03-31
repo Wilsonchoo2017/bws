@@ -51,6 +51,7 @@ SOURCE_CONFIGS: dict[SourceId, SourceConfig] = {
             MetadataField.MINIFIG_COUNT,
             MetadataField.DIMENSIONS,
         }),
+        circuit_breaker_cooldown_seconds=3600,  # 1 hour (matches BrickLink quota reset)
     ),
     SourceId.BRICKRANKER: SourceConfig(
         source_id=SourceId.BRICKRANKER,
@@ -90,3 +91,17 @@ def normalize_string(value: str | None) -> str | None:
         return None
     stripped = value.strip()
     return stripped if stripped else None
+
+
+# Placeholder titles that should be treated as missing data.
+PLACEHOLDER_TITLE_PATTERNS: tuple[str, ...] = (
+    "image coming soon",
+)
+
+
+def is_placeholder_title(title: str | None) -> bool:
+    """Return True if the title is None or a known placeholder string."""
+    if title is None:
+        return True
+    normalized = title.strip().lower()
+    return any(pattern in normalized for pattern in PLACEHOLDER_TITLE_PATTERNS)

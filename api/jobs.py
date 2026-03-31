@@ -25,6 +25,7 @@ class Job:
     items: list = field(default_factory=list)
     error: str | None = None
     progress: str | None = None
+    worker_no: int | None = None
 
 
 class JobManager:

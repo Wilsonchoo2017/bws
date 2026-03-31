@@ -32,7 +32,7 @@ def get_items_needing_enrichment(
                li.year_retired, li.parts_count, li.weight, li.image_url,
                li.retiring_soon
         FROM lego_items li
-        WHERE (li.title IS NULL
+        WHERE ((li.title IS NULL OR LOWER(TRIM(li.title)) LIKE '%image coming soon%')
            OR li.theme IS NULL
            OR li.year_released IS NULL
            OR li.parts_count IS NULL

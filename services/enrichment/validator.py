@@ -4,6 +4,7 @@ Pure functions that validate and sanitize field values from sources.
 """
 
 from services.enrichment.config import (
+    is_placeholder_title,
     is_valid_image_url,
     is_valid_parts_count,
     is_valid_year,
@@ -41,7 +42,9 @@ def validate_field(
 
     if field == MetadataField.TITLE:
         if isinstance(value, str):
-            return normalize_string(value)
+            normalized = normalize_string(value)
+            if normalized and not is_placeholder_title(normalized):
+                return normalized
         return None
 
     if field == MetadataField.WEIGHT:
