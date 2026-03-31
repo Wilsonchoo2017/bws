@@ -1,0 +1,134 @@
+"""DuckDB persistence for Keepa snapshots."""
+
+import json
+import logging
+from typing import TYPE_CHECKING
+
+from services.keepa.types import KeepaProductData
+
+if TYPE_CHECKING:
+    from duckdb import DuckDBPyConnection
+
+logger = logging.getLogger("bws.keepa.repository")
+
+
+def _series_to_json(points: tuple) -> str:
+    """Serialize a tuple of KeepaDataPoint to JSON array of [date, value]."""
+    return json.dumps([[p.date, p.value] for p in points])
+
+
+def save_keepa_snapshot(
+    conn: "DuckDBPyConnection", data: KeepaProductData
+) -> int:
+    """Insert a Keepa snapshot row and return the new row ID."""
+    row_id = conn.execute(
+        "SELECT nextval('keepa_snapshots_id_seq')"
+    ).fetchone()[0]
+
+    conn.execute(
+        """
+        INSERT INTO keepa_snapshots (
+            id, set_number, asin, title, keepa_url, scraped_at,
+            current_buy_box_cents, current_amazon_cents, current_new_cents,
+            lowest_ever_cents, highest_ever_cents,
+            amazon_price_json, new_price_json, new_3p_fba_json,
+            new_3p_fbm_json, used_price_json, used_like_new_json,
+            buy_box_json, list_price_json, warehouse_deals_json,
+            collectible_json, sales_rank_json
+        ) VALUES (
+            ?, ?, ?, ?, ?, ?,
+            ?, ?, ?,
+            ?, ?,
+            ?, ?, ?,
+            ?, ?, ?,
+            ?, ?, ?,
+            ?, ?
+        )
+        """,
+        [
+            row_id,
+            data.set_number,
+            data.asin,
+            data.title,
+            data.keepa_url,
+            data.scraped_at,
+            data.current_buy_box_cents,
+            data.current_amazon_cents,
+            data.current_new_cents,
+            data.lowest_ever_cents,
+            data.highest_ever_cents,
+            _series_to_json(data.amazon_price),
+            _series_to_json(data.new_price),
+            _series_to_json(data.new_3p_fba),
+            _series_to_json(data.new_3p_fbm),
+            _series_to_json(data.used_price),
+            _series_to_json(data.used_like_new),
+            _series_to_json(data.buy_box),
+            _series_to_json(data.list_price),
+            _series_to_json(data.warehouse_deals),
+            _series_to_json(data.collectible),
+            _series_to_json(data.sales_rank),
+        ],
+    )
+
+    logger.info("Saved Keepa snapshot id=%d for %s", row_id, data.set_number)
+    return row_id
+
+
+def record_keepa_prices(
+    conn: "DuckDBPyConnection", data: KeepaProductData
+) -> None:
+    """Write current Keepa prices to the unified price_records table."""
+    from services.items.repository import record_price
+
+    if data.current_amazon_cents:
+        record_price(
+            conn,
+            set_number=data.set_number,
+            source="keepa_amazon",
+            price_cents=data.current_amazon_cents,
+            currency="USD",
+            title=data.title,
+            url=data.keepa_url,
+        )
+
+    if data.current_new_cents:
+        record_price(
+            conn,
+            set_number=data.set_number,
+            source="keepa_new",
+            price_cents=data.current_new_cents,
+            currency="USD",
+            title=data.title,
+            url=data.keepa_url,
+        )
+
+    if data.current_buy_box_cents:
+        record_price(
+            conn,
+            set_number=data.set_number,
+            source="keepa_buy_box",
+            price_cents=data.current_buy_box_cents,
+            currency="USD",
+            title=data.title,
+            url=data.keepa_url,
+        )
+
+
+def get_latest_keepa_snapshot(
+    conn: "DuckDBPyConnection", set_number: str
+) -> dict | None:
+    """Get the most recent Keepa snapshot for a set."""
+    row = conn.execute(
+        """
+        SELECT * FROM keepa_snapshots
+        WHERE set_number = ?
+        ORDER BY scraped_at DESC
+        LIMIT 1
+        """,
+        [set_number],
+    ).fetchone()
+    if not row:
+        return None
+    columns = [desc[0] for desc in conn.description]
+    return dict(zip(columns, row))

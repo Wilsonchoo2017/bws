@@ -107,11 +107,9 @@ async def scrape_set(
     if headless is None:
         headless = BRICKECONOMY_CONFIG.headless
 
-    url = f"{BRICKECONOMY_BASE}/set/{set_number}"
-
     try:
         if page is not None:
-            return await _scrape_page(page, url, set_number)
+            return await _scrape_with_search(page, set_number)
 
         async with stealth_browser(
             headless=headless,
@@ -119,7 +117,7 @@ async def scrape_set(
             profile_name="brickeconomy",
         ) as browser:
             p = await new_page(browser)
-            return await _scrape_page(p, url, set_number)
+            return await _scrape_with_search(p, set_number)
 
     except Exception as exc:
         logger.exception("BrickEconomy scrape failed for set: %s", set_number)
@@ -130,38 +128,131 @@ async def scrape_set(
         )
 
 
-async def _scrape_page(page, url: str, set_number: str) -> BrickeconomyScrapeResult:
-    """Internal: load a page and parse it."""
+async def _navigate_and_bypass_cf(page, url: str, set_number: str) -> bool:
+    """Navigate to URL and handle Cloudflare. Returns True if successful."""
     await BRICKECONOMY_RATE_LIMITER.acquire()
 
     logger.info("Navigating to %s", url)
     await page.goto(url, wait_until="domcontentloaded")
     await human_delay(2_000, 4_000)
 
-    # Check for Cloudflare challenge
     if await _detect_cloudflare(page):
         solved = await _wait_for_cloudflare(page, set_number)
         if not solved:
-            return BrickeconomyScrapeResult(
-                set_number=set_number,
-                success=False,
-                error="Cloudflare challenge not solved within timeout",
-            )
-        # Reload after challenge solved
+            return False
         await page.goto(url, wait_until="domcontentloaded")
         await human_delay(2_000, 4_000)
 
-    # Wait for page content to fully load
+    await page.wait_for_load_state("networkidle")
+    await human_delay(1_000, 2_000)
+    return True
+
+
+async def _resolve_set_url(page, set_number: str) -> str | None:
+    """Use BrickEconomy search bar to find the canonical set page URL.
+
+    Navigates to the homepage, types the set number into the search input,
+    submits the ASP.NET form, then finds the correct set link in results.
+
+    Returns the final URL after navigation, or None if not found.
+    """
+    # Navigate to homepage first
+    if not await _navigate_and_bypass_cf(page, BRICKECONOMY_BASE, set_number):
+        return None
+
+    # Check that the search input exists
+    has_search = await page.evaluate(
+        "!!document.getElementById('txtSearchHeader')"
+    )
+    if not has_search:
+        logger.warning("Could not find search input on BrickEconomy homepage")
+        return None
+
+    # Type the set number (just the number part, without -1 suffix)
+    bare_number = set_number.split("-")[0]
+
+    # Set value and submit via JS to bypass any overlays blocking clicks.
+    # ASP.NET form postback causes full page navigation.
+    async with page.expect_navigation(wait_until="domcontentloaded", timeout=30_000):
+        await page.evaluate(
+            """(value) => {
+                const input = document.getElementById('txtSearchHeader');
+                input.value = value;
+                input.dispatchEvent(new Event('input', { bubbles: true }));
+                const btn = document.getElementById('cmdSearchHeader');
+                if (btn) btn.click();
+                else input.closest('form')?.submit();
+            }""",
+            bare_number,
+        )
+
+    await human_delay(2_000, 4_000)
     await page.wait_for_load_state("networkidle")
     await human_delay(1_000, 2_000)
 
-    # Get final URL (after any redirects) and HTML
+    final_url = page.url
+
+    # Check if the search redirected directly to a set page
+    if "/set/" in final_url and bare_number in final_url:
+        logger.info("Search redirected to %s", final_url)
+        return final_url
+
+    # Otherwise we're on a search results page -- find the first matching set link
+    link = await page.evaluate(
+        """(bareNumber) => {
+            const links = document.querySelectorAll('a[href*="/set/"]');
+            for (const a of links) {
+                const href = a.getAttribute('href') || '';
+                if (href.includes('/set/' + bareNumber + '-')
+                    || href.includes('/set/' + bareNumber + '/')) {
+                    return a.href || href;
+                }
+            }
+            // Fallback: first /set/ link matching the number anywhere
+            for (const a of links) {
+                if ((a.href || '').includes(bareNumber)) {
+                    return a.href;
+                }
+            }
+            return null;
+        }""",
+        bare_number,
+    )
+
+    if link:
+        logger.info("Resolved %s via search results -> %s", set_number, link)
+        return link
+
+    logger.warning("Could not find set URL for %s in search results", set_number)
+    return None
+
+
+async def _scrape_with_search(page, set_number: str) -> BrickeconomyScrapeResult:
+    """Resolve the set URL via search bar, then scrape the page."""
+    resolved = await _resolve_set_url(page, set_number)
+    if not resolved:
+        return BrickeconomyScrapeResult(
+            set_number=set_number,
+            success=False,
+            error=f"Could not find set on BrickEconomy: {set_number}",
+        )
+
+    # If _resolve_set_url already landed us on the set page, scrape current content
+    current_url = page.url
+    if "/set/" in current_url:
+        return await _scrape_current_page(page, set_number)
+
+    # Otherwise navigate to the resolved URL
+    return await _scrape_page(page, resolved, set_number)
+
+
+async def _scrape_current_page(page, set_number: str) -> BrickeconomyScrapeResult:
+    """Parse the page currently loaded in the browser."""
     final_url = page.url
     html = await page.content()
-
-    # Check for 404 / not found
     title = await page.title()
-    if "not found" in title.lower() or "404" in title:
+
+    if _is_not_found(title, final_url):
         return BrickeconomyScrapeResult(
             set_number=set_number,
             success=False,
@@ -183,6 +274,29 @@ async def _scrape_page(page, url: str, set_number: str) -> BrickeconomyScrapeRes
         success=True,
         snapshot=snapshot,
     )
+
+
+def _is_not_found(title: str, url: str) -> bool:
+    """Check if the page is a 404 or search/not-found page."""
+    t = title.lower()
+    return (
+        "not found" in t
+        or "404" in t
+        or "search" in t
+        or "/search" in url
+    )
+
+
+async def _scrape_page(page, url: str, set_number: str) -> BrickeconomyScrapeResult:
+    """Internal: navigate to a known set URL and parse it."""
+    if not await _navigate_and_bypass_cf(page, url, set_number):
+        return BrickeconomyScrapeResult(
+            set_number=set_number,
+            success=False,
+            error="Cloudflare challenge not solved within timeout",
+        )
+
+    return await _scrape_current_page(page, set_number)
 
 
 async def scrape_batch(

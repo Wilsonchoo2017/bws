@@ -10,13 +10,30 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import type { ItemDetail, PriceRecord } from '../types';
+import type { BuyRating, ItemDetail, PriceRecord } from '../types';
 import { formatPrice } from '../types';
 import { KellyPanel } from '../kelly-panel';
 import { SignalsPanel } from '../signals-table';
+import { BrickeconomyPanel } from './brickeconomy-panel';
 import { BricklinkPriceChart } from './bricklink-price-chart';
+import { KeepaPanel } from './keepa-panel';
 import { MinifiguresPanel } from './minifigures-panel';
 import { MinifigureValueChart } from './minifigure-value-chart';
+
+const BUY_RATING_OPTIONS: {
+  value: BuyRating;
+  label: string;
+  color: string;
+}[] = [
+  { value: 1, label: 'Best Buy', color: 'bg-green-100 text-green-800 border-green-300 dark:bg-green-900/30 dark:text-green-300 dark:border-green-700' },
+  { value: 2, label: 'Good Buy', color: 'bg-blue-100 text-blue-800 border-blue-300 dark:bg-blue-900/30 dark:text-blue-300 dark:border-blue-700' },
+  { value: 3, label: 'Bad Buy', color: 'bg-orange-100 text-orange-800 border-orange-300 dark:bg-orange-900/30 dark:text-orange-300 dark:border-orange-700' },
+  { value: 4, label: 'Worst Buy', color: 'bg-red-100 text-red-800 border-red-300 dark:bg-red-900/30 dark:text-red-300 dark:border-red-700' },
+];
+
+function getBuyRatingOption(rating: BuyRating) {
+  return BUY_RATING_OPTIONS.find((o) => o.value === rating) ?? BUY_RATING_OPTIONS[0];
+}
 
 const ENRICH_SOURCES = [
   { id: null, label: 'All Sources' },
@@ -29,6 +46,9 @@ const SOURCE_LABELS: Record<string, string> = {
   bricklink_new: 'Bricklink (New)',
   bricklink_used: 'Bricklink (Used)',
   toysrus: 'Toys R Us MY',
+  keepa_amazon: 'Keepa (Amazon)',
+  keepa_new: 'Keepa (New)',
+  keepa_buy_box: 'Keepa (Buy Box)',
 };
 
 function getSourceUrl(source: string, record: PriceRecord, setNumber: string): string | null {
@@ -48,7 +68,13 @@ const SOURCE_COLORS: Record<string, string> = {
   bricklink_used:
     'bg-cyan-100 text-cyan-800 dark:bg-cyan-900/30 dark:text-cyan-300',
   toysrus:
-    'bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-300'
+    'bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-300',
+  keepa_amazon:
+    'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300',
+  keepa_new:
+    'bg-rose-100 text-rose-800 dark:bg-rose-900/30 dark:text-rose-300',
+  keepa_buy_box:
+    'bg-gray-100 text-gray-800 dark:bg-gray-900/30 dark:text-gray-300',
 };
 
 interface ItemDetailViewProps {
@@ -125,6 +151,72 @@ export function ItemDetailView({ setNumber }: ItemDetailViewProps) {
     }
   };
 
+  const handleBrickeconomyScrape = async () => {
+    setEnrichStatus('loading');
+    setEnrichMessage(null);
+
+    try {
+      const res = await fetch('/api/scrape/run', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          scraperId: 'brickeconomy',
+          url: setNumber,
+        }),
+      });
+      const json = await res.json();
+
+      if (!json.success && !json.job_id) {
+        setEnrichStatus('error');
+        setEnrichMessage(json.error ?? json.detail ?? 'BrickEconomy scrape failed');
+        return;
+      }
+
+      setEnrichStatus('success');
+      setEnrichMessage(
+        `BrickEconomy scrape queued (${json.job_id})`
+      );
+    } catch (err) {
+      setEnrichStatus('error');
+      setEnrichMessage(
+        err instanceof Error ? err.message : 'Failed to start BrickEconomy scrape'
+      );
+    }
+  };
+
+  const handleKeepaScrape = async () => {
+    setEnrichStatus('loading');
+    setEnrichMessage(null);
+
+    try {
+      const res = await fetch('/api/scrape/run', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          scraperId: 'keepa',
+          url: setNumber,
+        }),
+      });
+      const json = await res.json();
+
+      if (!json.success && !json.job_id) {
+        setEnrichStatus('error');
+        setEnrichMessage(json.error ?? json.detail ?? 'Keepa scrape failed');
+        return;
+      }
+
+      setEnrichStatus('success');
+      setEnrichMessage(
+        `Keepa scrape queued (${json.job_id})`
+      );
+    } catch (err) {
+      setEnrichStatus('error');
+      setEnrichMessage(
+        err instanceof Error ? err.message : 'Failed to start Keepa scrape'
+      );
+    }
+  };
+
   if (loading) {
     return (
       <div className='flex h-96 items-center justify-center'>
@@ -189,6 +281,39 @@ export function ItemDetailView({ setNumber }: ItemDetailViewProps) {
             {item.dimensions && <span>{item.dimensions}</span>}
           </div>
 
+          {/* Buy rating */}
+          <div className='mt-3 flex items-center gap-2'>
+            {BUY_RATING_OPTIONS.map((opt) => {
+              const isActive = item.buy_rating === opt.value;
+              return (
+                <button
+                  key={opt.value}
+                  onClick={async () => {
+                    const newRating = isActive ? null : opt.value;
+                    const res = await fetch(`/api/items/${setNumber}/buy-rating`, {
+                      method: 'PUT',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ rating: newRating }),
+                    });
+                    const json = await res.json();
+                    if (json.success) {
+                      setItem((prev) =>
+                        prev ? { ...prev, buy_rating: newRating } : prev
+                      );
+                    }
+                  }}
+                  className={`rounded-full border px-3 py-1 text-xs font-medium transition-all ${
+                    isActive
+                      ? opt.color
+                      : 'border-border text-muted-foreground hover:border-foreground/30'
+                  }`}
+                >
+                  {opt.label}
+                </button>
+              );
+            })}
+          </div>
+
           {/* Enrich dropdown */}
           <div className='mt-3 flex items-center gap-3'>
             <DropdownMenu>
@@ -212,6 +337,13 @@ export function ItemDetailView({ setNumber }: ItemDetailViewProps) {
                     {s.label}
                   </DropdownMenuItem>
                 ))}
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onClick={handleBrickeconomyScrape}>
+                  BrickEconomy
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={handleKeepaScrape}>
+                  Keepa
+                </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
             {enrichMessage && (
@@ -271,6 +403,12 @@ export function ItemDetailView({ setNumber }: ItemDetailViewProps) {
 
       {/* Minifigure value trend chart */}
       <MinifigureValueChart setNumber={setNumber} />
+
+      {/* Keepa Amazon price history */}
+      <KeepaPanel setNumber={setNumber} />
+
+      {/* BrickEconomy valuation panel */}
+      <BrickeconomyPanel setNumber={setNumber} />
 
       {/* BrickLink price analysis charts */}
       <BricklinkPriceChart setNumber={setNumber} />

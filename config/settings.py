@@ -179,6 +179,26 @@ class CarousellSettings:
 CAROUSELL_CONFIG = CarousellSettings()
 
 
+@dataclass(frozen=True)
+class KeepaSettings:
+    """Keepa browser automation configuration."""
+
+    base_url: str = "https://keepa.com"
+    headless: bool = False  # visible browser needed for captcha
+    timeout_ms: int = 30_000
+    user_data_dir: str = str(Path.home() / ".bws" / "keepa-profile")
+    viewport_width: int = 1366
+    viewport_height: int = 768
+    locale: str = "en-US"
+    captcha_timeout_s: int = 120
+    min_delay_ms: int = 5_000
+    max_delay_ms: int = 15_000
+    max_requests_per_hour: int = 30  # conservative
+
+
+KEEPA_CONFIG = KeepaSettings()
+
+
 def calculate_backoff(attempt: int) -> float:
     """Calculate exponential backoff delay in seconds.
 
@@ -271,3 +291,4 @@ BRICKECONOMY_CONFIG = BrickeconomySettings()
 BRICKECONOMY_RATE_LIMITER = HourlyRateLimiter(
     BRICKECONOMY_CONFIG.max_requests_per_hour
 )
+KEEPA_RATE_LIMITER = HourlyRateLimiter(KEEPA_CONFIG.max_requests_per_hour)

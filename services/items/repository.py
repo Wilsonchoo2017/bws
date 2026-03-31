@@ -103,6 +103,42 @@ def record_price(
     )
 
 
+def get_all_items_lite(conn: "DuckDBPyConnection") -> list[dict]:
+    """Get all LEGO items with basic catalog data only (no price joins).
+
+    This is the fast path for initial page load -- prices are fetched separately.
+    """
+    result = conn.execute("""
+        SELECT
+            li.set_number,
+            li.title,
+            li.theme,
+            li.year_released,
+            li.year_retired,
+            li.retiring_soon,
+            li.watchlist,
+            CASE
+                WHEN ia.status = 'downloaded' THEN '/api/images/set/' || li.set_number
+                ELSE COALESCE(li.image_url, 'https://img.bricklink.com/ItemImage/SN/0/' || li.set_number || '-1.png')
+            END AS image_url,
+            li.rrp_cents,
+            li.rrp_currency,
+            li.updated_at,
+            li.minifig_count,
+            li.dimensions
+        FROM lego_items li
+        LEFT JOIN image_assets ia ON ia.asset_type = 'set' AND ia.item_id = li.set_number
+        ORDER BY li.updated_at DESC
+    """).fetchall()
+
+    columns = [
+        "set_number", "title", "theme", "year_released", "year_retired",
+        "retiring_soon", "watchlist", "image_url", "rrp_cents", "rrp_currency",
+        "updated_at", "minifig_count", "dimensions",
+    ]
+    return [dict(zip(columns, row)) for row in result]
+
+
 def get_all_items(conn: "DuckDBPyConnection") -> list[dict]:
     """Get all LEGO items with best/latest price from each retail source.
 
@@ -152,6 +188,7 @@ def get_all_items(conn: "DuckDBPyConnection") -> list[dict]:
             li.year_released,
             li.year_retired,
             li.retiring_soon,
+            li.watchlist,
             CASE
                 WHEN ia.status = 'downloaded' THEN '/api/images/set/' || li.set_number
                 ELSE COALESCE(li.image_url, 'https://img.bricklink.com/ItemImage/SN/0/' || li.set_number || '-1.png')
@@ -193,7 +230,7 @@ def get_all_items(conn: "DuckDBPyConnection") -> list[dict]:
     """).fetchall()  # noqa: S608
 
     columns = [
-        "set_number", "title", "theme", "year_released", "year_retired", "retiring_soon", "image_url",
+        "set_number", "title", "theme", "year_released", "year_retired", "retiring_soon", "watchlist", "image_url",
         "rrp_cents", "rrp_currency", "updated_at", "minifig_count", "dimensions",
         "shopee_price_cents", "shopee_currency", "shopee_url", "shopee_shop_name",
         "shopee_last_seen", "shopee_shop_count",
@@ -243,3 +280,55 @@ def get_item_detail(conn: "DuckDBPyConnection", set_number: str) -> dict | None:
     ]
     item["prices"] = [dict(zip(price_columns, p)) for p in prices]
     return item
+
+
+def get_unscraped_priority_items(conn: "DuckDBPyConnection") -> list[str]:
+    """Return set numbers that are on watchlist or in portfolio but have no BrickEconomy snapshot."""
+    rows = conn.execute(
+        """
+        SELECT DISTINCT li.set_number
+        FROM lego_items li
+        LEFT JOIN brickeconomy_snapshots bs ON bs.set_number = li.set_number
+        WHERE bs.set_number IS NULL
+          AND (
+              li.watchlist = TRUE
+              OR li.set_number IN (SELECT DISTINCT set_number FROM portfolio_transactions)
+          )
+        ORDER BY li.set_number
+        """,
+    ).fetchall()
+    return [r[0] for r in rows]
+
+
+def update_buy_rating(
+    conn: "DuckDBPyConnection", set_number: str, rating: int | None
+) -> int | None:
+    """Set the buy rating for a lego_items row. Returns new value, or None if not found.
+
+    Valid ratings: 1=best, 2=good, 3=bad, 4=worst, None=unrated.
+    """
+    row = conn.execute(
+        "SELECT 1 FROM lego_items WHERE set_number = ?", [set_number]
+    ).fetchone()
+    if row is None:
+        return None
+    conn.execute(
+        "UPDATE lego_items SET buy_rating = ?, updated_at = now() WHERE set_number = ?",
+        [rating, set_number],
+    )
+    return rating
+
+
+def toggle_watchlist(conn: "DuckDBPyConnection", set_number: str) -> bool | None:
+    """Toggle the watchlist flag for a lego_items row. Returns new value, or None if not found."""
+    row = conn.execute(
+        "SELECT watchlist FROM lego_items WHERE set_number = ?", [set_number]
+    ).fetchone()
+    if row is None:
+        return None
+    new_value = not bool(row[0])
+    conn.execute(
+        "UPDATE lego_items SET watchlist = ?, updated_at = now() WHERE set_number = ?",
+        [new_value, set_number],
+    )
+    return new_value

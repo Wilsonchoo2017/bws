@@ -23,6 +23,7 @@ export interface UnifiedItem {
   year_released: number | null;
   year_retired: number | null;
   retiring_soon: boolean | null;
+  watchlist: boolean;
   image_url: string | null;
   rrp_cents: number | null;
   rrp_currency: string | null;
@@ -63,6 +64,8 @@ export interface PriceRecord {
   recorded_at: string;
 }
 
+export type BuyRating = 1 | 2 | 3 | 4;
+
 export interface ItemDetail {
   set_number: string;
   title: string | null;
@@ -73,6 +76,7 @@ export interface ItemDetail {
   minifig_count: number | null;
   dimensions: string | null;
   image_url: string | null;
+  buy_rating: BuyRating | null;
   prices: PriceRecord[];
 }
 
@@ -192,6 +196,58 @@ export interface KellySizing {
   recommended_amount_cents: number | null;
   confidence: 'high' | 'moderate' | 'low' | 'insufficient';
   warnings: string[];
+}
+
+export interface BrickeconomyData {
+  set_number: string;
+  scraped_at: string;
+  title: string | null;
+  theme: string | null;
+  subtheme: string | null;
+  year_released: number | null;
+  pieces: number | null;
+  minifigs: number | null;
+  availability: string | null;
+  brickeconomy_url: string | null;
+  rrp_usd_cents: number | null;
+  rrp_gbp_cents: number | null;
+  rrp_eur_cents: number | null;
+  value_new_cents: number | null;
+  value_used_cents: number | null;
+  annual_growth_pct: number | null;
+  rating_value: string | null;
+  review_count: number | null;
+  future_estimate_cents: number | null;
+  future_estimate_date: string | null;
+  distribution_mean_cents: number | null;
+  distribution_stddev_cents: number | null;
+  value_chart_json: [string, number][] | null;
+  sales_trend_json: [string, number][] | null;
+  candlestick_json: [string, number, number, number, number][] | null;
+}
+
+export interface KeepaData {
+  set_number: string;
+  asin: string | null;
+  title: string | null;
+  keepa_url: string | null;
+  scraped_at: string;
+  current_buy_box_cents: number | null;
+  current_amazon_cents: number | null;
+  current_new_cents: number | null;
+  lowest_ever_cents: number | null;
+  highest_ever_cents: number | null;
+  amazon_price_json: string | [string, number][] | null;
+  new_price_json: string | [string, number][] | null;
+  new_3p_fba_json: string | [string, number][] | null;
+  new_3p_fbm_json: string | [string, number][] | null;
+  used_price_json: string | [string, number][] | null;
+  used_like_new_json: string | [string, number][] | null;
+  buy_box_json: string | [string, number][] | null;
+  list_price_json: string | [string, number][] | null;
+  warehouse_deals_json: string | [string, number][] | null;
+  collectible_json: string | [string, number][] | null;
+  sales_rank_json: string | [string, number][] | null;
 }
 
 export function formatPrice(

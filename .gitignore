@@ -1,7 +1,9 @@
+# Environment
 .env
 .env.local
 .env.*.local
 
+# Python
 __pycache__/
 *.py[cod]
 *$py.class
@@ -13,7 +15,34 @@ dist/
 *.egg
 venv/
 .venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+htmlcov/
+.coverage
+.coverage.*
+*.cover
 
-.DS_Store
+# Node / Frontend
+node_modules/
+.next/
+.turbo/
+*.tsbuildinfo
+
+# IDE
+.vscode/
+.idea/
 *.swp
 *.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Database
+*.duckdb
+*.duckdb.wal
+
+# Claude Code
+.claude/settings.local.json

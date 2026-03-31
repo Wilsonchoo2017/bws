@@ -180,6 +180,7 @@ CREATE TABLE IF NOT EXISTS lego_items (
     rrp_cents INTEGER,
     rrp_currency VARCHAR DEFAULT 'MYR',
     retiring_soon BOOLEAN DEFAULT FALSE,
+    watchlist BOOLEAN DEFAULT FALSE,
     last_enriched_at TIMESTAMP,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -317,6 +318,33 @@ CREATE TABLE IF NOT EXISTS brickranker_items (
 );
 """
 
+KEEPA_SNAPSHOTS_DDL = """
+CREATE TABLE IF NOT EXISTS keepa_snapshots (
+    id INTEGER PRIMARY KEY,
+    set_number VARCHAR NOT NULL,
+    asin VARCHAR,
+    title VARCHAR,
+    keepa_url VARCHAR,
+    scraped_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    current_buy_box_cents INTEGER,
+    current_amazon_cents INTEGER,
+    current_new_cents INTEGER,
+    lowest_ever_cents INTEGER,
+    highest_ever_cents INTEGER,
+    amazon_price_json VARCHAR,
+    new_price_json VARCHAR,
+    new_3p_fba_json VARCHAR,
+    new_3p_fbm_json VARCHAR,
+    used_price_json VARCHAR,
+    used_like_new_json VARCHAR,
+    buy_box_json VARCHAR,
+    list_price_json VARCHAR,
+    warehouse_deals_json VARCHAR,
+    collectible_json VARCHAR,
+    sales_rank_json VARCHAR
+);
+"""
+
 # Sequence tables for auto-increment IDs
 BRICKECONOMY_SNAPSHOTS_DDL = """
 CREATE TABLE IF NOT EXISTS brickeconomy_snapshots (
@@ -372,6 +400,7 @@ CREATE SEQUENCE IF NOT EXISTS portfolio_transactions_id_seq;
 CREATE SEQUENCE IF NOT EXISTS portfolio_snapshots_id_seq;
 CREATE SEQUENCE IF NOT EXISTS image_assets_id_seq;
 CREATE SEQUENCE IF NOT EXISTS brickeconomy_snapshots_id_seq;
+CREATE SEQUENCE IF NOT EXISTS keepa_snapshots_id_seq;
 """
 
 # Index creation statements
@@ -442,6 +471,10 @@ CREATE INDEX IF NOT EXISTS idx_be_snapshots_set
     ON brickeconomy_snapshots(set_number, scraped_at);
 CREATE INDEX IF NOT EXISTS idx_be_snapshots_scraped
     ON brickeconomy_snapshots(scraped_at);
+CREATE INDEX IF NOT EXISTS idx_keepa_snapshots_set
+    ON keepa_snapshots(set_number, scraped_at);
+CREATE INDEX IF NOT EXISTS idx_keepa_snapshots_scraped
+    ON keepa_snapshots(scraped_at);
 """
 
 ALL_DDL = [
@@ -467,6 +500,7 @@ ALL_DDL = [
     PORTFOLIO_TRANSACTIONS_DDL,
     PORTFOLIO_SNAPSHOTS_DDL,
     BRICKECONOMY_SNAPSHOTS_DDL,
+    KEEPA_SNAPSHOTS_DDL,
     INDEXES_DDL,
 ]
 
@@ -525,6 +559,12 @@ def _migrate_lego_items(conn: "DuckDBPyConnection") -> None:
         conn.execute("ALTER TABLE lego_items ADD COLUMN minifig_count INTEGER")
     if "dimensions" not in existing:
         conn.execute("ALTER TABLE lego_items ADD COLUMN dimensions VARCHAR")
+    if "watchlist" not in existing:
+        conn.execute(
+            "ALTER TABLE lego_items ADD COLUMN watchlist BOOLEAN DEFAULT FALSE"
+        )
+    if "buy_rating" not in existing:
+        conn.execute("ALTER TABLE lego_items ADD COLUMN buy_rating INTEGER")
 
 
 def _migrate_shopee_products(conn: "DuckDBPyConnection") -> None:
@@ -564,6 +604,7 @@ _SEQUENCE_TABLE_MAP = [
     ("portfolio_snapshots_id_seq", "portfolio_snapshots"),
     ("image_assets_id_seq", "image_assets"),
     ("brickeconomy_snapshots_id_seq", "brickeconomy_snapshots"),
+    ("keepa_snapshots_id_seq", "keepa_snapshots"),
 ]
 
 
@@ -677,6 +718,7 @@ def _rebuild_table(conn: "DuckDBPyConnection", table_name: str) -> None:
         "portfolio_snapshots": PORTFOLIO_SNAPSHOTS_DDL,
         "image_assets": IMAGE_ASSETS_DDL,
         "brickeconomy_snapshots": BRICKECONOMY_SNAPSHOTS_DDL,
+        "keepa_snapshots": KEEPA_SNAPSHOTS_DDL,
     }
 
     ddl = table_ddl_map.get(table_name)
@@ -773,6 +815,8 @@ def drop_all_tables(conn: "DuckDBPyConnection") -> None:
     conn.execute("DROP SEQUENCE IF EXISTS portfolio_snapshots_id_seq;")
     conn.execute("DROP TABLE IF EXISTS brickeconomy_snapshots;")
     conn.execute("DROP SEQUENCE IF EXISTS brickeconomy_snapshots_id_seq;")
+    conn.execute("DROP TABLE IF EXISTS keepa_snapshots;")
+    conn.execute("DROP SEQUENCE IF EXISTS keepa_snapshots_id_seq;")
 
 
 def get_table_stats(conn: "DuckDBPyConnection") -> dict[str, int]:
@@ -797,6 +841,7 @@ def get_table_stats(conn: "DuckDBPyConnection") -> dict[str, int]:
         "portfolio_snapshots",
         "image_assets",
         "brickeconomy_snapshots",
+        "keepa_snapshots",
     ]
     stats = {}
     for table in tables:

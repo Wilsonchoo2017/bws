@@ -48,7 +48,7 @@ class BrickeconomySnapshot:
     rating_value: str | None = None
     review_count: int | None = None
 
-    # Future estimate
+    # Future estimate (not scraped -- BrickEconomy forecast, not real data)
     future_estimate_cents: int | None = None
     future_estimate_date: str | None = None
 
@@ -100,12 +100,10 @@ _RE_CANDLESTICK_ROW = re.compile(
     r"\s*([\d.]+)\s*,\s*([\d.]+)\s*,\s*([\d.]+)\s*,\s*([\d.]+)"
 )
 
-# Distribution: mean and stddev near drawSalesListChart
-_RE_DISTRIBUTION_MEAN = re.compile(
-    r"(?:mean|mu)\s*(?:=|:)\s*([\d.]+)", re.IGNORECASE
-)
-_RE_DISTRIBUTION_STDDEV = re.compile(
-    r"(?:stddev|sigma|sd)\s*(?:=|:)\s*([\d.]+)", re.IGNORECASE
+# Distribution: mean and stddev passed as args to density() call in the for loop
+# Pattern: density(i, 148.718..., 32.676...)
+_RE_DENSITY_CALL = re.compile(
+    r"density\(\w+\s*,\s*([\d.]+)\s*,\s*([\d.]+)\s*\)"
 )
 
 # Sparkline growth data (90-day)
@@ -169,7 +167,10 @@ def _parse_json_ld(soup: BeautifulSoup) -> dict:
 
 
 def _parse_value_chart(html: str) -> tuple[tuple[str, int], ...]:
-    """Extract Set Value (New/Sealed) time series from drawChart()."""
+    """Extract Set Value (New/Sealed) time series from drawChart().
+
+    Filters out future/forecast data points (dates beyond today).
+    """
     match = _RE_VALUE_CHART.search(html)
     if not match:
         logger.debug("Value chart addRows block not found")
@@ -177,6 +178,7 @@ def _parse_value_chart(html: str) -> tuple[tuple[str, int], ...]:
 
     rows_block = match.group(1)
     points: list[tuple[str, int]] = []
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
     for m in _RE_DATE_PRICE.finditer(rows_block):
         year, month_0, day, price = (
@@ -186,6 +188,8 @@ def _parse_value_chart(html: str) -> tuple[tuple[str, int], ...]:
             float(m.group(4)),
         )
         iso_date = _js_date_to_iso(year, month_0, day)
+        if iso_date > today:
+            continue
         points.append((iso_date, _dollars_to_cents(price)))
 
     return tuple(points)
@@ -237,25 +241,18 @@ def _parse_candlestick(html: str) -> tuple[tuple[str, int, int, int, int], ...]:
 
 
 def _parse_distribution(html: str) -> tuple[int | None, int | None]:
-    """Extract Gaussian distribution mean and stddev from drawSalesListChart()."""
-    # Look for the distribution function block
-    dist_block_match = re.search(
-        r"function\s+drawSalesListChart\s*\(\)\s*\{(.*?)\n\s*\}",
-        html,
-        re.DOTALL,
-    )
-    if not dist_block_match:
+    """Extract Gaussian distribution mean and stddev from drawSalesListChart().
+
+    The density function is called as: density(i, MEAN, STDDEV) inside a for loop.
+    """
+    # Look for the density() call with mean and stddev as literal arguments
+    match = _RE_DENSITY_CALL.search(html)
+    if not match:
+        logger.debug("Distribution density() call not found")
         return None, None
 
-    block = dist_block_match.group(1)
-
-    mean_match = _RE_DISTRIBUTION_MEAN.search(block)
-    stddev_match = _RE_DISTRIBUTION_STDDEV.search(block)
-
-    mean_cents = _dollars_to_cents(float(mean_match.group(1))) if mean_match else None
-    stddev_cents = (
-        _dollars_to_cents(float(stddev_match.group(1))) if stddev_match else None
-    )
+    mean_cents = _dollars_to_cents(float(match.group(1)))
+    stddev_cents = _dollars_to_cents(float(match.group(2)))
 
     return mean_cents, stddev_cents
 
@@ -289,90 +286,116 @@ def _parse_future_estimate(html: str) -> tuple[int | None, str | None]:
 # ---------------------------------------------------------------------------
 
 
-def _parse_set_details(soup: BeautifulSoup) -> dict:
-    """Extract set metadata from HTML sections."""
-    details: dict = {}
+def _parse_sidebar(soup: BeautifulSoup) -> dict:
+    """Extract all data from the col-md-4 sidebar containing Set Details.
 
-    # Look for detail rows (typically dt/dd or label/value pairs)
-    for row in soup.select(".row.no-margin"):
-        label_el = row.select_one(".col-xs-6:first-child, .text-muted")
-        value_el = row.select_one(".col-xs-6:last-child, .col-xs-6 + .col-xs-6")
-        if not label_el or not value_el:
-            continue
+    The sidebar has a clear key|value sequence after "Set Details":
+    Set number, Name, Theme, Subtheme, Year, Availability, Pieces, Minifigs,
+    then Set Pricing section with retail price, value, growth, etc.
+    """
+    result: dict = {}
 
-        label = label_el.get_text(strip=True).lower()
-        value = value_el.get_text(strip=True)
+    sidebar = None
+    for div in soup.find_all("div", class_="col-md-4"):
+        text = div.get_text("|", strip=True)
+        if "Set Details" in text:
+            sidebar = text
+            break
 
-        if "piece" in label:
-            match = re.search(r"([\d,]+)", value)
-            if match:
-                details["pieces"] = int(match.group(1).replace(",", ""))
-        elif "minifig" in label:
-            match = re.search(r"(\d+)", value)
-            if match:
-                details["minifigs"] = int(match.group(1))
-        elif "theme" in label and "subtheme" not in label:
-            details["theme"] = value
-        elif "subtheme" in label:
-            details["subtheme"] = value
-        elif "year" in label:
-            match = re.search(r"(\d{4})", value)
-            if match:
-                details["year_released"] = int(match.group(1))
-        elif "availab" in label or "status" in label:
-            details["availability"] = value
+    if not sidebar:
+        logger.debug("Sidebar with Set Details not found")
+        return result
 
-    # Fallback: look for availability in specific sections
-    if "availability" not in details:
-        avail_el = soup.find(string=re.compile(r"Retired|Available|Exclusive"))
-        if avail_el:
-            text = avail_el.strip()
-            if text in ("Retired", "Available", "Exclusive"):
-                details["availability"] = text
+    tokens = [t.strip() for t in sidebar.split("|") if t.strip()]
 
-    return details
+    def _get_after(label: str) -> str | None:
+        """Get the token immediately after a label."""
+        for i, tok in enumerate(tokens):
+            if tok.lower() == label.lower() and i + 1 < len(tokens):
+                return tokens[i + 1]
+        return None
+
+    # Set details
+    result["theme"] = _get_after("Theme")
+    result["subtheme"] = _get_after("Subtheme")
+
+    year_str = _get_after("Year")
+    if year_str:
+        m = re.search(r"(\d{4})", year_str)
+        if m:
+            result["year_released"] = int(m.group(1))
+
+    result["availability"] = _get_after("Availability")
+
+    pieces_str = _get_after("Pieces")
+    if pieces_str:
+        m = re.search(r"([\d,]+)", pieces_str)
+        if m:
+            result["pieces"] = int(m.group(1).replace(",", ""))
+
+    minifigs_str = _get_after("Minifigs")
+    if minifigs_str:
+        m = re.search(r"(\d+)", minifigs_str)
+        if m:
+            result["minifigs"] = int(m.group(1))
+
+    # Retail price (USD) -- appears after "Retail price" or "retail price"
+    retail_str = _get_after("Retail price")
+    if not retail_str:
+        retail_str = _get_after("retail price")
+    if retail_str:
+        m = _RE_DOLLAR_AMOUNT.search(retail_str)
+        if m:
+            result["rrp_usd_cents"] = _dollars_to_cents(
+                float(m.group(1).replace(",", ""))
+            )
+
+    # Current new/sealed value
+    # Look for "New/Sealed" then "Value" then price
+    for i, tok in enumerate(tokens):
+        if tok == "New/Sealed" and i + 2 < len(tokens) and tokens[i + 1] == "Value":
+            m = _RE_DOLLAR_AMOUNT.search(tokens[i + 2])
+            if m:
+                result["value_new_cents"] = _dollars_to_cents(
+                    float(m.group(1).replace(",", ""))
+                )
+            break
+
+    # Used value
+    for i, tok in enumerate(tokens):
+        if tok == "Used" and i + 2 < len(tokens) and tokens[i + 1] == "Value":
+            m = _RE_DOLLAR_AMOUNT.search(tokens[i + 2])
+            if m:
+                result["value_used_cents"] = _dollars_to_cents(
+                    float(m.group(1).replace(",", ""))
+                )
+            break
+
+    # Annual growth
+    annual_str = _get_after("Annual growth")
+    if annual_str:
+        m = re.search(r"([+-]?\d+\.?\d*)", annual_str)
+        if m:
+            result["annual_growth_pct"] = float(m.group(1))
+
+    return result
 
 
-def _parse_retail_prices(soup: BeautifulSoup) -> dict:
-    """Extract retail/RRP prices from the Retail Price section."""
-    prices: dict = {}
+def _parse_rrp_gbp_eur(soup: BeautifulSoup) -> tuple[int | None, int | None]:
+    """Extract GBP and EUR retail prices from the page."""
     text = soup.get_text()
 
-    # USD RRP
-    usd_match = re.search(r"(?:RRP|MSRP|Retail)[^$]*\$([\d,.]+)", text)
-    if usd_match:
-        prices["rrp_usd_cents"] = _dollars_to_cents(
-            float(usd_match.group(1).replace(",", ""))
-        )
-
-    # GBP RRP
-    gbp_match = re.search(r"\xa3([\d,.]+)", text)
+    gbp_cents = None
+    gbp_match = re.search(r"United Kingdom[^£]*£([\d,.]+)", text)
     if gbp_match:
-        prices["rrp_gbp_cents"] = _dollars_to_cents(
-            float(gbp_match.group(1).replace(",", ""))
-        )
+        gbp_cents = _dollars_to_cents(float(gbp_match.group(1).replace(",", "")))
 
-    # EUR RRP
-    eur_match = re.search(r"\u20ac([\d,.]+)", text)
+    eur_cents = None
+    eur_match = re.search(r"Europe[^€]*€([\d,.]+)", text)
     if eur_match:
-        prices["rrp_eur_cents"] = _dollars_to_cents(
-            float(eur_match.group(1).replace(",", ""))
-        )
+        eur_cents = _dollars_to_cents(float(eur_match.group(1).replace(",", "")))
 
-    return prices
-
-
-def _parse_annual_growth(soup: BeautifulSoup) -> float | None:
-    """Extract annual growth percentage."""
-    text = soup.get_text()
-    match = re.search(r"([-+]?\d+\.?\d*)%\s*(?:annual|yearly|growth)", text, re.I)
-    if match:
-        return float(match.group(1))
-    # Try reverse: "annual growth X%"
-    match = re.search(r"(?:annual|yearly)\s+growth[^%]*?([-+]?\d+\.?\d*)%", text, re.I)
-    if match:
-        return float(match.group(1))
-    return None
+    return gbp_cents, eur_cents
 
 
 def _parse_value_from_meta(soup: BeautifulSoup) -> int | None:
@@ -412,7 +435,12 @@ def parse_brickeconomy_page(
     # JSON-LD structured data
     ld = _parse_json_ld(soup)
     title = ld.get("name")
-    image_url = ld.get("image")
+    image_raw = ld.get("image")
+    # image can be a string or a list of strings
+    if isinstance(image_raw, list):
+        image_url = image_raw[0] if image_raw else None
+    else:
+        image_url = image_raw
 
     # Rating from JSON-LD
     agg_rating = ld.get("aggregateRating", {})
@@ -420,9 +448,8 @@ def parse_brickeconomy_page(
     review_count_raw = agg_rating.get("reviewCount")
     review_count = int(review_count_raw) if review_count_raw else None
 
-    # HTML metadata
-    details = _parse_set_details(soup)
-    retail = _parse_retail_prices(soup)
+    # Sidebar metadata (set details, pricing, growth)
+    sidebar = _parse_sidebar(soup)
 
     # Chart data (from inline JS)
     value_chart = _parse_value_chart(html)
@@ -430,35 +457,38 @@ def parse_brickeconomy_page(
     candlestick = _parse_candlestick(html)
     dist_mean, dist_stddev = _parse_distribution(html)
 
-    # Current value: prefer chart annotation, fallback to meta
-    value_new_cents, _today_date = _parse_current_value(html)
+    # Current value: prefer sidebar, then chart annotation, then meta
+    value_new_cents = sidebar.get("value_new_cents")
+    if value_new_cents is None:
+        value_new_cents, _today_date = _parse_current_value(html)
     if value_new_cents is None:
         value_new_cents = _parse_value_from_meta(soup)
 
-    # Future estimate
-    future_cents, future_date = _parse_future_estimate(html)
+    # Future estimates are BrickEconomy forecasts, not real data -- skip
+    future_cents, future_date = None, None
 
-    # Annual growth
-    annual_growth = _parse_annual_growth(soup)
+    # RRP: sidebar has USD RRP; GBP/EUR from the full page text
+    rrp_usd = sidebar.get("rrp_usd_cents")
+    rrp_gbp, rrp_eur = _parse_rrp_gbp_eur(soup)
 
     return BrickeconomySnapshot(
         set_number=set_number,
         scraped_at=now,
         title=title,
-        theme=details.get("theme"),
-        subtheme=details.get("subtheme"),
-        year_released=details.get("year_released"),
-        pieces=details.get("pieces"),
-        minifigs=details.get("minifigs"),
-        availability=details.get("availability"),
+        theme=sidebar.get("theme"),
+        subtheme=sidebar.get("subtheme"),
+        year_released=sidebar.get("year_released"),
+        pieces=sidebar.get("pieces"),
+        minifigs=sidebar.get("minifigs"),
+        availability=sidebar.get("availability"),
         image_url=image_url,
         brickeconomy_url=url,
-        rrp_usd_cents=retail.get("rrp_usd_cents"),
-        rrp_gbp_cents=retail.get("rrp_gbp_cents"),
-        rrp_eur_cents=retail.get("rrp_eur_cents"),
+        rrp_usd_cents=rrp_usd,
+        rrp_gbp_cents=rrp_gbp,
+        rrp_eur_cents=rrp_eur,
         value_new_cents=value_new_cents,
-        value_used_cents=None,
-        annual_growth_pct=annual_growth,
+        value_used_cents=sidebar.get("value_used_cents"),
+        annual_growth_pct=sidebar.get("annual_growth_pct"),
         rating_value=rating_value,
         review_count=review_count,
         future_estimate_cents=future_cents,

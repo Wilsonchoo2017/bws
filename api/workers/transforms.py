@@ -135,6 +135,31 @@ def brickeconomy_snapshot_to_dict(snapshot: Any) -> dict:
     }
 
 
+def keepa_product_to_dict(data: Any) -> dict:
+    """Transform Keepa product data into a normalized item dict."""
+    buy_box_display = (
+        f"${data.current_buy_box_cents / 100:.2f}"
+        if data.current_buy_box_cents
+        else "N/A"
+    )
+    return {
+        "title": data.title,
+        "set_number": data.set_number,
+        "asin": data.asin,
+        "price_display": buy_box_display,
+        "product_url": data.keepa_url,
+        "current_buy_box_cents": data.current_buy_box_cents,
+        "current_amazon_cents": data.current_amazon_cents,
+        "current_new_cents": data.current_new_cents,
+        "lowest_ever_cents": data.lowest_ever_cents,
+        "highest_ever_cents": data.highest_ever_cents,
+        "amazon_points": len(data.amazon_price),
+        "new_points": len(data.new_price),
+        "buy_box_points": len(data.buy_box),
+        "sales_rank_points": len(data.sales_rank),
+    }
+
+
 def enrichment_log_summary(field_details: list[dict]) -> str:
     """Build a log summary string from enrichment field details.
 

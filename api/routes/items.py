@@ -22,7 +22,7 @@ from services.backtesting.screener import (
     compute_all_signals,
     compute_item_signals,
 )
-from services.items.repository import get_all_items, get_item_detail, get_or_create_item, item_exists
+from services.items.repository import get_all_items, get_all_items_lite, get_item_detail, get_or_create_item, item_exists, toggle_watchlist, update_buy_rating
 from services.shopee.repository import get_all_products
 from services.shopee.saturation_repository import (
     get_all_latest_saturations,
@@ -46,6 +46,10 @@ class AddItemRequest(BaseModel):
     )
 
 
+class UpdateBuyRatingRequest(BaseModel):
+    rating: int | None = Field(None, ge=1, le=4)
+
+
 @router.post("", status_code=201)
 async def add_item(request: AddItemRequest):
     """Add a new LEGO set to the catalog by set number."""
@@ -66,6 +70,62 @@ async def add_item(request: AddItemRequest):
         raise HTTPException(status_code=500, detail=str(e))
     finally:
         conn.close()
+
+
+@router.patch("/{set_number}/watchlist")
+async def toggle_item_watchlist(set_number: str):
+    """Toggle watchlist status for an item."""
+    conn = get_connection()
+    try:
+        init_schema(conn)
+        new_value = toggle_watchlist(conn, set_number)
+        if new_value is None:
+            raise HTTPException(status_code=404, detail=f"Item {set_number} not found")
+        return {"success": True, "data": {"set_number": set_number, "watchlist": new_value}}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        conn.close()
+
+
+@router.put("/{set_number}/buy-rating")
+async def set_buy_rating(set_number: str, request: UpdateBuyRatingRequest):
+    """Set or clear the buy rating for an item."""
+    conn = get_connection()
+    try:
+        init_schema(conn)
+        result = update_buy_rating(conn, set_number, request.rating)
+        if result is None and request.rating is not None:
+            raise HTTPException(status_code=404, detail=f"Item {set_number} not found")
+        # For clearing (rating=None), we still need to check item exists
+        if request.rating is None:
+            row = conn.execute(
+                "SELECT 1 FROM lego_items WHERE set_number = ?", [set_number]
+            ).fetchone()
+            if row is None:
+                raise HTTPException(status_code=404, detail=f"Item {set_number} not found")
+        return {"success": True, "data": {"set_number": set_number, "buy_rating": request.rating}}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        conn.close()
+
+
+@router.get("/lite")
+async def list_items_lite():
+    """List all LEGO items with catalog data only (no prices). Fast path for initial load."""
+    try:
+        conn = get_connection()
+        init_schema(conn)
+        items = get_all_items_lite(conn)
+        conn.close()
+        return {"success": True, "data": items, "count": len(items)}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.get("")
@@ -356,6 +416,56 @@ async def get_item_bricklink_prices(set_number: str):
         }
     except HTTPException:
         raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        conn.close()
+
+
+@router.get("/{set_number}/brickeconomy")
+async def get_item_brickeconomy(set_number: str):
+    """Get the latest BrickEconomy snapshot for an item."""
+    conn = get_connection()
+    try:
+        init_schema(conn)
+
+        from services.brickeconomy.repository import get_latest_snapshot
+
+        snapshot = get_latest_snapshot(conn, set_number)
+        # Try with -1 suffix if bare number didn't match
+        if not snapshot and "-" not in set_number:
+            snapshot = get_latest_snapshot(conn, f"{set_number}-1")
+        if not snapshot:
+            return {"success": True, "data": None}
+
+        # Ensure datetime is serialized as ISO string
+        if snapshot.get("scraped_at"):
+            snapshot["scraped_at"] = str(snapshot["scraped_at"])
+
+        return {"success": True, "data": snapshot}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        conn.close()
+
+
+@router.get("/{set_number}/keepa")
+async def get_item_keepa(set_number: str):
+    """Get the latest Keepa snapshot for an item."""
+    conn = get_connection()
+    try:
+        init_schema(conn)
+
+        from services.keepa.repository import get_latest_keepa_snapshot
+
+        snapshot = get_latest_keepa_snapshot(conn, set_number)
+        if not snapshot:
+            return {"success": True, "data": None}
+
+        if snapshot.get("scraped_at"):
+            snapshot["scraped_at"] = str(snapshot["scraped_at"])
+
+        return {"success": True, "data": snapshot}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
     finally:

@@ -4,6 +4,7 @@ from api.workers.brickeconomy import BrickeconomyWorker
 from api.workers.bricklink_catalog import BricklinkCatalogWorker
 from api.workers.carousell import CarousellWorker
 from api.workers.enrichment import EnrichmentWorker
+from api.workers.keepa import KeepaWorker
 from api.workers.mightyutan import MightyutanWorker
 from api.workers.shopee import ShopeeWorker
 from api.workers.shopee_saturation import ShopeeSaturationWorker
@@ -20,5 +21,6 @@ WORKER_REGISTRY = {
         EnrichmentWorker(),
         CarousellWorker(),
         BrickeconomyWorker(),
+        KeepaWorker(),
     ]
 }

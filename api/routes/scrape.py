@@ -107,6 +107,12 @@ SCRAPERS: list[ScraperInfo] = [
                 url="40346-1",
                 description="Scrape BrickEconomy page for a LEGO set (e.g. 40346-1)",
             ),
+            ScrapeTargetInfo(
+                id="batch",
+                label="Portfolio & Watchlist (Batch)",
+                url="batch",
+                description="Scrape all portfolio and watchlist items that have no BrickEconomy snapshot yet",
+            ),
         ],
     ),
 ]
@@ -174,6 +180,14 @@ async def start_scrape(request: ScrapeRequest):
         raise HTTPException(
             status_code=400,
             detail="URL must be a BrickLink catalogList.asp URL",
+        )
+
+    if request.scraper_id == "brickeconomy" and not (
+        request.url == "batch" or request.url.replace("-", "").isalnum()
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail='URL must be "batch" or a LEGO set number',
         )
 
     if request.scraper_id == "carousell" and not request.url.strip():

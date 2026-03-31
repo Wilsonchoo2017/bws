@@ -1,15 +1,24 @@
 'use client';
 
 import Link from 'next/link';
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   useReactTable,
   getCoreRowModel,
   getPaginationRowModel,
   getSortedRowModel,
   type ColumnDef,
+  type RowData,
   type SortingState
 } from '@tanstack/react-table';
+
+declare module '@tanstack/react-table' {
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  interface TableMeta<TData extends RowData> {
+    toggleWatchlist?: (setNumber: string) => void;
+    enriching?: boolean;
+  }
+}
 import { DataTable } from '@/components/ui/table/data-table';
 import { DataTableColumnHeader } from '@/components/ui/table/data-table-column-header';
 import { Button } from '@/components/ui/button';
@@ -29,7 +38,37 @@ import { PriceDealFilter } from './price-deal-filter';
 import type { UnifiedItem } from './types';
 import { formatPrice } from './types';
 
+function PriceShimmer() {
+  return <div className='bg-muted/50 h-4 w-14 animate-pulse rounded' />;
+}
+
 const columns: ColumnDef<UnifiedItem>[] = [
+  {
+    accessorKey: 'watchlist',
+    header: '',
+    cell: ({ row, table }) => {
+      const isWatchlisted = row.original.watchlist;
+      const onToggle = table.options.meta?.toggleWatchlist;
+      return (
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            onToggle?.(row.original.set_number);
+          }}
+          className={`text-lg hover:scale-110 transition-transform ${
+            isWatchlisted
+              ? 'text-yellow-500'
+              : 'text-muted-foreground/30 hover:text-yellow-400'
+          }`}
+          title={isWatchlisted ? 'Remove from watchlist' : 'Add to watchlist'}
+        >
+          {isWatchlisted ? '\u2605' : '\u2606'}
+        </button>
+      );
+    },
+    size: 40,
+    enableSorting: false,
+  },
   {
     accessorKey: 'image_url',
     header: '',
@@ -107,8 +146,9 @@ const columns: ColumnDef<UnifiedItem>[] = [
     header: ({ column }) => (
       <DataTableColumnHeader column={column} title='Score' />
     ),
-    cell: ({ row }) => {
+    cell: ({ row, table }) => {
       const score = row.getValue('composite_score') as number | null;
+      if (table.options.meta?.enriching && score == null) return <PriceShimmer />;
       if (score == null || Number.isNaN(score)) return <span className='text-muted-foreground'>-</span>;
       const color =
         score >= 65 ? 'text-emerald-600 dark:text-emerald-500' :
@@ -144,8 +184,9 @@ const columns: ColumnDef<UnifiedItem>[] = [
     header: ({ column }) => (
       <DataTableColumnHeader column={column} title='Shopee' />
     ),
-    cell: ({ row }) => {
+    cell: ({ row, table }) => {
       const cents = row.getValue('shopee_price_cents') as number | null;
+      if (table.options.meta?.enriching && cents == null) return <PriceShimmer />;
       const url = row.original.shopee_url;
       const shopName = row.original.shopee_shop_name;
       const shopCount = row.original.shopee_shop_count ?? 0;
@@ -183,8 +224,9 @@ const columns: ColumnDef<UnifiedItem>[] = [
     header: ({ column }) => (
       <DataTableColumnHeader column={column} title='TRU' />
     ),
-    cell: ({ row }) => {
+    cell: ({ row, table }) => {
       const cents = row.getValue('toysrus_price_cents') as number | null;
+      if (table.options.meta?.enriching && cents == null) return <PriceShimmer />;
       const url = row.original.toysrus_url;
       const formatted = formatPrice(cents, 'MYR');
       if (!cents) return <span className='text-muted-foreground'>-</span>;
@@ -208,8 +250,9 @@ const columns: ColumnDef<UnifiedItem>[] = [
     header: ({ column }) => (
       <DataTableColumnHeader column={column} title='MU' />
     ),
-    cell: ({ row }) => {
+    cell: ({ row, table }) => {
       const cents = row.getValue('mightyutan_price_cents') as number | null;
+      if (table.options.meta?.enriching && cents == null) return <PriceShimmer />;
       const url = row.original.mightyutan_url;
       const formatted = formatPrice(cents, 'MYR');
       if (!cents) return <span className='text-muted-foreground'>-</span>;
@@ -233,8 +276,9 @@ const columns: ColumnDef<UnifiedItem>[] = [
     header: ({ column }) => (
       <DataTableColumnHeader column={column} title='BL New' />
     ),
-    cell: ({ row }) => {
+    cell: ({ row, table }) => {
       const cents = row.getValue('bricklink_new_cents') as number | null;
+      if (table.options.meta?.enriching && cents == null) return <PriceShimmer />;
       return (
         <span className='font-mono text-sm'>
           {formatPrice(cents, row.original.bricklink_new_currency)}
@@ -248,8 +292,9 @@ const columns: ColumnDef<UnifiedItem>[] = [
     header: ({ column }) => (
       <DataTableColumnHeader column={column} title='BL Used' />
     ),
-    cell: ({ row }) => {
+    cell: ({ row, table }) => {
       const cents = row.getValue('bricklink_used_cents') as number | null;
+      if (table.options.meta?.enriching && cents == null) return <PriceShimmer />;
       return (
         <span className='font-mono text-sm'>
           {formatPrice(cents, row.original.bricklink_used_currency)}
@@ -279,6 +324,7 @@ const columns: ColumnDef<UnifiedItem>[] = [
 export function UnifiedItemsTable() {
   const [data, setData] = useState<UnifiedItem[]>([]);
   const [loading, setLoading] = useState(true);
+  const [enriching, setEnriching] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [sorting, setSorting] = useState<SortingState>([]);
   const [searchQuery, setSearchQuery] = useState('');
@@ -291,9 +337,13 @@ export function UnifiedItemsTable() {
   const [adding, setAdding] = useState(false);
   const [addError, setAddError] = useState<string | null>(null);
   const [scoreFilter, setScoreFilter] = useState<'all' | '65+' | '50+' | '35+' | '<35' | 'no_score'>('all');
+  const [showWatchlistOnly, setShowWatchlistOnly] = useState(false);
 
   const filteredData = useMemo(() => {
     let result = data;
+    if (showWatchlistOnly) {
+      result = result.filter((item) => item.watchlist);
+    }
     if (searchQuery.trim()) {
       const q = searchQuery.trim().toLowerCase();
       result = result.filter(
@@ -332,7 +382,7 @@ export function UnifiedItemsTable() {
       result = dealFilter(result);
     }
     return result;
-  }, [data, searchQuery, dealFilter, hideNoRetail, retirementFilter, scoreFilter]);
+  }, [data, searchQuery, dealFilter, hideNoRetail, retirementFilter, scoreFilter, showWatchlistOnly]);
 
   const minifigMissing = useMemo(
     () => filteredData.filter(i => i.minifig_count === null).map(i => i.set_number),
@@ -351,17 +401,36 @@ export function UnifiedItemsTable() {
     [filteredData]
   );
 
-  const fetchItems = async () => {
+  const toggleWatchlist = useCallback(async (setNumber: string) => {
+    try {
+      const res = await fetch(`/api/items/${setNumber}/watchlist`, {
+        method: 'PATCH',
+      });
+      if (!res.ok) return;
+      const json = await res.json();
+      if (json.success) {
+        setData((prev) =>
+          prev.map((item) =>
+            item.set_number === setNumber
+              ? { ...item, watchlist: json.data.watchlist }
+              : item
+          )
+        );
+      }
+    } catch {
+      // silent fail for single-user tool
+    }
+  }, []);
+
+  const enrichItems = useCallback(async () => {
+    setEnriching(true);
     try {
       const [itemsRes, signalsRes] = await Promise.all([
         fetch('/api/items').then((r) => r.json()),
         fetch('/api/items/signals').then((r) => r.json()).catch(() => null),
       ]);
 
-      if (!itemsRes.success) {
-        setError(itemsRes.error ?? 'Failed to load items');
-        return;
-      }
+      if (!itemsRes.success) return;
 
       const scoreMap = new Map<string, number>();
       if (signalsRes?.success && Array.isArray(signalsRes.data)) {
@@ -379,16 +448,62 @@ export function UnifiedItemsTable() {
       }));
 
       setData(merged);
+    } catch {
+      // Prices failed to load — lite data still visible
+    } finally {
+      setEnriching(false);
+    }
+  }, []);
+
+  const fetchItems = useCallback(async () => {
+    try {
+      // Phase 1: Fast load — catalog data only (no price joins)
+      const liteRes = await fetch('/api/items/lite').then((r) => r.json());
+      if (!liteRes.success) {
+        setError(liteRes.error ?? 'Failed to load items');
+        return;
+      }
+
+      // Show items immediately with null prices
+      const liteItems: UnifiedItem[] = (liteRes.data as Record<string, unknown>[]).map((item) => ({
+        ...item,
+        shopee_price_cents: null,
+        shopee_currency: null,
+        shopee_url: null,
+        shopee_shop_name: null,
+        shopee_last_seen: null,
+        shopee_shop_count: 0,
+        toysrus_price_cents: null,
+        toysrus_currency: null,
+        toysrus_url: null,
+        toysrus_last_seen: null,
+        mightyutan_price_cents: null,
+        mightyutan_currency: null,
+        mightyutan_url: null,
+        mightyutan_last_seen: null,
+        bricklink_new_cents: null,
+        bricklink_new_currency: null,
+        bricklink_new_last_seen: null,
+        bricklink_used_cents: null,
+        bricklink_used_currency: null,
+        bricklink_used_last_seen: null,
+        composite_score: null,
+      } as UnifiedItem));
+
+      setData(liteItems);
+      setLoading(false);
+
+      // Phase 2: Enrich with prices + signals in background
+      enrichItems();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load items');
-    } finally {
       setLoading(false);
     }
-  };
+  }, [enrichItems]);
 
   useEffect(() => {
     fetchItems();
-  }, []);
+  }, [fetchItems]);
 
   const SET_NUMBER_PATTERN = /^\d{3,6}(-\d+)?$/;
 
@@ -437,9 +552,10 @@ export function UnifiedItemsTable() {
     getPaginationRowModel: getPaginationRowModel(),
     getSortedRowModel: getSortedRowModel(),
     initialState: {
-      pagination: { pageSize: 100 },
+      pagination: { pageSize: 10 },
       columnVisibility: { rrp_cents: false },
     },
+    meta: { toggleWatchlist, enriching },
   });
 
   if (loading) {
@@ -514,6 +630,13 @@ export function UnifiedItemsTable() {
               <SelectItem value='no_score'>No score</SelectItem>
             </SelectContent>
           </Select>
+          <Button
+            variant={showWatchlistOnly ? 'default' : 'outline'}
+            size='default'
+            onClick={() => setShowWatchlistOnly((prev) => !prev)}
+          >
+            {showWatchlistOnly ? '\u2605 Watchlist' : '\u2606 Watchlist'}
+          </Button>
           <Button
             variant={hideNoRetail ? 'default' : 'outline'}
             size='default'
