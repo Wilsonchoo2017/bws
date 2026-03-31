@@ -156,6 +156,41 @@ async def scrape_missing_minifigs(
     return EnrichBatchResponse(queued=len(queued_numbers), set_numbers=queued_numbers)
 
 
+@router.post("/enrich-missing-dimensions", response_model=EnrichBatchResponse)
+async def enrich_missing_dimensions(
+    request: EnrichBatchRequest | None = None,
+) -> EnrichBatchResponse:
+    """Queue enrichment for items with missing dimensions (NULL)."""
+    conn = get_connection()
+    try:
+        init_schema(conn)
+
+        if request and request.set_numbers:
+            placeholders = ", ".join(["?"] * len(request.set_numbers))
+            rows = conn.execute(
+                f"SELECT set_number FROM lego_items WHERE dimensions IS NULL AND set_number IN ({placeholders})",  # noqa: S608
+                request.set_numbers,
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT set_number FROM lego_items WHERE dimensions IS NULL",
+            ).fetchall()
+
+        items = [r[0] for r in rows]
+    except Exception:
+        logger.exception("Failed to fetch items with missing dimensions")
+        raise HTTPException(status_code=500, detail="Internal server error")
+    finally:
+        conn.close()
+
+    queued_numbers: list[str] = []
+    for set_number in items:
+        job_manager.create_job("enrichment", f"{set_number}:bricklink")
+        queued_numbers.append(set_number)
+
+    return EnrichBatchResponse(queued=len(queued_numbers), set_numbers=queued_numbers)
+
+
 @router.get("/needs-enrichment", response_model=NeedsEnrichmentResponse)
 async def list_needs_enrichment(
     limit: int = Query(default=50, ge=1, le=500),

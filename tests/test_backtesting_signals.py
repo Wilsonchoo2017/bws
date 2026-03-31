@@ -14,16 +14,16 @@ from services.backtesting.signals import (
     _extract_price,
     _filter_up_to,
     compute_collector_premium,
-    compute_community_quality,
     compute_demand_pressure,
     compute_lifecycle_position,
-    compute_momentum,
-    compute_peer_appreciation,
+    compute_listing_ratio,
+    compute_new_used_spread,
     compute_price_trend,
     compute_price_vs_rrp,
+    compute_price_wall,
     compute_stock_level,
     compute_supply_velocity,
-    compute_theme_quality,
+    compute_volume_price_confirm,
 )
 
 
@@ -156,45 +156,7 @@ class TestFilterUpTo:
 
 
 # ---------------------------------------------------------------------------
-# Signal 1: Peer Appreciation
-# ---------------------------------------------------------------------------
-
-
-class TestPeerAppreciation:
-    def test_appreciating_price(self) -> None:
-        # Price rises 50% above trailing avg
-        sales = _make_sales(
-            [(2025, m) for m in range(1, 8)],
-            [100, 100, 100, 100, 100, 100, 200],
-        )
-        score = compute_peer_appreciation(sales, 2025, 7)
-        assert score is not None
-        assert score >= 75.0  # +100% above trailing
-
-    def test_stable_price(self) -> None:
-        sales = _make_sales(
-            [(2025, m) for m in range(1, 8)],
-            [100, 100, 100, 100, 100, 100, 100],
-        )
-        score = compute_peer_appreciation(sales, 2025, 7)
-        assert score == 50.0  # Stable
-
-    def test_declining_price(self) -> None:
-        sales = _make_sales(
-            [(2025, m) for m in range(1, 8)],
-            [200, 200, 200, 200, 200, 200, 100],
-        )
-        score = compute_peer_appreciation(sales, 2025, 7)
-        assert score is not None
-        assert score <= 35.0
-
-    def test_insufficient_data(self) -> None:
-        sales = _make_sales([(2025, 1)], [100])
-        assert compute_peer_appreciation(sales, 2025, 1) is None
-
-
-# ---------------------------------------------------------------------------
-# Signal 2: Demand Pressure
+# Signal: Demand Pressure
 # ---------------------------------------------------------------------------
 
 
@@ -342,81 +304,7 @@ class TestStockLevel:
 
 
 # ---------------------------------------------------------------------------
-# Signal 8: Momentum
-# ---------------------------------------------------------------------------
-
-
-class TestMomentum:
-    def test_accelerating(self) -> None:
-        sales = _make_sales(
-            [(2025, m) for m in range(1, 7)],
-            [100] * 6,
-            total_qty=[5, 5, 5, 20, 20, 20],
-        )
-        score = compute_momentum(sales, 2025, 6)
-        assert score is not None
-        assert score >= 80.0
-
-    def test_decelerating(self) -> None:
-        sales = _make_sales(
-            [(2025, m) for m in range(1, 7)],
-            [100] * 6,
-            total_qty=[20, 20, 20, 5, 5, 5],
-        )
-        score = compute_momentum(sales, 2025, 6)
-        assert score is not None
-        assert score <= 40.0
-
-    def test_insufficient_data(self) -> None:
-        sales = _make_sales([(2025, 1), (2025, 2), (2025, 3)], [100, 100, 100])
-        assert compute_momentum(sales, 2025, 3) is None
-
-
-# ---------------------------------------------------------------------------
-# Signal 9: Theme Quality
-# ---------------------------------------------------------------------------
-
-
-class TestThemeQuality:
-    def test_premium_theme(self) -> None:
-        score = compute_theme_quality("Star Wars")
-        assert score is not None
-        assert score > 50.0
-
-    def test_low_demand_theme(self) -> None:
-        score = compute_theme_quality("Vidiyo")
-        assert score is not None
-        assert score < 20.0
-
-    def test_none_theme(self) -> None:
-        assert compute_theme_quality(None) is None
-
-
-# ---------------------------------------------------------------------------
-# Signal 10: Community Quality
-# ---------------------------------------------------------------------------
-
-
-class TestCommunityQuality:
-    def test_high_liquidity(self) -> None:
-        sales = _make_sales(
-            [(2025, m) for m in range(1, 4)],
-            [100, 100, 100],
-            times_sold=[200, 200, 200],
-        )
-        assert compute_community_quality(sales, 2025, 3) == 95.0
-
-    def test_low_liquidity(self) -> None:
-        sales = _make_sales(
-            [(2025, m) for m in range(1, 4)],
-            [100, 100, 100],
-            times_sold=[1, 1, 1],
-        )
-        assert compute_community_quality(sales, 2025, 3) == 15.0
-
-
-# ---------------------------------------------------------------------------
-# Signal 11: Collector Premium
+# Signal: Collector Premium
 # ---------------------------------------------------------------------------
 
 
@@ -480,3 +368,336 @@ class TestModifiers:
 
     def test_niche_none(self) -> None:
         assert compute_niche_penalty(None) == 1.0
+
+
+# ---------------------------------------------------------------------------
+# Helpers to build snapshot DataFrames
+# ---------------------------------------------------------------------------
+
+
+def _make_snapshot(
+    item_id: str,
+    scraped_at: str,
+    current_new: dict,
+    current_used: dict | None = None,
+) -> pd.DataFrame:
+    """Build a single-row price history snapshot DataFrame."""
+    import json
+
+    row: dict = {
+        "item_id": item_id,
+        "scraped_at": pd.Timestamp(scraped_at),
+        "current_new": json.dumps(current_new),
+    }
+    if current_used is not None:
+        row["current_used"] = json.dumps(current_used)
+    return pd.DataFrame([row])
+
+
+def _make_current_new_box(
+    avg_price: int = 10000,
+    qty_avg_price: int = 10000,
+    min_price: int = 8000,
+    max_price: int = 12000,
+    total_lots: int = 20,
+    total_qty: int = 30,
+    times_sold: int = 10,
+) -> dict:
+    """Build a current_new pricing box dict."""
+    return {
+        "avg_price": {"currency": "USD", "amount": avg_price},
+        "qty_avg_price": {"currency": "USD", "amount": qty_avg_price},
+        "min_price": {"currency": "USD", "amount": min_price},
+        "max_price": {"currency": "USD", "amount": max_price},
+        "total_lots": total_lots,
+        "total_qty": total_qty,
+        "times_sold": times_sold,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Signal 15: Price Wall
+# ---------------------------------------------------------------------------
+
+
+class TestPriceWall:
+    def test_returns_none_without_snapshots(self) -> None:
+        assert compute_price_wall(None, "TEST-1", 2025, 3) is None
+
+    def test_returns_none_with_empty_snapshots(self) -> None:
+        assert compute_price_wall(pd.DataFrame(), "TEST-1", 2025, 3) is None
+
+    def test_strong_support_above(self) -> None:
+        """qty_avg well above avg = bullish support."""
+        box = _make_current_new_box(
+            avg_price=10000, qty_avg_price=12000,
+            min_price=8000, max_price=14000,
+        )
+        snaps = _make_snapshot("TEST-1", "2025-03-15", box)
+        score = compute_price_wall(snaps, "TEST-1", 2025, 3)
+        assert score is not None
+        assert score >= 75.0
+
+    def test_neutral_divergence(self) -> None:
+        """qty_avg roughly equal to avg."""
+        box = _make_current_new_box(
+            avg_price=10000, qty_avg_price=10200,
+            min_price=8000, max_price=12000,
+        )
+        snaps = _make_snapshot("TEST-1", "2025-03-15", box)
+        score = compute_price_wall(snaps, "TEST-1", 2025, 3)
+        assert score == 55.0
+
+    def test_bearish_dumping(self) -> None:
+        """qty_avg well below avg = dumping."""
+        box = _make_current_new_box(
+            avg_price=10000, qty_avg_price=8000,
+            min_price=7000, max_price=14000,
+        )
+        snaps = _make_snapshot("TEST-1", "2025-03-15", box)
+        score = compute_price_wall(snaps, "TEST-1", 2025, 3)
+        assert score is not None
+        assert score <= 35.0
+
+    def test_missing_qty_avg_price(self) -> None:
+        """Returns None when qty_avg_price is missing."""
+        box = _make_current_new_box()
+        del box["qty_avg_price"]
+        snaps = _make_snapshot("TEST-1", "2025-03-15", box)
+        assert compute_price_wall(snaps, "TEST-1", 2025, 3) is None
+
+    def test_respects_time_cutoff(self) -> None:
+        """Snapshot after the eval date should be ignored."""
+        box = _make_current_new_box(
+            avg_price=10000, qty_avg_price=12000,
+            min_price=8000, max_price=14000,
+        )
+        snaps = _make_snapshot("TEST-1", "2025-04-15", box)
+        assert compute_price_wall(snaps, "TEST-1", 2025, 3) is None
+
+
+# ---------------------------------------------------------------------------
+# Signal 16: Listing Ratio
+# ---------------------------------------------------------------------------
+
+
+class TestListingRatio:
+    def test_returns_none_without_snapshots(self) -> None:
+        sales = _make_sales(
+            [(2025, 1), (2025, 2), (2025, 3)],
+            [10000, 10000, 10000],
+        )
+        assert compute_listing_ratio(None, "TEST-1", sales, 2025, 3) is None
+
+    def test_undersupply_high_score(self) -> None:
+        """Few listings relative to sales = bullish."""
+        box = _make_current_new_box(total_qty=5, total_lots=3)
+        snaps = _make_snapshot("TEST-1", "2025-03-15", box)
+        sales = _make_sales(
+            [(2025, 1), (2025, 2), (2025, 3)],
+            [10000, 10000, 10000],
+            total_qty=[20, 25, 30],
+            times_sold=[15, 20, 18],
+        )
+        score = compute_listing_ratio(snaps, "TEST-1", sales, 2025, 3)
+        assert score is not None
+        assert score >= 80.0  # 5 / 25 avg = 0.2 months
+
+    def test_oversupply_low_score(self) -> None:
+        """Many listings relative to sales = bearish."""
+        box = _make_current_new_box(total_qty=500, total_lots=80)
+        snaps = _make_snapshot("TEST-1", "2025-03-15", box)
+        sales = _make_sales(
+            [(2025, 1), (2025, 2), (2025, 3)],
+            [10000, 10000, 10000],
+            total_qty=[2, 3, 1],
+            times_sold=[2, 1, 2],
+        )
+        score = compute_listing_ratio(snaps, "TEST-1", sales, 2025, 3)
+        assert score is not None
+        assert score <= 20.0  # 500 / 2 avg = 250 months
+
+    def test_zero_sales_returns_10(self) -> None:
+        """Listings exist but zero sales = extreme oversupply."""
+        box = _make_current_new_box(total_qty=50, total_lots=10)
+        snaps = _make_snapshot("TEST-1", "2025-03-15", box)
+        sales = _make_sales(
+            [(2025, 1), (2025, 2), (2025, 3)],
+            [10000, 10000, 10000],
+            total_qty=[0, 0, 0],
+            times_sold=[0, 0, 0],
+        )
+        score = compute_listing_ratio(snaps, "TEST-1", sales, 2025, 3)
+        assert score == 10.0
+
+    def test_neutral_range(self) -> None:
+        """Balanced supply/demand."""
+        box = _make_current_new_box(total_qty=30, total_lots=15)
+        snaps = _make_snapshot("TEST-1", "2025-03-15", box)
+        sales = _make_sales(
+            [(2025, 1), (2025, 2), (2025, 3)],
+            [10000, 10000, 10000],
+            total_qty=[8, 10, 12],
+            times_sold=[6, 8, 7],
+        )
+        score = compute_listing_ratio(snaps, "TEST-1", sales, 2025, 3)
+        assert score is not None
+        assert 45.0 <= score <= 70.0  # ~30/10 = 3 months
+
+    def test_no_sales_data_with_listings(self) -> None:
+        """No sales rows at all but snapshots exist."""
+        box = _make_current_new_box(total_qty=20, total_lots=5)
+        snaps = _make_snapshot("TEST-1", "2025-03-15", box)
+        empty_sales = pd.DataFrame(columns=[
+            "item_id", "year", "month", "condition",
+            "times_sold", "total_quantity", "min_price",
+            "avg_price", "max_price", "currency",
+        ])
+        score = compute_listing_ratio(snaps, "TEST-1", empty_sales, 2025, 3)
+        assert score == 10.0
+
+
+# ---------------------------------------------------------------------------
+# Signal 17: Volume-Price Confirmation
+# ---------------------------------------------------------------------------
+
+
+class TestVolumePriceConfirm:
+    def test_insufficient_data(self) -> None:
+        sales = _make_sales(
+            [(2025, 1), (2025, 2), (2025, 3)],
+            [100, 110, 120],
+        )
+        assert compute_volume_price_confirm(sales, 2025, 3) is None
+
+    def test_confirmed_rally(self) -> None:
+        """Price up + volume up = high score."""
+        sales = _make_sales(
+            [(2025, m) for m in range(1, 7)],
+            [100, 100, 100, 110, 120, 130],
+            total_qty=[10, 10, 10, 15, 20, 25],
+        )
+        score = compute_volume_price_confirm(sales, 2025, 6)
+        assert score is not None
+        assert score >= 75.0
+
+    def test_weak_rally_distribution(self) -> None:
+        """Price up + volume down = low-moderate score."""
+        sales = _make_sales(
+            [(2025, m) for m in range(1, 7)],
+            [100, 100, 100, 110, 120, 130],
+            total_qty=[30, 30, 30, 10, 8, 5],
+        )
+        score = compute_volume_price_confirm(sales, 2025, 6)
+        assert score is not None
+        assert score == 40.0
+
+    def test_capitulation(self) -> None:
+        """Price down + volume up = moderate score (potential reversal)."""
+        sales = _make_sales(
+            [(2025, m) for m in range(1, 7)],
+            [100, 100, 100, 90, 80, 70],
+            total_qty=[10, 10, 10, 20, 30, 40],
+        )
+        score = compute_volume_price_confirm(sales, 2025, 6)
+        assert score is not None
+        assert score == 45.0
+
+    def test_apathy(self) -> None:
+        """Price down + volume down = low score."""
+        sales = _make_sales(
+            [(2025, m) for m in range(1, 7)],
+            [100, 100, 100, 90, 80, 70],
+            total_qty=[30, 30, 30, 10, 8, 5],
+        )
+        score = compute_volume_price_confirm(sales, 2025, 6)
+        assert score is not None
+        assert score == 25.0
+
+    def test_neutral_zone(self) -> None:
+        """Flat price and volume = neutral."""
+        sales = _make_sales(
+            [(2025, m) for m in range(1, 7)],
+            [100, 100, 100, 101, 100, 101],
+            total_qty=[10, 10, 10, 10, 10, 10],
+        )
+        score = compute_volume_price_confirm(sales, 2025, 6)
+        assert score == 55.0
+
+
+# ---------------------------------------------------------------------------
+# Signal 18: New-Used Spread
+# ---------------------------------------------------------------------------
+
+
+def _make_pricing_box(avg_price: int) -> dict:
+    """Build a minimal pricing box with just avg_price."""
+    return {
+        "avg_price": {"currency": "USD", "amount": avg_price},
+        "total_lots": 10,
+        "total_qty": 20,
+    }
+
+
+def _make_dual_snapshot(
+    item_id: str,
+    scraped_at: str,
+    new_price: int,
+    used_price: int,
+) -> pd.DataFrame:
+    """Build a snapshot with both new and used pricing."""
+    return _make_snapshot(
+        item_id,
+        scraped_at,
+        current_new=_make_pricing_box(new_price),
+        current_used=_make_pricing_box(used_price),
+    )
+
+
+class TestNewUsedSpread:
+    def test_returns_none_without_snapshots(self) -> None:
+        assert compute_new_used_spread(None, "TEST-1", 2025, 3) is None
+
+    def test_used_exceeds_new(self) -> None:
+        """Used > new = extreme sealed scarcity."""
+        snaps = _make_dual_snapshot("TEST-1", "2025-03-15", 10000, 11000)
+        score = compute_new_used_spread(snaps, "TEST-1", 2025, 3)
+        assert score == 95.0
+
+    def test_tight_spread_static(self) -> None:
+        """Used at 85% of new = strong collector market."""
+        snaps = _make_dual_snapshot("TEST-1", "2025-03-15", 10000, 8500)
+        score = compute_new_used_spread(snaps, "TEST-1", 2025, 3)
+        assert score == 80.0
+
+    def test_wide_spread_static(self) -> None:
+        """Used at 30% of new = casual market."""
+        snaps = _make_dual_snapshot("TEST-1", "2025-03-15", 10000, 3000)
+        score = compute_new_used_spread(snaps, "TEST-1", 2025, 3)
+        assert score == 20.0
+
+    def test_narrowing_spread_bullish(self) -> None:
+        """Spread narrowing over two snapshots = bullish."""
+        import json
+
+        snap1 = _make_dual_snapshot("TEST-1", "2025-02-15", 10000, 6000)
+        snap2 = _make_dual_snapshot("TEST-1", "2025-03-15", 10000, 8500)
+        snaps = pd.concat([snap1, snap2], ignore_index=True)
+        score = compute_new_used_spread(snaps, "TEST-1", 2025, 3)
+        assert score is not None
+        assert score >= 75.0
+
+    def test_widening_spread_bearish(self) -> None:
+        """Spread widening over two snapshots = bearish."""
+        snap1 = _make_dual_snapshot("TEST-1", "2025-02-15", 10000, 7000)
+        snap2 = _make_dual_snapshot("TEST-1", "2025-03-15", 10000, 4000)
+        snaps = pd.concat([snap1, snap2], ignore_index=True)
+        score = compute_new_used_spread(snaps, "TEST-1", 2025, 3)
+        assert score is not None
+        assert score <= 35.0
+
+    def test_missing_used_price(self) -> None:
+        """Returns None when used pricing unavailable."""
+        box = _make_current_new_box()
+        snaps = _make_snapshot("TEST-1", "2025-03-15", box)
+        assert compute_new_used_spread(snaps, "TEST-1", 2025, 3) is None

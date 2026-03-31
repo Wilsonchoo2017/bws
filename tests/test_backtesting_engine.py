@@ -171,8 +171,7 @@ class TestEngineIntegration:
         config = BacktestConfig(min_history_months=3)
         trades = run_backtest(backtest_db, config)
         for trade in trades:
-            # At least peer_appreciation and demand_pressure should be computed
-            assert trade.signals.peer_appreciation is not None
+            # At least demand_pressure should be computed
             assert trade.signals.demand_pressure is not None
 
 
@@ -222,5 +221,5 @@ class TestTradesToDataframe:
 
         assert len(df) == len(trades)
         assert "item_id" in df.columns
-        assert "peer_appreciation" in df.columns
+        assert "demand_pressure" in df.columns
         assert "return_flip_1m" in df.columns

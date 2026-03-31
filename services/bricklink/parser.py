@@ -12,6 +12,7 @@ from bs4 import BeautifulSoup
 
 from bws_types.models import (
     BricklinkData,
+    CatalogListItem,
     Condition,
     MinifigureInfo,
     MonthlySale,
@@ -246,7 +247,7 @@ def _extract_dimensions(html: str) -> str | None:
     BrickLink shows dimensions like 'Item Dim.: 26.2 x 14 x 7.2 cm'.
     """
     match = re.search(
-        r"Item\s+Dim\.?:?\s*([\d.]+\s*x\s*[\d.]+\s*x\s*[\d.]+\s*cm)",
+        r"Item\s+Dim\.?:?\s*(?:<[^>]*>)?\s*([\d.]+\s*x\s*[\d.]+\s*x\s*[\d.]+\s*cm)",
         html,
         re.IGNORECASE,
     )
@@ -686,6 +687,139 @@ def parse_minifig_inventory(html: str) -> list[MinifigureInfo]:
         ))
 
     return minifigs
+
+
+def parse_catalog_list_page(html: str) -> list[CatalogListItem]:
+    """Parse a BrickLink catalog list page to extract items.
+
+    Parses the catalogList.asp page HTML table to find all items listed.
+
+    Args:
+        html: HTML content from a catalogList.asp page
+
+    Returns:
+        List of CatalogListItem with item_id, item_type, title, year, image
+    """
+    soup = BeautifulSoup(html, "lxml")
+    items: list[CatalogListItem] = []
+    seen_ids: set[str] = set()
+
+    # Find links to catalog item pages (/v2/catalog/catalogitem.page?S=xxxxx-1)
+    item_link_pattern = re.compile(
+        r"catalogitem\.page\?([A-Z])=([^&\"'#\s]+)", re.IGNORECASE,
+    )
+
+    for link in soup.find_all("a", href=item_link_pattern):
+        href = link.get("href", "")
+        match = item_link_pattern.search(href)
+        if not match:
+            continue
+
+        item_type = match.group(1).upper()
+        item_id = match.group(2).strip()
+        if not item_id or item_id in seen_ids:
+            continue
+
+        # Get title from the link text
+        title = link.get_text(strip=True) or None
+        # Skip links that are just the item number (we want the name link)
+        if title and title == item_id:
+            continue
+
+        seen_ids.add(item_id)
+
+        # Look for year and image in surrounding context
+        year_released: int | None = None
+        image_url: str | None = None
+
+        # Walk up to find the containing row/block
+        parent = link.find_parent("tr") or link.find_parent("td")
+        if parent:
+            # Find year: look for a 4-digit year (2000-2099)
+            parent_text = parent.get_text(separator=" ")
+            year_match = re.search(r"\b(20\d{2})\b", parent_text)
+            if year_match:
+                year_released = int(year_match.group(1))
+
+            # Find thumbnail image
+            for img in parent.find_all("img"):
+                src = str(img.get("src", ""))
+                if "img.bricklink.com" in src or "brickimg" in src:
+                    image_url = _normalize_image_url(src)
+                    break
+
+        # Fallback: construct image URL from item_id
+        if not image_url and item_type == "S":
+            image_url = (
+                f"https://img.bricklink.com/ItemImage/SN/0/{item_id}.png"
+            )
+
+        items.append(CatalogListItem(
+            item_id=item_id,
+            item_type=item_type,
+            title=title,
+            year_released=year_released,
+            image_url=image_url,
+        ))
+
+    return items
+
+
+def parse_catalog_list_pagination(html: str) -> int:
+    """Extract total page count from a catalog list page.
+
+    Args:
+        html: HTML content from a catalogList.asp page
+
+    Returns:
+        Total number of pages (minimum 1)
+    """
+    soup = BeautifulSoup(html, "lxml")
+
+    # Look for "Page X of Y" text
+    page_of_pattern = re.compile(r"Page\s+\d+\s+of\s+(\d+)", re.IGNORECASE)
+    text = soup.get_text()
+    match = page_of_pattern.search(text)
+    if match:
+        return max(1, int(match.group(1)))
+
+    # Fallback: find the highest pg= value in pagination links
+    max_page = 1
+    pg_pattern = re.compile(r"[?&]pg=(\d+)")
+    for link in soup.find_all("a", href=pg_pattern):
+        href = link.get("href", "")
+        pg_match = pg_pattern.search(href)
+        if pg_match:
+            page_num = int(pg_match.group(1))
+            max_page = max(max_page, page_num)
+
+    return max_page
+
+
+def build_catalog_list_url(base_url: str, page: int) -> str:
+    """Build a catalog list URL with the given page number.
+
+    Replaces or adds the pg= parameter in the URL.
+
+    Args:
+        base_url: Base catalogList.asp URL
+        page: Page number to set
+
+    Returns:
+        URL with pg= parameter set to the given page
+    """
+    parsed = urlparse(base_url)
+    params = parse_qs(parsed.query, keep_blank_values=True)
+    params["pg"] = [str(page)]
+
+    # Rebuild query string preserving parameter order
+    query_parts = []
+    for key, values in params.items():
+        for val in values:
+            query_parts.append(f"{key}={val}")
+    new_query = "&".join(query_parts)
+
+    return parsed._replace(query=new_query).geturl()
 
 
 def is_valid_bricklink_url(url: str) -> bool:

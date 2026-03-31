@@ -17,10 +17,13 @@ from config.settings import (
     get_random_user_agent,
 )
 from services.bricklink.parser import (
+    build_catalog_list_url,
     build_item_url,
     build_minifig_inventory_url,
     build_price_guide_url,
     parse_bricklink_url,
+    parse_catalog_list_page,
+    parse_catalog_list_pagination,
     parse_full_item,
     parse_minifig_inventory,
     parse_monthly_sales,
@@ -34,7 +37,7 @@ from services.bricklink.repository import (
     upsert_monthly_sales,
     upsert_set_minifigures,
 )
-from bws_types.models import BricklinkData, BricklinkItem, MinifigureData, MonthlySale
+from bws_types.models import BricklinkData, BricklinkItem, CatalogListItem, MinifigureData, MonthlySale
 
 
 if TYPE_CHECKING:
@@ -62,6 +65,19 @@ class MinifigScrapeResult:
     minifigures_scraped: int = 0
     minifigures: tuple[MinifigureData, ...] = ()
     total_value_cents: int | None = None
+    error: str | None = None
+
+
+@dataclass(frozen=True)
+class CatalogScrapeResult:
+    """Result of scraping a catalog list."""
+
+    success: bool
+    total_pages: int = 0
+    items_found: int = 0
+    items_inserted: int = 0
+    items_skipped: int = 0
+    items: tuple[CatalogListItem, ...] = ()
     error: str | None = None
 
 
@@ -345,6 +361,98 @@ async def scrape_set_minifigures(
         return MinifigScrapeResult(success=False, set_item_id=item_id, error=f"Request error: {e}")
     except (TimeoutError, OSError) as e:
         return MinifigScrapeResult(success=False, set_item_id=item_id, error=f"Network error: {e}")
+    finally:
+        if should_close_client:
+            await client.aclose()
+
+
+async def scrape_catalog_list(
+    conn: "DuckDBPyConnection",
+    url: str,
+    *,
+    save: bool = True,
+    client: httpx.AsyncClient | None = None,
+) -> CatalogScrapeResult:
+    """Scrape a BrickLink catalog list page with pagination.
+
+    Discovers items from catalogList.asp pages, inserting minimal records
+    so the enrichment worker can populate metadata later.
+
+    Args:
+        conn: DuckDB connection
+        url: catalogList.asp URL (any page -- pagination is auto-detected)
+        save: Whether to save discovered items to database
+        client: Optional HTTP client
+
+    Returns:
+        CatalogScrapeResult with discovered items
+    """
+    should_close_client = client is None
+    if client is None:
+        client = httpx.AsyncClient(timeout=60.0)
+
+    try:
+        # Fetch first page
+        page1_url = build_catalog_list_url(url, page=1)
+        html = await _fetch_page(client, page1_url)
+
+        # Parse items and detect total pages
+        all_items = parse_catalog_list_page(html)
+        total_pages = parse_catalog_list_pagination(html)
+
+        # Fetch remaining pages
+        for page_num in range(2, total_pages + 1):
+            await asyncio.sleep(get_random_delay())
+            page_url = build_catalog_list_url(url, page=page_num)
+            page_html = await _fetch_page(client, page_url)
+            page_items = parse_catalog_list_page(page_html)
+            all_items.extend(page_items)
+
+        # Deduplicate by item_id
+        seen: set[str] = set()
+        unique_items: list[CatalogListItem] = []
+        for item in all_items:
+            if item.item_id not in seen:
+                seen.add(item.item_id)
+                unique_items.append(item)
+
+        items_inserted = 0
+        items_skipped = 0
+
+        if save:
+            for item in unique_items:
+                existing = get_item(conn, item.item_id)
+                if existing:
+                    items_skipped += 1
+                    continue
+
+                # Create minimal BricklinkData for new items
+                data = BricklinkData(
+                    item_id=item.item_id,
+                    item_type=item.item_type,
+                    title=item.title,
+                    year_released=item.year_released,
+                    image_url=item.image_url,
+                )
+                upsert_item(conn, data)
+                items_inserted += 1
+
+        return CatalogScrapeResult(
+            success=True,
+            total_pages=total_pages,
+            items_found=len(unique_items),
+            items_inserted=items_inserted,
+            items_skipped=items_skipped,
+            items=tuple(unique_items),
+        )
+
+    except httpx.HTTPStatusError as e:
+        error_msg = f"HTTP {e.response.status_code}: {e.response.reason_phrase}"
+        return CatalogScrapeResult(success=False, error=error_msg)
+    except httpx.RequestError as e:
+        return CatalogScrapeResult(success=False, error=f"Request error: {e}")
+    except (TimeoutError, OSError) as e:
+        return CatalogScrapeResult(success=False, error=f"Network error: {e}")
     finally:
         if should_close_client:
             await client.aclose()

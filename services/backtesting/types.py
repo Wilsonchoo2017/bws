@@ -17,20 +17,20 @@ class BacktestConfig:
 
 
 SIGNAL_NAMES: tuple[str, ...] = (
-    "peer_appreciation",
     "demand_pressure",
     "supply_velocity",
     "price_trend",
     "price_vs_rrp",
     "lifecycle_position",
     "stock_level",
-    "momentum",
-    "theme_quality",
-    "community_quality",
     "collector_premium",
     "theme_growth",
     "value_opportunity",
     "minifig_appeal",
+    "price_wall",
+    "listing_ratio",
+    "volume_price_confirm",
+    "new_used_spread",
 )
 
 MODIFIER_NAMES: tuple[str, ...] = (
@@ -42,26 +42,26 @@ MODIFIER_NAMES: tuple[str, ...] = (
 
 @dataclass(frozen=True)
 class SignalSnapshot:
-    """All 11 signals + 3 modifiers computed at a point in time."""
+    """All 14 signals + 3 modifiers computed at a point in time."""
 
     item_id: str
     year: int
     month: int
-    # 11 signals (0-100 each, None if insufficient data)
-    peer_appreciation: float | None = None
+    # 14 signals (0-100 each, None if insufficient data)
     demand_pressure: float | None = None
     supply_velocity: float | None = None
     price_trend: float | None = None
     price_vs_rrp: float | None = None
     lifecycle_position: float | None = None
     stock_level: float | None = None
-    momentum: float | None = None
-    theme_quality: float | None = None
-    community_quality: float | None = None
     collector_premium: float | None = None
     theme_growth: float | None = None
     value_opportunity: float | None = None
     minifig_appeal: float | None = None
+    price_wall: float | None = None
+    listing_ratio: float | None = None
+    volume_price_confirm: float | None = None
+    new_used_spread: float | None = None
     # 3 modifiers (multipliers, default 1.0)
     mod_shelf_life: float = 1.0
     mod_subtheme: float = 1.0

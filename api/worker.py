@@ -61,6 +61,21 @@ async def run_worker(manager: JobManager | None = None) -> None:
                     result["successful"],
                     result["total"],
                 )
+            elif job.scraper_id == "bricklink_catalog":
+                result = await _run_bricklink_catalog_scrape(job.url)
+                mgr.mark_completed(
+                    job_id,
+                    items_found=result["items_found"],
+                    items=result["items"],
+                )
+                logger.info(
+                    "Catalog job %s completed: %d found, %d inserted, %d skipped",
+                    job_id,
+                    result["items_found"],
+                    result["items_inserted"],
+                    result["items_skipped"],
+                )
+                _queue_enrichment_for_catalog_items(mgr, result["set_numbers"])
             elif job.scraper_id == "enrichment":
                 result = await asyncio.to_thread(_run_enrichment, job.url)
                 mgr.mark_completed(
@@ -359,6 +374,68 @@ async def _check_deal_signals() -> None:
             conn.close()
     except Exception:
         logger.exception("Deal signal check failed")
+
+
+async def _run_bricklink_catalog_scrape(url: str) -> dict:
+    """Run BrickLink catalog list scrape with pagination."""
+    from db.connection import get_connection
+    from db.schema import init_schema
+    from services.bricklink.scraper import scrape_catalog_list
+
+    conn = get_connection()
+    init_schema(conn)
+
+    try:
+        result = await scrape_catalog_list(conn, url)
+    finally:
+        conn.close()
+
+    if not result.success:
+        raise RuntimeError(result.error or "BrickLink catalog scrape failed")
+
+    # Extract set numbers for enrichment (e.g., "75192-1" -> "75192")
+    set_numbers = []
+    for item in result.items:
+        if item.item_type == "S" and "-" in item.item_id:
+            set_numbers.append(item.item_id.rsplit("-", 1)[0])
+
+    return {
+        "items_found": result.items_found,
+        "items_inserted": result.items_inserted,
+        "items_skipped": result.items_skipped,
+        "set_numbers": set_numbers,
+        "items": [
+            {
+                "title": item.title or item.item_id,
+                "price_display": "N/A",
+                "product_url": (
+                    f"https://www.bricklink.com/v2/catalog/catalogitem.page"
+                    f"?{item.item_type}={item.item_id}"
+                ),
+                "image_url": item.image_url,
+            }
+            for item in result.items
+        ],
+    }
+
+
+def _queue_enrichment_for_catalog_items(
+    manager: JobManager,
+    set_numbers: list[str],
+) -> None:
+    """Queue enrichment jobs for newly discovered catalog items."""
+    from services.enrichment.auto import queue_enrichment_batch
+
+    if not set_numbers:
+        return
+
+    queued = queue_enrichment_batch(manager, set_numbers)
+    if queued > 0:
+        logger.info(
+            "Post-catalog: queued enrichment for %d/%d sets",
+            queued,
+            len(set_numbers),
+        )
 
 
 def _queue_enrichment_for_scraped_items(

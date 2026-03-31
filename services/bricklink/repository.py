@@ -295,10 +295,13 @@ def has_recent_minifig_pricing(
     Returns:
         True if fresh pricing exists, False otherwise
     """
-    row = conn.execute(
-        "SELECT MAX(scraped_at) FROM minifig_price_history WHERE minifig_id = ?",
-        [minifig_id],
-    ).fetchone()
+    try:
+        row = conn.execute(
+            "SELECT MAX(scraped_at) FROM minifig_price_history WHERE minifig_id = ?",
+            [minifig_id],
+        ).fetchone()
+    except Exception:
+        return False
     if not row or row[0] is None:
         return False
     scraped_at = parse_timestamp(row[0])

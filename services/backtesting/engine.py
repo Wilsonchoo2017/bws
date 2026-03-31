@@ -16,19 +16,19 @@ from services.backtesting.modifiers import (
 from services.backtesting.signals import (
     _extract_avg_price,
     compute_collector_premium,
-    compute_community_quality,
     compute_demand_pressure,
     compute_lifecycle_position,
+    compute_listing_ratio,
     compute_minifig_appeal,
-    compute_momentum,
-    compute_peer_appreciation,
+    compute_new_used_spread,
     compute_price_trend,
     compute_price_vs_rrp,
+    compute_price_wall,
     compute_stock_level,
     compute_supply_velocity,
     compute_theme_growth,
-    compute_theme_quality,
     compute_value_opportunity,
+    compute_volume_price_confirm,
 )
 from services.backtesting.types import BacktestConfig, SignalSnapshot, TradeResult
 
@@ -121,9 +121,6 @@ def run_backtest(
                 item_id=str(item_id),
                 year=eval_year,
                 month=eval_month,
-                peer_appreciation=compute_peer_appreciation(
-                    item_sales, eval_year, eval_month
-                ),
                 demand_pressure=compute_demand_pressure(
                     item_sales, eval_year, eval_month
                 ),
@@ -142,11 +139,6 @@ def run_backtest(
                 stock_level=compute_stock_level(
                     snapshots, str(item_id), eval_year, eval_month
                 ),
-                momentum=compute_momentum(item_sales, eval_year, eval_month),
-                theme_quality=compute_theme_quality(theme),
-                community_quality=compute_community_quality(
-                    item_sales, eval_year, eval_month
-                ),
                 collector_premium=compute_collector_premium(
                     item_sales, eval_year, eval_month
                 ),
@@ -157,6 +149,19 @@ def run_backtest(
                 minifig_appeal=compute_minifig_appeal(
                     minifig_data.get(str(item_id)),
                     int(entry_price),
+                ),
+                price_wall=compute_price_wall(
+                    snapshots, str(item_id), eval_year, eval_month
+                ),
+                listing_ratio=compute_listing_ratio(
+                    snapshots, str(item_id), item_sales,
+                    eval_year, eval_month,
+                ),
+                volume_price_confirm=compute_volume_price_confirm(
+                    item_sales, eval_year, eval_month
+                ),
+                new_used_spread=compute_new_used_spread(
+                    snapshots, str(item_id), eval_year, eval_month
                 ),
                 mod_shelf_life=mod_shelf_life,
                 mod_subtheme=mod_subtheme,

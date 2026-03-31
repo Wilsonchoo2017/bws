@@ -93,6 +93,17 @@ class MinifigureData:
 
 
 @dataclass(frozen=True)
+class CatalogListItem:
+    """An item discovered from a BrickLink catalog list page."""
+
+    item_id: str  # e.g., "75192-1"
+    item_type: str  # e.g., "S"
+    title: str | None = None
+    year_released: int | None = None
+    image_url: str | None = None
+
+
+@dataclass(frozen=True)
 class BricklinkData:
     """Complete Bricklink item data from scraping."""
 

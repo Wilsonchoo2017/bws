@@ -42,20 +42,20 @@ NEIGHBOR_FALLBACK_DISCOUNT: float = 0.6
 # Momentum/trend signals are down-weighted (anti-value for buy-and-hold).
 # Fundamental signals (theme, lifecycle, value opportunity) are up-weighted.
 SIGNAL_WEIGHTS: dict[str, float] = {
-    "peer_appreciation": 0.3,
     "demand_pressure": 1.0,
     "supply_velocity": 1.0,
     "price_trend": 0.3,
     "price_vs_rrp": 1.0,
     "lifecycle_position": 1.5,
     "stock_level": 1.0,
-    "momentum": 0.2,
-    "theme_quality": 1.5,
-    "theme_growth": 1.2,
-    "community_quality": 1.0,
     "collector_premium": 1.0,
+    "theme_growth": 1.2,
     "value_opportunity": 1.8,
     "minifig_appeal": 1.3,
+    "price_wall": 1.0,
+    "listing_ratio": 1.2,
+    "volume_price_confirm": 1.3,
+    "new_used_spread": 1.2,
 }
 
 # Default weight for signals not listed in SIGNAL_WEIGHTS

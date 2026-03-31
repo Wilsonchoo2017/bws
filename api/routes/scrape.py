@@ -57,6 +57,19 @@ SCRAPERS: list[ScraperInfo] = [
             )
         ],
     ),
+    ScraperInfo(
+        id="bricklink_catalog",
+        name="BrickLink Catalog List",
+        description="Discover items from a BrickLink catalog list page with full pagination",
+        targets=[
+            ScrapeTargetInfo(
+                id="sets-2020",
+                label="Sets - Year 2020",
+                url="https://www.bricklink.com/catalogList.asp?pg=1&itemYear=2020&catType=S&v=1",
+                description="All LEGO sets from 2020 on BrickLink",
+            ),
+        ],
+    ),
 ]
 
 VALID_SCRAPER_IDS = {s.id for s in SCRAPERS}
@@ -108,6 +121,12 @@ async def start_scrape(request: ScrapeRequest):
         raise HTTPException(
             status_code=400,
             detail='URL must be "batch" or a LEGO set number',
+        )
+
+    if request.scraper_id == "bricklink_catalog" and "catalogList.asp" not in request.url:
+        raise HTTPException(
+            status_code=400,
+            detail="URL must be a BrickLink catalogList.asp URL",
         )
 
     job = job_manager.create_job(request.scraper_id, request.url)

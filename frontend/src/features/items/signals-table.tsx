@@ -4,17 +4,20 @@ import { useEffect, useState } from 'react';
 import type { ItemSignals } from './types';
 
 const SIGNALS = [
-  { key: 'peer_appreciation', label: 'Appreciation', desc: 'Price vs trailing 6-month average' },
   { key: 'demand_pressure', label: 'Demand', desc: '3-month average sales volume' },
   { key: 'supply_velocity', label: 'Supply Velocity', desc: 'Rate of change in available inventory' },
   { key: 'price_trend', label: 'Price Trend', desc: '6-month linear regression slope' },
   { key: 'price_vs_rrp', label: 'Price vs RRP', desc: 'Current BrickLink price relative to RRP' },
   { key: 'lifecycle_position', label: 'Lifecycle', desc: 'Position in retirement J-curve' },
   { key: 'stock_level', label: 'Stock Level', desc: 'Current inventory scarcity' },
-  { key: 'momentum', label: 'Momentum', desc: 'Sales acceleration month-over-month' },
-  { key: 'theme_quality', label: 'Theme Quality', desc: 'Theme-based collector appeal' },
-  { key: 'community_quality', label: 'Community', desc: 'Transaction count over 3 months' },
   { key: 'collector_premium', label: 'Collector Premium', desc: 'Price spread health (bid-ask)' },
+  { key: 'theme_growth', label: 'Theme Growth', desc: 'Historical annual theme appreciation rate' },
+  { key: 'value_opportunity', label: 'Value Opportunity', desc: 'Buy-the-dip: price below trailing average' },
+  { key: 'minifig_appeal', label: 'Minifig Appeal', desc: 'Minifigure value, exclusivity, and arbitrage' },
+  { key: 'price_wall', label: 'Price Wall', desc: 'Inventory clustering above/below average price' },
+  { key: 'listing_ratio', label: 'Listing Ratio', desc: 'Months of inventory vs transaction velocity' },
+  { key: 'volume_price_confirm', label: 'Vol-Price Confirm', desc: 'Volume confirms or contradicts price direction' },
+  { key: 'new_used_spread', label: 'New-Used Spread', desc: 'Used-to-new price ratio and trend' },
 ] as const;
 
 const MODIFIERS = [
@@ -168,7 +171,7 @@ export function SignalsPanel({ setNumber }: SignalsPanelProps) {
                     <span
                       className={`rounded px-2 py-0.5 font-mono text-sm font-semibold ${scoreColor(value)} ${scoreBg(value)}`}
                     >
-                      {value !== null ? value.toFixed(0) : '--'}
+                      {value != null ? value.toFixed(0) : '--'}
                     </span>
                   </td>
                   <td className="px-4 py-2.5">

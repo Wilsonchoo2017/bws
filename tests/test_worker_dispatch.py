@@ -79,7 +79,7 @@ class TestRouteWorkerConsistency:
         from api.routes.scrape import VALID_SCRAPER_IDS
 
         # These are the IDs the worker explicitly handles
-        worker_handled_ids = {"shopee", "toysrus", "enrichment", "shopee_saturation"}
+        worker_handled_ids = {"shopee", "toysrus", "enrichment", "shopee_saturation", "bricklink_catalog"}
 
         for scraper_id in VALID_SCRAPER_IDS:
             assert scraper_id in worker_handled_ids, (
