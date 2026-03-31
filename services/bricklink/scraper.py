@@ -31,6 +31,7 @@ from services.bricklink.parser import (
 from services.bricklink.repository import (
     create_minifig_price_history,
     create_price_history,
+    get_item,
     has_recent_minifig_pricing,
     upsert_item,
     upsert_minifigure,
