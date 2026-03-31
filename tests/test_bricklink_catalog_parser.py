@@ -20,13 +20,20 @@ def _make_catalog_row(
     year: int = 2020,
     image_url: str | None = None,
 ) -> str:
-    img_src = image_url or f"https://img.bricklink.com/ItemImage/SN/0/{item_id}.png"
+    """Build a catalog row matching BrickLink's real HTML structure.
+
+    Real structure: 3 cells
+      - Cell 0: thumbnail image
+      - Cell 1: item ID link + inventory link
+      - Cell 2: title (plain text) + metadata + breadcrumb links
+    """
+    img_src = image_url or f"https://img.bricklink.com/ItemImage/ST/0/{item_id}.t1.png"
     return (
         f'<tr>'
         f'<td><img src="{img_src}"></td>'
         f'<td><a href="/v2/catalog/catalogitem.page?{item_type}={item_id}">'
-        f'{title}</a></td>'
-        f'<td>{year}</td>'
+        f'{item_id}</a></td>'
+        f'<td>{title}<br>100 Parts, {year}</td>'
         f'</tr>'
     )
 
@@ -103,8 +110,13 @@ class TestParseCatalogListPage:
         assert "75192-1" in items[0].image_url
 
     def test_handles_minifig_type(self):
-        row = _make_catalog_row("M", "sw0001", "Battle Droid")
-        html = _wrap_html(_make_catalog_table(row))
+        html = _wrap_html(
+            '<table><tr>'
+            '<td><img src="https://img.bricklink.com/ItemImage/MN/0/sw0001.png"></td>'
+            '<td><a href="/v2/catalog/catalogitem.page?M=sw0001">sw0001</a></td>'
+            '<td>Battle Droid<br>2005</td>'
+            '</tr></table>'
+        )
 
         items = parse_catalog_list_page(html)
 
@@ -126,17 +138,21 @@ class TestParseCatalogListPage:
 
         assert items == []
 
-    def test_skips_item_id_only_links(self):
-        """Links where text is just the item_id should be skipped (we want name links)."""
+    def test_extracts_title_from_description_cell(self):
+        """Title comes from the description cell, not the item ID link."""
         html = _wrap_html(
-            '<table><tr><td>'
-            '<a href="/v2/catalog/catalogitem.page?S=75192-1">75192-1</a>'
-            '</td></tr></table>'
+            '<table><tr>'
+            '<td><img src="https://img.bricklink.com/ItemImage/ST/0/75192-1.t1.png"></td>'
+            '<td><a href="/v2/catalog/catalogitem.page?S=75192-1">75192-1</a></td>'
+            '<td>Millennium Falcon<br>7541 Parts, 2017</td>'
+            '</tr></table>'
         )
 
         items = parse_catalog_list_page(html)
 
-        assert items == []
+        assert len(items) == 1
+        assert items[0].title == "Millennium Falcon"
+        assert items[0].item_id == "75192-1"
 
 
 class TestParseCatalogListPagination:

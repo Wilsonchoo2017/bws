@@ -720,33 +720,48 @@ def parse_catalog_list_page(html: str) -> list[CatalogListItem]:
         if not item_id or item_id in seen_ids:
             continue
 
-        # Get title from the link text
-        title = link.get_text(strip=True) or None
-        # Skip links that are just the item number (we want the name link)
-        if title and title == item_id:
-            continue
-
         seen_ids.add(item_id)
 
-        # Look for year and image in surrounding context
+        # Find the containing row
+        row = link.find_parent("tr")
+        if not row:
+            continue
+
+        cells = row.find_all("td", recursive=False)
+
+        # Extract title from the description cell (typically the last cell)
+        # Title is the first text node in that cell, before metadata like
+        # "2483 Parts, 5 Minifigures, 2020"
+        title: str | None = None
         year_released: int | None = None
         image_url: str | None = None
 
-        # Walk up to find the containing row/block
-        parent = link.find_parent("tr") or link.find_parent("td")
-        if parent:
-            # Find year: look for a 4-digit year (2000-2099)
-            parent_text = parent.get_text(separator=" ")
-            year_match = re.search(r"\b(20\d{2})\b", parent_text)
+        # Description cell is the last cell with substantial text
+        desc_cell = cells[-1] if cells else None
+        if desc_cell:
+            # Title is the first non-empty text node
+            for child in desc_cell.children:
+                if isinstance(child, str):
+                    t = child.strip()
+                    if t:
+                        title = t
+                        break
+                elif child.name in ("b", "strong"):
+                    title = child.get_text(strip=True)
+                    break
+
+            # Find year in the cell text
+            cell_text = desc_cell.get_text(separator=" ")
+            year_match = re.search(r"\b(20\d{2})\b", cell_text)
             if year_match:
                 year_released = int(year_match.group(1))
 
-            # Find thumbnail image
-            for img in parent.find_all("img"):
-                src = str(img.get("src", ""))
-                if "img.bricklink.com" in src or "brickimg" in src:
-                    image_url = _normalize_image_url(src)
-                    break
+        # Find thumbnail image in the row
+        for img in row.find_all("img"):
+            src = str(img.get("src", ""))
+            if "img.bricklink.com" in src or "brickimg" in src:
+                image_url = _normalize_image_url(src)
+                break
 
         # Fallback: construct image URL from item_id
         if not image_url and item_type == "S":
