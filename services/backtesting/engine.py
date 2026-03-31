@@ -19,13 +19,16 @@ from services.backtesting.signals import (
     compute_community_quality,
     compute_demand_pressure,
     compute_lifecycle_position,
+    compute_minifig_appeal,
     compute_momentum,
     compute_peer_appreciation,
     compute_price_trend,
     compute_price_vs_rrp,
     compute_stock_level,
     compute_supply_velocity,
+    compute_theme_growth,
     compute_theme_quality,
+    compute_value_opportunity,
 )
 from services.backtesting.types import BacktestConfig, SignalSnapshot, TradeResult
 
@@ -55,6 +58,8 @@ def run_backtest(
     if config is None:
         config = BacktestConfig()
 
+    from services.backtesting.data_loader import load_minifig_data
+
     # Load all data upfront (once)
     all_sales = load_monthly_sales(conn)
     metadata = load_item_metadata(conn)
@@ -62,6 +67,7 @@ def run_backtest(
         snapshots = load_price_snapshots(conn)
     except Exception:
         snapshots = None
+    minifig_data = load_minifig_data(conn)
 
     # Filter to requested condition
     condition_sales = all_sales[all_sales["condition"] == config.condition]
@@ -143,6 +149,14 @@ def run_backtest(
                 ),
                 collector_premium=compute_collector_premium(
                     item_sales, eval_year, eval_month
+                ),
+                theme_growth=compute_theme_growth(theme),
+                value_opportunity=compute_value_opportunity(
+                    item_sales, eval_year, eval_month
+                ),
+                minifig_appeal=compute_minifig_appeal(
+                    minifig_data.get(str(item_id)),
+                    int(entry_price),
                 ),
                 mod_shelf_life=mod_shelf_life,
                 mod_subtheme=mod_subtheme,

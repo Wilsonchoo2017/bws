@@ -448,6 +448,121 @@ def compute_collector_premium(
     return 25.0  # High volatility
 
 
+def compute_value_opportunity(
+    item_sales: pd.DataFrame,
+    year: int,
+    month: int,
+) -> float | None:
+    """Signal 13: Value opportunity (contrarian to peer appreciation).
+
+    High score = price is below trailing average (buying opportunity).
+    Implements value investing logic: buy when price is depressed.
+    """
+    sales = _filter_up_to(item_sales, year, month)
+    if len(sales) < 2:
+        return None
+
+    current_row = sales.iloc[-1]
+    current_price = _extract_avg_price(current_row)
+    if current_price is None or current_price == 0:
+        return None
+
+    trailing = sales.iloc[:-1].tail(6)
+    trailing_prices = [_extract_avg_price(r) for _, r in trailing.iterrows()]
+    trailing_prices = [p for p in trailing_prices if p is not None and p > 0]
+    if not trailing_prices:
+        return None
+
+    trailing_avg = sum(trailing_prices) / len(trailing_prices)
+    if trailing_avg == 0:
+        return None
+
+    change_pct = ((current_price - trailing_avg) / trailing_avg) * 100
+
+    # INVERTED scoring: below average = high score (buying opportunity)
+    if change_pct <= -30:
+        return 90.0
+    if change_pct <= -15:
+        return 75.0
+    if change_pct <= -5:
+        return 60.0
+    if change_pct <= 5:
+        return 50.0
+    if change_pct <= 15:
+        return 35.0
+    return 20.0
+
+
+def compute_minifig_appeal(
+    minifig_data: object | None,
+    entry_price_cents: int | None,
+) -> float | None:
+    """Signal 14: Minifigure value and rarity appeal.
+
+    Combines three factors:
+    1. Value floor: minifig value as fraction of set price
+    2. Exclusivity: % of minifigs exclusive to this set (rare = valuable)
+    3. Arbitrage: if shared minifigs can be obtained cheaper elsewhere,
+       that LOWERS this set's appeal; if THIS set is the cheapest way
+       to get them, that's a bonus.
+
+    Returns None when minifig data is unavailable.
+    """
+    if minifig_data is None:
+        return None
+    if entry_price_cents is None or entry_price_cents <= 0:
+        return None
+
+    total_value = getattr(minifig_data, "total_value_cents", 0)
+    exclusive_count = getattr(minifig_data, "exclusive_count", 0)
+    total_count = getattr(minifig_data, "total_count", 0)
+    exclusive_value = getattr(minifig_data, "exclusive_value_cents", 0)
+    cheapest_alt_price = getattr(
+        minifig_data, "cheapest_alternative_price_cents", None
+    )
+
+    if total_value <= 0 or total_count <= 0:
+        return None
+
+    # Factor 1: Value floor ratio (0-40 points)
+    value_ratio = total_value / entry_price_cents
+    if value_ratio >= 1.0:
+        value_score = 40.0
+    elif value_ratio >= 0.5:
+        value_score = 30.0
+    elif value_ratio >= 0.2:
+        value_score = 20.0
+    else:
+        value_score = 10.0
+
+    # Factor 2: Exclusivity ratio (0-40 points)
+    exclusivity_ratio = exclusive_count / total_count
+    if exclusivity_ratio >= 0.8:
+        excl_score = 40.0  # Most minifigs are exclusive
+    elif exclusivity_ratio >= 0.5:
+        excl_score = 30.0
+    elif exclusivity_ratio >= 0.2:
+        excl_score = 20.0
+    else:
+        excl_score = 10.0  # Most minifigs appear in other sets
+
+    # Factor 3: Arbitrage position (0-20 points)
+    # If THIS set is cheaper than alternatives for the same minifigs = bonus
+    # If alternatives are cheaper = penalty
+    if cheapest_alt_price is not None and cheapest_alt_price > 0:
+        if entry_price_cents < cheapest_alt_price:
+            arb_score = 20.0  # This set is the cheapest way to get the figs
+        elif entry_price_cents < cheapest_alt_price * 1.2:
+            arb_score = 12.0  # Competitive price
+        else:
+            arb_score = 5.0  # Can get these figs cheaper elsewhere
+    else:
+        # No alternatives found (all exclusive) or no price data
+        arb_score = 15.0 if exclusive_count == total_count else 10.0
+
+    return min(95.0, value_score + excl_score + arb_score)
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------

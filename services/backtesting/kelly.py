@@ -13,8 +13,10 @@ from typing import TYPE_CHECKING, Any
 import pandas as pd
 
 from config.kelly import (
+    APPLY_MODIFIERS,
     CONFIDENCE_HIGH_SAMPLES,
     CONFIDENCE_MODERATE_SAMPLES,
+    DEFAULT_SIGNAL_WEIGHT,
     FLIP_HORIZONS,
     HOLD_HORIZONS,
     KELLY_FRACTION,
@@ -23,6 +25,7 @@ from config.kelly import (
     NEIGHBOR_FALLBACK_DISCOUNT,
     SCORE_BIN_LABELS,
     SCORE_BINS,
+    SIGNAL_WEIGHTS,
 )
 from services.backtesting.analysis import trades_to_dataframe
 from services.backtesting.types import SIGNAL_NAMES, TradeResult
@@ -138,9 +141,28 @@ def compute_kelly_table(
     if df.empty:
         return {}
 
-    # Compute composite score per trade (avg of non-null signals)
+    # Compute weighted composite score per trade
     signal_cols = [c for c in SIGNAL_NAMES if c in df.columns]
-    df["composite_score"] = df[signal_cols].mean(axis=1, skipna=True)
+    weights = pd.Series(
+        {c: SIGNAL_WEIGHTS.get(c, DEFAULT_SIGNAL_WEIGHT) for c in signal_cols}
+    )
+    values = df[signal_cols]
+    mask = values.notna()
+    weighted_sum = values.where(mask, 0.0).mul(weights, axis=1).sum(axis=1)
+    weight_sum = mask.astype(float).mul(weights, axis=1).sum(axis=1)
+    df["composite_score"] = (weighted_sum / weight_sum).where(weight_sum > 0)
+
+    # Apply modifiers as multipliers if enabled
+    if APPLY_MODIFIERS:
+        mod_cols = [
+            c for c in ("mod_shelf_life", "mod_subtheme", "mod_niche")
+            if c in df.columns
+        ]
+        if mod_cols:
+            modifier_product = df[mod_cols].prod(axis=1)
+            df["composite_score"] = (
+                df["composite_score"] * modifier_product
+            ).clip(0, 100)
 
     # Assign bins using the shared function
     df["score_bin"] = df["composite_score"].apply(_bin_composite_score)

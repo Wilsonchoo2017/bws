@@ -40,10 +40,12 @@ def get_or_create_item(
 
     On conflict, updates fields only if the new value is not None
     (preserves existing data, enriches with new sources).
-    If no image_url is provided, falls back to BrickLink constructed URL.
+    If no image_url is provided, falls back to BrickLink constructed URL
+    for new inserts only -- existing image_urls are never overwritten by fallback.
     """
-    if image_url is None:
-        image_url = _bricklink_image_url(set_number)
+    # For INSERT: use BrickLink fallback when no image provided.
+    # For UPDATE: only pass caller's original value so COALESCE preserves existing.
+    insert_image_url = image_url if image_url is not None else _bricklink_image_url(set_number)
 
     conn.execute(
         """
@@ -60,7 +62,7 @@ def get_or_create_item(
             year_retired = COALESCE(EXCLUDED.year_retired, lego_items.year_retired),
             parts_count = COALESCE(EXCLUDED.parts_count, lego_items.parts_count),
             weight = COALESCE(EXCLUDED.weight, lego_items.weight),
-            image_url = COALESCE(EXCLUDED.image_url, lego_items.image_url),
+            image_url = COALESCE(?, lego_items.image_url),
             rrp_cents = COALESCE(EXCLUDED.rrp_cents, lego_items.rrp_cents),
             rrp_currency = COALESCE(EXCLUDED.rrp_currency, lego_items.rrp_currency),
             retiring_soon = COALESCE(EXCLUDED.retiring_soon, lego_items.retiring_soon),
@@ -68,8 +70,9 @@ def get_or_create_item(
             dimensions = COALESCE(EXCLUDED.dimensions, lego_items.dimensions),
             updated_at = now()
         """,
-        [set_number, title, theme, year_released, year_retired, parts_count, weight, image_url,
-         rrp_cents, rrp_currency, retiring_soon, minifig_count, dimensions],
+        [set_number, title, theme, year_released, year_retired, parts_count, weight, insert_image_url,
+         rrp_cents, rrp_currency, retiring_soon, minifig_count, dimensions,
+         image_url],  # for ON CONFLICT update -- None lets COALESCE keep existing
     )
 
 
@@ -130,7 +133,7 @@ def get_all_items(conn: "DuckDBPyConnection") -> list[dict]:
             li.year_released,
             li.year_retired,
             li.retiring_soon,
-            li.image_url,
+            COALESCE(li.image_url, 'https://img.bricklink.com/ItemImage/SN/0/' || li.set_number || '-1.png') AS image_url,
             li.rrp_cents,
             li.rrp_currency,
             li.updated_at,

@@ -35,6 +35,36 @@ CONFIDENCE_MODERATE_SAMPLES: int = 30
 # 0.6 means the neighbor's recommendation is reduced by 40%.
 NEIGHBOR_FALLBACK_DISCOUNT: float = 0.6
 
+# ---------------------------------------------------------------------------
+# Signal weights for weighted composite scoring
+# ---------------------------------------------------------------------------
+# Weights > 1.0 amplify the signal; < 1.0 dampen it.
+# Momentum/trend signals are down-weighted (anti-value for buy-and-hold).
+# Fundamental signals (theme, lifecycle, value opportunity) are up-weighted.
+SIGNAL_WEIGHTS: dict[str, float] = {
+    "peer_appreciation": 0.3,
+    "demand_pressure": 1.0,
+    "supply_velocity": 1.0,
+    "price_trend": 0.3,
+    "price_vs_rrp": 1.0,
+    "lifecycle_position": 1.5,
+    "stock_level": 1.0,
+    "momentum": 0.2,
+    "theme_quality": 1.5,
+    "theme_growth": 1.2,
+    "community_quality": 1.0,
+    "collector_premium": 1.0,
+    "value_opportunity": 1.8,
+    "minifig_appeal": 1.3,
+}
+
+# Default weight for signals not listed in SIGNAL_WEIGHTS
+DEFAULT_SIGNAL_WEIGHT: float = 1.0
+
+# Whether to apply modifiers (shelf_life, subtheme, niche) as multipliers
+# to the composite score
+APPLY_MODIFIERS: bool = True
+
 # Return horizons grouped by strategy
 FLIP_HORIZONS: tuple[str, ...] = ("return_flip_1m", "return_flip_2m")
 HOLD_HORIZONS: tuple[str, ...] = (

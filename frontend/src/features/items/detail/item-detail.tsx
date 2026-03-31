@@ -16,6 +16,7 @@ import { KellyPanel } from '../kelly-panel';
 import { SignalsPanel } from '../signals-table';
 import { BricklinkPriceChart } from './bricklink-price-chart';
 import { MinifiguresPanel } from './minifigures-panel';
+import { MinifigureValueChart } from './minifigure-value-chart';
 
 const ENRICH_SOURCES = [
   { id: null, label: 'All Sources' },
@@ -267,6 +268,9 @@ export function ItemDetailView({ setNumber }: ItemDetailViewProps) {
 
       {/* Minifigures */}
       <MinifiguresPanel setNumber={setNumber} />
+
+      {/* Minifigure value trend chart */}
+      <MinifigureValueChart setNumber={setNumber} />
 
       {/* BrickLink price analysis charts */}
       <BricklinkPriceChart setNumber={setNumber} />

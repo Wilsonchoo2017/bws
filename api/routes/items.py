@@ -9,6 +9,7 @@ from services.bricklink.repository import (
     get_monthly_sales,
     get_price_history,
     get_set_minifigures,
+    get_set_minifig_value_history,
 )
 from services.bricklink.scraper import scrape_set_minifigures
 from services.backtesting.kelly import (
@@ -219,6 +220,31 @@ async def get_item_minifigures(set_number: str):
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        conn.close()
+
+
+@router.get("/{set_number}/minifigures/value-history")
+async def get_minifig_value_history(set_number: str):
+    """Get aggregated minifigure value history for a LEGO set."""
+    conn = get_connection()
+    try:
+        init_schema(conn)
+
+        rows = conn.execute(
+            "SELECT item_id FROM bricklink_items WHERE item_id LIKE ?",
+            [f"{set_number}-%"],
+        ).fetchall()
+
+        if not rows:
+            return {"success": True, "data": {"snapshots": []}}
+
+        item_id = rows[0][0]
+        snapshots = get_set_minifig_value_history(conn, item_id)
+
+        return {"success": True, "data": {"snapshots": snapshots}}
+    except Exception:
+        raise HTTPException(status_code=500, detail="Failed to fetch minifigure value history")
     finally:
         conn.close()
 

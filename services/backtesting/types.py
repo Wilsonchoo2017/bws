@@ -28,6 +28,9 @@ SIGNAL_NAMES: tuple[str, ...] = (
     "theme_quality",
     "community_quality",
     "collector_premium",
+    "theme_growth",
+    "value_opportunity",
+    "minifig_appeal",
 )
 
 MODIFIER_NAMES: tuple[str, ...] = (
@@ -56,6 +59,9 @@ class SignalSnapshot:
     theme_quality: float | None = None
     community_quality: float | None = None
     collector_premium: float | None = None
+    theme_growth: float | None = None
+    value_opportunity: float | None = None
+    minifig_appeal: float | None = None
     # 3 modifiers (multipliers, default 1.0)
     mod_shelf_life: float = 1.0
     mod_subtheme: float = 1.0

@@ -5,9 +5,12 @@ validation rules, and freshness windows.
 """
 
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from services.enrichment.types import MetadataField, SourceId
+
+# Skip BrickLink pricing writes if last scraped within this window
+PRICING_FRESHNESS = timedelta(days=7)
 
 
 @dataclass(frozen=True)

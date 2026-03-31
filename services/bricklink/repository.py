@@ -255,6 +255,60 @@ def upsert_item(conn: "DuckDBPyConnection", data: BricklinkData) -> int:
     return item_id
 
 
+def has_recent_pricing(
+    conn: "DuckDBPyConnection",
+    item_id: str,
+    freshness: timedelta,
+) -> bool:
+    """Check if a recent price history record exists within the freshness window.
+
+    Args:
+        conn: DuckDB connection
+        item_id: Bricklink item ID (e.g., "75192-1")
+        freshness: Maximum age of pricing data to consider fresh
+
+    Returns:
+        True if fresh pricing exists, False otherwise
+    """
+    row = conn.execute(
+        "SELECT MAX(scraped_at) FROM bricklink_price_history WHERE item_id = ?",
+        [item_id],
+    ).fetchone()
+    if not row or row[0] is None:
+        return False
+    scraped_at = row[0]
+    if isinstance(scraped_at, str):
+        scraped_at = parse_timestamp(scraped_at)
+    return scraped_at is not None and (datetime.now(tz=_UTC) - scraped_at) < freshness
+
+
+def has_recent_minifig_pricing(
+    conn: "DuckDBPyConnection",
+    minifig_id: str,
+    freshness: timedelta,
+) -> bool:
+    """Check if a recent minifig price history record exists within the freshness window.
+
+    Args:
+        conn: DuckDB connection
+        minifig_id: Minifigure ID
+        freshness: Maximum age of pricing data to consider fresh
+
+    Returns:
+        True if fresh pricing exists, False otherwise
+    """
+    row = conn.execute(
+        "SELECT MAX(scraped_at) FROM minifig_price_history WHERE minifig_id = ?",
+        [minifig_id],
+    ).fetchone()
+    if not row or row[0] is None:
+        return False
+    scraped_at = row[0]
+    if isinstance(scraped_at, str):
+        scraped_at = parse_timestamp(scraped_at)
+    return scraped_at is not None and (datetime.now(tz=_UTC) - scraped_at) < freshness
+
+
 def create_price_history(
     conn: "DuckDBPyConnection",
     item_id: str,
@@ -752,6 +806,59 @@ def get_minifig_price_history(
             "current_new": _json_to_pricing_box(row[4]),
             "current_used": _json_to_pricing_box(row[5]),
             "scraped_at": parse_timestamp(row[6]),
+        }
+        for row in results
+    ]
+
+
+def get_set_minifig_value_history(
+    conn: "DuckDBPyConnection",
+    set_item_id: str,
+) -> list[dict]:
+    """Get aggregated minifigure value history for a set.
+
+    Sums current_new and current_used avg_price across all minifigs
+    in the set, grouped by scrape timestamp (rounded to hour).
+
+    Args:
+        conn: DuckDB connection
+        set_item_id: Set item ID (e.g., "75192-1")
+
+    Returns:
+        List of dicts with scraped_at, total_new_cents, total_used_cents
+    """
+    results = conn.execute(
+        """
+        SELECT
+            date_trunc('hour', mph.scraped_at) AS snapshot_hour,
+            SUM(
+                COALESCE(
+                    CAST(json_extract(mph.current_new, '$.avg_price.amount') AS INTEGER)
+                    * sm.quantity,
+                    0
+                )
+            ) AS total_new_cents,
+            SUM(
+                COALESCE(
+                    CAST(json_extract(mph.current_used, '$.avg_price.amount') AS INTEGER)
+                    * sm.quantity,
+                    0
+                )
+            ) AS total_used_cents
+        FROM set_minifigures sm
+        JOIN minifig_price_history mph ON mph.minifig_id = sm.minifig_id
+        WHERE sm.set_item_id = ?
+        GROUP BY date_trunc('hour', mph.scraped_at)
+        ORDER BY snapshot_hour ASC
+        """,
+        [set_item_id],
+    ).fetchall()
+
+    return [
+        {
+            "scraped_at": str(row[0]) if row[0] else None,
+            "total_new_cents": int(row[1]) if row[1] else 0,
+            "total_used_cents": int(row[2]) if row[2] else 0,
         }
         for row in results
     ]

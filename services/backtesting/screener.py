@@ -10,8 +10,10 @@ from typing import TYPE_CHECKING
 
 import pandas as pd
 
+from config.kelly import APPLY_MODIFIERS, DEFAULT_SIGNAL_WEIGHT, SIGNAL_WEIGHTS
 from services.backtesting.data_loader import (
     load_item_metadata,
+    load_minifig_data,
     load_monthly_sales,
     load_price_snapshots,
 )
@@ -26,13 +28,16 @@ from services.backtesting.signals import (
     compute_community_quality,
     compute_demand_pressure,
     compute_lifecycle_position,
+    compute_minifig_appeal,
     compute_momentum,
     compute_peer_appreciation,
     compute_price_trend,
     compute_price_vs_rrp,
     compute_stock_level,
     compute_supply_velocity,
+    compute_theme_growth,
     compute_theme_quality,
+    compute_value_opportunity,
 )
 
 if TYPE_CHECKING:
@@ -46,6 +51,7 @@ def _compute_item_signals(
     item_sales: pd.DataFrame,
     item_meta: pd.DataFrame,
     snapshots: pd.DataFrame | None,
+    minifig_data: dict | None = None,
 ) -> dict | None:
     """Compute all signals for a single item at its latest available month.
 
@@ -106,6 +112,14 @@ def _compute_item_signals(
         "collector_premium": compute_collector_premium(
             item_sales, eval_year, eval_month
         ),
+        "theme_growth": compute_theme_growth(theme),
+        "value_opportunity": compute_value_opportunity(
+            item_sales, eval_year, eval_month
+        ),
+        "minifig_appeal": compute_minifig_appeal(
+            (minifig_data or {}).get(item_id),
+            int(entry_price),
+        ),
     }
 
     modifiers = {
@@ -114,12 +128,27 @@ def _compute_item_signals(
         "mod_niche": compute_niche_penalty(theme),
     }
 
-    valid_scores = [v for v in signals.values() if v is not None]
-    composite = (
-        round(sum(valid_scores) / len(valid_scores), 1)
-        if valid_scores
-        else None
-    )
+    # Weighted composite score
+    weighted_sum = 0.0
+    weight_sum = 0.0
+    for name, value in signals.items():
+        if value is not None:
+            w = SIGNAL_WEIGHTS.get(name, DEFAULT_SIGNAL_WEIGHT)
+            weighted_sum += value * w
+            weight_sum += w
+
+    composite = round(weighted_sum / weight_sum, 1) if weight_sum > 0 else None
+
+    # Apply modifiers as multipliers to composite
+    if composite is not None and APPLY_MODIFIERS:
+        modifier_product = (
+            modifiers["mod_shelf_life"]
+            * modifiers["mod_subtheme"]
+            * modifiers["mod_niche"]
+        )
+        composite = round(
+            min(100.0, max(0.0, composite * modifier_product)), 1
+        )
 
     return {
         "item_id": item_id,
@@ -157,6 +186,8 @@ def compute_item_signals(
         )
         snapshots = None
 
+    mfig_data = load_minifig_data(conn)
+
     condition_sales = all_sales[all_sales["condition"] == condition]
     if condition_sales.empty:
         condition_sales = all_sales
@@ -180,7 +211,7 @@ def compute_item_signals(
         item_sales = condition_sales[condition_sales["item_id"] == candidate]
         if not item_sales.empty:
             return _compute_item_signals(
-                candidate, item_sales, item_meta, snapshots
+                candidate, item_sales, item_meta, snapshots, mfig_data
             )
 
     return None
@@ -203,6 +234,8 @@ def compute_all_signals(
         )
         snapshots = None
 
+    mfig_data = load_minifig_data(conn)
+
     condition_sales = all_sales[all_sales["condition"] == condition]
     if condition_sales.empty:
         condition_sales = all_sales
@@ -217,7 +250,7 @@ def compute_all_signals(
             item_meta = metadata[metadata["set_number"] == base_id]
 
         result = _compute_item_signals(
-            str(item_id), item_sales, item_meta, snapshots
+            str(item_id), item_sales, item_meta, snapshots, mfig_data
         )
         if result is not None:
             results.append(result)

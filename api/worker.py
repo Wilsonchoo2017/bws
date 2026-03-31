@@ -269,6 +269,53 @@ def _run_enrichment(job_url: str) -> dict:
         # Store results
         store_enrichment_result(conn, result)
 
+        # If minifig_count > 0, scrape minifigure inventory and prices
+        try:
+            minifig_count = None
+            # Check if freshly found from enrichment
+            for r in result.field_results:
+                if (
+                    r.field.value == "minifig_count"
+                    and r.status == FieldStatus.FOUND
+                    and r.value
+                ):
+                    minifig_count = int(r.value)
+                    break
+            # Fall back to existing value in lego_items
+            if minifig_count is None:
+                row = conn.execute(
+                    "SELECT minifig_count FROM lego_items WHERE set_number = ?",
+                    [set_number],
+                ).fetchone()
+                if row and row[0] and int(row[0]) > 0:
+                    minifig_count = int(row[0])
+
+            if minifig_count and minifig_count > 0:
+                from services.bricklink.scraper import scrape_set_minifigures_sync
+
+                # Safe to call asyncio.run() here: _run_enrichment runs in a
+                # plain thread via asyncio.to_thread with no event loop attached,
+                # and scrape_set_minifigures_sync creates a fresh loop with no
+                # shared resources from the main loop.
+                item_id = f"{set_number}-1"
+                # Only scrape if bricklink_items entry exists
+                bl_row = conn.execute(
+                    "SELECT item_id FROM bricklink_items WHERE item_id = ?",
+                    [item_id],
+                ).fetchone()
+                if bl_row:
+                    mf_result = scrape_set_minifigures_sync(
+                        conn, item_id, save=True, scrape_prices=True,
+                    )
+                    logger.info(
+                        "Minifig scrape for %s: %d/%d scraped",
+                        set_number,
+                        mf_result.minifigures_scraped,
+                        mf_result.minifig_count,
+                    )
+        except Exception:
+            logger.exception("Minifig scrape failed for %s", set_number)
+
         # Build response
         field_details = [
             {

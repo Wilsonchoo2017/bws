@@ -87,6 +87,12 @@ export interface SetMinifigureData {
   minifigures: MinifigurePrice[];
 }
 
+export interface MinifigValueSnapshot {
+  scraped_at: string;
+  total_new_cents: number;
+  total_used_cents: number;
+}
+
 export interface PricingBoxData {
   times_sold: number | null;
   total_lots: number | null;

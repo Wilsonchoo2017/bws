@@ -75,7 +75,9 @@ def list_transactions(
         SELECT pt.id, pt.set_number, pt.txn_type, pt.quantity,
                pt.price_cents, pt.currency, pt.condition, pt.txn_date,
                pt.notes, pt.created_at,
-               li.title, li.image_url, li.theme
+               li.title,
+               COALESCE(li.image_url, 'https://img.bricklink.com/ItemImage/SN/0/' || pt.set_number || '-1.png') AS image_url,
+               li.theme
         FROM portfolio_transactions pt
         LEFT JOIN lego_items li ON li.set_number = pt.set_number
         {where}
@@ -100,7 +102,9 @@ def get_transaction(conn: "DuckDBPyConnection", txn_id: int) -> dict | None:
         SELECT pt.id, pt.set_number, pt.txn_type, pt.quantity,
                pt.price_cents, pt.currency, pt.condition, pt.txn_date,
                pt.notes, pt.created_at,
-               li.title, li.image_url, li.theme
+               li.title,
+               COALESCE(li.image_url, 'https://img.bricklink.com/ItemImage/SN/0/' || pt.set_number || '-1.png') AS image_url,
+               li.theme
         FROM portfolio_transactions pt
         LEFT JOIN lego_items li ON li.set_number = pt.set_number
         WHERE pt.id = ?
@@ -407,7 +411,9 @@ def _item_metadata(
     placeholders = ", ".join(["?"] * len(set_numbers))
     rows = conn.execute(
         f"""
-        SELECT set_number, title, image_url, theme
+        SELECT set_number, title,
+               COALESCE(image_url, 'https://img.bricklink.com/ItemImage/SN/0/' || set_number || '-1.png') AS image_url,
+               theme
         FROM lego_items
         WHERE set_number IN ({placeholders})
         """,  # noqa: S608
