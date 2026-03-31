@@ -1,6 +1,6 @@
 """Common database query functions for BWS."""
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 
 
@@ -49,5 +49,10 @@ def parse_timestamp(value: str | datetime | None) -> datetime | None:
     if value is None:
         return None
     if isinstance(value, datetime):
+        if value.tzinfo is None:
+            return value.replace(tzinfo=timezone.utc)
         return value
-    return datetime.fromisoformat(value)
+    parsed = datetime.fromisoformat(value)
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone.utc)
+    return parsed

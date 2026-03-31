@@ -24,6 +24,8 @@ def make_item():
             "image_url": None,
             "weight": None,
             "retiring_soon": None,
+            "minifig_count": None,
+            "dimensions": None,
         }
         return {**defaults, **overrides}
 

@@ -13,6 +13,7 @@ import {
 import { DataTable } from '@/components/ui/table/data-table';
 import { DataTableColumnHeader } from '@/components/ui/table/data-table-column-header';
 import { EnrichMissingButton } from './enrich-missing-button';
+import { ScrapeMissingMinifigsButton } from './scrape-missing-minifigs-button';
 import { PriceDealFilter } from './price-deal-filter';
 import type { UnifiedItem } from './types';
 import { formatPrice } from './types';
@@ -256,6 +257,11 @@ export function UnifiedItemsTable() {
     return result;
   }, [data, searchQuery, dealFilter, hideNoRetail, retirementFilter]);
 
+  const minifigMissing = useMemo(
+    () => filteredData.filter(i => i.minifig_count === null).map(i => i.set_number),
+    [filteredData]
+  );
+
   const fetchItems = () => {
     fetch('/api/items')
       .then((res) => res.json())
@@ -383,6 +389,7 @@ export function UnifiedItemsTable() {
         </select>
         <PriceDealFilter onFilterChange={(fn) => setDealFilter(() => fn)} />
         <EnrichMissingButton setNumbers={filteredData.map((i) => i.set_number)} />
+        <ScrapeMissingMinifigsButton setNumbers={minifigMissing} />
         <div className='ml-auto flex items-center gap-2'>
           <input
             type='text'

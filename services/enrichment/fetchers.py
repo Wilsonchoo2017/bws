@@ -41,7 +41,7 @@ def fetch_from_bricklink(
         row = conn.execute(
             """
             SELECT item_id, item_type, title, weight, year_released, image_url,
-                   parts_count, theme, last_scraped_at
+                   parts_count, theme, last_scraped_at, minifig_count, dimensions
             FROM bricklink_items
             WHERE item_id = ? OR item_id = ?
             ORDER BY last_scraped_at DESC NULLS LAST
@@ -66,6 +66,8 @@ def fetch_from_bricklink(
                     image_url=row[5],
                     parts_count=row[6],
                     theme=row[7],
+                    minifig_count=row[9],
+                    dimensions=row[10],
                 )
                 logger.info("Bricklink cache hit for %s (age: %s)", set_number, datetime.now(tz=timezone.utc) - scraped_at)
                 return adapt_bricklink(cached)
@@ -74,11 +76,18 @@ def fetch_from_bricklink(
 
     # HTTP scrape
     try:
+        from services.bricklink.repository import has_recent_pricing
         from services.bricklink.scraper import scrape_item_sync
         from services.bricklink.parser import build_price_guide_url
+        from services.enrichment.config import PRICING_FRESHNESS
+
+        item_id = f"{set_number}-1"
+        skip_pricing = has_recent_pricing(conn, item_id, PRICING_FRESHNESS)
+        if skip_pricing:
+            logger.info("Skipping pricing write for %s (fresh within 7 days)", set_number)
 
         url = build_price_guide_url("S", f"{set_number}-1")
-        scrape_result = scrape_item_sync(conn, url, save=True)
+        scrape_result = scrape_item_sync(conn, url, save=True, skip_pricing=skip_pricing)
 
         if not scrape_result.success:
             return make_failed_result(SourceId.BRICKLINK, scrape_result.error or "Unknown error")

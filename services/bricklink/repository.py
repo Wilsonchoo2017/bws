@@ -276,9 +276,7 @@ def has_recent_pricing(
     ).fetchone()
     if not row or row[0] is None:
         return False
-    scraped_at = row[0]
-    if isinstance(scraped_at, str):
-        scraped_at = parse_timestamp(scraped_at)
+    scraped_at = parse_timestamp(row[0])
     return scraped_at is not None and (datetime.now(tz=_UTC) - scraped_at) < freshness
 
 
@@ -303,9 +301,7 @@ def has_recent_minifig_pricing(
     ).fetchone()
     if not row or row[0] is None:
         return False
-    scraped_at = row[0]
-    if isinstance(scraped_at, str):
-        scraped_at = parse_timestamp(scraped_at)
+    scraped_at = parse_timestamp(row[0])
     return scraped_at is not None and (datetime.now(tz=_UTC) - scraped_at) < freshness
 
 

@@ -53,10 +53,11 @@ def upsert_products(
             INSERT INTO shopee_products (
                 id, title, price_display, price_cents,
                 sold_count, rating, shop_name,
-                product_url, image_url, source_url, scraped_at
+                product_url, image_url, source_url,
+                is_sold_out, scraped_at
             ) VALUES (
                 nextval('shopee_products_id_seq'),
-                ?, ?, ?, ?, ?, ?, ?, ?, ?, now()
+                ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, now()
             )
             ON CONFLICT (product_url) DO UPDATE SET
                 title = EXCLUDED.title,
@@ -67,6 +68,7 @@ def upsert_products(
                 shop_name = EXCLUDED.shop_name,
                 image_url = EXCLUDED.image_url,
                 source_url = EXCLUDED.source_url,
+                is_sold_out = EXCLUDED.is_sold_out,
                 scraped_at = now()
             """,
             [
@@ -79,6 +81,7 @@ def upsert_products(
                 product.product_url,
                 product.image_url,
                 source_url,
+                product.is_sold_out,
             ],
         )
         saved += 1
@@ -134,7 +137,8 @@ def get_all_products(conn: "DuckDBPyConnection") -> list[dict]:
         SELECT
             title, price_display, price_cents,
             sold_count, rating, shop_name,
-            product_url, image_url, source_url, scraped_at
+            product_url, image_url, source_url,
+            is_sold_out, scraped_at
         FROM shopee_products
         ORDER BY scraped_at DESC
         """
@@ -143,6 +147,7 @@ def get_all_products(conn: "DuckDBPyConnection") -> list[dict]:
     columns = [
         "title", "price_display", "price_cents",
         "sold_count", "rating", "shop_name",
-        "product_url", "image_url", "source_url", "scraped_at",
+        "product_url", "image_url", "source_url",
+        "is_sold_out", "scraped_at",
     ]
     return [dict(zip(columns, row)) for row in result]

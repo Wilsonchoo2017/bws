@@ -17,6 +17,7 @@ class ShopeeProduct:
     shop_name: str | None = None
     product_url: str | None = None
     image_url: str | None = None
+    is_sold_out: bool = False
 
 
 async def parse_search_results(
@@ -72,14 +73,21 @@ async def parse_search_results(
                     }
                 }
 
-                // Title is the text before the price
-                const allText = text.split('RM')[0].trim();
+                // Detect sold out -- Shopee renders "Sold Out" overlay text
+                const isSoldOut = /sold\\s*out/i.test(text);
+
+                // Title is the text before the price, strip "Sold Out" prefix
+                let allText = text.split('RM')[0].trim();
+                allText = allText.replace(/sold\\s*out\\s*(custom-overlay\\s*)?/gi, '')
+                                 .replace(/flag-label\\s*/gi, '')
+                                 .trim();
 
                 results.push({
                     title: allText || '',
                     price_display: price,
                     sold_count: sold,
                     rating: rating,
+                    is_sold_out: isSoldOut,
                     product_url: href.startsWith('http')
                         ? href
                         : 'https://shopee.com.my' + href,
@@ -101,6 +109,7 @@ async def parse_search_results(
             rating=item.get("rating"),
             product_url=item.get("product_url"),
             image_url=item.get("image_url"),
+            is_sold_out=item.get("is_sold_out", False),
         )
         for item in raw_items
         if item.get("title")

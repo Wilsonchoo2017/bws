@@ -27,6 +27,7 @@ export interface UnifiedItem {
   rrp_cents: number | null;
   rrp_currency: string | null;
   updated_at: string | null;
+  minifig_count: number | null;
   shopee_price_cents: number | null;
   shopee_currency: string | null;
   shopee_url: string | null;

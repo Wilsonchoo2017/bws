@@ -2,6 +2,7 @@
 
 
 import asyncio
+import secrets
 from dataclasses import dataclass
 from urllib.parse import urlparse
 
@@ -9,7 +10,7 @@ from db.connection import get_connection
 from db.schema import init_schema
 from services.shopee.auth import is_logged_in, login
 from services.shopee.browser import shopee_browser, human_delay, new_page
-from services.shopee.humanize import random_click, random_type
+from services.shopee.humanize import random_click, random_click_element, random_type
 from services.shopee.parser import ShopeeProduct, parse_search_results
 from services.shopee.popups import (
     dismiss_popups,
@@ -146,16 +147,18 @@ async def scrape_shop_page(
     url: str,
     *,
     max_items: int = 200,
+    max_pages: int = 20,
 ) -> ShopeeScrapeResult:
     """Scrape all products from a Shopee shop/collection page.
 
     Navigates directly to the given URL (e.g. a shop collection page)
     and extracts all visible products. Handles popups, login redirects,
-    and scrolls down to load lazy-loaded items.
+    scrolls to load lazy items, and paginates through all pages.
 
     Args:
         url: Full Shopee URL to scrape
         max_items: Maximum products to extract
+        max_pages: Maximum number of pages to scrape
 
     Returns:
         ShopeeScrapeResult with parsed products or error
@@ -166,7 +169,7 @@ async def scrape_shop_page(
             setup_dialog_handler(page)
 
             # Navigate directly to the target URL
-            await page.goto(url, wait_until="domcontentloaded")
+            await page.goto(url, wait_until="networkidle")
             await human_delay(min_ms=2_000, max_ms=4_000)
             await dismiss_popups_loop(page, interval_ms=2_000, max_rounds=5)
             await select_english(page)
@@ -182,15 +185,20 @@ async def scrape_shop_page(
                             error="Login failed or timed out",
                         )
                     # After login, go to the actual target
-                    await page.goto(url, wait_until="domcontentloaded")
+                    await page.goto(url, wait_until="networkidle")
                     await human_delay(min_ms=2_000, max_ms=3_000)
                     await dismiss_popups_loop(page, interval_ms=2_000, max_rounds=3)
 
-            # Scroll down to trigger lazy-loading of product cards
-            await _scroll_to_load(page, max_scrolls=10)
+            # Wait for product cards to render (Shopee is a SPA)
+            try:
+                await page.wait_for_selector(
+                    'a[href*="-i."]', timeout=15_000,
+                )
+            except Exception:
+                pass  # Proceed anyway -- page may have no products
 
-            # Parse products (same DOM structure as search results)
-            items = await parse_search_results(page, max_items)
+            # Scrape all pages: scroll, parse, paginate
+            items = await _scrape_all_pages(page, max_items, max_pages)
 
             # Extract shop name from URL (e.g. /legoshopmy?... -> "legoshopmy")
             shop_name = _extract_shop_name(url)
@@ -204,6 +212,7 @@ async def scrape_shop_page(
                         shop_name=shop_name,
                         product_url=item.product_url,
                         image_url=item.image_url,
+                        is_sold_out=item.is_sold_out,
                     )
                     for item in items
                 )
@@ -276,13 +285,186 @@ async def _scroll_to_load(page, max_scrolls: int = 10) -> None:
             break
 
 
+async def _simulate_browsing(page) -> None:
+    """Simulate a human slowly scanning the page before moving on.
+
+    Scrolls gradually from top to bottom in small increments, pausing
+    at random intervals to "read" or hover over a product. This mimics
+    a real user visually scanning the product grid before clicking next.
+    """
+    # Scroll to top first
+    await page.evaluate("window.scrollTo(0, 0)")
+    await human_delay(min_ms=500, max_ms=1_000)
+
+    page_height = await page.evaluate("document.body.scrollHeight")
+    viewport_height = await page.evaluate("window.innerHeight")
+    if page_height <= viewport_height:
+        await human_delay(min_ms=1_500, max_ms=3_000)
+        return
+
+    # Scroll down in 3-6 incremental steps
+    num_steps = secrets.randbelow(4) + 3
+    step_size = page_height / num_steps
+    current_y = 0.0
+
+    for step in range(num_steps):
+        # Vary each scroll distance slightly (+/- 20%)
+        jitter = 0.8 + (secrets.randbelow(40) / 100.0)
+        current_y = min(current_y + step_size * jitter, page_height)
+
+        await page.evaluate(
+            f"window.scrollTo({{top: {current_y}, behavior: 'smooth'}})"
+        )
+        # Pause 1-3s per step, as if scanning the products
+        await human_delay(min_ms=1_000, max_ms=3_000)
+
+        # Occasionally hover over a product card (~40% chance)
+        if secrets.randbelow(10) < 4:
+            card_count = await page.evaluate(
+                'document.querySelectorAll(\'a[href*="-i."]\').length'
+            )
+            if card_count > 0:
+                idx = secrets.randbelow(card_count)
+                await page.evaluate(f"""() => {{
+                    const cards = document.querySelectorAll('a[href*="-i."]');
+                    const card = cards[{idx}];
+                    if (card) {{
+                        const r = card.getBoundingClientRect();
+                        if (r.top >= 0 && r.bottom <= window.innerHeight) {{
+                            card.dispatchEvent(new MouseEvent('mouseover', {{bubbles: true}}));
+                        }}
+                    }}
+                }}""")
+                await human_delay(min_ms=600, max_ms=1_500)
+
+        # Occasionally move mouse to a random spot (~30% chance)
+        if secrets.randbelow(10) < 3:
+            vw = await page.evaluate("window.innerWidth")
+            vh = await page.evaluate("window.innerHeight")
+            x = secrets.randbelow(max(1, vw - 100)) + 50
+            y = secrets.randbelow(max(1, vh - 100)) + 50
+            await page.mouse.move(x, y)
+            await human_delay(min_ms=300, max_ms=800)
+
+    # Final pause at the bottom before paginating
+    await human_delay(min_ms=1_000, max_ms=2_500)
+
+
+async def _click_next_page(page) -> bool:
+    """Find and click the '>' next-page button in Shopee pagination.
+
+    Uses JS evaluation to locate the button, then clicks it with
+    human-like randomization for anti-detection.
+
+    Returns:
+        True if a next-page button was found and clicked, False otherwise.
+    """
+    found = await page.evaluate("""() => {
+        // Strategy 1: Find a button/link with exact ">" text
+        const allBtns = document.querySelectorAll('button, a');
+        for (const btn of allBtns) {
+            const text = btn.textContent.trim();
+            if (text === '>' || text === 'Next') {
+                // Skip if disabled
+                if (btn.disabled || btn.classList.contains('shopee-disabled')
+                    || btn.getAttribute('aria-disabled') === 'true') {
+                    return false;
+                }
+                btn.setAttribute('data-bws-next', 'true');
+                return true;
+            }
+        }
+
+        // Strategy 2: Find pagination container and click last enabled nav button
+        const paginators = document.querySelectorAll(
+            '[class*="pagination"], [class*="page-controller"], ' +
+            '.shopee-mini-page-controller, [role="navigation"]'
+        );
+        for (const nav of paginators) {
+            const btns = nav.querySelectorAll('button, a');
+            if (btns.length === 0) continue;
+            const lastBtn = btns[btns.length - 1];
+            if (lastBtn.disabled || lastBtn.classList.contains('shopee-disabled')
+                || lastBtn.getAttribute('aria-disabled') === 'true') {
+                return false;
+            }
+            lastBtn.setAttribute('data-bws-next', 'true');
+            return true;
+        }
+        return false;
+    }""")
+
+    if not found:
+        return False
+
+    el = await page.query_selector('[data-bws-next="true"]')
+    if not el:
+        return False
+
+    await page.evaluate("el => el.removeAttribute('data-bws-next')", el)
+    await random_click_element(el)
+    await human_delay(min_ms=2_000, max_ms=4_000)
+    await page.wait_for_load_state("networkidle")
+    await page.evaluate("window.scrollTo(0, 0)")
+    await human_delay(min_ms=500, max_ms=1_000)
+    return True
+
+
+async def _scrape_all_pages(
+    page,
+    max_items: int = 200,
+    max_pages: int = 20,
+) -> tuple[ShopeeProduct, ...]:
+    """Scroll, parse, and paginate through all pages of results.
+
+    For each page: scrolls to load lazy items, parses products,
+    deduplicates, then clicks next. Stops when max_items or max_pages
+    is reached, or no next button exists.
+
+    Args:
+        page: Playwright page positioned on the first results page
+        max_items: Maximum total products to collect
+        max_pages: Maximum number of pages to scrape
+
+    Returns:
+        Deduplicated tuple of ShopeeProduct, trimmed to max_items
+    """
+    all_items: list[ShopeeProduct] = []
+    seen_urls: set[str] = set()
+
+    for page_num in range(max_pages):
+        await _scroll_to_load(page, max_scrolls=10)
+        page_items = await parse_search_results(page, max_items)
+
+        for item in page_items:
+            url = item.product_url or ""
+            if url and url in seen_urls:
+                continue
+            if url:
+                seen_urls.add(url)
+            all_items.append(item)
+
+        if len(all_items) >= max_items:
+            break
+
+        # Simulate human browsing before navigating to next page
+        await _simulate_browsing(page)
+
+        has_next = await _click_next_page(page)
+        if not has_next:
+            break
+
+    return tuple(all_items[:max_items])
+
+
 def scrape_shop_page_sync(
     url: str,
     *,
     max_items: int = 200,
+    max_pages: int = 20,
 ) -> ShopeeScrapeResult:
     """Synchronous wrapper for scrape_shop_page."""
-    return asyncio.run(scrape_shop_page(url, max_items=max_items))
+    return asyncio.run(scrape_shop_page(url, max_items=max_items, max_pages=max_pages))
 
 
 def search_shopee_sync(

@@ -105,7 +105,7 @@ class TestGetAllItemsColumnCompleteness:
 
     EXPECTED_COLUMNS = {
         "set_number", "title", "theme", "year_released", "year_retired",
-        "retiring_soon", "image_url",
+        "retiring_soon", "image_url", "minifig_count",
         "rrp_cents", "rrp_currency", "updated_at",
         "shopee_price_cents", "shopee_currency", "shopee_url", "shopee_last_seen",
         "toysrus_price_cents", "toysrus_currency", "toysrus_url", "toysrus_last_seen",

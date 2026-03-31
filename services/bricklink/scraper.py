@@ -6,6 +6,7 @@ Coordinates fetching HTML and parsing data from Bricklink.
 import asyncio
 from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import timedelta
 from typing import TYPE_CHECKING
 
 import httpx
@@ -27,6 +28,7 @@ from services.bricklink.parser import (
 from services.bricklink.repository import (
     create_minifig_price_history,
     create_price_history,
+    has_recent_minifig_pricing,
     upsert_item,
     upsert_minifigure,
     upsert_monthly_sales,
@@ -99,6 +101,7 @@ async def scrape_item(
     url: str,
     *,
     save: bool = True,
+    skip_pricing: bool = False,
     client: httpx.AsyncClient | None = None,
 ) -> ScrapeResult:
     """Scrape a single Bricklink item.
@@ -160,9 +163,10 @@ async def scrape_item(
         # Save to database if requested
         if save:
             upsert_item(conn, data)
-            create_price_history(conn, item_id, data)
-            if monthly_sales:
-                upsert_monthly_sales(conn, item_id, list(monthly_sales))
+            if not skip_pricing:
+                create_price_history(conn, item_id, data)
+                if monthly_sales:
+                    upsert_monthly_sales(conn, item_id, list(monthly_sales))
 
         return ScrapeResult(
             success=True,
@@ -191,6 +195,7 @@ async def scrape_item_by_id(
     item_id: str,
     *,
     save: bool = True,
+    skip_pricing: bool = False,
     client: httpx.AsyncClient | None = None,
 ) -> ScrapeResult:
     """Scrape a Bricklink item by type and ID.
@@ -200,13 +205,14 @@ async def scrape_item_by_id(
         item_type: Item type (P, S, M, etc.)
         item_id: Item ID
         save: Whether to save results to database
+        skip_pricing: Whether to skip writing pricing data
         client: Optional HTTP client
 
     Returns:
         ScrapeResult with data or error
     """
     url = build_price_guide_url(item_type, item_id)
-    return await scrape_item(conn, url, save=save, client=client)
+    return await scrape_item(conn, url, save=save, skip_pricing=skip_pricing, client=client)
 
 
 async def scrape_set_minifigures(
@@ -215,6 +221,7 @@ async def scrape_set_minifigures(
     *,
     save: bool = True,
     scrape_prices: bool = True,
+    pricing_freshness: timedelta | None = None,
     client: httpx.AsyncClient | None = None,
 ) -> MinifigScrapeResult:
     """Scrape minifigure inventory and prices for a LEGO set.
@@ -224,6 +231,8 @@ async def scrape_set_minifigures(
         item_id: Set item ID (e.g., "77256-1")
         save: Whether to save results to database
         scrape_prices: Whether to fetch individual minifig prices
+        pricing_freshness: If set, skip pricing writes for minifigs with
+            recent pricing within this window
         client: Optional HTTP client
 
     Returns:
@@ -302,7 +311,12 @@ async def scrape_set_minifigures(
                 # Save minifig data
                 if save:
                     upsert_minifigure(conn, mf_data)
-                    create_minifig_price_history(conn, mf_info.minifig_id, mf_data)
+                    skip_mf_pricing = (
+                        pricing_freshness is not None
+                        and has_recent_minifig_pricing(conn, mf_info.minifig_id, pricing_freshness)
+                    )
+                    if not skip_mf_pricing:
+                        create_minifig_price_history(conn, mf_info.minifig_id, mf_data)
 
             except (httpx.HTTPStatusError, httpx.RequestError, ValueError, TimeoutError) as e:
                 # Log but continue with other minifigs
@@ -342,10 +356,14 @@ def scrape_set_minifigures_sync(
     *,
     save: bool = True,
     scrape_prices: bool = True,
+    pricing_freshness: timedelta | None = None,
 ) -> MinifigScrapeResult:
     """Synchronous wrapper for scrape_set_minifigures."""
     return asyncio.run(
-        scrape_set_minifigures(conn, item_id, save=save, scrape_prices=scrape_prices)
+        scrape_set_minifigures(
+            conn, item_id, save=save, scrape_prices=scrape_prices,
+            pricing_freshness=pricing_freshness,
+        )
     )
 
 
@@ -397,6 +415,7 @@ def scrape_item_sync(
     url: str,
     *,
     save: bool = True,
+    skip_pricing: bool = False,
 ) -> ScrapeResult:
     """Synchronous wrapper for scrape_item.
 
@@ -404,11 +423,12 @@ def scrape_item_sync(
         conn: DuckDB connection
         url: Bricklink URL
         save: Whether to save results to database
+        skip_pricing: Whether to skip writing pricing data
 
     Returns:
         ScrapeResult with data or error
     """
-    return asyncio.run(scrape_item(conn, url, save=save))
+    return asyncio.run(scrape_item(conn, url, save=save, skip_pricing=skip_pricing))
 
 
 def scrape_batch_sync(

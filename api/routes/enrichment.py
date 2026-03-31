@@ -117,6 +117,45 @@ async def enrich_missing(
     return EnrichBatchResponse(queued=len(queued_numbers), set_numbers=queued_numbers)
 
 
+@router.post("/scrape-missing-minifigs", response_model=EnrichBatchResponse)
+async def scrape_missing_minifigs(
+    request: EnrichBatchRequest | None = None,
+) -> EnrichBatchResponse:
+    """Queue enrichment for items with unknown minifig_count (NULL).
+
+    Items with minifig_count = 0 (previously scraped, no minifigs) are skipped.
+    Only items with minifig_count IS NULL (never scraped) are queued.
+    """
+    conn = get_connection()
+    try:
+        init_schema(conn)
+
+        if request and request.set_numbers:
+            placeholders = ", ".join(["?"] * len(request.set_numbers))
+            rows = conn.execute(
+                f"SELECT set_number FROM lego_items WHERE minifig_count IS NULL AND set_number IN ({placeholders})",  # noqa: S608
+                request.set_numbers,
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT set_number FROM lego_items WHERE minifig_count IS NULL",
+            ).fetchall()
+
+        items = [r[0] for r in rows]
+    except Exception:
+        logger.exception("Failed to fetch items with missing minifig_count")
+        raise HTTPException(status_code=500, detail="Internal server error")
+    finally:
+        conn.close()
+
+    queued_numbers: list[str] = []
+    for set_number in items:
+        job_manager.create_job("enrichment", set_number)
+        queued_numbers.append(set_number)
+
+    return EnrichBatchResponse(queued=len(queued_numbers), set_numbers=queued_numbers)
+
+
 @router.get("/needs-enrichment", response_model=NeedsEnrichmentResponse)
 async def list_needs_enrichment(
     limit: int = Query(default=50, ge=1, le=500),

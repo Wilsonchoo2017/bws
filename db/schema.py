@@ -92,6 +92,7 @@ CREATE TABLE IF NOT EXISTS shopee_products (
     product_url VARCHAR UNIQUE,
     image_url VARCHAR,
     source_url VARCHAR,
+    is_sold_out BOOLEAN DEFAULT FALSE,
     scraped_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 """
@@ -424,6 +425,21 @@ def _migrate_lego_items(conn: "DuckDBPyConnection") -> None:
         conn.execute("ALTER TABLE lego_items ADD COLUMN dimensions VARCHAR")
 
 
+def _migrate_shopee_products(conn: "DuckDBPyConnection") -> None:
+    """Add is_sold_out column to shopee_products."""
+    existing = {
+        row[0]
+        for row in conn.execute(
+            "SELECT column_name FROM information_schema.columns "
+            "WHERE table_name = 'shopee_products'"
+        ).fetchall()
+    }
+    if "is_sold_out" not in existing:
+        conn.execute(
+            "ALTER TABLE shopee_products ADD COLUMN is_sold_out BOOLEAN DEFAULT FALSE"
+        )
+
+
 _SEQUENCE_TABLE_MAP = [
     ("bricklink_items_id_seq", "bricklink_items"),
     ("bricklink_price_history_id_seq", "bricklink_price_history"),
@@ -575,6 +591,8 @@ def _rebuild_table(conn: "DuckDBPyConnection", table_name: str) -> None:
         _migrate_bricklink_items(conn)
     if table_name == "lego_items":
         _migrate_lego_items(conn)
+    if table_name == "shopee_products":
+        _migrate_shopee_products(conn)
 
     # Get new table columns to find the intersection
     new_cols = {
@@ -614,6 +632,7 @@ def init_schema(conn: "DuckDBPyConnection") -> None:
         conn.execute(ddl)
     _migrate_bricklink_items(conn)
     _migrate_lego_items(conn)
+    _migrate_shopee_products(conn)
     _sync_sequences(conn)
     # Flush WAL to reduce corruption risk on ungraceful shutdown
     try:

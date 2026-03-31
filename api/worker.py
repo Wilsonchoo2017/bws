@@ -292,6 +292,7 @@ def _run_enrichment(job_url: str) -> dict:
 
             if minifig_count and minifig_count > 0:
                 from services.bricklink.scraper import scrape_set_minifigures_sync
+                from services.enrichment.config import PRICING_FRESHNESS
 
                 # Safe to call asyncio.run() here: _run_enrichment runs in a
                 # plain thread via asyncio.to_thread with no event loop attached,
@@ -306,6 +307,7 @@ def _run_enrichment(job_url: str) -> dict:
                 if bl_row:
                     mf_result = scrape_set_minifigures_sync(
                         conn, item_id, save=True, scrape_prices=True,
+                        pricing_freshness=PRICING_FRESHNESS,
                     )
                     logger.info(
                         "Minifig scrape for %s: %d/%d scraped",

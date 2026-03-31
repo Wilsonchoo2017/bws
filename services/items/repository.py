@@ -137,6 +137,7 @@ def get_all_items(conn: "DuckDBPyConnection") -> list[dict]:
             li.rrp_cents,
             li.rrp_currency,
             li.updated_at,
+            li.minifig_count,
             s.price_cents AS shopee_price_cents,
             s.currency AS shopee_currency,
             s.url AS shopee_url,
@@ -161,7 +162,7 @@ def get_all_items(conn: "DuckDBPyConnection") -> list[dict]:
 
     columns = [
         "set_number", "title", "theme", "year_released", "year_retired", "retiring_soon", "image_url",
-        "rrp_cents", "rrp_currency", "updated_at",
+        "rrp_cents", "rrp_currency", "updated_at", "minifig_count",
         "shopee_price_cents", "shopee_currency", "shopee_url", "shopee_last_seen",
         "toysrus_price_cents", "toysrus_currency", "toysrus_url", "toysrus_last_seen",
         "bricklink_new_cents", "bricklink_new_currency", "bricklink_new_last_seen",
