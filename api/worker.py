@@ -48,6 +48,16 @@ async def run_worker(manager: JobManager | None = None) -> None:
                 logger.info("Job %s completed: %d items", job_id, len(result))
                 _queue_enrichment_for_scraped_items(mgr, result)
                 await _check_deal_signals()
+            elif job.scraper_id == "mightyutan":
+                result = await _run_mightyutan_scrape()
+                mgr.mark_completed(
+                    job_id,
+                    items_found=len(result),
+                    items=result,
+                )
+                logger.info("Job %s completed: %d items", job_id, len(result))
+                _queue_enrichment_for_scraped_items(mgr, result)
+                await _check_deal_signals()
             elif job.scraper_id == "shopee_saturation":
                 result = await _run_saturation_batch(job.url)
                 mgr.mark_completed(
@@ -62,7 +72,7 @@ async def run_worker(manager: JobManager | None = None) -> None:
                     result["total"],
                 )
             elif job.scraper_id == "bricklink_catalog":
-                result = await _run_bricklink_catalog_scrape(job.url)
+                result = await _run_bricklink_catalog_scrape(job.url, mgr, job_id)
                 mgr.mark_completed(
                     job_id,
                     items_found=result["items_found"],
@@ -157,6 +167,37 @@ async def _run_toysrus_scrape() -> list[dict]:
             "sold_count": None,
             "rating": None,
             "shop_name": "Toys\"R\"Us Malaysia",
+            "product_url": p.url,
+            "image_url": p.image_url,
+        }
+        for p in result.products
+    ]
+
+
+async def _run_mightyutan_scrape() -> list[dict]:
+    """Run the Mighty Utan LEGO catalog scrape and return items as dicts."""
+    from db.connection import get_connection
+    from db.schema import init_schema
+    from services.mightyutan.scraper import scrape_all_lego
+
+    conn = get_connection()
+    init_schema(conn)
+
+    try:
+        result = await scrape_all_lego(conn=conn)
+    finally:
+        conn.close()
+
+    if not result.success:
+        raise RuntimeError(result.error or "Mighty Utan scrape failed")
+
+    return [
+        {
+            "title": p.name,
+            "price_display": f"RM {p.price_myr}",
+            "sold_count": p.total_sold,
+            "rating": p.rating,
+            "shop_name": "Mighty Utan Malaysia",
             "product_url": p.url,
             "image_url": p.image_url,
         }
@@ -376,7 +417,11 @@ async def _check_deal_signals() -> None:
         logger.exception("Deal signal check failed")
 
 
-async def _run_bricklink_catalog_scrape(url: str) -> dict:
+async def _run_bricklink_catalog_scrape(
+    url: str,
+    mgr: JobManager,
+    job_id: str,
+) -> dict:
     """Run BrickLink catalog list scrape with pagination."""
     from db.connection import get_connection
     from db.schema import init_schema
@@ -385,8 +430,14 @@ async def _run_bricklink_catalog_scrape(url: str) -> dict:
     conn = get_connection()
     init_schema(conn)
 
+    def on_progress(current_page: int, total_pages: int, items_so_far: int) -> None:
+        mgr.update_progress(
+            job_id,
+            f"Page {current_page}/{total_pages} -- {items_so_far} items found",
+        )
+
     try:
-        result = await scrape_catalog_list(conn, url)
+        result = await scrape_catalog_list(conn, url, on_progress=on_progress)
     finally:
         conn.close()
 

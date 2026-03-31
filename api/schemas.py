@@ -28,6 +28,7 @@ class ScrapeJobResponse(BaseModel):
     completed_at: datetime | None = None
     items_found: int = 0
     error: str | None = None
+    progress: str | None = None
 
 
 class ScrapeItemResponse(BaseModel):

@@ -24,6 +24,7 @@ class Job:
     items_found: int = 0
     items: list = field(default_factory=list)
     error: str | None = None
+    progress: str | None = None
 
 
 class JobManager:
@@ -32,7 +33,7 @@ class JobManager:
     def __init__(self) -> None:
         self._jobs: OrderedDict[str, Job] = OrderedDict()
         self._queue: asyncio.Queue[str] = asyncio.Queue()
-        self._max_history = 100
+        self._max_history = 1000
 
     def create_job(self, scraper_id: str, url: str) -> Job:
         """Create a new job and add it to the queue."""
@@ -71,6 +72,11 @@ class JobManager:
             job.items_found = items_found
             if items is not None:
                 job.items = items
+
+    def update_progress(self, job_id: str, progress: str) -> None:
+        job = self._jobs.get(job_id)
+        if job:
+            job.progress = progress
 
     def mark_failed(self, job_id: str, error: str) -> None:
         job = self._jobs.get(job_id)

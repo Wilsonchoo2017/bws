@@ -28,6 +28,27 @@ export const SCRAPERS: ScraperConfig[] = [
         description: 'Full LEGO product catalog on Toys"R"Us Malaysia'
       }
     ]
+  },
+  {
+    id: 'mightyutan',
+    name: 'Mighty Utan Malaysia',
+    description:
+      'Scrape LEGO catalog from mightyutan.com.my via SiteGiant storefront',
+    targets: [
+      {
+        id: 'lego-catalog',
+        label: 'LEGO Full Catalog',
+        url: 'https://mightyutan.com.my/collection/lego-1',
+        description: 'Full LEGO product catalog on Mighty Utan Malaysia'
+      }
+    ]
+  },
+  {
+    id: 'bricklink_catalog',
+    name: 'BrickLink Catalog',
+    description:
+      'Discover items from BrickLink catalog list pages with full pagination',
+    targets: []
   }
 ];
 

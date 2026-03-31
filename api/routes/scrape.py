@@ -45,6 +45,19 @@ SCRAPERS: list[ScraperInfo] = [
         ],
     ),
     ScraperInfo(
+        id="mightyutan",
+        name="Mighty Utan Malaysia",
+        description="Scrape LEGO catalog from mightyutan.com.my via SiteGiant storefront",
+        targets=[
+            ScrapeTargetInfo(
+                id="lego-catalog",
+                label="LEGO Full Catalog",
+                url="https://mightyutan.com.my/collection/lego-1",
+                description="Full LEGO product catalog on Mighty Utan Malaysia",
+            )
+        ],
+    ),
+    ScraperInfo(
         id="shopee_saturation",
         name="Shopee Saturation Checker",
         description="Check market saturation on Shopee for items with retail pricing",
@@ -115,6 +128,14 @@ async def start_scrape(request: ScrapeRequest):
             detail="URL must be a toysrus.com.my URL",
         )
 
+    if request.scraper_id == "mightyutan" and not request.url.startswith(
+        "https://mightyutan.com.my/"
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail="URL must be a mightyutan.com.my URL",
+        )
+
     if request.scraper_id == "shopee_saturation" and not (
         request.url == "batch" or request.url.replace("-", "").isalnum()
     ):
@@ -141,7 +162,7 @@ async def clear_jobs():
 
 
 @router.get("/jobs", response_model=list[ScrapeJobResponse])
-async def list_jobs(limit: int = 50):
+async def list_jobs(limit: int = 1000):
     """List recent scrape jobs."""
     return [_job_to_response(j) for j in job_manager.list_jobs(limit)]
 
@@ -163,6 +184,7 @@ async def get_job(job_id: str):
         completed_at=job.completed_at,
         items_found=job.items_found,
         error=job.error,
+        progress=job.progress,
         items=[ScrapeItemResponse(**item) for item in job.items],
     )
 
@@ -178,4 +200,5 @@ def _job_to_response(job) -> ScrapeJobResponse:
         completed_at=job.completed_at,
         items_found=job.items_found,
         error=job.error,
+        progress=job.progress,
     )

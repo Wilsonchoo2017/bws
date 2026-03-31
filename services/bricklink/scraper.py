@@ -372,6 +372,7 @@ async def scrape_catalog_list(
     *,
     save: bool = True,
     client: httpx.AsyncClient | None = None,
+    on_progress: Callable[[int, int, int], None] | None = None,
 ) -> CatalogScrapeResult:
     """Scrape a BrickLink catalog list page with pagination.
 
@@ -383,6 +384,7 @@ async def scrape_catalog_list(
         url: catalogList.asp URL (any page -- pagination is auto-detected)
         save: Whether to save discovered items to database
         client: Optional HTTP client
+        on_progress: Optional callback(current_page, total_pages, items_so_far)
 
     Returns:
         CatalogScrapeResult with discovered items
@@ -400,6 +402,9 @@ async def scrape_catalog_list(
         all_items = parse_catalog_list_page(html)
         total_pages = parse_catalog_list_pagination(html)
 
+        if on_progress:
+            on_progress(1, total_pages, len(all_items))
+
         # Fetch remaining pages
         for page_num in range(2, total_pages + 1):
             await asyncio.sleep(get_random_delay())
@@ -407,6 +412,9 @@ async def scrape_catalog_list(
             page_html = await _fetch_page(client, page_url)
             page_items = parse_catalog_list_page(page_html)
             all_items.extend(page_items)
+
+            if on_progress:
+                on_progress(page_num, total_pages, len(all_items))
 
         # Deduplicate by item_id
         seen: set[str] = set()

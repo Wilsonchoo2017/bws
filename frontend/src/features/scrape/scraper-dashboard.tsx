@@ -12,6 +12,7 @@ interface JobState {
   items: ScrapeItem[];
   itemsFound: number;
   error?: string;
+  progress?: string;
 }
 
 interface ScraperDashboardProps {
@@ -36,7 +37,8 @@ export function ScraperDashboard({ scraper }: ScraperDashboardProps) {
             status: data.status,
             items: data.items || [],
             itemsFound: data.items_found || 0,
-            error: data.error
+            error: data.error,
+            progress: data.progress
           }
         }));
 
@@ -213,7 +215,7 @@ function JobResults({ job }: { job: JobState }) {
           <span className='text-muted-foreground animate-pulse text-sm'>
             {job.status === 'queued'
               ? 'Waiting for worker...'
-              : 'Scraping in progress...'}
+              : job.progress || 'Scraping in progress...'}
           </span>
         )}
         {job.status === 'completed' && (
