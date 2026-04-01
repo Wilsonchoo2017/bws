@@ -318,6 +318,43 @@ CREATE TABLE IF NOT EXISTS brickranker_items (
 );
 """
 
+SCRAPE_TASKS_DDL = """
+CREATE TABLE IF NOT EXISTS scrape_tasks (
+    id INTEGER PRIMARY KEY,
+    task_id VARCHAR NOT NULL UNIQUE,
+    set_number VARCHAR NOT NULL,
+    task_type VARCHAR NOT NULL,
+    priority INTEGER NOT NULL DEFAULT 3,
+    status VARCHAR NOT NULL DEFAULT 'pending',
+    depends_on VARCHAR,
+    attempt_count INTEGER DEFAULT 0,
+    max_attempts INTEGER DEFAULT 3,
+    error VARCHAR,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    started_at TIMESTAMP,
+    completed_at TIMESTAMP,
+    locked_by VARCHAR,
+    locked_at TIMESTAMP
+);
+"""
+
+GOOGLE_TRENDS_SNAPSHOTS_DDL = """
+CREATE TABLE IF NOT EXISTS google_trends_snapshots (
+    id INTEGER PRIMARY KEY,
+    set_number VARCHAR NOT NULL,
+    keyword VARCHAR NOT NULL,
+    search_property VARCHAR NOT NULL DEFAULT 'youtube',
+    geo VARCHAR NOT NULL DEFAULT '',
+    timeframe_start VARCHAR,
+    timeframe_end VARCHAR,
+    interest_json VARCHAR,
+    peak_value INTEGER,
+    peak_date VARCHAR,
+    average_value FLOAT,
+    scraped_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+"""
+
 KEEPA_SNAPSHOTS_DDL = """
 CREATE TABLE IF NOT EXISTS keepa_snapshots (
     id INTEGER PRIMARY KEY,
@@ -405,6 +442,8 @@ CREATE SEQUENCE IF NOT EXISTS portfolio_snapshots_id_seq;
 CREATE SEQUENCE IF NOT EXISTS image_assets_id_seq;
 CREATE SEQUENCE IF NOT EXISTS brickeconomy_snapshots_id_seq;
 CREATE SEQUENCE IF NOT EXISTS keepa_snapshots_id_seq;
+CREATE SEQUENCE IF NOT EXISTS google_trends_snapshots_id_seq;
+CREATE SEQUENCE IF NOT EXISTS scrape_tasks_id_seq;
 """
 
 # Index creation statements
@@ -479,6 +518,14 @@ CREATE INDEX IF NOT EXISTS idx_keepa_snapshots_set
     ON keepa_snapshots(set_number, scraped_at);
 CREATE INDEX IF NOT EXISTS idx_keepa_snapshots_scraped
     ON keepa_snapshots(scraped_at);
+CREATE INDEX IF NOT EXISTS idx_gtrends_snapshots_set
+    ON google_trends_snapshots(set_number, scraped_at);
+CREATE INDEX IF NOT EXISTS idx_gtrends_snapshots_scraped
+    ON google_trends_snapshots(scraped_at);
+CREATE INDEX IF NOT EXISTS idx_scrape_tasks_status_priority
+    ON scrape_tasks(status, priority, created_at);
+CREATE INDEX IF NOT EXISTS idx_scrape_tasks_set_type
+    ON scrape_tasks(set_number, task_type);
 """
 
 ALL_DDL = [
@@ -505,6 +552,8 @@ ALL_DDL = [
     PORTFOLIO_SNAPSHOTS_DDL,
     BRICKECONOMY_SNAPSHOTS_DDL,
     KEEPA_SNAPSHOTS_DDL,
+    GOOGLE_TRENDS_SNAPSHOTS_DDL,
+    SCRAPE_TASKS_DDL,
     INDEXES_DDL,
 ]
 
@@ -609,6 +658,8 @@ _SEQUENCE_TABLE_MAP = [
     ("image_assets_id_seq", "image_assets"),
     ("brickeconomy_snapshots_id_seq", "brickeconomy_snapshots"),
     ("keepa_snapshots_id_seq", "keepa_snapshots"),
+    ("google_trends_snapshots_id_seq", "google_trends_snapshots"),
+    ("scrape_tasks_id_seq", "scrape_tasks"),
 ]
 
 
@@ -723,6 +774,8 @@ def _rebuild_table(conn: "DuckDBPyConnection", table_name: str) -> None:
         "image_assets": IMAGE_ASSETS_DDL,
         "brickeconomy_snapshots": BRICKECONOMY_SNAPSHOTS_DDL,
         "keepa_snapshots": KEEPA_SNAPSHOTS_DDL,
+        "google_trends_snapshots": GOOGLE_TRENDS_SNAPSHOTS_DDL,
+        "scrape_tasks": SCRAPE_TASKS_DDL,
     }
 
     ddl = table_ddl_map.get(table_name)
@@ -821,6 +874,10 @@ def drop_all_tables(conn: "DuckDBPyConnection") -> None:
     conn.execute("DROP SEQUENCE IF EXISTS brickeconomy_snapshots_id_seq;")
     conn.execute("DROP TABLE IF EXISTS keepa_snapshots;")
     conn.execute("DROP SEQUENCE IF EXISTS keepa_snapshots_id_seq;")
+    conn.execute("DROP TABLE IF EXISTS google_trends_snapshots;")
+    conn.execute("DROP SEQUENCE IF EXISTS google_trends_snapshots_id_seq;")
+    conn.execute("DROP TABLE IF EXISTS scrape_tasks;")
+    conn.execute("DROP SEQUENCE IF EXISTS scrape_tasks_id_seq;")
 
 
 def get_table_stats(conn: "DuckDBPyConnection") -> dict[str, int]:
@@ -846,6 +903,8 @@ def get_table_stats(conn: "DuckDBPyConnection") -> dict[str, int]:
         "image_assets",
         "brickeconomy_snapshots",
         "keepa_snapshots",
+        "google_trends_snapshots",
+        "scrape_tasks",
     ]
     stats = {}
     for table in tables:

@@ -1,63 +1,63 @@
-"""Auto-enrichment helpers -- dedup and queue enrichment jobs."""
+"""Auto-enrichment helpers -- create persistent scrape tasks for discovered sets."""
 
 import logging
 
 from api.jobs import JobManager
-from api.schemas import JobStatus
 
 logger = logging.getLogger("bws.enrichment.auto")
-
-
-def _get_pending_enrichment_set_numbers(manager: JobManager) -> set[str]:
-    """Get set numbers that already have queued/running enrichment jobs."""
-    pending: set[str] = set()
-    for job in manager.list_jobs(limit=100):
-        if job.scraper_id != "enrichment":
-            continue
-        if job.status not in (JobStatus.QUEUED, JobStatus.RUNNING):
-            continue
-        # Parse set_number from job URL ("75192" or "75192:bricklink")
-        set_number = job.url.split(":")[0]
-        pending.add(set_number)
-    return pending
 
 
 def queue_enrichment_if_needed(
     manager: JobManager,
     set_number: str,
 ) -> bool:
-    """Queue an enrichment job if one isn't already pending for this set.
+    """Create scrape tasks for a set if none are already active.
 
-    Returns True if a job was queued, False if skipped (already pending).
+    Returns True if tasks were created, False if skipped (already active).
+    The ``manager`` parameter is kept for API compatibility but is no longer
+    used -- tasks go directly to the persistent DuckDB queue.
     """
-    pending = _get_pending_enrichment_set_numbers(manager)
-    if set_number in pending:
-        return False
+    from db.connection import get_connection
+    from db.schema import init_schema
+    from services.scrape_queue.repository import create_tasks_for_set
 
-    manager.create_job("enrichment", set_number)
-    logger.info("Auto-queued enrichment for %s", set_number)
-    return True
+    conn = get_connection()
+    try:
+        init_schema(conn)
+        tasks = create_tasks_for_set(conn, set_number)
+    finally:
+        conn.close()
+
+    if tasks:
+        logger.info("Auto-created %d scrape tasks for %s", len(tasks), set_number)
+        return True
+    return False
 
 
 def queue_enrichment_batch(
     manager: JobManager,
     set_numbers: list[str],
 ) -> int:
-    """Queue enrichment for multiple sets, deduplicating against pending jobs.
+    """Create scrape tasks for multiple sets (dedup handled by repository).
 
-    Returns count of newly queued jobs.
+    Returns count of sets that had tasks created.
     """
-    pending = _get_pending_enrichment_set_numbers(manager)
-    queued = 0
+    from db.connection import get_connection
+    from db.schema import init_schema
+    from services.scrape_queue.repository import create_tasks_for_set
 
-    for sn in set_numbers:
-        if sn in pending:
-            continue
-        manager.create_job("enrichment", sn)
-        pending.add(sn)  # prevent dupes within this batch
-        queued += 1
+    conn = get_connection()
+    try:
+        init_schema(conn)
+        queued = 0
+        for sn in set_numbers:
+            tasks = create_tasks_for_set(conn, sn)
+            if tasks:
+                queued += 1
+    finally:
+        conn.close()
 
     if queued > 0:
-        logger.info("Auto-queued enrichment for %d sets", queued)
+        logger.info("Auto-created scrape tasks for %d sets", queued)
 
     return queued

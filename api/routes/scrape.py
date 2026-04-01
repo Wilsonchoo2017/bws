@@ -221,37 +221,107 @@ async def start_scrape(request: ScrapeRequest):
 
 @router.delete("/jobs")
 async def clear_jobs():
-    """Clear all completed and failed jobs from history."""
+    """Clear all completed and failed jobs from history (both in-memory and persistent)."""
     removed = job_manager.clear_finished()
+
+    # Also clear terminal scrape tasks
+    try:
+        from db.connection import get_connection
+        from db.schema import init_schema
+
+        conn = get_connection()
+        try:
+            init_schema(conn)
+            result = conn.execute(
+                "SELECT COUNT(*) FROM scrape_tasks WHERE status IN ('completed', 'failed')",
+            ).fetchone()
+            task_count = result[0] if result else 0
+            if task_count > 0:
+                conn.execute(
+                    "DELETE FROM scrape_tasks WHERE status IN ('completed', 'failed')",
+                )
+                removed += task_count
+        finally:
+            conn.close()
+    except Exception:
+        pass
+
     return {"cleared": removed}
 
 
 @router.get("/jobs", response_model=list[ScrapeJobResponse])
 async def list_jobs(limit: int = 1000):
-    """List recent scrape jobs."""
-    return [_job_to_response(j) for j in job_manager.list_jobs(limit)]
+    """List recent scrape jobs, including persistent scrape queue tasks."""
+    # In-memory jobs (Shopee, ToysRUs, BrickLink catalog, etc.)
+    jobs = [_job_to_response(j) for j in job_manager.list_jobs(limit)]
+
+    # Persistent scrape queue tasks (enrichment pipeline)
+    try:
+        from db.connection import get_connection
+        from db.schema import init_schema
+
+        conn = get_connection()
+        try:
+            init_schema(conn)
+            jobs.extend(_scrape_tasks_as_jobs(conn, limit))
+        finally:
+            conn.close()
+    except Exception:
+        pass  # Graceful degradation -- show in-memory jobs even if DB fails
+
+    return jobs
 
 
 @router.get("/jobs/{job_id}", response_model=ScrapeJobDetailResponse)
 async def get_job(job_id: str):
     """Get a job's status and results."""
+    # Check in-memory jobs first
     job = job_manager.get_job(job_id)
-    if not job:
-        raise HTTPException(status_code=404, detail="Job not found")
+    if job:
+        return ScrapeJobDetailResponse(
+            job_id=job.job_id,
+            status=job.status,
+            scraper_id=job.scraper_id,
+            url=job.url,
+            created_at=job.created_at,
+            started_at=job.started_at,
+            completed_at=job.completed_at,
+            items_found=job.items_found,
+            error=job.error,
+            progress=job.progress,
+            items=[ScrapeItemResponse(**item) for item in job.items],
+        )
 
-    return ScrapeJobDetailResponse(
-        job_id=job.job_id,
-        status=job.status,
-        scraper_id=job.scraper_id,
-        url=job.url,
-        created_at=job.created_at,
-        started_at=job.started_at,
-        completed_at=job.completed_at,
-        items_found=job.items_found,
-        error=job.error,
-        progress=job.progress,
-        items=[ScrapeItemResponse(**item) for item in job.items],
-    )
+    # Check persistent scrape tasks
+    try:
+        from db.connection import get_connection
+        from db.schema import init_schema
+
+        conn = get_connection()
+        try:
+            init_schema(conn)
+            tasks = _scrape_tasks_as_jobs(conn, limit=1000)
+            for task_job in tasks:
+                if task_job.job_id == job_id:
+                    return ScrapeJobDetailResponse(
+                        job_id=task_job.job_id,
+                        status=task_job.status,
+                        scraper_id=task_job.scraper_id,
+                        url=task_job.url,
+                        created_at=task_job.created_at,
+                        started_at=task_job.started_at,
+                        completed_at=task_job.completed_at,
+                        items_found=task_job.items_found,
+                        error=task_job.error,
+                        progress=task_job.progress,
+                        items=[],
+                    )
+        finally:
+            conn.close()
+    except Exception:
+        pass
+
+    raise HTTPException(status_code=404, detail="Job not found")
 
 
 def _job_to_response(job) -> ScrapeJobResponse:
@@ -268,3 +338,79 @@ def _job_to_response(job) -> ScrapeJobResponse:
         progress=job.progress,
         worker_no=job.worker_no,
     )
+
+
+# Map scrape task statuses to job statuses for unified display.
+_TASK_STATUS_TO_JOB_STATUS = {
+    "pending": JobStatus.QUEUED,
+    "blocked": JobStatus.QUEUED,
+    "running": JobStatus.RUNNING,
+    "completed": JobStatus.COMPLETED,
+    "failed": JobStatus.FAILED,
+}
+
+
+def _scrape_tasks_as_jobs(conn, limit: int) -> list[ScrapeJobResponse]:
+    """Convert persistent scrape_tasks rows into ScrapeJobResponse for the /jobs list."""
+    from datetime import datetime, timezone
+
+    rows = conn.execute(
+        """
+        SELECT task_id, set_number, task_type, status, priority,
+               depends_on, attempt_count, max_attempts, error,
+               created_at, started_at, completed_at, locked_by
+        FROM scrape_tasks
+        ORDER BY
+            CASE status
+                WHEN 'running' THEN 0
+                WHEN 'pending' THEN 1
+                WHEN 'blocked' THEN 2
+                WHEN 'failed' THEN 3
+                WHEN 'completed' THEN 4
+            END,
+            priority ASC,
+            created_at DESC
+        LIMIT ?
+        """,
+        [limit],
+    ).fetchall()
+
+    results: list[ScrapeJobResponse] = []
+    for row in rows:
+        (task_id, set_number, task_type, status, priority,
+         depends_on, attempt_count, max_attempts, error,
+         created_at, started_at, completed_at, locked_by) = row
+
+        job_status = _TASK_STATUS_TO_JOB_STATUS.get(status, JobStatus.QUEUED)
+
+        # Build a progress string showing useful context
+        progress_parts: list[str] = []
+        if status == "blocked" and depends_on:
+            progress_parts.append(f"waiting for {depends_on}")
+        if attempt_count > 1:
+            progress_parts.append(f"attempt {attempt_count}/{max_attempts}")
+        if locked_by and status == "running":
+            progress_parts.append(locked_by)
+        progress = " | ".join(progress_parts) if progress_parts else None
+
+        # Ensure datetime objects
+        if isinstance(created_at, str):
+            created_at = datetime.fromisoformat(created_at)
+        if not created_at:
+            created_at = datetime.now(tz=timezone.utc)
+
+        results.append(ScrapeJobResponse(
+            job_id=task_id,
+            status=job_status,
+            scraper_id=f"scrape:{task_type}",
+            url=set_number,
+            created_at=created_at,
+            started_at=started_at,
+            completed_at=completed_at,
+            items_found=1 if status == "completed" and not error else 0,
+            error=error,
+            progress=progress,
+            worker_no=None,
+        ))
+
+    return results

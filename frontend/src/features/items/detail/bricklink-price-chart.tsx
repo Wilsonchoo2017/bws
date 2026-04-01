@@ -15,9 +15,12 @@ import {
 } from 'recharts';
 import type { BricklinkPriceData, MonthlySaleRecord } from '../types';
 import { formatPrice } from '../types';
+import type { ChartDateRange } from './item-detail';
 
 interface BricklinkPriceChartProps {
   setNumber: string;
+  globalDateRange?: ChartDateRange | null;
+  onDateRange?: (range: ChartDateRange) => void;
 }
 
 type ChartTab = 'monthly-price' | 'monthly-volume' | 'snapshots';
@@ -29,6 +32,7 @@ const MONTH_NAMES = [
 
 function buildMonthlySalesChart(sales: readonly MonthlySaleRecord[]) {
   const byMonth = new Map<string, {
+    ts: number;
     label: string;
     new_avg: number | null;
     used_avg: number | null;
@@ -45,7 +49,9 @@ function buildMonthlySalesChart(sales: readonly MonthlySaleRecord[]) {
   for (const sale of sales) {
     const key = `${sale.year}-${String(sale.month).padStart(2, '0')}`;
     const label = `${MONTH_NAMES[sale.month]} ${sale.year}`;
+    const ts = new Date(`${sale.year}-${String(sale.month).padStart(2, '0')}-15`).getTime();
     const existing = byMonth.get(key) ?? {
+      ts,
       label,
       new_avg: null,
       used_avg: null,
@@ -89,6 +95,7 @@ function buildSnapshotChart(history: BricklinkPriceData['price_history']) {
   return [...history]
     .sort((a, b) => (a.scraped_at ?? '').localeCompare(b.scraped_at ?? ''))
     .map((h) => ({
+      ts: h.scraped_at ? new Date(h.scraped_at).getTime() : 0,
       label: h.scraped_at
         ? new Date(h.scraped_at).toLocaleDateString('en-US', {
             month: 'short',
@@ -144,7 +151,7 @@ function VolumeTooltip({ active, payload, label }: any) {
   );
 }
 
-export function BricklinkPriceChart({ setNumber }: BricklinkPriceChartProps) {
+export function BricklinkPriceChart({ setNumber, globalDateRange, onDateRange }: BricklinkPriceChartProps) {
   const [data, setData] = useState<BricklinkPriceData | null>(null);
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState<ChartTab>('monthly-price');
@@ -161,6 +168,20 @@ export function BricklinkPriceChart({ setNumber }: BricklinkPriceChartProps) {
       .finally(() => setLoading(false));
   }, [setNumber]);
 
+  const monthlyChart = data ? buildMonthlySalesChart(data.monthly_sales) : [];
+  const snapshotChart = data ? buildSnapshotChart(data.price_history) : [];
+
+  // Report date range to parent for cross-chart sync
+  useEffect(() => {
+    if (onDateRange && monthlyChart.length > 0) {
+      const timestamps = monthlyChart.map((p) => p.ts);
+      onDateRange({
+        min: Math.min(...timestamps),
+        max: Math.max(...timestamps),
+      });
+    }
+  }, [monthlyChart.length]);
+
   if (loading) {
     return (
       <div className='flex h-64 items-center justify-center'>
@@ -175,9 +196,6 @@ export function BricklinkPriceChart({ setNumber }: BricklinkPriceChartProps) {
   ) {
     return null;
   }
-
-  const monthlyChart = buildMonthlySalesChart(data.monthly_sales);
-  const snapshotChart = buildSnapshotChart(data.price_history);
 
   const tabs: { key: ChartTab; label: string; disabled: boolean }[] = [
     {
@@ -237,9 +255,14 @@ export function BricklinkPriceChart({ setNumber }: BricklinkPriceChartProps) {
             <AreaChart data={monthlyChart}>
               <CartesianGrid strokeDasharray='3 3' opacity={0.3} />
               <XAxis
-                dataKey='label'
+                dataKey='ts'
+                type='number'
+                scale='time'
+                domain={globalDateRange ? [globalDateRange.min, globalDateRange.max] : ['dataMin', 'dataMax']}
                 tick={{ fontSize: 11 }}
-                interval='preserveStartEnd'
+                tickFormatter={(ts) =>
+                  new Date(ts).toLocaleDateString('en-US', { month: 'short', year: '2-digit' })
+                }
               />
               <YAxis
                 tick={{ fontSize: 11 }}
@@ -276,9 +299,14 @@ export function BricklinkPriceChart({ setNumber }: BricklinkPriceChartProps) {
             <BarChart data={monthlyChart}>
               <CartesianGrid strokeDasharray='3 3' opacity={0.3} />
               <XAxis
-                dataKey='label'
+                dataKey='ts'
+                type='number'
+                scale='time'
+                domain={globalDateRange ? [globalDateRange.min, globalDateRange.max] : ['dataMin', 'dataMax']}
                 tick={{ fontSize: 11 }}
-                interval='preserveStartEnd'
+                tickFormatter={(ts) =>
+                  new Date(ts).toLocaleDateString('en-US', { month: 'short', year: '2-digit' })
+                }
               />
               <YAxis tick={{ fontSize: 11 }} />
               <Tooltip content={<VolumeTooltip />} />
@@ -304,9 +332,14 @@ export function BricklinkPriceChart({ setNumber }: BricklinkPriceChartProps) {
             <AreaChart data={snapshotChart}>
               <CartesianGrid strokeDasharray='3 3' opacity={0.3} />
               <XAxis
-                dataKey='label'
+                dataKey='ts'
+                type='number'
+                scale='time'
+                domain={globalDateRange ? [globalDateRange.min, globalDateRange.max] : ['dataMin', 'dataMax']}
                 tick={{ fontSize: 11 }}
-                interval='preserveStartEnd'
+                tickFormatter={(ts) =>
+                  new Date(ts).toLocaleDateString('en-US', { month: 'short', year: '2-digit' })
+                }
               />
               <YAxis
                 tick={{ fontSize: 11 }}

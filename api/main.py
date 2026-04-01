@@ -4,6 +4,8 @@
 import asyncio
 import logging
 from contextlib import asynccontextmanager
+from logging.handlers import RotatingFileHandler
+from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -13,12 +15,29 @@ from api.worker import run_worker
 from services.enrichment.scheduler import run_enrichment_sweep
 from services.images.sweep import run_image_download_sweep
 from services.keepa.scheduler import run_keepa_sweep
+from services.scrape_queue.dispatcher import recover_scrape_queue, run_scrape_dispatcher
 from services.shopee.saturation_scheduler import run_saturation_sweep
+
+_LOG_DIR = Path(__file__).resolve().parent.parent / "logs"
+_LOG_DIR.mkdir(exist_ok=True)
+
+_LOG_FORMAT = "%(asctime)s [%(name)s] %(levelname)s: %(message)s"
 
 logging.basicConfig(
     level=logging.INFO,
-    format="%(asctime)s [%(name)s] %(levelname)s: %(message)s",
+    format=_LOG_FORMAT,
 )
+
+# Persist logs to rotating file (10 MB per file, keep 5 backups)
+_file_handler = RotatingFileHandler(
+    _LOG_DIR / "bws.log",
+    maxBytes=10 * 1024 * 1024,
+    backupCount=5,
+    encoding="utf-8",
+)
+_file_handler.setLevel(logging.WARNING)
+_file_handler.setFormatter(logging.Formatter(_LOG_FORMAT))
+logging.getLogger().addHandler(_file_handler)
 
 logger = logging.getLogger("bws.api")
 
@@ -29,19 +48,25 @@ async def lifespan(app: FastAPI):
     from api.jobs import job_manager
 
     logger.info("Starting BWS API...")
+
+    # Crash recovery: reclaim stale scrape tasks before starting dispatcher
+    await recover_scrape_queue()
+
     worker_task = asyncio.create_task(run_worker())
     sweep_task = asyncio.create_task(run_enrichment_sweep(job_manager))
     saturation_task = asyncio.create_task(run_saturation_sweep(job_manager))
     image_task = asyncio.create_task(run_image_download_sweep())
     keepa_task = asyncio.create_task(run_keepa_sweep(job_manager))
-    logger.info("Background worker, enrichment/saturation/image/keepa sweeps started")
+    scrape_dispatcher_task = asyncio.create_task(run_scrape_dispatcher())
+    logger.info("Background worker, enrichment/saturation/image/keepa sweeps + scrape dispatcher started")
     yield
+    scrape_dispatcher_task.cancel()
     keepa_task.cancel()
     image_task.cancel()
     saturation_task.cancel()
     sweep_task.cancel()
     worker_task.cancel()
-    for task in (worker_task, sweep_task, saturation_task, image_task, keepa_task):
+    for task in (worker_task, sweep_task, saturation_task, image_task, keepa_task, scrape_dispatcher_task):
         try:
             await task
         except asyncio.CancelledError:

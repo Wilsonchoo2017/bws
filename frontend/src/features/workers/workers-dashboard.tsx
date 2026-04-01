@@ -12,6 +12,11 @@ const SCRAPER_LABELS: Record<string, string> = {
   mightyutan: 'Mighty Utan',
   enrichment: 'Enrichment',
   bricklink_catalog: 'BrickLink',
+  'scrape:bricklink_metadata': 'BrickLink',
+  'scrape:brickeconomy': 'BrickEconomy',
+  'scrape:keepa': 'Keepa',
+  'scrape:minifigures': 'Minifigs',
+  'scrape:google_trends': 'Trends',
 };
 
 const STATUS_STYLES: Record<JobStatus, string> = {
@@ -328,6 +333,11 @@ function pageNumbers(
   return pages;
 }
 
+/** Check if a job is a persistent scrape queue task (vs in-memory job). */
+function isScrapeTask(job: WorkerJob): boolean {
+  return job.scraper_id.startsWith('scrape:');
+}
+
 function ActiveWorkers({ jobs }: { jobs: WorkerJob[] }) {
   const running = jobs.filter((j) => j.status === 'running');
 
@@ -339,7 +349,9 @@ function ActiveWorkers({ jobs }: { jobs: WorkerJob[] }) {
         const label = SCRAPER_LABELS[job.scraper_id] ?? job.scraper_id;
         const suffix = job.worker_no != null ? ` #${job.worker_no}` : '';
         const target =
-          job.scraper_id === 'enrichment' ? job.url : truncateUrl(job.url);
+          job.scraper_id === 'enrichment' || isScrapeTask(job)
+            ? job.url
+            : truncateUrl(job.url);
 
         return (
           <div
@@ -417,9 +429,11 @@ function StatCard({
 }
 
 function JobRow({ job }: { job: WorkerJob }) {
-  // Parse enrichment target from URL: "75192" or "75192:bricklink"
+  // Scrape tasks and enrichment jobs use set_number as URL
   const target =
-    job.scraper_id === 'enrichment' ? job.url : truncateUrl(job.url);
+    job.scraper_id === 'enrichment' || isScrapeTask(job)
+      ? job.url
+      : truncateUrl(job.url);
 
   return (
     <tr className='border-border border-t'>

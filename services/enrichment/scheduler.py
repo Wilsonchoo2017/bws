@@ -1,10 +1,9 @@
-"""Periodic enrichment sweep -- scans for items with missing metadata and queues jobs."""
+"""Periodic enrichment sweep -- scans for items with missing metadata and creates scrape tasks."""
 
 import asyncio
 import logging
 
 from api.jobs import JobManager
-from services.enrichment.auto import queue_enrichment_batch
 
 logger = logging.getLogger("bws.enrichment.scheduler")
 
@@ -23,7 +22,7 @@ async def run_enrichment_sweep(
     Infinite loop that:
     1. Waits for `interval_minutes`
     2. Scans lego_items for rows with NULL metadata
-    3. Queues enrichment jobs (deduplicated against pending jobs)
+    3. Creates persistent scrape tasks (deduplicated)
     """
     logger.info(
         "Enrichment sweep started (interval=%dm, batch=%d)",
@@ -43,26 +42,30 @@ async def run_enrichment_sweep(
             from db.connection import get_connection
             from db.schema import init_schema
             from services.enrichment.repository import get_items_needing_enrichment
+            from services.scrape_queue.repository import create_tasks_for_set
 
             conn = get_connection()
             try:
                 init_schema(conn)
                 items = get_items_needing_enrichment(conn, limit=batch_size)
+
+                if not items:
+                    logger.debug("Enrichment sweep: no items need enrichment")
+                    continue
+
+                queued = 0
+                for item in items:
+                    tasks = create_tasks_for_set(conn, item["set_number"])
+                    if tasks:
+                        queued += 1
+
+                logger.info(
+                    "Enrichment sweep: found %d items, created tasks for %d",
+                    len(items),
+                    queued,
+                )
             finally:
                 conn.close()
-
-            if not items:
-                logger.debug("Enrichment sweep: no items need enrichment")
-                continue
-
-            set_numbers = [item["set_number"] for item in items]
-            queued = queue_enrichment_batch(manager, set_numbers)
-
-            logger.info(
-                "Enrichment sweep: found %d items, queued %d jobs",
-                len(items),
-                queued,
-            )
 
         except Exception:
             logger.exception("Enrichment sweep failed")

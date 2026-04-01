@@ -17,9 +17,12 @@ import {
   YAxis,
 } from 'recharts';
 import type { BrickeconomyData } from '../types';
+import type { ChartDateRange } from './item-detail';
 
 interface BrickeconomyPanelProps {
   setNumber: string;
+  globalDateRange?: ChartDateRange | null;
+  onDateRange?: (range: ChartDateRange) => void;
 }
 
 type ChartTab = 'value' | 'sales' | 'candlestick';
@@ -134,6 +137,7 @@ function buildSalesTrend(data: BrickeconomyData) {
     | null;
   if (!trend) return [];
   return trend.map(([month, count]) => ({
+    ts: new Date(month + '-15').getTime(),
     month,
     label: new Date(month + '-01').toLocaleDateString('en-US', {
       month: 'short',
@@ -149,6 +153,7 @@ function buildCandlestick(data: BrickeconomyData) {
     | null;
   if (!candles) return [];
   return candles.map(([month, low, open, close, high]) => ({
+    ts: new Date(month + '-15').getTime(),
     month,
     label: new Date(month + '-01').toLocaleDateString('en-US', {
       month: 'short',
@@ -268,9 +273,11 @@ function SummaryCard({
 function ValueScatterChart({
   points,
   trend,
+  globalDateRange,
 }: {
   points: ValuePoint[];
   trend: TrendPoint[];
+  globalDateRange?: ChartDateRange | null;
 }) {
   // Merge all data into a single timeline for ComposedChart.
   // Trend points have trend/upper/lower; scatter points have sale value.
@@ -326,10 +333,10 @@ function ValueScatterChart({
       year: '2-digit',
     });
 
-  // X domain: only span the actual sale data range (no future extrapolation)
+  // X domain: use global range if available, else span sale data
   const saleTimestamps = points.map((p) => p.ts);
-  const xMin = Math.min(...saleTimestamps);
-  const xMax = Math.max(...saleTimestamps);
+  const xMin = globalDateRange ? globalDateRange.min : Math.min(...saleTimestamps);
+  const xMax = globalDateRange ? globalDateRange.max : Math.max(...saleTimestamps);
 
   return (
     <ResponsiveContainer width='100%' height='100%' minWidth={0} minHeight={0}>
@@ -408,7 +415,7 @@ function ValueScatterChart({
 // Main panel
 // ---------------------------------------------------------------------------
 
-export function BrickeconomyPanel({ setNumber }: BrickeconomyPanelProps) {
+export function BrickeconomyPanel({ setNumber, globalDateRange, onDateRange }: BrickeconomyPanelProps) {
   const [data, setData] = useState<BrickeconomyData | null>(null);
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState<ChartTab>('value');
@@ -425,6 +432,23 @@ export function BrickeconomyPanel({ setNumber }: BrickeconomyPanelProps) {
       .finally(() => setLoading(false));
   }, [setNumber]);
 
+  const { points: valuePoints, trend: valueTrend } = data
+    ? buildValueData(data)
+    : { points: [], trend: [] };
+  const salesTrend = data ? buildSalesTrend(data) : [];
+  const candlestick = data ? buildCandlestick(data) : [];
+
+  // Report date range to parent for cross-chart sync
+  useEffect(() => {
+    if (onDateRange && valuePoints.length > 0) {
+      const timestamps = valuePoints.map((p) => p.ts);
+      onDateRange({
+        min: Math.min(...timestamps),
+        max: Math.max(...timestamps),
+      });
+    }
+  }, [valuePoints.length]);
+
   if (loading) {
     return (
       <div className='flex h-64 items-center justify-center'>
@@ -436,10 +460,6 @@ export function BrickeconomyPanel({ setNumber }: BrickeconomyPanelProps) {
   }
 
   if (!data) return null;
-
-  const { points: valuePoints, trend: valueTrend } = buildValueData(data);
-  const salesTrend = buildSalesTrend(data);
-  const candlestick = buildCandlestick(data);
 
   const tabs: { key: ChartTab; label: string; disabled: boolean }[] = [
     { key: 'value', label: 'Set Value', disabled: valuePoints.length === 0 },
@@ -537,7 +557,7 @@ export function BrickeconomyPanel({ setNumber }: BrickeconomyPanelProps) {
       {/* Charts */}
       <div className='h-80 w-full'>
         {tab === 'value' && valuePoints.length > 0 && (
-          <ValueScatterChart points={valuePoints} trend={valueTrend} />
+          <ValueScatterChart points={valuePoints} trend={valueTrend} globalDateRange={globalDateRange} />
         )}
 
         {tab === 'sales' && salesTrend.length > 0 && (
@@ -550,9 +570,14 @@ export function BrickeconomyPanel({ setNumber }: BrickeconomyPanelProps) {
             <BarChart data={salesTrend}>
               <CartesianGrid strokeDasharray='3 3' opacity={0.3} />
               <XAxis
-                dataKey='label'
+                dataKey='ts'
+                type='number'
+                scale='time'
+                domain={globalDateRange ? [globalDateRange.min, globalDateRange.max] : ['dataMin', 'dataMax']}
                 tick={{ fontSize: 11 }}
-                interval='preserveStartEnd'
+                tickFormatter={(ts) =>
+                  new Date(ts).toLocaleDateString('en-US', { month: 'short', year: '2-digit' })
+                }
               />
               <YAxis tick={{ fontSize: 11 }} />
               <Tooltip content={<SalesTooltip />} />
@@ -577,9 +602,14 @@ export function BrickeconomyPanel({ setNumber }: BrickeconomyPanelProps) {
             <BarChart data={candlestick}>
               <CartesianGrid strokeDasharray='3 3' opacity={0.3} />
               <XAxis
-                dataKey='label'
+                dataKey='ts'
+                type='number'
+                scale='time'
+                domain={globalDateRange ? [globalDateRange.min, globalDateRange.max] : ['dataMin', 'dataMax']}
                 tick={{ fontSize: 11 }}
-                interval='preserveStartEnd'
+                tickFormatter={(ts) =>
+                  new Date(ts).toLocaleDateString('en-US', { month: 'short', year: '2-digit' })
+                }
               />
               <YAxis
                 tick={{ fontSize: 11 }}

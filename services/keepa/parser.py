@@ -381,26 +381,12 @@ _EXTRACT_JS = """() => {
 
 
 async def click_all_date_range(page: Page) -> bool:
-    """Click Year then All to load full price history.
+    """Click 'All (N days)' to load full price history.
 
-    Keepa shows the 'All' option only after clicking 'Year' first.
     Uses JavaScript clicks to avoid Playwright timeouts.
+    Falls back to clicking 'Year' first if 'All' is not visible.
     """
     try:
-        # Click Year first
-        await page.evaluate("""() => {
-            const cells = document.querySelectorAll('td.legendRange');
-            for (const c of cells) {
-                if (c.textContent.trim() === 'Year') {
-                    c.click();
-                    return true;
-                }
-            }
-            return false;
-        }""")
-        await page.wait_for_timeout(2_000)
-
-        # Now click All
         clicked = await page.evaluate("""() => {
             const cells = document.querySelectorAll('td.legendRange');
             for (const c of cells) {
@@ -414,6 +400,35 @@ async def click_all_date_range(page: Page) -> bool:
 
         if clicked:
             logger.info("Selected 'All' date range")
+            return True
+
+        # Fallback: click Year first to reveal All
+        logger.debug("'All' not found, clicking 'Year' first")
+        await page.evaluate("""() => {
+            const cells = document.querySelectorAll('td.legendRange');
+            for (const c of cells) {
+                if (c.textContent.trim() === 'Year') {
+                    c.click();
+                    return true;
+                }
+            }
+            return false;
+        }""")
+        await page.wait_for_timeout(2_000)
+
+        clicked = await page.evaluate("""() => {
+            const cells = document.querySelectorAll('td.legendRange');
+            for (const c of cells) {
+                if (c.textContent.trim().startsWith('All')) {
+                    c.click();
+                    return true;
+                }
+            }
+            return false;
+        }""")
+
+        if clicked:
+            logger.info("Selected 'All' date range (after Year fallback)")
         else:
             logger.warning("Could not find 'All' date range button")
 

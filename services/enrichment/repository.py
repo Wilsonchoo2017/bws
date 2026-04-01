@@ -17,14 +17,15 @@ def get_items_needing_enrichment(
     conn: "DuckDBPyConnection",
     limit: int = 50,
 ) -> list[dict]:
-    """Find lego_items rows with any NULL metadata fields or missing BrickEconomy data.
+    """Find lego_items rows with any NULL metadata fields, missing BrickEconomy, or missing Google Trends.
 
     Excludes retiring_soon from the NULL check -- retirement status is
     not actively sought during enrichment.  Items enriched within the
     last 90 days are also skipped.
 
-    Items are also included when they have no BrickEconomy snapshot,
-    since BrickEconomy is a mandatory data source for every item.
+    Items are also included when they have no BrickEconomy snapshot
+    (mandatory data source) or no Google Trends snapshot (for items
+    that already have basic metadata: title + year_released).
 
     Returns items ordered by most recently created first (newest items
     get enriched first).
@@ -44,6 +45,14 @@ def get_items_needing_enrichment(
             OR NOT EXISTS (
                 SELECT 1 FROM brickeconomy_snapshots bs
                 WHERE bs.set_number = li.set_number
+            )
+            OR (
+                li.title IS NOT NULL
+                AND li.year_released IS NOT NULL
+                AND NOT EXISTS (
+                    SELECT 1 FROM google_trends_snapshots gts
+                    WHERE gts.set_number = li.set_number
+                )
             )
           )
           AND (li.last_enriched_at IS NULL

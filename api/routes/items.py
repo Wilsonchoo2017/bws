@@ -472,6 +472,30 @@ async def get_item_keepa(set_number: str):
         conn.close()
 
 
+@router.get("/{set_number}/trends")
+async def get_item_trends(set_number: str):
+    """Get the latest Google Trends snapshot for an item."""
+    conn = get_connection()
+    try:
+        init_schema(conn)
+
+        from services.google_trends.repository import get_latest_trends_snapshot
+
+        snapshot = get_latest_trends_snapshot(conn, set_number)
+        if not snapshot:
+            return {"success": True, "data": None}
+
+        if snapshot.get("scraped_at"):
+            snapshot["scraped_at"] = str(snapshot["scraped_at"])
+
+        return {"success": True, "data": snapshot}
+    except Exception:
+        logger.exception("Failed to fetch trends for %s", set_number)
+        raise HTTPException(status_code=500, detail="Internal server error")
+    finally:
+        conn.close()
+
+
 def _serialize_box(box) -> dict | None:
     """Serialize a PricingBox to a JSON-friendly dict."""
     if box is None:

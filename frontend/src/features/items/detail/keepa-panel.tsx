@@ -14,9 +14,12 @@ import {
   YAxis,
 } from 'recharts';
 import type { KeepaData } from '../types';
+import type { ChartDateRange } from './item-detail';
 
 interface KeepaDataPanelProps {
   setNumber: string;
+  globalDateRange?: ChartDateRange | null;
+  onDateRange?: (range: ChartDateRange) => void;
 }
 
 type ChartTab = 'all' | 'amazon' | 'new' | 'used';
@@ -55,6 +58,7 @@ interface PricePoint {
   label: string;
   ts: number;
   amazon?: number;
+  amazon_in_stock?: number; // set to yMax for full-height band, undefined when OOS
   new?: number;
   new_3p_fba?: number;
   new_3p_fbm?: number;
@@ -105,26 +109,44 @@ function buildChartData(data: KeepaData): PricePoint[] {
         });
       }
       const point = dateMap.get(date)!;
-      (point as Record<string, unknown>)[key] = cents / 100;
+      // null or negative cents = out of stock: omit the key to create a gap
+      if (cents != null && cents >= 0) {
+        (point as Record<string, unknown>)[key] = cents / 100;
+      }
     }
   }
 
   // Sort by timestamp
-  return Array.from(dateMap.values())
+  const sorted = Array.from(dateMap.values())
     .filter((p) => p.ts > 0)
     .sort((a, b) => a.ts - b.ts);
+
+  // Derive amazon_in_stock: 1 when amazon has a valid price, undefined when OOS.
+  // The actual y-height is set at render time via the YAxis domain.
+  for (const p of sorted) {
+    if (p.amazon != null) {
+      (p as Record<string, unknown>)['amazon_in_stock'] = 1;
+    }
+  }
+
+  return sorted;
 }
 
 function KeepaTooltip({ active, payload, label }: any) {
   if (!active || !payload?.length) return null;
+  const formatted = typeof label === 'number'
+    ? new Date(label).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+    : label;
   return (
     <div className="rounded-lg border bg-white px-3 py-2 text-xs shadow-lg dark:bg-zinc-900">
-      <p className="mb-1 font-medium">{label}</p>
+      <p className="mb-1 font-medium">{formatted}</p>
       {payload
         .filter((entry: any) => entry.value != null)
         .map((entry: any) => (
           <p key={entry.dataKey} style={{ color: entry.color }}>
-            {entry.name}: ${entry.value.toFixed(2)}
+            {entry.dataKey === 'amazon_in_stock'
+              ? `${entry.name}: ${entry.value === 1 ? 'Yes' : 'No'}`
+              : `${entry.name}: $${entry.value.toFixed(2)}`}
           </p>
         ))}
     </div>
@@ -154,7 +176,6 @@ function SummaryCard({
 // Series config for each tab
 const TAB_SERIES: Record<ChartTab, { key: string; name: string; color: string }[]> = {
   all: [
-    { key: 'amazon', name: 'Amazon', color: SERIES_COLORS.amazon },
     { key: 'new', name: 'New', color: SERIES_COLORS.new },
     { key: 'new_3p_fba', name: '3P FBA', color: SERIES_COLORS.new_3p_fba },
     { key: 'new_3p_fbm', name: '3P FBM', color: SERIES_COLORS.new_3p_fbm },
@@ -177,7 +198,7 @@ const TAB_SERIES: Record<ChartTab, { key: string; name: string; color: string }[
   ],
 };
 
-export function KeepaPanel({ setNumber }: KeepaDataPanelProps) {
+export function KeepaPanel({ setNumber, globalDateRange, onDateRange }: KeepaDataPanelProps) {
   const [data, setData] = useState<KeepaData | null>(null);
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState<ChartTab>('all');
@@ -194,6 +215,21 @@ export function KeepaPanel({ setNumber }: KeepaDataPanelProps) {
       .finally(() => setLoading(false));
   }, [setNumber]);
 
+  const chartData = data ? buildChartData(data) : [];
+
+  // Report date range to parent for cross-chart sync
+  useEffect(() => {
+    if (chartData.length > 0 && onDateRange) {
+      const timestamps = chartData.map((p) => p.ts).filter((t) => t > 0);
+      if (timestamps.length > 0) {
+        onDateRange({
+          min: Math.min(...timestamps),
+          max: Math.max(...timestamps),
+        });
+      }
+    }
+  }, [chartData.length]);
+
   if (loading) {
     return (
       <div className="flex h-64 items-center justify-center">
@@ -204,9 +240,39 @@ export function KeepaPanel({ setNumber }: KeepaDataPanelProps) {
     );
   }
 
-  if (!data) return null;
+  if (!data) {
+    const handleEnrich = async () => {
+      try {
+        await fetch('/api/scrape/run', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ scraperId: 'keepa', url: setNumber }),
+        });
+      } catch {
+        // ignore
+      }
+    };
 
-  const chartData = buildChartData(data);
+    return (
+      <div>
+        <div className="flex items-center justify-between">
+          <h2 className="text-lg font-semibold">Keepa Amazon Price History</h2>
+          <button
+            onClick={handleEnrich}
+            className="rounded-md border border-blue-300 bg-blue-50 px-3 py-1.5 text-sm font-medium text-blue-700 transition-colors hover:bg-blue-100 dark:border-blue-700 dark:bg-blue-900/30 dark:text-blue-300 dark:hover:bg-blue-900/50"
+          >
+            Enrich Keepa
+          </button>
+        </div>
+        <div className="mt-4 flex h-32 items-center justify-center rounded-lg border border-dashed">
+          <p className="text-muted-foreground text-sm">
+            No Keepa data available for this set.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
   const activeSeries = TAB_SERIES[tab].filter((s) =>
     chartData.some((p) => (p as Record<string, unknown>)[s.key] != null)
   );
@@ -218,15 +284,19 @@ export function KeepaPanel({ setNumber }: KeepaDataPanelProps) {
     { key: 'used', label: 'Used' },
   ];
 
-  // Compute Y domain from visible series
+  // Compute Y domain from visible series (exclude amazon_in_stock)
   const visibleKeys = activeSeries.map((s) => s.key);
   const allValues = chartData.flatMap((p) =>
     visibleKeys
       .map((k) => (p as Record<string, unknown>)[k] as number | undefined)
-      .filter((v): v is number => v != null)
+      .filter((v): v is number => v != null && v > 0)
   );
   const yMin = allValues.length > 0 ? Math.floor(Math.min(...allValues) * 0.9) : 0;
   const yMax = allValues.length > 0 ? Math.ceil(Math.max(...allValues) * 1.05) : 100;
+
+  // Show amazon stock band on all and amazon tabs
+  const showAmazonBand = (tab === 'all' || tab === 'amazon') &&
+    chartData.some((p) => p.amazon_in_stock != null);
 
   const handleScrape = async () => {
     try {
@@ -295,17 +365,6 @@ export function KeepaPanel({ setNumber }: KeepaDataPanelProps) {
         )}
       </div>
 
-      {/* Keepa chart screenshot */}
-      {data.chart_screenshot_path && (
-        <div className="mb-4 overflow-hidden rounded-lg border">
-          <img
-            src={`/api/images/keepa/${setNumber}`}
-            alt="Keepa price chart"
-            className="w-full"
-          />
-        </div>
-      )}
-
       {/* Tab navigation */}
       <div className="mb-4 flex gap-1">
         {tabs.map((t) => (
@@ -330,22 +389,48 @@ export function KeepaPanel({ setNumber }: KeepaDataPanelProps) {
             <ComposedChart data={chartData} margin={{ top: 10, right: 10, bottom: 0, left: 0 }}>
               <CartesianGrid strokeDasharray="3 3" opacity={0.15} />
               <XAxis
-                dataKey="label"
+                dataKey="ts"
+                type="number"
+                scale="time"
+                domain={globalDateRange ? [globalDateRange.min, globalDateRange.max] : ['dataMin', 'dataMax']}
                 tick={{ fontSize: 11 }}
-                interval="preserveStartEnd"
+                tickFormatter={(ts) =>
+                  new Date(ts).toLocaleDateString('en-US', { month: 'short', year: '2-digit' })
+                }
               />
               <YAxis
+                yAxisId="price"
                 tick={{ fontSize: 11 }}
                 tickFormatter={(v) => `$${v}`}
                 domain={[yMin, yMax]}
               />
+              {showAmazonBand && (
+                <YAxis yAxisId="stock" hide domain={[0, 1]} />
+              )}
               <Tooltip content={<KeepaTooltip />} />
               <Legend />
+
+              {showAmazonBand && (
+                <Area
+                  yAxisId="stock"
+                  dataKey="amazon_in_stock"
+                  name="Amazon In Stock"
+                  type="stepAfter"
+                  stroke="none"
+                  fill={SERIES_COLORS.amazon}
+                  fillOpacity={0.10}
+                  dot={false}
+                  connectNulls={false}
+                  isAnimationActive={false}
+                  legendType="rect"
+                />
+              )}
 
               {activeSeries.map((s, i) => (
                 i === 0 ? (
                   <Area
                     key={s.key}
+                    yAxisId="price"
                     dataKey={s.key}
                     name={s.name}
                     type="stepAfter"
@@ -354,19 +439,20 @@ export function KeepaPanel({ setNumber }: KeepaDataPanelProps) {
                     fillOpacity={0.08}
                     strokeWidth={2}
                     dot={false}
-                    connectNulls
+                    connectNulls={false}
                     isAnimationActive={false}
                   />
                 ) : (
                   <Line
                     key={s.key}
+                    yAxisId="price"
                     dataKey={s.key}
                     name={s.name}
                     type="stepAfter"
                     stroke={s.color}
                     strokeWidth={1.5}
                     dot={false}
-                    connectNulls
+                    connectNulls={false}
                     isAnimationActive={false}
                   />
                 )

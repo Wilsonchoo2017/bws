@@ -13,9 +13,12 @@ import {
 } from 'recharts';
 import type { MinifigValueSnapshot } from '../types';
 import { formatPrice } from '../types';
+import type { ChartDateRange } from './item-detail';
 
 interface MinifigureValueChartProps {
   setNumber: string;
+  globalDateRange?: ChartDateRange | null;
+  onDateRange?: (range: ChartDateRange) => void;
 }
 
 function ValueTooltip({ active, payload, label }: any) {
@@ -32,7 +35,7 @@ function ValueTooltip({ active, payload, label }: any) {
   );
 }
 
-export function MinifigureValueChart({ setNumber }: MinifigureValueChartProps) {
+export function MinifigureValueChart({ setNumber, globalDateRange, onDateRange }: MinifigureValueChartProps) {
   const [snapshots, setSnapshots] = useState<MinifigValueSnapshot[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
@@ -49,15 +52,8 @@ export function MinifigureValueChart({ setNumber }: MinifigureValueChartProps) {
       .finally(() => setLoading(false));
   }, [setNumber]);
 
-  if (loading || (!error && snapshots.length === 0)) {
-    return null;
-  }
-
-  if (error) {
-    return null;
-  }
-
   const chartData = snapshots.map((s) => ({
+    ts: s.scraped_at ? new Date(s.scraped_at).getTime() : 0,
     label: s.scraped_at
       ? new Date(s.scraped_at).toLocaleDateString('en-US', {
           month: 'short',
@@ -68,6 +64,27 @@ export function MinifigureValueChart({ setNumber }: MinifigureValueChartProps) {
     total_used: s.total_used_cents / 100,
   }));
 
+  // Report date range to parent for cross-chart sync
+  useEffect(() => {
+    if (onDateRange && chartData.length > 0) {
+      const timestamps = chartData.map((p) => p.ts).filter((t) => t > 0);
+      if (timestamps.length > 0) {
+        onDateRange({
+          min: Math.min(...timestamps),
+          max: Math.max(...timestamps),
+        });
+      }
+    }
+  }, [chartData.length]);
+
+  if (loading || (!error && snapshots.length === 0)) {
+    return null;
+  }
+
+  if (error) {
+    return null;
+  }
+
   return (
     <div>
       <h2 className='mb-3 text-lg font-semibold'>Minifigure Value Trend</h2>
@@ -76,9 +93,14 @@ export function MinifigureValueChart({ setNumber }: MinifigureValueChartProps) {
           <AreaChart data={chartData}>
             <CartesianGrid strokeDasharray='3 3' opacity={0.3} />
             <XAxis
-              dataKey='label'
+              dataKey='ts'
+              type='number'
+              scale='time'
+              domain={globalDateRange ? [globalDateRange.min, globalDateRange.max] : ['dataMin', 'dataMax']}
               tick={{ fontSize: 11 }}
-              interval='preserveStartEnd'
+              tickFormatter={(ts) =>
+                new Date(ts).toLocaleDateString('en-US', { month: 'short', year: '2-digit' })
+              }
             />
             <YAxis
               tick={{ fontSize: 11 }}

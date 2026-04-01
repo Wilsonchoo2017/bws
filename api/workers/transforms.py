@@ -160,6 +160,18 @@ def keepa_product_to_dict(data: Any) -> dict:
     }
 
 
+def trends_data_to_dict(data: Any) -> dict:
+    """Transform Google Trends data into a normalized item dict."""
+    return {
+        "set_number": data.set_number,
+        "keyword": data.keyword,
+        "points": len(data.interest_over_time),
+        "peak_value": data.peak_value,
+        "peak_date": data.peak_date,
+        "average_value": data.average_value,
+    }
+
+
 def enrichment_log_summary(field_details: list[dict]) -> str:
     """Build a log summary string from enrichment field details.
 

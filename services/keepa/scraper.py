@@ -119,14 +119,13 @@ async def scrape_keepa(
 
     Flow:
     1. Launch browser with persistent keepa profile
-    2. Navigate to keepa.com
+    2. Navigate directly to Keepa search URL
     3. Handle Cloudflare challenge if present
     4. Log in if needed
-    5. Search for the set number
-    6. Click first matching result
+    5. Click first matching result
+    6. Enable all chart legend series
     7. Set date range to 'All'
-    8. Intercept API responses for chart data
-    9. Fall back to DOM extraction if API interception fails
+    8. Sweep chart tooltips for historical data
 
     Args:
         set_number: LEGO set number (e.g. "60305")
@@ -141,9 +140,10 @@ async def scrape_keepa(
         async with _keepa_browser() as browser:
             page = await browser.new_page()
 
-            # Navigate to Keepa
-            logger.info("Navigating to %s", KEEPA_BASE)
-            await page.goto(KEEPA_BASE, wait_until="domcontentloaded")
+            # Navigate directly to search results
+            search_url = f"{KEEPA_BASE}/#!search/1-{set_number}%20lego"
+            logger.info("Navigating to search: %s", search_url)
+            await page.goto(search_url, wait_until="domcontentloaded")
             await human_delay(3_000, 5_000)
 
             # Handle Cloudflare challenge
@@ -155,7 +155,8 @@ async def scrape_keepa(
                         set_number=set_number,
                         error="Cloudflare challenge not solved within timeout",
                     )
-                await page.goto(KEEPA_BASE, wait_until="domcontentloaded")
+                # Retry search URL after Cloudflare
+                await page.goto(search_url, wait_until="domcontentloaded")
                 await human_delay(3_000, 5_000)
 
             # Check login state, log in if needed
@@ -167,79 +168,54 @@ async def scrape_keepa(
                         set_number=set_number,
                         error="Keepa login failed",
                     )
-                await human_delay(2_000, 3_000)
+                # Navigate back to search after login
+                await page.goto(search_url, wait_until="domcontentloaded")
+                await human_delay(3_000, 5_000)
 
-            # Search for the LEGO set
-            search_query = f"{set_number} lego"
-            logger.info("Searching Keepa for: %s", search_query)
+            # Handle Cloudflare after login redirect
+            if await _detect_cloudflare(page):
+                solved = await _wait_for_cloudflare(page, set_number)
+                if not solved:
+                    return KeepaScrapeResult(
+                        success=False,
+                        set_number=set_number,
+                        error="Cloudflare challenge not solved within timeout",
+                    )
+                await human_delay(3_000, 5_000)
 
-            search_input = await _find_search_box(page)
-            if not search_input:
+            # Wait for search results — try multiple selectors
+            result_found = False
+            for selector in (
+                ".ag-row",
+                ".ag-row-first",
+                'div[role="row"]',
+                'div[role="gridcell"]',
+                "#searchResultTable",
+            ):
+                try:
+                    await page.wait_for_selector(selector, timeout=5_000)
+                    logger.info("Search results found with selector: %s", selector)
+                    result_found = True
+                    break
+                except Exception:
+                    continue
+
+            if not result_found:
+                # Log what's actually on the page for debugging
+                body_text = await page.evaluate(
+                    "() => document.body.innerText.substring(0, 500)"
+                )
+                logger.warning(
+                    "No search result selectors matched. Page text: %s",
+                    body_text[:200],
+                )
                 return KeepaScrapeResult(
                     success=False,
                     set_number=set_number,
-                    error="Could not find Keepa search box",
+                    error="Search results did not load within timeout",
                 )
 
-            # Use JS click to avoid Playwright timeout on Keepa's SPA
-            await search_input.evaluate("el => el.click()")
-            await human_delay(300, 600)
-
-            # Focus and select all existing text
-            await search_input.evaluate("el => { el.focus(); el.select(); }")
-            await human_delay(100, 200)
-
-            # Type search query with human-like delays
-            for char in search_query:
-                delay_ms = secrets.randbelow(70) + 50
-                await page.keyboard.type(char, delay=delay_ms)
-            await human_delay(800, 1_500)
-
-            # Press Enter to search
-            await page.keyboard.press("Enter")
-            await human_delay(3_000, 5_000)
-
-            # Cloudflare often triggers after search submission
-            if await _detect_cloudflare(page):
-                solved = await _wait_for_cloudflare(page, set_number)
-                if not solved:
-                    return KeepaScrapeResult(
-                        success=False,
-                        set_number=set_number,
-                        error="Cloudflare challenge not solved within timeout",
-                    )
-                # After solving, the search results should load
-                await human_delay(3_000, 5_000)
-
-            # Wait for search results (ag-grid takes time to render)
-            try:
-                await page.wait_for_selector(
-                    ".ag-row, .ag-row-first", timeout=15_000
-                )
-            except Exception:
-                logger.debug("ag-grid rows not found, waiting longer")
-                await human_delay(3_000, 5_000)
-
-            await page.wait_for_load_state("networkidle")
             await human_delay(1_000, 2_000)
-
-            # Check Cloudflare again (can trigger on result page too)
-            if await _detect_cloudflare(page):
-                solved = await _wait_for_cloudflare(page, set_number)
-                if not solved:
-                    return KeepaScrapeResult(
-                        success=False,
-                        set_number=set_number,
-                        error="Cloudflare challenge not solved within timeout",
-                    )
-                await human_delay(3_000, 5_000)
-                # Re-wait for results after Cloudflare
-                try:
-                    await page.wait_for_selector(
-                        ".ag-row, .ag-row-first", timeout=15_000
-                    )
-                except Exception:
-                    pass
 
             # Click first matching result
             clicked = await _click_first_result(page, set_number)
@@ -250,25 +226,18 @@ async def scrape_keepa(
                     error=f"No search results found for {set_number}",
                 )
 
-            await human_delay(3_000, 5_000)
-            await page.wait_for_load_state("networkidle")
-            await human_delay(1_000, 2_000)
+            await human_delay(5_000, 8_000)
 
-            # Click "All" date range (Year first, then All appears)
+            # Enable all chart legend series before sweeping
+            await _enable_all_legend_series(page)
+            await human_delay(2_000, 3_000)
+
+            # Click "All" date range to load full history
             await click_all_date_range(page)
-            await human_delay(3_000, 5_000)
+            await human_delay(4_000, 6_000)
 
             # Extract product data from the DOM statistics tables
             product_data = await extract_product_data(page, set_number)
-
-            # Take screenshot of the chart area
-            screenshot_path = await _take_chart_screenshot(
-                page, set_number, product_data.asin
-            )
-            if screenshot_path:
-                product_data = dataclasses.replace(
-                    product_data, chart_screenshot_path=screenshot_path
-                )
 
             # Sweep the chart canvas to extract historical data via tooltips
             # Pass x-axis ticks + totalDays for year inference
@@ -503,35 +472,43 @@ def _infer_year(
     return now.year
 
 
-async def _take_chart_screenshot(
-    page: Page, set_number: str, asin: str | None
-) -> str | None:
-    """Take a screenshot of the chart area and save it."""
-    try:
-        from config.settings import BWS_IMAGES_PATH
 
-        canvases = await page.query_selector_all("canvas")
-        for canvas in canvases:
-            box = await canvas.bounding_box()
-            if box and box["width"] > 400 and box["height"] > 200:
-                screenshot_dir = BWS_IMAGES_PATH / "keepa"
-                screenshot_dir.mkdir(parents=True, exist_ok=True)
-                filename = f"{set_number}_{asin or 'unknown'}.png"
-                path = screenshot_dir / filename
-                await page.screenshot(
-                    path=str(path),
-                    clip={
-                        "x": box["x"] - 30,
-                        "y": box["y"] - 60,
-                        "width": box["width"] + 200,
-                        "height": box["height"] + 80,
-                    },
-                )
-                logger.info("Chart screenshot saved: %s", path)
-                return str(path)
+async def _enable_all_legend_series(page: Page) -> None:
+    """Enable all price series in the Keepa chart legend.
+
+    Keepa legend: each series is a <tr> with a .legendColorBox <td>
+    containing a .legendColorBoxCircle <div>, and a .legendLabel <td>.
+
+    Enabled series have a thick colored border (border:6px solid <color>).
+    Disabled series have a thin gray border (border:1px solid #ccc).
+    Clicking a disabled TR toggles it on.
+    """
+    try:
+        toggled = await page.evaluate("""() => {
+            const toggled = [];
+            const labels = document.querySelectorAll('td.legendLabel');
+            for (const label of labels) {
+                if (!label.offsetParent) continue;
+                const tr = label.closest('tr');
+                if (!tr) continue;
+                const circle = tr.querySelector('.legendColorBoxCircle');
+                if (!circle) continue;
+                // Disabled series: border is "1px solid #ccc" (thin gray)
+                const border = circle.style.border || '';
+                if (border.includes('1px') && border.includes('#ccc')) {
+                    tr.click();
+                    toggled.push(label.textContent.trim());
+                }
+            }
+            return toggled;
+        }""")
+
+        if toggled:
+            logger.info("Enabled %d legend series: %s", len(toggled), toggled)
+        else:
+            logger.debug("All legend series already enabled")
     except Exception:
-        logger.debug("Could not take chart screenshot")
-    return None
+        logger.debug("Could not toggle legend series")
 
 
 async def _sweep_chart_tooltips(
@@ -576,44 +553,67 @@ async def _sweep_chart_tooltips(
         chart_x = chart_box["x"]
         chart_y_mid = chart_box["y"] + chart_box["height"] * 0.4
         chart_width = chart_box["width"]
-        num_steps = 50
 
-        raw_tooltips: list[dict[str, Any]] = []
+        step_size = 2  # pixels per step
 
-        for i in range(num_steps):
-            x = chart_x + (chart_width * i / num_steps)
-            await page.mouse.move(x, chart_y_mid)
-            await asyncio.sleep(0.1)
+        # Sweep the entire chart in a single JS call.  Dispatch
+        # synthetic mousemove events from JS, read the tooltip after
+        # each move, and collect only when the tooltip text changes.
+        # Move exactly 1 step per animation frame so the chart has
+        # time to update tooltips between moves.
+        raw_tooltips: list[dict[str, Any]] = await page.evaluate(
+            """([chartX, yMid, chartWidth, step]) => {
+            return new Promise(resolve => {
+                const results = [];
+                const numSteps = Math.floor(chartWidth / step);
+                let lastText = '';
+                let i = 0;
 
-            tooltip = await page.evaluate("""() => {
-                const tips = document.querySelectorAll('.flotTip, [id^="flotTip"]');
-                const parts = [];
-                for (const t of tips) {
-                    if (t.offsetParent !== null && t.textContent.trim()) {
-                        parts.push(t.textContent.trim());
+                function readTooltip() {
+                    const date = document.getElementById('flotTipDate');
+                    if (!date || date.style.display === 'none') return null;
+                    const dateText = date.textContent.trim();
+                    if (!dateText) return null;
+                    const parts = [dateText];
+                    const tips = document.querySelectorAll('.flotTip');
+                    for (const tip of tips) {
+                        if (tip.id === 'flotTipDate') continue;
+                        if (tip.style.display === 'none') continue;
+                        const text = tip.textContent.trim();
+                        if (text && text.includes('$')) parts.push(text);
                     }
+                    return parts.length > 1 ? parts.join('') : null;
                 }
-                if (parts.length > 0) return parts.join(' | ');
 
-                const els = document.querySelectorAll('div, span');
-                for (const el of els) {
-                    if (!el.offsetParent) continue;
-                    const text = (el.textContent || '').trim();
-                    const rect = el.getBoundingClientRect();
-                    if (text.includes('$') && text.length > 30 &&
-                        text.length < 300 && rect.width > 200 &&
-                        /Mon|Tue|Wed|Thu|Fri|Sat|Sun/.test(text)) {
-                        return text;
+                function tick() {
+                    if (i >= numSteps) { resolve(results); return; }
+                    const x = chartX + step * i;
+                    const target = document.elementFromPoint(x, yMid);
+                    if (target) {
+                        target.dispatchEvent(new MouseEvent('mousemove', {
+                            clientX: x, clientY: yMid,
+                            bubbles: true, cancelable: true,
+                        }));
                     }
+                    const text = readTooltip();
+                    if (text && text !== lastText) {
+                        results.push({step: i, x: Math.round(x), text: text});
+                        lastText = text;
+                    }
+                    i++;
+                    requestAnimationFrame(tick);
                 }
-                return null;
-            }""")
-
-            if tooltip:
-                raw_tooltips.append({"step": i, "x": int(x), "text": tooltip})
+                requestAnimationFrame(tick);
+            });
+            }""",
+            [chart_x, chart_y_mid, chart_width, step_size],
+        )
 
         points: list[dict[str, Any]] = []
-        seen_dates: set[str] = set()
+        # Track which labels have appeared at least once during the sweep.
+        # If a label was present before but is missing from a later tooltip,
+        # it means that series is out of stock at that date — emit -1.
+        seen_labels: set[str] = set()
 
         for item in raw_tooltips:
             tooltip = item.get("text", "")
@@ -640,24 +640,34 @@ async def _sweep_chart_tooltips(
             else:
                 date_iso = f"step_{item['step']}"
 
-            if date_iso in seen_dates:
-                continue
-            seen_dates.add(date_iso)
-
             search_text = tooltip[date_match.end():] if date_match else tooltip
+
+            # Match prices: "Amazon$ 24.99" or "Amazon $ 24.99"
             price_matches = re.findall(
                 r"(Amazon|New, 3rd Party FBA|New, 3rd Party FBM|"
                 r"New|Buy Box|Used, like new|Used|"
                 r"Warehouse Deals|Collectible|List Price)"
-                r"\$\s*([\d,.]+)",
+                r"[:\s]*\$\s*([\d,.]+)",
                 search_text,
             )
 
+            present_labels: set[str] = set()
             for label, price in price_matches:
+                label = label.strip()
+                present_labels.add(label)
+                seen_labels.add(label)
                 points.append({
                     "date": date_iso,
-                    "label": label.strip(),
+                    "label": label,
                     "price": price.strip(),
+                })
+
+            # Any label we've seen before but is missing now = OOS at this date
+            for label in seen_labels - present_labels:
+                points.append({
+                    "date": date_iso,
+                    "label": label,
+                    "price": None,
                 })
 
         await page.mouse.move(0, 0)
@@ -707,10 +717,14 @@ def _merge_chart_points(
         if not field:
             continue
 
-        try:
-            cents = int(float(point["price"].replace(",", "")) * 100)
-        except (ValueError, TypeError):
-            continue
+        raw_price = point["price"]
+        if raw_price is None:
+            cents = None
+        else:
+            try:
+                cents = int(float(raw_price.replace(",", "")) * 100)
+            except (ValueError, TypeError):
+                continue
 
         key = (field, point["date"], cents)
         if key in seen:

@@ -1,11 +1,13 @@
 """Keepa sweep -- ensures all portfolio items have at least one Keepa snapshot.
 
 Runs periodically, finds portfolio holdings without Keepa data,
-and queues scrape jobs for them.
+and queues scrape jobs for them.  Tracks failed attempts so the
+same items are not retried endlessly.
 """
 
 import asyncio
 import logging
+from datetime import datetime, timezone
 
 from api.jobs import JobManager
 
@@ -13,6 +15,16 @@ logger = logging.getLogger("bws.keepa.scheduler")
 
 DEFAULT_INTERVAL_MINUTES = 60
 DEFAULT_BATCH_SIZE = 5
+
+# Max consecutive failures before a set number is skipped for 24 hours.
+_MAX_FAILURES = 3
+
+# Cooldown after max failures (seconds).
+_FAILURE_COOLDOWN_S = 24 * 3600
+
+# Track per-set failure counts and last-failure timestamps.
+# Key: set_number, Value: (failure_count, last_failure_utc)
+_failure_tracker: dict[str, tuple[int, datetime]] = {}
 
 
 def _get_portfolio_items_without_keepa(limit: int = 5) -> list[str]:
@@ -42,22 +54,71 @@ def _get_portfolio_items_without_keepa(limit: int = 5) -> list[str]:
         conn.close()
 
 
+def _is_on_cooldown(set_number: str) -> bool:
+    """Check if a set number has exceeded max failures and is still in cooldown."""
+    entry = _failure_tracker.get(set_number)
+    if not entry:
+        return False
+
+    count, last_fail = entry
+    if count < _MAX_FAILURES:
+        return False
+
+    elapsed = (datetime.now(tz=timezone.utc) - last_fail).total_seconds()
+    if elapsed >= _FAILURE_COOLDOWN_S:
+        # Cooldown expired -- reset tracker
+        del _failure_tracker[set_number]
+        return False
+
+    return True
+
+
+def record_keepa_failure(set_number: str) -> None:
+    """Record a Keepa scrape failure for cooldown tracking."""
+    entry = _failure_tracker.get(set_number)
+    now = datetime.now(tz=timezone.utc)
+    if entry:
+        _failure_tracker[set_number] = (entry[0] + 1, now)
+    else:
+        _failure_tracker[set_number] = (1, now)
+
+    count = _failure_tracker[set_number][0]
+    if count >= _MAX_FAILURES:
+        logger.warning(
+            "Keepa: %s has failed %d times, cooling down for %dh",
+            set_number, count, _FAILURE_COOLDOWN_S // 3600,
+        )
+
+
+def record_keepa_success(set_number: str) -> None:
+    """Clear failure tracking for a successfully scraped set."""
+    _failure_tracker.pop(set_number, None)
+
+
 def queue_keepa_batch(manager: JobManager, set_numbers: list[str]) -> int:
     """Queue Keepa scrape jobs for the given set numbers.
 
-    Deduplicates against already-queued/running keepa jobs.
+    Deduplicates against already-queued/running keepa jobs and
+    skips items on failure cooldown.
     Returns the number of new jobs queued.
     """
-    # Check existing pending/running keepa jobs
-    existing = {
-        job.url.strip()
-        for job in manager.list_jobs()
-        if job.scraper_id == "keepa" and job.status in ("QUEUED", "RUNNING")
-    }
+    from api.schemas import JobStatus
+
+    # Check existing pending/running/recently-failed keepa jobs
+    existing = set()
+    for job in manager.list_jobs():
+        if job.scraper_id != "keepa":
+            continue
+        url = job.url.strip()
+        if job.status in (JobStatus.QUEUED, JobStatus.RUNNING, JobStatus.FAILED):
+            existing.add(url)
 
     queued = 0
     for set_number in set_numbers:
         if set_number in existing:
+            continue
+        if _is_on_cooldown(set_number):
+            logger.debug("Keepa sweep: skipping %s (on cooldown)", set_number)
             continue
         manager.create_job("keepa", set_number)
         queued += 1
@@ -76,7 +137,7 @@ async def run_keepa_sweep(
     Infinite loop that:
     1. Waits for `interval_minutes`
     2. Finds portfolio items without Keepa data
-    3. Queues Keepa scrape jobs (deduplicated)
+    3. Queues Keepa scrape jobs (deduplicated, with failure tracking)
     """
     logger.info(
         "Keepa sweep started (interval=%dm, batch=%d)",
@@ -101,12 +162,19 @@ async def run_keepa_sweep(
                 continue
 
             queued = queue_keepa_batch(manager, missing)
-            logger.info(
-                "Keepa sweep: %d portfolio items missing Keepa data, "
-                "queued %d jobs (sets: %s)",
-                len(missing),
-                queued,
-                ", ".join(missing[:10]),
-            )
+            if queued > 0:
+                logger.info(
+                    "Keepa sweep: %d portfolio items missing Keepa data, "
+                    "queued %d jobs (sets: %s)",
+                    len(missing),
+                    queued,
+                    ", ".join(missing[:10]),
+                )
+            else:
+                logger.debug(
+                    "Keepa sweep: %d items missing but all skipped "
+                    "(already queued or on cooldown)",
+                    len(missing),
+                )
         except Exception:
             logger.exception("Keepa sweep failed")

@@ -40,6 +40,9 @@ node_modules/
 .DS_Store
 Thumbs.db
 
+# Logs
+logs/
+
 # Database
 *.duckdb
 *.duckdb.wal

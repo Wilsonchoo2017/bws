@@ -20,6 +20,11 @@ import { KeepaPanel } from './keepa-panel';
 import { MinifiguresPanel } from './minifigures-panel';
 import { MinifigureValueChart } from './minifigure-value-chart';
 
+export interface ChartDateRange {
+  min: number; // unix ms
+  max: number; // unix ms
+}
+
 const BUY_RATING_OPTIONS: {
   value: BuyRating;
   label: string;
@@ -89,6 +94,27 @@ export function ItemDetailView({ setNumber }: ItemDetailViewProps) {
   const [error, setError] = useState<string | null>(null);
   const [enrichStatus, setEnrichStatus] = useState<EnrichStatus>('idle');
   const [enrichMessage, setEnrichMessage] = useState<string | null>(null);
+
+  // Shared date range across all charts
+  const [chartRanges, setChartRanges] = useState<Record<string, ChartDateRange>>({});
+
+  const reportDateRange = (chartId: string, range: ChartDateRange) => {
+    setChartRanges((prev) => {
+      if (prev[chartId]?.min === range.min && prev[chartId]?.max === range.max) {
+        return prev;
+      }
+      return { ...prev, [chartId]: range };
+    });
+  };
+
+  const globalDateRange: ChartDateRange | null = (() => {
+    const ranges = Object.values(chartRanges);
+    if (ranges.length === 0) return null;
+    return {
+      min: Math.min(...ranges.map((r) => r.min)),
+      max: Math.max(...ranges.map((r) => r.max)),
+    };
+  })();
 
   const fetchItem = () => {
     fetch(`/api/items/${setNumber}`)
@@ -402,16 +428,32 @@ export function ItemDetailView({ setNumber }: ItemDetailViewProps) {
       <MinifiguresPanel setNumber={setNumber} />
 
       {/* Minifigure value trend chart */}
-      <MinifigureValueChart setNumber={setNumber} />
+      <MinifigureValueChart
+        setNumber={setNumber}
+        globalDateRange={globalDateRange}
+        onDateRange={(r) => reportDateRange('minifig', r)}
+      />
 
       {/* Keepa Amazon price history */}
-      <KeepaPanel setNumber={setNumber} />
+      <KeepaPanel
+        setNumber={setNumber}
+        globalDateRange={globalDateRange}
+        onDateRange={(r) => reportDateRange('keepa', r)}
+      />
 
       {/* BrickEconomy valuation panel */}
-      <BrickeconomyPanel setNumber={setNumber} />
+      <BrickeconomyPanel
+        setNumber={setNumber}
+        globalDateRange={globalDateRange}
+        onDateRange={(r) => reportDateRange('brickeconomy', r)}
+      />
 
       {/* BrickLink price analysis charts */}
-      <BricklinkPriceChart setNumber={setNumber} />
+      <BricklinkPriceChart
+        setNumber={setNumber}
+        globalDateRange={globalDateRange}
+        onDateRange={(r) => reportDateRange('bricklink', r)}
+      />
 
       {/* Price history table */}
       <div>

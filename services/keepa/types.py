@@ -9,7 +9,7 @@ class KeepaDataPoint:
     """A single price/rank observation at a point in time."""
 
     date: str  # ISO "YYYY-MM-DD"
-    value: int  # price in US cents, or sales rank
+    value: int | None  # price in US cents, sales rank, or None (out of stock)
 
 
 @dataclass(frozen=True)
