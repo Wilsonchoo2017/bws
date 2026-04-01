@@ -30,6 +30,8 @@ class TestEdgeCases:
             retiring_soon=False,
             minifig_count=7,
             dimensions="58.2 x 49.0 x 21.0 cm",
+            release_date="2017-09",
+            retired_date="2023-12",
         )
 
         call_count = 0
@@ -46,7 +48,7 @@ class TestEdgeCases:
             CircuitBreakerState(),
         )
 
-        assert len(result.field_results) == 0
+        # BrickEconomy is mandatory so always called, but no missing fields to fill
         assert call_count == 0
 
     def test_3_3_re_enrichment_after_field_cleared(self, make_item):
@@ -67,18 +69,20 @@ class TestEdgeCases:
         result, _ = enrich(
             "10305",
             item,
-            {SourceId.BRICKLINK: lambda sn: SourceResult(
-                source=SourceId.BRICKLINK, success=True, fields={},
+            {SourceId.BRICKECONOMY: lambda sn: SourceResult(
+                source=SourceId.BRICKECONOMY, success=True,
+                fields={MetadataField.YEAR_RETIRED: 2023},
             )},
             CircuitBreakerState(),
             fields=(MetadataField.YEAR_RETIRED,),
         )
 
-        # YEAR_RETIRED has no sources in FIELD_SOURCE_PRIORITY, so it is SKIPPED
+        # YEAR_RETIRED is provided by BrickEconomy
         retired_r = next(
             r for r in result.field_results if r.field == MetadataField.YEAR_RETIRED
         )
-        assert retired_r.status == FieldStatus.SKIPPED
+        assert retired_r.status == FieldStatus.FOUND
+        assert retired_r.value == 2023
 
     def test_3_4_garbage_year_rejected(self):
         """Given source returns year_released=9999.

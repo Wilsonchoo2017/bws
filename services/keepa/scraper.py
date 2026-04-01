@@ -42,6 +42,9 @@ def _keepa_browser() -> AsyncCamoufox:
     user_data_path = Path(KEEPA_CONFIG.user_data_dir).expanduser()
     user_data_path.mkdir(parents=True, exist_ok=True)
 
+    from services.browser import _clear_stale_profile_lock
+    _clear_stale_profile_lock(user_data_path)
+
     return AsyncCamoufox(
         headless=KEEPA_CONFIG.headless,
         geoip=True,

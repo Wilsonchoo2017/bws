@@ -5,6 +5,7 @@ and other browser-based scrapers.
 """
 
 import asyncio
+import logging
 import secrets
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -12,6 +13,22 @@ from typing import AsyncGenerator, Union
 
 from camoufox.async_api import AsyncCamoufox
 from playwright.async_api import Browser, BrowserContext, Page
+
+logger = logging.getLogger("bws.browser")
+
+
+def _clear_stale_profile_lock(profile_path: Path) -> None:
+    """Remove Firefox profile lock files left by a crashed browser.
+
+    Firefox/Camoufox uses .parentlock to prevent two instances from
+    sharing a profile. If the browser crashes, the lock persists and
+    blocks future launches (browser exits immediately with code 0).
+    """
+    for lock_name in (".parentlock", "parent.lock", "lock"):
+        lock_file = profile_path / lock_name
+        if lock_file.exists():
+            logger.info("Removing stale profile lock: %s", lock_file)
+            lock_file.unlink(missing_ok=True)
 
 
 @asynccontextmanager
@@ -35,6 +52,7 @@ async def stealth_browser(
     """
     user_data_path = Path.home() / ".bws" / f"{profile_name}-profile"
     user_data_path.mkdir(parents=True, exist_ok=True)
+    _clear_stale_profile_lock(user_data_path)
 
     async with AsyncCamoufox(
         headless=headless,

@@ -28,7 +28,7 @@ class TestCircuitBreaker:
         """Given fresh circuit breaker. Then all sources available."""
         cb = CircuitBreakerState()
         assert is_available(cb, SourceId.BRICKLINK, cooldown_seconds=1800)
-        assert is_available(cb, SourceId.BRICKRANKER, cooldown_seconds=1800)
+        assert is_available(cb, SourceId.BRICKECONOMY, cooldown_seconds=1800)
 
     def test_single_failure_does_not_trip(self):
         """Given 1 failure (threshold=5). Then source still available."""
@@ -41,12 +41,12 @@ class TestCircuitBreaker:
         """Given 5 consecutive failures (threshold=5). Then breaker trips."""
         cb = CircuitBreakerState()
         for _ in range(5):
-            cb = record_failure(cb, SourceId.BRICKRANKER, threshold=5)
+            cb = record_failure(cb, SourceId.BRICKECONOMY, threshold=5)
 
-        state = cb.get_state(SourceId.BRICKRANKER)
+        state = cb.get_state(SourceId.BRICKECONOMY)
         assert state.is_open
         assert state.consecutive_failures == 5
-        assert not is_available(cb, SourceId.BRICKRANKER, cooldown_seconds=1800)
+        assert not is_available(cb, SourceId.BRICKECONOMY, cooldown_seconds=1800)
 
     def test_success_resets_failures(self):
         """Given 4 failures then 1 success. Then counter resets."""
@@ -64,7 +64,7 @@ class TestCircuitBreaker:
         old_time = datetime.now(tz=timezone.utc) - timedelta(seconds=3600)
         cb = CircuitBreakerState(
             states={
-                SourceId.BRICKRANKER: SourceState(
+                SourceId.BRICKECONOMY: SourceState(
                     consecutive_failures=5,
                     last_failure_at=old_time,
                     is_open=True,
@@ -72,29 +72,29 @@ class TestCircuitBreaker:
             }
         )
         # Cooldown is 1800s, 3600s have passed
-        assert is_available(cb, SourceId.BRICKRANKER, cooldown_seconds=1800)
+        assert is_available(cb, SourceId.BRICKECONOMY, cooldown_seconds=1800)
 
     def test_cooldown_not_expired_blocks(self):
         """Given tripped breaker with recent failure. Then source blocked."""
         recent_time = datetime.now(tz=timezone.utc) - timedelta(seconds=60)
         cb = CircuitBreakerState(
             states={
-                SourceId.BRICKRANKER: SourceState(
+                SourceId.BRICKECONOMY: SourceState(
                     consecutive_failures=5,
                     last_failure_at=recent_time,
                     is_open=True,
                 )
             }
         )
-        assert not is_available(cb, SourceId.BRICKRANKER, cooldown_seconds=1800)
+        assert not is_available(cb, SourceId.BRICKECONOMY, cooldown_seconds=1800)
 
     def test_other_sources_unaffected(self):
-        """Given BrickRanker tripped. Then Bricklink still available."""
+        """Given BrickEconomy tripped. Then Bricklink still available."""
         cb = CircuitBreakerState()
         for _ in range(5):
-            cb = record_failure(cb, SourceId.BRICKRANKER, threshold=5)
+            cb = record_failure(cb, SourceId.BRICKECONOMY, threshold=5)
 
-        assert not is_available(cb, SourceId.BRICKRANKER, cooldown_seconds=1800)
+        assert not is_available(cb, SourceId.BRICKECONOMY, cooldown_seconds=1800)
         assert is_available(cb, SourceId.BRICKLINK, cooldown_seconds=1800)
 
 
@@ -102,15 +102,16 @@ class TestResilienceIntegration:
     """GROUP 6: Resilience integration tests."""
 
     def test_6_2_circuit_breaker_skips_source(self, make_item):
-        """Given Bricklink circuit breaker open.
+        """Given Bricklink and BrickEconomy circuit breakers open.
         When enrichment needs weight (Bricklink-only).
         Then Bricklink skipped, field marked SKIPPED."""
         item = make_item()
 
-        # Pre-trip Bricklink circuit breaker
+        # Pre-trip both circuit breakers
         cb = CircuitBreakerState()
         for _ in range(5):
             cb = record_failure(cb, SourceId.BRICKLINK, threshold=5)
+            cb = record_failure(cb, SourceId.BRICKECONOMY, threshold=5)
 
         bricklink_called = False
 
@@ -200,6 +201,7 @@ class TestResilienceIntegration:
         cb = CircuitBreakerState()
         for _ in range(5):
             cb = record_failure(cb, SourceId.BRICKLINK, threshold=5)
+            cb = record_failure(cb, SourceId.BRICKECONOMY, threshold=5)
 
         call_count = 0
 

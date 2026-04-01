@@ -28,25 +28,47 @@ class BrickeconomySnapshot:
     theme: str | None = None
     subtheme: str | None = None
     year_released: int | None = None
+    year_retired: int | None = None
+    release_date: str | None = None  # ISO month "2025-01" from "January 2025"
+    retired_date: str | None = None  # ISO month "2021-10" from "October 2021"
     pieces: int | None = None
     minifigs: int | None = None
+    minifig_value_cents: int | None = None  # total minifig value USD cents
+    exclusive_minifigs: bool | None = None  # "All exclusive" indicator
     availability: str | None = None
+    retiring_soon: bool | None = None
     image_url: str | None = None
     brickeconomy_url: str | None = None
+
+    # Identifiers
+    upc: str | None = None
+    ean: str | None = None
+    designer: str | None = None  # comma-separated if multiple
 
     # Retail prices (cents)
     rrp_usd_cents: int | None = None
     rrp_gbp_cents: int | None = None
     rrp_eur_cents: int | None = None
+    rrp_cad_cents: int | None = None
+    rrp_aud_cents: int | None = None
 
     # Current market values (cents USD)
     value_new_cents: int | None = None
     value_used_cents: int | None = None
+    used_value_low_cents: int | None = None
+    used_value_high_cents: int | None = None
 
     # Metrics
     annual_growth_pct: float | None = None
+    total_growth_pct: float | None = None
+    rolling_growth_pct: float | None = None  # previous 12 months
+    growth_90d_pct: float | None = None
     rating_value: str | None = None
     review_count: int | None = None
+
+    # Theme/subtheme context
+    theme_rank: int | None = None  # community rank within theme/subtheme
+    subtheme_avg_growth_pct: float | None = None
 
     # Future estimate (not scraped -- BrickEconomy forecast, not real data)
     future_estimate_cents: int | None = None
@@ -121,6 +143,24 @@ _RE_ESTIMATE_ANNOTATION = re.compile(
     r"\[new Date\((\d+),\s*(\d+),\s*(\d+)\)\s*,\s*([\d.]+)\s*,"
     r"\s*'[^']*'\s*,\s*'Estimate'"
 )
+
+
+_MONTH_NAMES = {
+    "january": 1, "february": 2, "march": 3, "april": 4,
+    "may": 5, "june": 6, "july": 7, "august": 8,
+    "september": 9, "october": 10, "november": 11, "december": 12,
+}
+
+
+def _parse_month_year(text: str) -> str | None:
+    """Parse 'January 2025' or 'October 2021' to ISO month '2025-01'."""
+    m = re.match(r"(\w+)\s+(\d{4})", text.strip())
+    if not m:
+        return None
+    month_num = _MONTH_NAMES.get(m.group(1).lower())
+    if month_num is None:
+        return None
+    return f"{int(m.group(2)):04d}-{month_num:02d}"
 
 
 def _dollars_to_cents(value: float) -> int:
@@ -321,11 +361,30 @@ def _parse_sidebar(soup: BeautifulSoup) -> dict:
 
     year_str = _get_after("Year")
     if year_str:
-        m = re.search(r"(\d{4})", year_str)
-        if m:
-            result["year_released"] = int(m.group(1))
+        # BrickEconomy shows "2021" for active sets, "2021 - 2023" for retired
+        years = re.findall(r"(\d{4})", year_str)
+        if years:
+            result["year_released"] = int(years[0])
+        if len(years) >= 2:
+            result["year_retired"] = int(years[1])
 
-    result["availability"] = _get_after("Availability")
+    # Release/retired month+year: "Released" -> "January 2025"
+    released_str = _get_after("Released")
+    if released_str:
+        result["release_date"] = _parse_month_year(released_str)
+
+    retired_str = _get_after("Retired")
+    if retired_str:
+        result["retired_date"] = _parse_month_year(retired_str)
+
+    availability = _get_after("Availability")
+    result["availability"] = availability
+    if availability:
+        avail_lower = availability.lower()
+        if "retiring" in avail_lower:
+            result["retiring_soon"] = True
+        elif avail_lower == "retired":
+            result["retiring_soon"] = False
 
     pieces_str = _get_after("Pieces")
     if pieces_str:
@@ -333,11 +392,27 @@ def _parse_sidebar(soup: BeautifulSoup) -> dict:
         if m:
             result["pieces"] = int(m.group(1).replace(",", ""))
 
+    # Minifigs count + value + exclusivity
     minifigs_str = _get_after("Minifigs")
     if minifigs_str:
         m = re.search(r"(\d+)", minifigs_str)
         if m:
             result["minifigs"] = int(m.group(1))
+
+    # Minifig value appears after minifig count: "(Value $17.73)"
+    # Exclusive indicator: "(All exclusive)" or "(X exclusive)"
+    for i, tok in enumerate(tokens):
+        if tok == "Minifigs" and i + 1 < len(tokens):
+            # Scan subsequent tokens for value and exclusivity
+            for j in range(i + 1, min(i + 5, len(tokens))):
+                val_match = re.search(r"Value\s+\$([\d,.]+)", tokens[j])
+                if val_match:
+                    result["minifig_value_cents"] = _dollars_to_cents(
+                        float(val_match.group(1).replace(",", ""))
+                    )
+                if "exclusive" in tokens[j].lower():
+                    result["exclusive_minifigs"] = True
+            break
 
     # Retail price (USD) -- appears after "Retail price" or "retail price"
     retail_str = _get_after("Retail price")
@@ -361,7 +436,35 @@ def _parse_sidebar(soup: BeautifulSoup) -> dict:
                 )
             break
 
-    # Used value
+    # Total growth: "+60.01%" after "Growth" (before "Annual growth")
+    growth_str = _get_after("Growth")
+    if growth_str:
+        m = re.search(r"([+-]?\d+\.?\d*)", growth_str)
+        if m:
+            result["total_growth_pct"] = float(m.group(1))
+
+    # Annual growth
+    annual_str = _get_after("Annual growth")
+    if annual_str:
+        m = re.search(r"([+-]?\d+\.?\d*)", annual_str)
+        if m:
+            result["annual_growth_pct"] = float(m.group(1))
+
+    # Rolling growth (previous 12 months)
+    rolling_str = _get_after("Rolling growth")
+    if rolling_str:
+        m = re.search(r"([+-]?\d+\.?\d*)", rolling_str)
+        if m:
+            result["rolling_growth_pct"] = float(m.group(1))
+
+    # 90-day change
+    change_90d_str = _get_after("90-day change")
+    if change_90d_str:
+        m = re.search(r"([+-]?\d+\.?\d*)", change_90d_str)
+        if m:
+            result["growth_90d_pct"] = float(m.group(1))
+
+    # Used value + range
     for i, tok in enumerate(tokens):
         if tok == "Used" and i + 2 < len(tokens) and tokens[i + 1] == "Value":
             m = _RE_DOLLAR_AMOUNT.search(tokens[i + 2])
@@ -371,31 +474,131 @@ def _parse_sidebar(soup: BeautifulSoup) -> dict:
                 )
             break
 
-    # Annual growth
-    annual_str = _get_after("Annual growth")
-    if annual_str:
-        m = re.search(r"([+-]?\d+\.?\d*)", annual_str)
-        if m:
-            result["annual_growth_pct"] = float(m.group(1))
+    # Used value range: "Range" -> "$104.90 - $134.50"
+    range_str = _get_after("Range")
+    if range_str:
+        prices = _RE_DOLLAR_AMOUNT.findall(range_str)
+        if len(prices) >= 2:
+            result["used_value_low_cents"] = _dollars_to_cents(
+                float(prices[0].replace(",", ""))
+            )
+            result["used_value_high_cents"] = _dollars_to_cents(
+                float(prices[1].replace(",", ""))
+            )
 
     return result
 
 
-def _parse_rrp_gbp_eur(soup: BeautifulSoup) -> tuple[int | None, int | None]:
-    """Extract GBP and EUR retail prices from the page."""
+def _parse_regional_prices(
+    soup: BeautifulSoup,
+) -> dict[str, int | None]:
+    """Extract all regional retail prices from the page."""
     text = soup.get_text()
+    prices: dict[str, int | None] = {}
 
-    gbp_cents = None
     gbp_match = re.search(r"United Kingdom[^£]*£([\d,.]+)", text)
-    if gbp_match:
-        gbp_cents = _dollars_to_cents(float(gbp_match.group(1).replace(",", "")))
+    prices["gbp"] = (
+        _dollars_to_cents(float(gbp_match.group(1).replace(",", "")))
+        if gbp_match
+        else None
+    )
 
-    eur_cents = None
     eur_match = re.search(r"Europe[^€]*€([\d,.]+)", text)
-    if eur_match:
-        eur_cents = _dollars_to_cents(float(eur_match.group(1).replace(",", "")))
+    prices["eur"] = (
+        _dollars_to_cents(float(eur_match.group(1).replace(",", "")))
+        if eur_match
+        else None
+    )
 
-    return gbp_cents, eur_cents
+    # Canada uses $ symbol -- look for "Canada" then next dollar amount
+    cad_match = re.search(r"Canada[^$]*\$([\d,.]+)", text)
+    prices["cad"] = (
+        _dollars_to_cents(float(cad_match.group(1).replace(",", "")))
+        if cad_match
+        else None
+    )
+
+    # Australia uses $ symbol
+    aud_match = re.search(r"Australia[^$]*\$([\d,.]+)", text)
+    prices["aud"] = (
+        _dollars_to_cents(float(aud_match.group(1).replace(",", "")))
+        if aud_match
+        else None
+    )
+
+    return prices
+
+
+def _parse_barcodes(sidebar_tokens: list[str]) -> tuple[str | None, str | None]:
+    """Extract UPC and EAN barcodes from sidebar tokens."""
+    upc = None
+    ean = None
+    for i, tok in enumerate(sidebar_tokens):
+        if tok == "UPC" and i + 1 < len(sidebar_tokens):
+            m = re.match(r"(\d{10,14})", sidebar_tokens[i + 1])
+            if m:
+                upc = m.group(1)
+        elif tok == "EAN" and i + 1 < len(sidebar_tokens):
+            m = re.match(r"(\d{10,14})", sidebar_tokens[i + 1])
+            if m:
+                ean = m.group(1)
+    return upc, ean
+
+
+def _parse_designer(sidebar_tokens: list[str]) -> str | None:
+    """Extract designer name(s) from sidebar tokens.
+
+    Pattern: "... was designed by LEGO designer(s)" followed by name tokens,
+    possibly with "and" between multiple designers, ending with ".".
+    """
+    # Find the "designed by" anchor
+    for i, tok in enumerate(sidebar_tokens):
+        if "designed by" in tok.lower():
+            names: list[str] = []
+            for j in range(i + 1, min(i + 6, len(sidebar_tokens))):
+                t = sidebar_tokens[j].strip().rstrip(".")
+                if t == "and":
+                    continue
+                if t == "." or not t:
+                    break
+                # Stop at tokens that don't look like names
+                if t.startswith("The ") or t.startswith("Regional"):
+                    break
+                names.append(t)
+            return ", ".join(names) if names else None
+    return None
+
+
+def _parse_theme_rank(sidebar_tokens: list[str]) -> int | None:
+    """Extract community rank within theme/subtheme.
+
+    Pattern: "... currently ranks #3 out of ..."
+    """
+    for tok in sidebar_tokens:
+        m = re.search(r"currently ranks #(\d+)", tok)
+        if m:
+            return int(m.group(1))
+    return None
+
+
+def _parse_subtheme_avg_growth(sidebar_tokens: list[str]) -> float | None:
+    """Extract subtheme/theme average annual growth.
+
+    Pattern: "(this set +11.02%)" is the set's own, but before it
+    there's the subtheme avg like "+12.41%".
+    Look for "Annual growth" in the Subtheme Analysis section.
+    """
+    # The subtheme analysis has tokens like:
+    # "Annual growth", "+12.41%", "(this set +11.02%)"
+    in_subtheme = False
+    for i, tok in enumerate(sidebar_tokens):
+        if "Analysis" in tok:
+            in_subtheme = True
+        if in_subtheme and tok == "Annual growth" and i + 1 < len(sidebar_tokens):
+            m = re.search(r"([+-]?\d+\.?\d*)", sidebar_tokens[i + 1])
+            if m:
+                return float(m.group(1))
+    return None
 
 
 def _parse_value_from_meta(soup: BeautifulSoup) -> int | None:
@@ -451,6 +654,14 @@ def parse_brickeconomy_page(
     # Sidebar metadata (set details, pricing, growth)
     sidebar = _parse_sidebar(soup)
 
+    # Sidebar tokens for secondary parsers (barcodes, designer, rank, growth)
+    sidebar_tokens: list[str] = []
+    for div in soup.find_all("div", class_="col-md-4"):
+        text = div.get_text("|", strip=True)
+        if "Set Details" in text:
+            sidebar_tokens = [t.strip() for t in text.split("|") if t.strip()]
+            break
+
     # Chart data (from inline JS)
     value_chart = _parse_value_chart(html)
     sales_trend = _parse_sales_trend(html)
@@ -467,9 +678,15 @@ def parse_brickeconomy_page(
     # Future estimates are BrickEconomy forecasts, not real data -- skip
     future_cents, future_date = None, None
 
-    # RRP: sidebar has USD RRP; GBP/EUR from the full page text
+    # Regional retail prices (GBP, EUR, CAD, AUD)
     rrp_usd = sidebar.get("rrp_usd_cents")
-    rrp_gbp, rrp_eur = _parse_rrp_gbp_eur(soup)
+    regional = _parse_regional_prices(soup)
+
+    # Barcodes, designer, theme rank, subtheme growth
+    upc, ean = _parse_barcodes(sidebar_tokens)
+    designer = _parse_designer(sidebar_tokens)
+    theme_rank = _parse_theme_rank(sidebar_tokens)
+    subtheme_avg_growth = _parse_subtheme_avg_growth(sidebar_tokens)
 
     return BrickeconomySnapshot(
         set_number=set_number,
@@ -478,19 +695,37 @@ def parse_brickeconomy_page(
         theme=sidebar.get("theme"),
         subtheme=sidebar.get("subtheme"),
         year_released=sidebar.get("year_released"),
+        year_retired=sidebar.get("year_retired"),
+        release_date=sidebar.get("release_date"),
+        retired_date=sidebar.get("retired_date"),
         pieces=sidebar.get("pieces"),
         minifigs=sidebar.get("minifigs"),
+        minifig_value_cents=sidebar.get("minifig_value_cents"),
+        exclusive_minifigs=sidebar.get("exclusive_minifigs"),
         availability=sidebar.get("availability"),
+        retiring_soon=sidebar.get("retiring_soon"),
         image_url=image_url,
         brickeconomy_url=url,
+        upc=upc,
+        ean=ean,
+        designer=designer,
         rrp_usd_cents=rrp_usd,
-        rrp_gbp_cents=rrp_gbp,
-        rrp_eur_cents=rrp_eur,
+        rrp_gbp_cents=regional["gbp"],
+        rrp_eur_cents=regional["eur"],
+        rrp_cad_cents=regional["cad"],
+        rrp_aud_cents=regional["aud"],
         value_new_cents=value_new_cents,
         value_used_cents=sidebar.get("value_used_cents"),
+        used_value_low_cents=sidebar.get("used_value_low_cents"),
+        used_value_high_cents=sidebar.get("used_value_high_cents"),
         annual_growth_pct=sidebar.get("annual_growth_pct"),
+        total_growth_pct=sidebar.get("total_growth_pct"),
+        rolling_growth_pct=sidebar.get("rolling_growth_pct"),
+        growth_90d_pct=sidebar.get("growth_90d_pct"),
         rating_value=rating_value,
         review_count=review_count,
+        theme_rank=theme_rank,
+        subtheme_avg_growth_pct=subtheme_avg_growth,
         future_estimate_cents=future_cents,
         future_estimate_date=future_date,
         distribution_mean_cents=dist_mean,

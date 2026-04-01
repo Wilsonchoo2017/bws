@@ -58,7 +58,17 @@ def backtest_db() -> duckdb.DuckDBPyConnection:
             parts_count INTEGER,
             rrp_cents INTEGER,
             rrp_currency VARCHAR,
-            retiring_soon BOOLEAN DEFAULT FALSE
+            retiring_soon BOOLEAN DEFAULT FALSE,
+            release_date VARCHAR
+        )
+    """)
+
+    conn.execute("""
+        CREATE TABLE brickeconomy_snapshots (
+            id INTEGER PRIMARY KEY,
+            set_number VARCHAR NOT NULL,
+            scraped_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            rrp_usd_cents INTEGER
         )
     """)
 

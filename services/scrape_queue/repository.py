@@ -288,6 +288,23 @@ def fail_task(
         )
 
 
+def force_fail_task(
+    conn: DuckDBPyConnection,
+    task_id: str,
+    error: str,
+) -> None:
+    """Immediately mark a task as failed, skipping remaining retries."""
+    conn.execute(
+        """
+        UPDATE scrape_tasks
+        SET status = 'failed', error = ?, completed_at = now(),
+            locked_by = NULL, locked_at = NULL
+        WHERE task_id = ?
+        """,
+        [error, task_id],
+    )
+
+
 # ---------------------------------------------------------------------------
 # Dependency resolution
 # ---------------------------------------------------------------------------

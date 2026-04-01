@@ -21,7 +21,6 @@ class SourceId(Enum):
     """Identifier for each metadata source."""
 
     BRICKLINK = "bricklink"
-    BRICKRANKER = "brickranker"
     BRICKECONOMY = "brickeconomy"
 
 
@@ -38,6 +37,8 @@ class MetadataField(Enum):
     RETIRING_SOON = "retiring_soon"
     MINIFIG_COUNT = "minifig_count"
     DIMENSIONS = "dimensions"
+    RELEASE_DATE = "release_date"
+    RETIRED_DATE = "retired_date"
 
 
 @dataclass(frozen=True)

@@ -28,14 +28,16 @@ class SourceConfig:
 FIELD_SOURCE_PRIORITY: dict[MetadataField, tuple[SourceId, ...]] = {
     MetadataField.TITLE: (SourceId.BRICKLINK, SourceId.BRICKECONOMY),
     MetadataField.YEAR_RELEASED: (SourceId.BRICKLINK, SourceId.BRICKECONOMY),
-    MetadataField.YEAR_RETIRED: (),
+    MetadataField.YEAR_RETIRED: (SourceId.BRICKECONOMY,),
     MetadataField.PARTS_COUNT: (SourceId.BRICKLINK, SourceId.BRICKECONOMY),
-    MetadataField.THEME: (SourceId.BRICKRANKER, SourceId.BRICKLINK, SourceId.BRICKECONOMY),
+    MetadataField.THEME: (SourceId.BRICKLINK, SourceId.BRICKECONOMY),
     MetadataField.IMAGE_URL: (SourceId.BRICKLINK, SourceId.BRICKECONOMY),
     MetadataField.WEIGHT: (SourceId.BRICKLINK,),
-    MetadataField.RETIRING_SOON: (SourceId.BRICKRANKER,),
+    MetadataField.RETIRING_SOON: (SourceId.BRICKECONOMY,),
     MetadataField.MINIFIG_COUNT: (SourceId.BRICKLINK, SourceId.BRICKECONOMY),
     MetadataField.DIMENSIONS: (SourceId.BRICKLINK,),
+    MetadataField.RELEASE_DATE: (SourceId.BRICKECONOMY,),
+    MetadataField.RETIRED_DATE: (SourceId.BRICKECONOMY,),
 }
 
 SOURCE_CONFIGS: dict[SourceId, SourceConfig] = {
@@ -53,22 +55,19 @@ SOURCE_CONFIGS: dict[SourceId, SourceConfig] = {
         }),
         circuit_breaker_cooldown_seconds=3600,  # 1 hour (matches BrickLink quota reset)
     ),
-    SourceId.BRICKRANKER: SourceConfig(
-        source_id=SourceId.BRICKRANKER,
-        fields_provided=frozenset({
-            MetadataField.THEME,
-            MetadataField.RETIRING_SOON,
-        }),
-    ),
     SourceId.BRICKECONOMY: SourceConfig(
         source_id=SourceId.BRICKECONOMY,
         fields_provided=frozenset({
             MetadataField.TITLE,
             MetadataField.YEAR_RELEASED,
+            MetadataField.YEAR_RETIRED,
             MetadataField.PARTS_COUNT,
             MetadataField.THEME,
             MetadataField.IMAGE_URL,
             MetadataField.MINIFIG_COUNT,
+            MetadataField.RETIRING_SOON,
+            MetadataField.RELEASE_DATE,
+            MetadataField.RETIRED_DATE,
         }),
         circuit_breaker_cooldown_seconds=3600,  # 1 hour
     ),

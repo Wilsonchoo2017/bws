@@ -14,7 +14,7 @@ logger = logging.getLogger("bws.enrichment.routes")
 router = APIRouter(prefix="/enrichment", tags=["enrichment"])
 
 
-VALID_SOURCES = {"bricklink", "brickranker", "brickeconomy"}
+VALID_SOURCES = {"bricklink", "brickeconomy"}
 
 
 class EnrichRequest(BaseModel):
@@ -49,7 +49,6 @@ class ScrapeTasksResponse(BaseModel):
 _SOURCE_TO_TASK_TYPE = {
     "bricklink": "bricklink_metadata",
     "brickeconomy": "brickeconomy",
-    "brickranker": "bricklink_metadata",  # BrickRanker runs as part of BrickLink metadata
 }
 
 
@@ -234,84 +233,6 @@ async def enrich_missing_dimensions(
         conn.close()
 
     return EnrichBatchResponse(queued=len(queued_numbers), set_numbers=queued_numbers)
-
-
-class SyncRetirementResponse(BaseModel):
-    synced: int
-    cleared: int
-    set_numbers: list[str]
-
-
-@router.post("/sync-retirement", response_model=SyncRetirementResponse)
-async def sync_retirement(
-    request: EnrichBatchRequest | None = None,
-) -> SyncRetirementResponse:
-    """Sync retiring_soon from brickranker_items into lego_items.
-
-    Reads the current retirement status from BrickRanker (source of truth)
-    and propagates it to the unified lego_items table.  Items no longer
-    marked retiring in BrickRanker get their flag cleared.
-    """
-    conn = get_connection()
-    try:
-        init_schema(conn)
-
-        # 1. Items marked retiring_soon in brickranker
-        retiring_rows = conn.execute(
-            """
-            SELECT bi.set_number
-            FROM brickranker_items bi
-            JOIN lego_items li ON li.set_number = bi.set_number
-            WHERE bi.retiring_soon = TRUE
-              AND bi.is_active = TRUE
-              AND (li.retiring_soon IS NULL OR li.retiring_soon = FALSE)
-            """,
-        ).fetchall()
-        retiring_numbers = [r[0] for r in retiring_rows]
-
-        if request and request.set_numbers:
-            filter_set = set(request.set_numbers)
-            retiring_numbers = [s for s in retiring_numbers if s in filter_set]
-
-        for sn in retiring_numbers:
-            conn.execute(
-                "UPDATE lego_items SET retiring_soon = TRUE, updated_at = now() WHERE set_number = ?",
-                [sn],
-            )
-
-        # 2. Items that are no longer retiring in brickranker but still flagged in lego_items
-        stale_rows = conn.execute(
-            """
-            SELECT li.set_number
-            FROM lego_items li
-            LEFT JOIN brickranker_items bi ON bi.set_number = li.set_number AND bi.is_active = TRUE
-            WHERE li.retiring_soon = TRUE
-              AND (bi.set_number IS NULL OR bi.retiring_soon = FALSE)
-            """,
-        ).fetchall()
-        stale_numbers = [r[0] for r in stale_rows]
-
-        if request and request.set_numbers:
-            filter_set = set(request.set_numbers)
-            stale_numbers = [s for s in stale_numbers if s in filter_set]
-
-        for sn in stale_numbers:
-            conn.execute(
-                "UPDATE lego_items SET retiring_soon = FALSE, updated_at = now() WHERE set_number = ?",
-                [sn],
-            )
-
-    except Exception:
-        logger.exception("Failed to sync retirement status")
-        raise HTTPException(status_code=500, detail="Internal server error")
-    finally:
-        conn.close()
-
-    return SyncRetirementResponse(
-        synced=len(retiring_numbers),
-        cleared=len(stale_numbers),
-        set_numbers=retiring_numbers,
-    )
 
 
 @router.get("/needs-enrichment", response_model=NeedsEnrichmentResponse)

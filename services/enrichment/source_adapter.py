@@ -5,7 +5,6 @@ Pure functions mapping source-specific data models to the unified MetadataField 
 
 from bws_types.models import BricklinkData
 from services.brickeconomy.parser import BrickeconomySnapshot
-from services.brickranker.parser import RetirementItem
 from services.enrichment.types import MetadataField, SourceId, SourceResult
 
 
@@ -33,28 +32,19 @@ def adapt_bricklink(data: BricklinkData) -> SourceResult:
     )
 
 
-def adapt_brickranker(item: RetirementItem) -> SourceResult:
-    """Extract enrichment fields from RetirementItem."""
-    fields: dict[MetadataField, str | int | bool | None] = {
-        MetadataField.THEME: item.theme,
-        MetadataField.RETIRING_SOON: item.retiring_soon,
-    }
-    return SourceResult(
-        source=SourceId.BRICKRANKER,
-        success=True,
-        fields=fields,
-    )
-
-
 def adapt_brickeconomy(snapshot: BrickeconomySnapshot) -> SourceResult:
     """Extract enrichment fields from BrickeconomySnapshot."""
     fields: dict[MetadataField, str | int | bool | None] = {
         MetadataField.TITLE: snapshot.title,
         MetadataField.YEAR_RELEASED: snapshot.year_released,
+        MetadataField.YEAR_RETIRED: snapshot.year_retired,
         MetadataField.PARTS_COUNT: snapshot.pieces,
         MetadataField.THEME: snapshot.theme,
         MetadataField.IMAGE_URL: snapshot.image_url,
         MetadataField.MINIFIG_COUNT: snapshot.minifigs,
+        MetadataField.RETIRING_SOON: snapshot.retiring_soon,
+        MetadataField.RELEASE_DATE: snapshot.release_date,
+        MetadataField.RETIRED_DATE: snapshot.retired_date,
     }
     return SourceResult(
         source=SourceId.BRICKECONOMY,

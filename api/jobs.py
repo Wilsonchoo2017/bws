@@ -37,7 +37,19 @@ class JobManager:
         self._max_history = 1000
 
     def create_job(self, scraper_id: str, url: str) -> Job:
-        """Create a new job and add it to the queue."""
+        """Create a new job and add it to the queue.
+
+        If a job with the same scraper_id and url is already queued or
+        running, returns the existing job instead of creating a duplicate.
+        """
+        for existing in self._jobs.values():
+            if (
+                existing.scraper_id == scraper_id
+                and existing.url == url
+                and existing.status in (JobStatus.QUEUED, JobStatus.RUNNING)
+            ):
+                return existing
+
         job_id = uuid.uuid4().hex[:12]
         job = Job(job_id=job_id, scraper_id=scraper_id, url=url)
         self._jobs[job_id] = job

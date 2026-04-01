@@ -26,6 +26,8 @@ def make_item():
             "retiring_soon": None,
             "minifig_count": None,
             "dimensions": None,
+            "release_date": None,
+            "retired_date": None,
         }
         return {**defaults, **overrides}
 

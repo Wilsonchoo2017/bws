@@ -72,6 +72,8 @@ def conn():
             retiring_soon BOOLEAN,
             minifig_count INTEGER,
             dimensions VARCHAR,
+            release_date VARCHAR,
+            retired_date VARCHAR,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )

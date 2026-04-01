@@ -35,6 +35,8 @@ def get_or_create_item(
     retiring_soon: bool | None = None,
     minifig_count: int | None = None,
     dimensions: str | None = None,
+    release_date: str | None = None,
+    retired_date: str | None = None,
 ) -> None:
     """Ensure a lego_items row exists for this set number.
 
@@ -52,9 +54,10 @@ def get_or_create_item(
         INSERT INTO lego_items (
             id, set_number, title, theme, year_released, year_retired,
             parts_count, weight, image_url, rrp_cents, rrp_currency,
-            retiring_soon, minifig_count, dimensions
+            retiring_soon, minifig_count, dimensions,
+            release_date, retired_date
         )
-        VALUES (nextval('lego_items_id_seq'), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (nextval('lego_items_id_seq'), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT (set_number) DO UPDATE SET
             title = COALESCE(EXCLUDED.title, lego_items.title),
             theme = COALESCE(EXCLUDED.theme, lego_items.theme),
@@ -68,10 +71,13 @@ def get_or_create_item(
             retiring_soon = COALESCE(EXCLUDED.retiring_soon, lego_items.retiring_soon),
             minifig_count = COALESCE(EXCLUDED.minifig_count, lego_items.minifig_count),
             dimensions = COALESCE(EXCLUDED.dimensions, lego_items.dimensions),
+            release_date = COALESCE(EXCLUDED.release_date, lego_items.release_date),
+            retired_date = COALESCE(EXCLUDED.retired_date, lego_items.retired_date),
             updated_at = now()
         """,
         [set_number, title, theme, year_released, year_retired, parts_count, weight, insert_image_url,
          rrp_cents, rrp_currency, retiring_soon, minifig_count, dimensions,
+         release_date, retired_date,
          image_url],  # for ON CONFLICT update -- None lets COALESCE keep existing
     )
 

@@ -302,22 +302,6 @@ CREATE TABLE IF NOT EXISTS image_assets (
 );
 """
 
-BRICKRANKER_ITEMS_DDL = """
-CREATE TABLE IF NOT EXISTS brickranker_items (
-    id INTEGER PRIMARY KEY,
-    set_number VARCHAR NOT NULL UNIQUE,
-    set_name VARCHAR,
-    year_released INTEGER,
-    retiring_soon BOOLEAN DEFAULT FALSE,
-    expected_retirement_date VARCHAR,
-    theme VARCHAR,
-    image_url VARCHAR,
-    is_active BOOLEAN DEFAULT TRUE,
-    scraped_at TIMESTAMP,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-"""
-
 SCRAPE_TASKS_DDL = """
 CREATE TABLE IF NOT EXISTS scrape_tasks (
     id INTEGER PRIMARY KEY,
@@ -396,9 +380,11 @@ CREATE TABLE IF NOT EXISTS brickeconomy_snapshots (
     theme VARCHAR,
     subtheme VARCHAR,
     year_released INTEGER,
+    year_retired INTEGER,
     pieces INTEGER,
     minifigs INTEGER,
     availability VARCHAR,
+    retiring_soon BOOLEAN,
     image_url VARCHAR,
     brickeconomy_url VARCHAR,
     rrp_usd_cents INTEGER,
@@ -419,12 +405,43 @@ CREATE TABLE IF NOT EXISTS brickeconomy_snapshots (
 );
 """
 
+ML_FEATURE_STORE_DDL = """
+CREATE TABLE IF NOT EXISTS ml_feature_store (
+    id INTEGER PRIMARY KEY,
+    set_number VARCHAR NOT NULL,
+    horizon_months INTEGER NOT NULL,
+    snapshot_date TIMESTAMP,
+    target_return FLOAT,
+    target_profitable BOOLEAN,
+    features_json JSON NOT NULL,
+    computed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(set_number, horizon_months)
+);
+"""
+
+ML_MODEL_RUNS_DDL = """
+CREATE TABLE IF NOT EXISTS ml_model_runs (
+    id INTEGER PRIMARY KEY,
+    model_name VARCHAR NOT NULL,
+    horizon_months INTEGER NOT NULL,
+    task VARCHAR NOT NULL,
+    r_squared FLOAT,
+    roc_auc FLOAT,
+    hit_rate FLOAT,
+    quintile_spread FLOAT,
+    n_train INTEGER,
+    n_test INTEGER,
+    feature_count INTEGER,
+    artifact_path VARCHAR,
+    trained_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+"""
+
 SEQUENCES_DDL = """
 CREATE SEQUENCE IF NOT EXISTS bricklink_items_id_seq;
 CREATE SEQUENCE IF NOT EXISTS bricklink_price_history_id_seq;
 CREATE SEQUENCE IF NOT EXISTS bricklink_monthly_sales_id_seq;
 CREATE SEQUENCE IF NOT EXISTS product_analysis_id_seq;
-CREATE SEQUENCE IF NOT EXISTS brickranker_items_id_seq;
 CREATE SEQUENCE IF NOT EXISTS minifigures_id_seq;
 CREATE SEQUENCE IF NOT EXISTS set_minifigures_id_seq;
 CREATE SEQUENCE IF NOT EXISTS minifig_price_history_id_seq;
@@ -444,6 +461,8 @@ CREATE SEQUENCE IF NOT EXISTS brickeconomy_snapshots_id_seq;
 CREATE SEQUENCE IF NOT EXISTS keepa_snapshots_id_seq;
 CREATE SEQUENCE IF NOT EXISTS google_trends_snapshots_id_seq;
 CREATE SEQUENCE IF NOT EXISTS scrape_tasks_id_seq;
+CREATE SEQUENCE IF NOT EXISTS ml_feature_store_id_seq;
+CREATE SEQUENCE IF NOT EXISTS ml_model_runs_id_seq;
 """
 
 # Index creation statements
@@ -462,8 +481,6 @@ CREATE INDEX IF NOT EXISTS idx_product_analysis_action
     ON product_analysis(action);
 CREATE INDEX IF NOT EXISTS idx_product_analysis_score
     ON product_analysis(overall_score);
-CREATE INDEX IF NOT EXISTS idx_brickranker_set_number
-    ON brickranker_items(set_number);
 CREATE INDEX IF NOT EXISTS idx_minifigures_minifig_id
     ON minifigures(minifig_id);
 CREATE INDEX IF NOT EXISTS idx_set_minifigures_set
@@ -472,8 +489,6 @@ CREATE INDEX IF NOT EXISTS idx_set_minifigures_minifig
     ON set_minifigures(minifig_id);
 CREATE INDEX IF NOT EXISTS idx_minifig_price_history_item
     ON minifig_price_history(minifig_id, scraped_at);
-CREATE INDEX IF NOT EXISTS idx_brickranker_retiring_soon
-    ON brickranker_items(retiring_soon);
 CREATE INDEX IF NOT EXISTS idx_shopee_products_url
     ON shopee_products(product_url);
 CREATE INDEX IF NOT EXISTS idx_shopee_products_source
@@ -526,6 +541,10 @@ CREATE INDEX IF NOT EXISTS idx_scrape_tasks_status_priority
     ON scrape_tasks(status, priority, created_at);
 CREATE INDEX IF NOT EXISTS idx_scrape_tasks_set_type
     ON scrape_tasks(set_number, task_type);
+CREATE INDEX IF NOT EXISTS idx_ml_feature_store_set
+    ON ml_feature_store(set_number, horizon_months);
+CREATE INDEX IF NOT EXISTS idx_ml_model_runs_trained
+    ON ml_model_runs(trained_at);
 """
 
 ALL_DDL = [
@@ -535,7 +554,6 @@ ALL_DDL = [
     BRICKLINK_MONTHLY_SALES_DDL,
     PRODUCT_ANALYSIS_DDL,
     IMAGE_ASSETS_DDL,
-    BRICKRANKER_ITEMS_DDL,
     MINIFIGURES_DDL,
     SET_MINIFIGURES_DDL,
     MINIFIG_PRICE_HISTORY_DDL,
@@ -554,6 +572,8 @@ ALL_DDL = [
     KEEPA_SNAPSHOTS_DDL,
     GOOGLE_TRENDS_SNAPSHOTS_DDL,
     SCRAPE_TASKS_DDL,
+    ML_FEATURE_STORE_DDL,
+    ML_MODEL_RUNS_DDL,
     INDEXES_DDL,
 ]
 
@@ -618,6 +638,46 @@ def _migrate_lego_items(conn: "DuckDBPyConnection") -> None:
         )
     if "buy_rating" not in existing:
         conn.execute("ALTER TABLE lego_items ADD COLUMN buy_rating INTEGER")
+    if "release_date" not in existing:
+        conn.execute("ALTER TABLE lego_items ADD COLUMN release_date VARCHAR")
+    if "retired_date" not in existing:
+        conn.execute("ALTER TABLE lego_items ADD COLUMN retired_date VARCHAR")
+
+
+def _migrate_brickeconomy_snapshots(conn: "DuckDBPyConnection") -> None:
+    """Add missing columns to brickeconomy_snapshots."""
+    existing = {
+        row[0]
+        for row in conn.execute(
+            "SELECT column_name FROM information_schema.columns "
+            "WHERE table_name = 'brickeconomy_snapshots'"
+        ).fetchall()
+    }
+    _new_columns: list[tuple[str, str]] = [
+        ("year_retired", "INTEGER"),
+        ("retiring_soon", "BOOLEAN"),
+        ("release_date", "VARCHAR"),
+        ("retired_date", "VARCHAR"),
+        ("minifig_value_cents", "INTEGER"),
+        ("exclusive_minifigs", "BOOLEAN"),
+        ("upc", "VARCHAR"),
+        ("ean", "VARCHAR"),
+        ("designer", "VARCHAR"),
+        ("rrp_cad_cents", "INTEGER"),
+        ("rrp_aud_cents", "INTEGER"),
+        ("used_value_low_cents", "INTEGER"),
+        ("used_value_high_cents", "INTEGER"),
+        ("total_growth_pct", "FLOAT"),
+        ("rolling_growth_pct", "FLOAT"),
+        ("growth_90d_pct", "FLOAT"),
+        ("theme_rank", "INTEGER"),
+        ("subtheme_avg_growth_pct", "FLOAT"),
+    ]
+    for col_name, col_type in _new_columns:
+        if col_name not in existing:
+            conn.execute(
+                f"ALTER TABLE brickeconomy_snapshots ADD COLUMN {col_name} {col_type}"
+            )
 
 
 def _migrate_shopee_products(conn: "DuckDBPyConnection") -> None:
@@ -640,7 +700,6 @@ _SEQUENCE_TABLE_MAP = [
     ("bricklink_price_history_id_seq", "bricklink_price_history"),
     ("bricklink_monthly_sales_id_seq", "bricklink_monthly_sales"),
     ("product_analysis_id_seq", "product_analysis"),
-    ("brickranker_items_id_seq", "brickranker_items"),
     ("minifigures_id_seq", "minifigures"),
     ("set_minifigures_id_seq", "set_minifigures"),
     ("minifig_price_history_id_seq", "minifig_price_history"),
@@ -660,6 +719,8 @@ _SEQUENCE_TABLE_MAP = [
     ("keepa_snapshots_id_seq", "keepa_snapshots"),
     ("google_trends_snapshots_id_seq", "google_trends_snapshots"),
     ("scrape_tasks_id_seq", "scrape_tasks"),
+    ("ml_feature_store_id_seq", "ml_feature_store"),
+    ("ml_model_runs_id_seq", "ml_model_runs"),
 ]
 
 
@@ -669,8 +730,8 @@ def _sync_sequences(conn: "DuckDBPyConnection") -> None:
     Prevents primary key collisions when sequences fall behind
     existing data (e.g., after restores or manual inserts).
 
-    Advances sequences by calling nextval rather than DROP+CREATE,
-    which is safe for concurrent connections (nextval is atomic).
+    Uses DROP+CREATE to guarantee the sequence starts at the correct
+    value, regardless of how far behind or ahead it drifted.
     """
     for seq_name, table_name in _SEQUENCE_TABLE_MAP:
         try:
@@ -678,18 +739,15 @@ def _sync_sequences(conn: "DuckDBPyConnection") -> None:
                 f"SELECT COALESCE(MAX(id), 0) FROM {table_name}"  # noqa: S608
             ).fetchone()
             max_id = row[0] if row else 0
-            if max_id <= 0:
-                continue
+            start = max_id + 1 if max_id > 0 else 1
 
-            target = max_id + 1
-            curr = 0
-            while curr < target:
-                curr = conn.execute(
-                    f"SELECT nextval('{seq_name}')"  # noqa: S608
-                ).fetchone()[0]
+            conn.execute(f"DROP SEQUENCE IF EXISTS {seq_name}")  # noqa: S608
+            conn.execute(
+                f"CREATE SEQUENCE {seq_name} START WITH {start}"  # noqa: S608
+            )
         except Exception:  # noqa: BLE001
             # Table or sequence may not exist yet on first init
-            pass
+            logger.debug("Sequence sync skipped for %s: table not ready", seq_name)
 
 
 def _rebuild_all_tables(conn: "DuckDBPyConnection") -> None:
@@ -756,7 +814,6 @@ def _rebuild_table(conn: "DuckDBPyConnection", table_name: str) -> None:
         "bricklink_price_history": BRICKLINK_PRICE_HISTORY_DDL,
         "bricklink_monthly_sales": BRICKLINK_MONTHLY_SALES_DDL,
         "product_analysis": PRODUCT_ANALYSIS_DDL,
-        "brickranker_items": BRICKRANKER_ITEMS_DDL,
         "minifigures": MINIFIGURES_DDL,
         "set_minifigures": SET_MINIFIGURES_DDL,
         "minifig_price_history": MINIFIG_PRICE_HISTORY_DDL,
@@ -776,6 +833,8 @@ def _rebuild_table(conn: "DuckDBPyConnection", table_name: str) -> None:
         "keepa_snapshots": KEEPA_SNAPSHOTS_DDL,
         "google_trends_snapshots": GOOGLE_TRENDS_SNAPSHOTS_DDL,
         "scrape_tasks": SCRAPE_TASKS_DDL,
+        "ml_feature_store": ML_FEATURE_STORE_DDL,
+        "ml_model_runs": ML_MODEL_RUNS_DDL,
     }
 
     ddl = table_ddl_map.get(table_name)
@@ -792,6 +851,8 @@ def _rebuild_table(conn: "DuckDBPyConnection", table_name: str) -> None:
         _migrate_bricklink_items(conn)
     if table_name == "lego_items":
         _migrate_lego_items(conn)
+    if table_name == "brickeconomy_snapshots":
+        _migrate_brickeconomy_snapshots(conn)
     if table_name == "shopee_products":
         _migrate_shopee_products(conn)
 
@@ -833,6 +894,7 @@ def init_schema(conn: "DuckDBPyConnection") -> None:
         conn.execute(ddl)
     _migrate_bricklink_items(conn)
     _migrate_lego_items(conn)
+    _migrate_brickeconomy_snapshots(conn)
     _migrate_shopee_products(conn)
     _sync_sequences(conn)
     # Flush WAL to reduce corruption risk on ungraceful shutdown
@@ -852,7 +914,6 @@ def drop_all_tables(conn: "DuckDBPyConnection") -> None:
     conn.execute("DROP TABLE IF EXISTS bricklink_monthly_sales;")
     conn.execute("DROP TABLE IF EXISTS bricklink_price_history;")
     conn.execute("DROP TABLE IF EXISTS bricklink_items;")
-    conn.execute("DROP TABLE IF EXISTS brickranker_items;")
     conn.execute("DROP TABLE IF EXISTS minifig_price_history;")
     conn.execute("DROP TABLE IF EXISTS set_minifigures;")
     conn.execute("DROP TABLE IF EXISTS minifigures;")
@@ -863,7 +924,6 @@ def drop_all_tables(conn: "DuckDBPyConnection") -> None:
     conn.execute("DROP SEQUENCE IF EXISTS bricklink_price_history_id_seq;")
     conn.execute("DROP SEQUENCE IF EXISTS bricklink_monthly_sales_id_seq;")
     conn.execute("DROP SEQUENCE IF EXISTS product_analysis_id_seq;")
-    conn.execute("DROP SEQUENCE IF EXISTS brickranker_items_id_seq;")
     conn.execute("DROP TABLE IF EXISTS image_assets;")
     conn.execute("DROP SEQUENCE IF EXISTS image_assets_id_seq;")
     conn.execute("DROP TABLE IF EXISTS portfolio_transactions;")
@@ -878,6 +938,10 @@ def drop_all_tables(conn: "DuckDBPyConnection") -> None:
     conn.execute("DROP SEQUENCE IF EXISTS google_trends_snapshots_id_seq;")
     conn.execute("DROP TABLE IF EXISTS scrape_tasks;")
     conn.execute("DROP SEQUENCE IF EXISTS scrape_tasks_id_seq;")
+    conn.execute("DROP TABLE IF EXISTS ml_feature_store;")
+    conn.execute("DROP SEQUENCE IF EXISTS ml_feature_store_id_seq;")
+    conn.execute("DROP TABLE IF EXISTS ml_model_runs;")
+    conn.execute("DROP SEQUENCE IF EXISTS ml_model_runs_id_seq;")
 
 
 def get_table_stats(conn: "DuckDBPyConnection") -> dict[str, int]:
@@ -894,7 +958,6 @@ def get_table_stats(conn: "DuckDBPyConnection") -> dict[str, int]:
         "bricklink_price_history",
         "bricklink_monthly_sales",
         "product_analysis",
-        "brickranker_items",
         "minifigures",
         "set_minifigures",
         "minifig_price_history",

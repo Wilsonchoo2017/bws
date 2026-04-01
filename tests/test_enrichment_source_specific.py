@@ -55,37 +55,6 @@ class TestSourceSpecificEnrichment:
         assert MetadataField.PARTS_COUNT in result_fields
         assert MetadataField.THEME in result_fields
 
-    def test_brickranker_only_calls_brickranker(self, make_item):
-        """Given source=brickranker.
-        When enrichment runs.
-        Then only BrickRanker fetcher called, only theme/retiring_soon attempted."""
-        item = make_item()
-
-        def brickranker_fetcher(sn: str) -> SourceResult:
-            return SourceResult(
-                source=SourceId.BRICKRANKER,
-                success=True,
-                fields={
-                    MetadataField.THEME: "Star Wars",
-                    MetadataField.RETIRING_SOON: True,
-                },
-            )
-
-        fields = tuple(SOURCE_CONFIGS[SourceId.BRICKRANKER].fields_provided)
-
-        result, _ = enrich(
-            "75192",
-            item,
-            {SourceId.BRICKRANKER: brickranker_fetcher},
-            CircuitBreakerState(),
-            fields=fields,
-        )
-
-        assert result.sources_called == (SourceId.BRICKRANKER,)
-        result_fields = {r.field for r in result.field_results}
-        assert result_fields == {MetadataField.THEME, MetadataField.RETIRING_SOON}
-
-
 class TestJobUrlParsing:
     """Tests for parsing job URL format '75192' or '75192:bricklink'."""
 
@@ -108,8 +77,8 @@ class TestJobUrlParsing:
         assert source == "bricklink"
 
     def test_set_number_with_suffix_and_source(self):
-        """Given '75192-1:brickranker'. Then parsed correctly."""
-        job_url = "75192-1:brickranker"
+        """Given '75192-1:brickeconomy'. Then parsed correctly."""
+        job_url = "75192-1:brickeconomy"
         set_number, source = job_url.split(":", 1)
         assert set_number == "75192-1"
-        assert source == "brickranker"
+        assert source == "brickeconomy"

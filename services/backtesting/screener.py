@@ -78,6 +78,9 @@ def _compute_item_signals(
     rrp_cents = _safe_get_int(item_meta, "rrp_cents")
     rrp_currency = _safe_get(item_meta, "rrp_currency")
     retiring_soon = _safe_get_bool(item_meta, "retiring_soon")
+    release_date = _safe_get(item_meta, "release_date")
+    parts_count = _safe_get_int(item_meta, "parts_count")
+    rrp_usd_cents = _safe_get_int(item_meta, "rrp_usd_cents")
 
     signals = {
         "demand_pressure": compute_demand_pressure(
@@ -158,6 +161,10 @@ def _compute_item_signals(
         "eval_year": eval_year,
         "eval_month": eval_month,
         "composite_score": composite,
+        # Cohort bucketing inputs
+        "release_date": release_date,
+        "parts_count": parts_count,
+        "rrp_usd_cents": rrp_usd_cents,
         **signals,
         **modifiers,
     }
@@ -256,6 +263,18 @@ def compute_all_signals(
     )
 
     return results
+
+
+def compute_all_signals_with_cohort(
+    conn: "DuckDBPyConnection",
+    condition: str = "new",
+    signal_weights: dict[str, float] | None = None,
+) -> list[dict]:
+    """Compute signals for all items, enriched with cohort-relative ranks."""
+    from services.backtesting.cohort import enrich_with_cohort_ranks
+
+    items = compute_all_signals(conn, condition, signal_weights)
+    return enrich_with_cohort_ranks(items)
 
 
 def _safe_get(df: pd.DataFrame, col: str) -> str | None:

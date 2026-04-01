@@ -21,15 +21,9 @@ def execute_bricklink_metadata(
     conn: DuckDBPyConnection,
     set_number: str,
 ) -> tuple[bool, str | None]:
-    """Scrape BrickLink catalog page and store enrichment fields.
-
-    Also calls BrickRanker (bulk, cache-first) for retirement data.
-    """
+    """Scrape BrickLink catalog page and store enrichment fields."""
     from services.enrichment.circuit_breaker import CircuitBreakerState
-    from services.enrichment.fetchers import (
-        fetch_from_bricklink,
-        fetch_from_brickranker,
-    )
+    from services.enrichment.fetchers import fetch_from_bricklink
     from services.enrichment.orchestrator import enrich
     from services.enrichment.repository import store_enrichment_result
     from services.enrichment.types import SourceId
@@ -41,7 +35,6 @@ def execute_bricklink_metadata(
 
     fetchers = {
         SourceId.BRICKLINK: lambda sn: fetch_from_bricklink(conn, sn),
-        SourceId.BRICKRANKER: lambda sn: fetch_from_brickranker(conn, sn),
     }
 
     cb_state = CircuitBreakerState()
@@ -116,7 +109,11 @@ def execute_keepa(
         return False, result.error or "Keepa scrape failed"
 
     record_keepa_success(set_number)
-    save_keepa_snapshot(conn, result.product_data)
+    try:
+        save_keepa_snapshot(conn, result.product_data)
+    except Exception:
+        logger.error("Keepa snapshot insert failed for %s", set_number, exc_info=True)
+        return False, "Failed to save Keepa snapshot"
     record_keepa_prices(conn, result.product_data)
 
     logger.info("Keepa for %s: OK", set_number)

@@ -68,4 +68,10 @@ def validate_field(
             return normalize_string(value)
         return None
 
+    if field in (MetadataField.RELEASE_DATE, MetadataField.RETIRED_DATE):
+        # ISO month format "YYYY-MM"
+        if isinstance(value, str) and len(value) == 7 and value[4] == "-":
+            return value
+        return None
+
     return value

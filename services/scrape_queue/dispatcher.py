@@ -23,6 +23,7 @@ from services.scrape_queue.repository import (
     claim_next,
     complete_task,
     fail_task,
+    force_fail_task,
     re_evaluate_blocked,
     reclaim_stale,
 )
@@ -32,6 +33,9 @@ if TYPE_CHECKING:
     from duckdb import DuckDBPyConnection
 
 logger = logging.getLogger("bws.scrape_queue.dispatcher")
+
+# Shutdown flag -- set by the lifespan handler to signal workers to stop
+_shutting_down = False
 
 _EXECUTOR_MAP: dict[TaskType, Callable] = {
     TaskType.BRICKLINK_METADATA: execute_bricklink_metadata,
@@ -56,6 +60,13 @@ _POLL_INTERVAL = 3
 
 # Schema initialization flag (set once, read by all workers).
 _schema_initialized = False
+
+
+def shutdown_scrape_dispatcher() -> None:
+    """Signal all dispatcher workers to stop after their current task."""
+    global _shutting_down  # noqa: PLW0603
+    _shutting_down = True
+    logger.info("Scrape dispatcher shutdown requested")
 
 
 async def recover_scrape_queue() -> None:
@@ -110,12 +121,20 @@ async def run_scrape_dispatcher(**_kwargs: object) -> None:
 
 async def _worker_loop(worker_id: str, task_type: TaskType) -> None:
     """Single worker: claim a task of the given type, execute it, repeat."""
-    while True:
-        claimed = await asyncio.to_thread(
-            _claim_and_execute, worker_id, task_type
-        )
+    while not _shutting_down:
+        try:
+            claimed = await asyncio.to_thread(
+                _claim_and_execute, worker_id, task_type
+            )
+        except asyncio.CancelledError:
+            logger.info("[%s] Worker cancelled, shutting down", worker_id)
+            return
         if not claimed:
-            await asyncio.sleep(_POLL_INTERVAL)
+            try:
+                await asyncio.sleep(_POLL_INTERVAL)
+            except asyncio.CancelledError:
+                logger.info("[%s] Worker cancelled during sleep, shutting down", worker_id)
+                return
 
 
 def _claim_and_execute(worker_id: str, task_type: TaskType) -> bool:
@@ -134,7 +153,13 @@ def _claim_and_execute(worker_id: str, task_type: TaskType) -> bool:
         _schema_initialized = True
 
     try:
-        task = claim_next(conn, worker_id, task_type)
+        try:
+            task = claim_next(conn, worker_id, task_type)
+        except Exception as exc:
+            if "Conflict" in str(exc):
+                logger.debug("[%s] Transaction conflict on claim, will retry", worker_id)
+                return False
+            raise
         if task is None:
             return False
 
@@ -163,6 +188,13 @@ def _claim_and_execute(worker_id: str, task_type: TaskType) -> bool:
         if success:
             complete_task(conn, task.task_id)
             logger.info("[%s] %s completed", worker_id, task.set_number)
+        elif error and "cooldown" in error.lower():
+            # Cooldown errors are non-retriable — mark as final failure immediately
+            # to avoid burning through all retry attempts pointlessly.
+            force_fail_task(conn, task.task_id, error)
+            logger.warning(
+                "[%s] %s failed (non-retriable): %s", worker_id, task.set_number, error,
+            )
         else:
             fail_task(conn, task.task_id, error or "Unknown error")
             logger.warning(

@@ -20,6 +20,7 @@ from services.backtesting.kelly import (
 )
 from services.backtesting.screener import (
     compute_all_signals,
+    compute_all_signals_with_cohort,
     compute_item_signals,
 )
 from services.items.repository import get_all_items, get_all_items_lite, get_item_detail, get_or_create_item, item_exists, toggle_watchlist, update_buy_rating
@@ -143,11 +144,11 @@ async def list_items():
 
 @router.get("/signals")
 async def list_signals(condition: str = "new"):
-    """Compute current trading signals for all items."""
+    """Compute current trading signals for all items with cohort rankings."""
     try:
         conn = get_connection()
         init_schema(conn)
-        signals = compute_all_signals(conn, condition=condition)
+        signals = compute_all_signals_with_cohort(conn, condition=condition)
         conn.close()
         return {"success": True, "data": _sanitize_nan(signals), "count": len(signals)}
     except Exception as e:
@@ -219,15 +220,20 @@ async def get_item_kelly(
 
 @router.get("/{set_number}/signals")
 async def get_item_signals(set_number: str, condition: str = "new"):
-    """Compute current trading signals for a single item."""
+    """Compute current trading signals for a single item with cohort context."""
     try:
         conn = get_connection()
         init_schema(conn)
-        signals = compute_item_signals(conn, set_number, condition=condition)
+        # Compute all signals to get cohort context, then filter
+        all_signals = compute_all_signals_with_cohort(conn, condition=condition)
         conn.close()
-        if not signals:
+        match = next(
+            (s for s in all_signals if s["set_number"] == set_number),
+            None,
+        )
+        if not match:
             return {"success": True, "data": None}
-        return {"success": True, "data": _sanitize_nan([signals])[0]}
+        return {"success": True, "data": _sanitize_nan([match])[0]}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

@@ -43,7 +43,6 @@ function getBuyRatingOption(rating: BuyRating) {
 const ENRICH_SOURCES = [
   { id: null, label: 'All Sources' },
   { id: 'bricklink', label: 'Bricklink' },
-  { id: 'brickranker', label: 'BrickRanker' },
 ] as const;
 
 const SOURCE_LABELS: Record<string, string> = {

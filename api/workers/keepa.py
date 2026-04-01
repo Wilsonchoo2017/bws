@@ -42,9 +42,12 @@ class KeepaWorker:
         record_keepa_success(set_number)
 
         conn = get_connection()
-        init_schema(conn)
-        save_keepa_snapshot(conn, result.product_data)
-        record_keepa_prices(conn, result.product_data)
+        try:
+            init_schema(conn)
+            save_keepa_snapshot(conn, result.product_data)
+            record_keepa_prices(conn, result.product_data)
+        finally:
+            conn.close()
 
         item = keepa_product_to_dict(result.product_data)
 

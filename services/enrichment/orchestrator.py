@@ -49,18 +49,13 @@ _FIELD_TO_COLUMN: dict[MetadataField, str] = {
     MetadataField.RETIRING_SOON: "retiring_soon",
     MetadataField.MINIFIG_COUNT: "minifig_count",
     MetadataField.DIMENSIONS: "dimensions",
+    MetadataField.RELEASE_DATE: "release_date",
+    MetadataField.RETIRED_DATE: "retired_date",
 }
 
 
-# Fields excluded from automatic missing-data detection.
-# Retirement status is not actively sought -- it is only stored when a
-# source happens to return it (e.g. BrickRanker scraped for THEME).
-_PASSIVE_FIELDS: frozenset[MetadataField] = frozenset({MetadataField.RETIRING_SOON})
-
 # Default fields to check when detecting missing metadata.
-_DEFAULT_ENRICHMENT_FIELDS: tuple[MetadataField, ...] = tuple(
-    f for f in MetadataField if f not in _PASSIVE_FIELDS
-)
+_DEFAULT_ENRICHMENT_FIELDS: tuple[MetadataField, ...] = tuple(MetadataField)
 
 
 def detect_missing_fields(
@@ -69,12 +64,9 @@ def detect_missing_fields(
 ) -> tuple[MetadataField, ...]:
     """Detect which metadata fields are missing (NULL) for an item.
 
-    By default, excludes passive fields like RETIRING_SOON -- those are
-    only stored opportunistically when a source returns them.
-
     Args:
         item: Dict from lego_items table (keys match column names)
-        fields: Optional subset of fields to check (default: all non-passive)
+        fields: Optional subset of fields to check (default: all fields)
 
     Returns:
         Tuple of missing MetadataField values
@@ -105,7 +97,7 @@ def determine_sources_needed(
     and filters out circuit-broken sources.  Mandatory sources (e.g.
     BrickEconomy) are always included when their circuit breaker allows.
 
-    Returns sources in a stable order: BRICKLINK, BRICKRANKER, BRICKECONOMY.
+    Returns sources in a stable order: BRICKLINK, BRICKECONOMY.
     """
     needed: set[SourceId] = set()
 
@@ -123,7 +115,7 @@ def determine_sources_needed(
             needed.add(source_id)
 
     # Stable ordering
-    order = (SourceId.BRICKLINK, SourceId.BRICKRANKER, SourceId.BRICKECONOMY)
+    order = (SourceId.BRICKLINK, SourceId.BRICKECONOMY)
     return tuple(s for s in order if s in needed)
 
 

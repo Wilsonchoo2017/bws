@@ -143,6 +143,15 @@ export interface BricklinkPriceData {
   monthly_sales: MonthlySaleRecord[];
 }
 
+export interface CohortRank {
+  key: string;
+  size: number;
+  composite_pct: number | null;
+  demand_pct: number | null;
+  price_perf_pct: number | null;
+  rank: number | null;
+}
+
 export interface ItemSignals {
   item_id: string;
   set_number: string;
@@ -171,6 +180,10 @@ export interface ItemSignals {
   mod_shelf_life: number;
   mod_subtheme: number;
   mod_niche: number;
+  release_date: string | null;
+  parts_count: number | null;
+  rrp_usd_cents: number | null;
+  cohorts: Record<string, CohortRank> | null;
 }
 
 export interface KellyHorizon {

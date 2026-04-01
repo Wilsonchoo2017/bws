@@ -3,10 +3,8 @@
 import pytest
 
 from bws_types.models import BricklinkData
-from services.brickranker.parser import RetirementItem
 from services.enrichment.source_adapter import (
     adapt_bricklink,
-    adapt_brickranker,
     make_failed_result,
 )
 from services.enrichment.types import MetadataField, SourceId
@@ -36,30 +34,6 @@ class TestAdaptBricklink:
         assert result.success
         assert result.fields[MetadataField.TITLE] is None
         assert result.fields[MetadataField.YEAR_RELEASED] is None
-
-
-class TestAdaptBrickRanker:
-    def test_extracts_all_fields(self):
-        item = RetirementItem(
-            set_number="75375",
-            set_name="Millennium Falcon",
-            year_released=2024,
-            retiring_soon=True,
-            expected_retirement_date="2025-12-31",
-            theme="Star Wars",
-            image_url="https://brickranker.com/75375.jpg",
-        )
-        result = adapt_brickranker(item)
-        assert result.success
-        assert result.source == SourceId.BRICKRANKER
-        assert result.fields[MetadataField.THEME] == "Star Wars"
-        assert result.fields[MetadataField.RETIRING_SOON] is True
-
-    def test_none_theme(self):
-        item = RetirementItem(set_number="99999", set_name="Unknown")
-        result = adapt_brickranker(item)
-        assert result.fields[MetadataField.THEME] is None
-        assert result.fields[MetadataField.RETIRING_SOON] is False
 
 
 class TestMakeFailedResult:

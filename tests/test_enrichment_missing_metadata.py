@@ -28,10 +28,10 @@ from services.enrichment.types import (
 class TestYearRetiredNoSources:
     """year_retired has no configured sources -- always SKIPPED."""
 
-    def test_given_year_retired_missing_when_enriched_then_skipped(self, make_item):
+    def test_given_year_retired_missing_when_enriched_then_failed(self, make_item):
         """Given a set with year_retired=NULL,
         When enrichment runs,
-        Then year_retired is SKIPPED because no sources provide it.
+        Then year_retired is FAILED because no sources provide it.
         """
         item = make_item(
             title="Elsa's Ice Palace",
@@ -63,16 +63,20 @@ class TestYearRetiredNoSources:
         retired_r = next(
             r for r in result.field_results if r.field == MetadataField.YEAR_RETIRED
         )
-        assert retired_r.status == FieldStatus.SKIPPED
+        # No sources provide YEAR_RETIRED, but mandatory sources (BrickEconomy)
+        # still get called. With no fetcher registered for BrickEconomy, the field
+        # resolves as FAILED (empty sources tuple).
+        assert retired_r.status == FieldStatus.FAILED
 
-    def test_given_year_retired_when_determine_sources_then_none_needed(self):
+    def test_given_year_retired_when_determine_sources_then_mandatory_only(self):
         """Given year_retired is the only missing field,
         When determining sources needed,
-        Then no sources are returned (empty tuple).
+        Then only mandatory sources (BrickEconomy) are returned.
         """
         cb = CircuitBreakerState()
         sources = determine_sources_needed((MetadataField.YEAR_RETIRED,), cb)
-        assert sources == ()
+        # BrickEconomy is mandatory even though it doesn't provide YEAR_RETIRED
+        assert sources == (SourceId.BRICKECONOMY,)
 
     def test_given_year_retired_when_resolve_then_not_found(self):
         """Given year_retired has no sources in priority config,
@@ -190,16 +194,7 @@ class TestPartialEnrichmentScenario:
                     MetadataField.WEIGHT: "0.3 kg",
                     MetadataField.MINIFIG_COUNT: 1,
                     MetadataField.DIMENSIONS: None,  # Not on BrickLink for this set
-                },
-            )
-
-        def brickranker_fetcher(set_number: str) -> SourceResult:
-            return SourceResult(
-                source=SourceId.BRICKRANKER,
-                success=True,
-                fields={
                     MetadataField.THEME: "Disney Princess",
-                    MetadataField.RETIRING_SOON: False,
                 },
             )
 
@@ -208,7 +203,6 @@ class TestPartialEnrichmentScenario:
             item,
             {
                 SourceId.BRICKLINK: bricklink_fetcher,
-                SourceId.BRICKRANKER: brickranker_fetcher,
             },
             CircuitBreakerState(),
         )
@@ -218,11 +212,10 @@ class TestPartialEnrichmentScenario:
         assert MetadataField.PARTS_COUNT in found
         assert MetadataField.WEIGHT in found
         assert MetadataField.MINIFIG_COUNT in found
-        # Theme comes from BrickRanker (higher priority) or BrickLink
         assert MetadataField.THEME in found
 
         # year_retired: FAILED (no sources configured, but resolve_fields still runs
-        # because other fields triggered source calls; empty sources → all() True → FAILED)
+        # because other fields triggered source calls; empty sources -> all() True -> FAILED)
         retired_r = next(
             r for r in result.field_results if r.field == MetadataField.YEAR_RETIRED
         )
@@ -253,16 +246,7 @@ class TestPartialEnrichmentScenario:
                     MetadataField.WEIGHT: "0.3 kg",
                     MetadataField.MINIFIG_COUNT: 1,
                     MetadataField.DIMENSIONS: None,
-                },
-            )
-
-        def brickranker_fetcher(set_number: str) -> SourceResult:
-            return SourceResult(
-                source=SourceId.BRICKRANKER,
-                success=True,
-                fields={
                     MetadataField.THEME: "Disney Princess",
-                    MetadataField.RETIRING_SOON: False,
                 },
             )
 
@@ -271,7 +255,6 @@ class TestPartialEnrichmentScenario:
             item,
             {
                 SourceId.BRICKLINK: bricklink_fetcher,
-                SourceId.BRICKRANKER: brickranker_fetcher,
             },
             CircuitBreakerState(),
         )
@@ -376,6 +359,8 @@ class TestDetectMissingIncludesNewFields:
             retiring_soon=False,
             minifig_count=7,
             dimensions="58.2 x 49.0 x 21.0 cm",
+            release_date="2017-09",
+            retired_date="2023-12",
         )
         missing = detect_missing_fields(item)
         assert len(missing) == 0

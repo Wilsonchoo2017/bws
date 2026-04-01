@@ -25,57 +25,66 @@ def save_keepa_snapshot(
         "SELECT nextval('keepa_snapshots_id_seq')"
     ).fetchone()[0]
 
-    conn.execute(
-        """
-        INSERT INTO keepa_snapshots (
-            id, set_number, asin, title, keepa_url, scraped_at,
-            current_buy_box_cents, current_amazon_cents, current_new_cents,
-            lowest_ever_cents, highest_ever_cents,
-            amazon_price_json, new_price_json, new_3p_fba_json,
-            new_3p_fbm_json, used_price_json, used_like_new_json,
-            buy_box_json, list_price_json, warehouse_deals_json,
-            collectible_json, sales_rank_json,
-            rating, review_count, tracking_users, chart_screenshot_path
-        ) VALUES (
-            ?, ?, ?, ?, ?, ?,
-            ?, ?, ?,
-            ?, ?,
-            ?, ?, ?,
-            ?, ?, ?,
-            ?, ?, ?,
-            ?, ?,
-            ?, ?, ?, ?
+    try:
+        conn.execute(
+            """
+            INSERT INTO keepa_snapshots (
+                id, set_number, asin, title, keepa_url, scraped_at,
+                current_buy_box_cents, current_amazon_cents, current_new_cents,
+                lowest_ever_cents, highest_ever_cents,
+                amazon_price_json, new_price_json, new_3p_fba_json,
+                new_3p_fbm_json, used_price_json, used_like_new_json,
+                buy_box_json, list_price_json, warehouse_deals_json,
+                collectible_json, sales_rank_json,
+                rating, review_count, tracking_users, chart_screenshot_path
+            ) VALUES (
+                ?, ?, ?, ?, ?, ?,
+                ?, ?, ?,
+                ?, ?,
+                ?, ?, ?,
+                ?, ?, ?,
+                ?, ?, ?,
+                ?, ?,
+                ?, ?, ?, ?
+            )
+            """,
+            [
+                row_id,
+                data.set_number,
+                data.asin,
+                data.title,
+                data.keepa_url,
+                data.scraped_at,
+                data.current_buy_box_cents,
+                data.current_amazon_cents,
+                data.current_new_cents,
+                data.lowest_ever_cents,
+                data.highest_ever_cents,
+                _series_to_json(data.amazon_price),
+                _series_to_json(data.new_price),
+                _series_to_json(data.new_3p_fba),
+                _series_to_json(data.new_3p_fbm),
+                _series_to_json(data.used_price),
+                _series_to_json(data.used_like_new),
+                _series_to_json(data.buy_box),
+                _series_to_json(data.list_price),
+                _series_to_json(data.warehouse_deals),
+                _series_to_json(data.collectible),
+                _series_to_json(data.sales_rank),
+                data.rating,
+                data.review_count,
+                data.tracking_users,
+                data.chart_screenshot_path,
+            ],
         )
-        """,
-        [
-            row_id,
+    except Exception:
+        logger.error(
+            "Failed to insert keepa_snapshot for %s (id=%d)",
             data.set_number,
-            data.asin,
-            data.title,
-            data.keepa_url,
-            data.scraped_at,
-            data.current_buy_box_cents,
-            data.current_amazon_cents,
-            data.current_new_cents,
-            data.lowest_ever_cents,
-            data.highest_ever_cents,
-            _series_to_json(data.amazon_price),
-            _series_to_json(data.new_price),
-            _series_to_json(data.new_3p_fba),
-            _series_to_json(data.new_3p_fbm),
-            _series_to_json(data.used_price),
-            _series_to_json(data.used_like_new),
-            _series_to_json(data.buy_box),
-            _series_to_json(data.list_price),
-            _series_to_json(data.warehouse_deals),
-            _series_to_json(data.collectible),
-            _series_to_json(data.sales_rank),
-            data.rating,
-            data.review_count,
-            data.tracking_users,
-            data.chart_screenshot_path,
-        ],
-    )
+            row_id,
+            exc_info=True,
+        )
+        raise
 
     logger.info("Saved Keepa snapshot id=%d for %s", row_id, data.set_number)
     return row_id

@@ -54,7 +54,7 @@ def load_item_metadata(conn: "DuckDBPyConnection") -> pd.DataFrame:
 
     Returns DataFrame with columns:
         item_id, set_number, title, theme, year_released, year_retired,
-        parts_count, rrp_cents, rrp_currency
+        parts_count, rrp_cents, rrp_currency, release_date, rrp_usd_cents
     """
     query = """
         SELECT
@@ -67,11 +67,19 @@ def load_item_metadata(conn: "DuckDBPyConnection") -> pd.DataFrame:
             COALESCE(li.retiring_soon, FALSE) AS retiring_soon,
             li.parts_count,
             li.rrp_cents,
-            li.rrp_currency
+            li.rrp_currency,
+            li.release_date,
+            be.rrp_usd_cents
         FROM bricklink_items bi
         LEFT JOIN lego_items li
             ON REPLACE(bi.item_id, '-1', '') = li.set_number
             OR bi.item_id = li.set_number || '-1'
+        LEFT JOIN (
+            SELECT set_number, rrp_usd_cents,
+                   ROW_NUMBER() OVER (PARTITION BY set_number ORDER BY scraped_at DESC) AS rn
+            FROM brickeconomy_snapshots
+            WHERE rrp_usd_cents IS NOT NULL
+        ) be ON be.set_number = li.set_number AND be.rn = 1
         ORDER BY bi.item_id
     """
     return conn.execute(query).df()

@@ -70,15 +70,15 @@ class TestConfigPriority:
     """FIELD_SOURCE_PRIORITY and SOURCE_CONFIGS updated for new fields."""
 
     def test_parts_count_priority_order(self):
-        """#20: PARTS_COUNT: BrickLink only."""
+        """#20: PARTS_COUNT: BrickLink first, BrickEconomy second."""
         sources = FIELD_SOURCE_PRIORITY[MetadataField.PARTS_COUNT]
-        assert sources == (SourceId.BRICKLINK,)
+        assert sources[0] == SourceId.BRICKLINK
 
     def test_theme_priority_order(self):
-        """#21: THEME: BrickRanker first, BrickLink second."""
+        """#21: THEME: BrickLink first, BrickEconomy second."""
         sources = FIELD_SOURCE_PRIORITY[MetadataField.THEME]
-        assert sources[0] == SourceId.BRICKRANKER
-        assert sources[1] == SourceId.BRICKLINK
+        assert sources[0] == SourceId.BRICKLINK
+        assert sources[1] == SourceId.BRICKECONOMY
 
     def test_bricklink_fields_provided(self):
         """#22: BrickLink SOURCE_CONFIG includes PARTS_COUNT and THEME."""
@@ -102,14 +102,14 @@ class TestDetermineSourcesWithFallback:
         sources = determine_sources_needed((MetadataField.PARTS_COUNT,), cb)
         assert SourceId.BRICKLINK in sources
 
-    def test_theme_missing_brickranker_broken(self):
-        """#24: Given THEME missing, BrickRanker circuit-broken.
-        Then BrickLink returned as fallback."""
+    def test_theme_missing_bricklink_broken(self):
+        """#24: Given THEME missing, BrickLink circuit-broken.
+        Then BrickEconomy returned as fallback."""
         from datetime import datetime, timezone
 
         cb = CircuitBreakerState(
             states={
-                SourceId.BRICKRANKER: SourceState(
+                SourceId.BRICKLINK: SourceState(
                     consecutive_failures=10,
                     last_failure_at=datetime.now(tz=timezone.utc),
                     is_open=True,
@@ -117,8 +117,8 @@ class TestDetermineSourcesWithFallback:
             },
         )
         sources = determine_sources_needed((MetadataField.THEME,), cb)
-        assert SourceId.BRICKRANKER not in sources
-        assert SourceId.BRICKLINK in sources
+        assert SourceId.BRICKLINK not in sources
+        assert SourceId.BRICKECONOMY in sources
 
 
 
@@ -145,45 +145,45 @@ class TestResolveFieldsFallback:
         assert field_results[0].value == 305
         assert field_results[0].source == SourceId.BRICKLINK
 
-    def test_brickranker_wins_for_theme(self):
-        """#28: Given BrickRanker returns 'Star Wars', BrickLink returns 'Star Wars'.
-        Then BrickRanker value used (higher priority)."""
-        br_result = SourceResult(
-            source=SourceId.BRICKRANKER,
+    def test_bricklink_wins_for_theme(self):
+        """#28: Given BrickLink returns 'Star Wars', BrickEconomy returns 'Star Wars'.
+        Then BrickLink value used (higher priority)."""
+        bl_result = SourceResult(
+            source=SourceId.BRICKLINK,
             success=True,
             fields={MetadataField.THEME: "Star Wars"},
         )
-        bl_result = SourceResult(
-            source=SourceId.BRICKLINK,
+        be_result = SourceResult(
+            source=SourceId.BRICKECONOMY,
             success=True,
             fields={MetadataField.THEME: "Star Wars"},
         )
         field_results = resolve_fields(
             (MetadataField.THEME,),
-            {SourceId.BRICKRANKER: br_result, SourceId.BRICKLINK: bl_result},
+            {SourceId.BRICKLINK: bl_result, SourceId.BRICKECONOMY: be_result},
         )
         assert field_results[0].value == "Star Wars"
-        assert field_results[0].source == SourceId.BRICKRANKER
+        assert field_results[0].source == SourceId.BRICKLINK
 
-    def test_bricklink_fallback_for_theme(self):
-        """#29: Given BrickRanker returns None, BrickLink returns 'Disney'.
-        Then BrickLink value used (fallback)."""
-        br_result = SourceResult(
-            source=SourceId.BRICKRANKER,
+    def test_brickeconomy_fallback_for_theme(self):
+        """#29: Given BrickLink returns None, BrickEconomy returns 'Disney'.
+        Then BrickEconomy value used (fallback)."""
+        bl_result = SourceResult(
+            source=SourceId.BRICKLINK,
             success=True,
             fields={MetadataField.THEME: None},
         )
-        bl_result = SourceResult(
-            source=SourceId.BRICKLINK,
+        be_result = SourceResult(
+            source=SourceId.BRICKECONOMY,
             success=True,
             fields={MetadataField.THEME: "Disney"},
         )
         field_results = resolve_fields(
             (MetadataField.THEME,),
-            {SourceId.BRICKRANKER: br_result, SourceId.BRICKLINK: bl_result},
+            {SourceId.BRICKLINK: bl_result, SourceId.BRICKECONOMY: be_result},
         )
         assert field_results[0].value == "Disney"
-        assert field_results[0].source == SourceId.BRICKLINK
+        assert field_results[0].source == SourceId.BRICKECONOMY
 
     def test_bricklink_none_parts_count(self):
         """#30: Given BrickLink returns None for PARTS_COUNT.
@@ -461,11 +461,10 @@ class TestSchemaMigration:
 class TestEndToEndFallback:
     """Full enrichment flow with BrickLink as fallback source."""
 
-    def test_bricklink_fallback_when_primary_sources_empty(self, make_item):
-        """#40: Given BrickRanker has no theme, but BrickLink has both
-        parts_count and theme.
+    def test_bricklink_provides_parts_count_and_theme(self, make_item):
+        """#40: Given BrickLink has both parts_count and theme.
         When enrichment runs.
-        Then parts_count and theme found via BrickLink fallback."""
+        Then parts_count and theme found via BrickLink."""
         item = make_item()
 
         def bricklink_fetcher(sn: str) -> SourceResult:
@@ -482,22 +481,11 @@ class TestEndToEndFallback:
                 },
             )
 
-        def brickranker_fetcher(sn: str) -> SourceResult:
-            return SourceResult(
-                source=SourceId.BRICKRANKER,
-                success=True,
-                fields={
-                    MetadataField.THEME: None,  # Disney sets not tracked
-                    MetadataField.RETIRING_SOON: False,
-                },
-            )
-
         result, _ = enrich(
             "43216",
             item,
             {
                 SourceId.BRICKLINK: bricklink_fetcher,
-                SourceId.BRICKRANKER: brickranker_fetcher,
             },
             CircuitBreakerState(),
         )
@@ -536,22 +524,11 @@ class TestEndToEndFallback:
                 },
             )
 
-        def brickranker_fetcher(sn: str) -> SourceResult:
-            return SourceResult(
-                source=SourceId.BRICKRANKER,
-                success=True,
-                fields={
-                    MetadataField.THEME: "Technic",
-                    MetadataField.RETIRING_SOON: True,
-                },
-            )
-
         result, _ = enrich(
             "42151",
             item,
             {
                 SourceId.BRICKLINK: bricklink_fetcher,
-                SourceId.BRICKRANKER: brickranker_fetcher,
             },
             CircuitBreakerState(),
         )
@@ -562,10 +539,10 @@ class TestEndToEndFallback:
         assert parts_r.value == 305
         assert parts_r.source == SourceId.BRICKLINK
 
-    def test_brickranker_wins_for_theme_when_available(self, make_item):
-        """#42: Given BrickRanker has theme='Star Wars', BrickLink also has it.
+    def test_bricklink_wins_for_theme_when_available(self, make_item):
+        """#42: Given BrickLink has theme='Star Wars'.
         When enrichment runs.
-        Then BrickRanker value used (priority)."""
+        Then BrickLink value used (highest priority)."""
         item = make_item()
 
         def bricklink_fetcher(sn: str) -> SourceResult:
@@ -582,22 +559,11 @@ class TestEndToEndFallback:
                 },
             )
 
-        def brickranker_fetcher(sn: str) -> SourceResult:
-            return SourceResult(
-                source=SourceId.BRICKRANKER,
-                success=True,
-                fields={
-                    MetadataField.THEME: "Star Wars",
-                    MetadataField.RETIRING_SOON: False,
-                },
-            )
-
         result, _ = enrich(
             "75192",
             item,
             {
                 SourceId.BRICKLINK: bricklink_fetcher,
-                SourceId.BRICKRANKER: brickranker_fetcher,
             },
             CircuitBreakerState(),
             fields=(MetadataField.THEME,),
@@ -607,4 +573,4 @@ class TestEndToEndFallback:
             r for r in result.field_results if r.field == MetadataField.THEME
         )
         assert theme_r.value == "Star Wars"
-        assert theme_r.source == SourceId.BRICKRANKER
+        assert theme_r.source == SourceId.BRICKLINK

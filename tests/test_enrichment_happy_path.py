@@ -63,10 +63,9 @@ class TestDetermineSourcesNeeded:
     """Tests for determine_sources_needed."""
 
     def test_single_field_single_source(self):
-        """Given theme is missing, BrickRanker and BrickLink are needed."""
+        """Given theme is missing, BrickLink is needed."""
         cb = CircuitBreakerState()
         sources = determine_sources_needed((MetadataField.THEME,), cb)
-        assert SourceId.BRICKRANKER in sources
         assert SourceId.BRICKLINK in sources
 
     def test_deduplication(self):
@@ -79,7 +78,7 @@ class TestDetermineSourcesNeeded:
         assert sources.count(SourceId.BRICKLINK) == 1
 
     def test_stable_ordering(self):
-        """Sources are always returned in BRICKLINK, BRICKRANKER order."""
+        """Sources are always returned in BRICKLINK, BRICKECONOMY order."""
         cb = CircuitBreakerState()
         sources = determine_sources_needed(
             (MetadataField.THEME, MetadataField.YEAR_RELEASED), cb
@@ -87,12 +86,12 @@ class TestDetermineSourcesNeeded:
         bricklink_idx = (
             sources.index(SourceId.BRICKLINK) if SourceId.BRICKLINK in sources else -1
         )
-        brickranker_idx = (
-            sources.index(SourceId.BRICKRANKER)
-            if SourceId.BRICKRANKER in sources
+        brickeconomy_idx = (
+            sources.index(SourceId.BRICKECONOMY)
+            if SourceId.BRICKECONOMY in sources
             else 99
         )
-        assert bricklink_idx < brickranker_idx
+        assert bricklink_idx < brickeconomy_idx
 
 
 class TestHappyPath:
@@ -172,7 +171,7 @@ class TestHappyPath:
         assert parts_r.value == 1254
 
     def test_1_3_multiple_fields_multiple_sources(self, make_item):
-        """Given set needs theme (BrickRanker), year_released (Bricklink), weight (Bricklink).
+        """Given set needs theme, year_released (Bricklink), weight (Bricklink).
         Then all three stored from correct sources."""
         item = make_item()
 
@@ -183,20 +182,14 @@ class TestHappyPath:
                 fields={
                     MetadataField.YEAR_RELEASED: 2023,
                     MetadataField.WEIGHT: "0.87 kg",
+                    MetadataField.THEME: "Technic",
                 },
-            )
-
-        def brickranker_fetcher(set_number: str) -> SourceResult:
-            return SourceResult(
-                source=SourceId.BRICKRANKER,
-                success=True,
-                fields={MetadataField.THEME: "Technic"},
             )
 
         result, _ = enrich(
             "42151",
             item,
-            {SourceId.BRICKLINK: bricklink_fetcher, SourceId.BRICKRANKER: brickranker_fetcher},
+            {SourceId.BRICKLINK: bricklink_fetcher},
             CircuitBreakerState(),
             fields=(MetadataField.THEME, MetadataField.YEAR_RELEASED, MetadataField.WEIGHT),
         )
@@ -205,7 +198,7 @@ class TestHappyPath:
         assert result.is_complete
 
         theme_r = next(r for r in result.field_results if r.field == MetadataField.THEME)
-        assert theme_r.source == SourceId.BRICKRANKER
+        assert theme_r.source == SourceId.BRICKLINK
         assert theme_r.value == "Technic"
 
     def test_1_4_stop_on_first_success(self, make_item):
@@ -243,16 +236,7 @@ class TestHappyPath:
                     MetadataField.IMAGE_URL: "https://img.bricklink.com/31009.png",
                     MetadataField.WEIGHT: "0.5 kg",
                     MetadataField.PARTS_COUNT: 271,
-                },
-            )
-
-        def brickranker_fetcher(set_number: str) -> SourceResult:
-            return SourceResult(
-                source=SourceId.BRICKRANKER,
-                success=True,
-                fields={
                     MetadataField.THEME: "Creator",
-                    MetadataField.RETIRING_SOON: False,
                 },
             )
 
@@ -261,12 +245,10 @@ class TestHappyPath:
             item,
             {
                 SourceId.BRICKLINK: bricklink_fetcher,
-                SourceId.BRICKRANKER: brickranker_fetcher,
             },
             CircuitBreakerState(),
         )
 
-        assert len(result.sources_called) == 2
         found_fields = {r.field for r in result.field_results if r.status == FieldStatus.FOUND}
         assert MetadataField.TITLE in found_fields
         assert MetadataField.YEAR_RELEASED in found_fields

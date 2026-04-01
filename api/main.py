@@ -10,12 +10,12 @@ from pathlib import Path
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from api.routes import enrichment, images, items, portfolio, scrape
+from api.routes import enrichment, images, items, ml, portfolio, scrape
 from api.worker import run_worker
 from services.enrichment.scheduler import run_enrichment_sweep
 from services.images.sweep import run_image_download_sweep
 from services.keepa.scheduler import run_keepa_sweep
-from services.scrape_queue.dispatcher import recover_scrape_queue, run_scrape_dispatcher
+from services.scrape_queue.dispatcher import recover_scrape_queue, run_scrape_dispatcher, shutdown_scrape_dispatcher
 from services.shopee.saturation_scheduler import run_saturation_sweep
 
 _LOG_DIR = Path(__file__).resolve().parent.parent / "logs"
@@ -60,17 +60,18 @@ async def lifespan(app: FastAPI):
     scrape_dispatcher_task = asyncio.create_task(run_scrape_dispatcher())
     logger.info("Background worker, enrichment/saturation/image/keepa sweeps + scrape dispatcher started")
     yield
-    scrape_dispatcher_task.cancel()
-    keepa_task.cancel()
-    image_task.cancel()
-    saturation_task.cancel()
-    sweep_task.cancel()
-    worker_task.cancel()
-    for task in (worker_task, sweep_task, saturation_task, image_task, keepa_task, scrape_dispatcher_task):
-        try:
-            await task
-        except asyncio.CancelledError:
-            pass
+    logger.info("BWS API shutting down...")
+    # Signal dispatcher workers to finish current task and stop
+    shutdown_scrape_dispatcher()
+    # Cancel all background tasks
+    tasks = [worker_task, sweep_task, saturation_task, image_task, keepa_task, scrape_dispatcher_task]
+    for task in tasks:
+        task.cancel()
+    # Wait for all tasks to finish with a timeout
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+    for task, result in zip(tasks, results):
+        if isinstance(result, Exception) and not isinstance(result, asyncio.CancelledError):
+            logger.warning("Task %s raised during shutdown: %s", task.get_name(), result)
     logger.info("BWS API shut down")
 
 
@@ -94,6 +95,7 @@ app.include_router(items.router, prefix="/api")
 app.include_router(enrichment.router, prefix="/api")
 app.include_router(portfolio.router, prefix="/api")
 app.include_router(images.router, prefix="/api")
+app.include_router(ml.router, prefix="/api")
 
 
 @app.get("/api/health")

@@ -36,6 +36,22 @@ class TestGetItemsNeedingEnrichment:
             [set_number],
         )
 
+    @staticmethod
+    def _add_mandatory_snapshots(
+        conn, set_number: str, *, release_date: str | None = None
+    ) -> None:
+        """Insert dummy snapshots so the item passes NOT EXISTS filters."""
+        conn.execute(
+            "INSERT INTO brickeconomy_snapshots (id, set_number, release_date) "
+            "VALUES (nextval('brickeconomy_snapshots_id_seq'), ?, ?)",
+            [set_number, release_date],
+        )
+        conn.execute(
+            "INSERT INTO google_trends_snapshots (id, set_number, keyword) "
+            "VALUES (nextval('google_trends_snapshots_id_seq'), ?, ?)",
+            [set_number, f"LEGO {set_number}"],
+        )
+
     def test_finds_items_with_null_fields(self, conn):
         """Given items with NULL metadata. Then detected as needing enrichment."""
         get_or_create_item(conn, "75192")
@@ -58,8 +74,10 @@ class TestGetItemsNeedingEnrichment:
             year_released=2013,
             parts_count=271,
             image_url="https://example.com/31009.png",
+            release_date="2013-06",
         )
         self._add_price_record(conn, "31009")
+        self._add_mandatory_snapshots(conn, "31009", release_date="2013-06")
 
         items = get_items_needing_enrichment(conn)
         set_numbers = [i["set_number"] for i in items]

@@ -6,7 +6,6 @@ Each fetcher:
 3. Returns a unified SourceResult
 """
 
-import calendar
 import logging
 from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING
@@ -14,7 +13,6 @@ from typing import TYPE_CHECKING
 from services.enrichment.source_adapter import (
     adapt_brickeconomy,
     adapt_bricklink,
-    adapt_brickranker,
     make_failed_result,
 )
 from services.enrichment.types import SourceId, SourceResult
@@ -26,16 +24,6 @@ logger = logging.getLogger("bws.enrichment.fetchers")
 
 # Default freshness: skip HTTP if cached data is younger than this
 _DEFAULT_FRESHNESS = timedelta(hours=24)
-
-
-def _freshness_until_end_of_month() -> timedelta:
-    """Return a timedelta from now until the end of the current month."""
-    now = datetime.now(tz=timezone.utc)
-    last_day = calendar.monthrange(now.year, now.month)[1]
-    end_of_month = now.replace(day=last_day, hour=23, minute=59, second=59)
-    remaining = end_of_month - now
-    # At minimum 1 day, so we don't re-scrape on the last second of the month
-    return max(remaining, timedelta(days=1))
 
 
 def fetch_from_bricklink(
@@ -119,75 +107,6 @@ def fetch_from_bricklink(
     except Exception as e:
         logger.exception("Bricklink fetch failed for %s", set_number)
         return make_failed_result(SourceId.BRICKLINK, str(e))
-
-
-def fetch_from_brickranker(
-    conn: "DuckDBPyConnection",
-    set_number: str,
-    *,
-    freshness: timedelta | None = None,
-) -> SourceResult:
-    """Fetch metadata from BrickRanker (cache-first, then HTTP).
-
-    Retirement data rarely changes, so cache is valid until end of month.
-
-    BrickRanker is a bulk scraper -- it fetches ALL retirement items at once.
-    So we strongly prefer cache to avoid unnecessary full-page scrapes.
-    """
-    if freshness is None:
-        freshness = _freshness_until_end_of_month()
-
-    # Check cache: brickranker_items table
-    try:
-        from services.brickranker.repository import get_item
-
-        cached = get_item(conn, set_number)
-        if cached and cached.get("scraped_at"):
-            scraped_at = cached["scraped_at"]
-            if isinstance(scraped_at, datetime) and (datetime.now(tz=timezone.utc) - scraped_at) < freshness:
-                from services.brickranker.parser import RetirementItem
-                br_item = RetirementItem(
-                    set_number=cached["set_number"],
-                    set_name=cached.get("set_name", ""),
-                    year_released=cached.get("year_released"),
-                    retiring_soon=cached.get("retiring_soon", False),
-                    expected_retirement_date=cached.get("expected_retirement_date"),
-                    theme=cached.get("theme"),
-                    image_url=cached.get("image_url"),
-                )
-                logger.info("BrickRanker cache hit for %s", set_number)
-                return adapt_brickranker(br_item)
-    except Exception:
-        logger.debug("BrickRanker cache lookup failed for %s, falling back to HTTP", set_number, exc_info=True)
-
-    # HTTP scrape (bulk -- scrapes all items)
-    try:
-        from services.brickranker.scraper import scrape_retirement_tracker_sync
-
-        scrape_result = scrape_retirement_tracker_sync(conn, save=True)
-
-        if not scrape_result.success:
-            return make_failed_result(SourceId.BRICKRANKER, scrape_result.error or "Unknown error")
-
-        if scrape_result.data is None:
-            return make_failed_result(SourceId.BRICKRANKER, "No data returned")
-
-        # Find the specific set in results
-        for item in scrape_result.data.items:
-            if item.set_number == set_number:
-                return adapt_brickranker(item)
-
-        # Set not found in retirement tracker (not retiring)
-        from services.brickranker.parser import RetirementItem
-        return adapt_brickranker(RetirementItem(
-            set_number=set_number,
-            set_name="",
-            retiring_soon=False,
-        ))
-
-    except Exception as e:
-        logger.exception("BrickRanker fetch failed for %s", set_number)
-        return make_failed_result(SourceId.BRICKRANKER, str(e))
 
 
 def fetch_from_brickeconomy(

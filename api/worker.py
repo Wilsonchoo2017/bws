@@ -91,7 +91,11 @@ async def run_worker(manager: JobManager | None = None) -> None:
     logger.info("Worker started, waiting for jobs...")
 
     while True:
-        job_id = await mgr.dequeue()
+        try:
+            job_id = await mgr.dequeue()
+        except asyncio.CancelledError:
+            logger.info("Worker loop cancelled, shutting down")
+            return
         job = mgr.get_job(job_id)
         if not job:
             continue

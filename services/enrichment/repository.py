@@ -34,7 +34,7 @@ def get_items_needing_enrichment(
         """
         SELECT li.set_number, li.title, li.theme, li.year_released,
                li.year_retired, li.parts_count, li.weight, li.image_url,
-               li.retiring_soon
+               li.retiring_soon, li.release_date, li.retired_date
         FROM lego_items li
         WHERE (
             (li.title IS NULL OR LOWER(TRIM(li.title)) LIKE '%image coming soon%')
@@ -42,9 +42,15 @@ def get_items_needing_enrichment(
             OR li.year_released IS NULL
             OR li.parts_count IS NULL
             OR li.image_url IS NULL
+            OR li.release_date IS NULL
             OR NOT EXISTS (
                 SELECT 1 FROM brickeconomy_snapshots bs
                 WHERE bs.set_number = li.set_number
+            )
+            OR NOT EXISTS (
+                SELECT 1 FROM brickeconomy_snapshots bs
+                WHERE bs.set_number = li.set_number
+                  AND bs.release_date IS NOT NULL
             )
             OR (
                 li.title IS NOT NULL
@@ -71,6 +77,7 @@ def get_items_needing_enrichment(
     columns = [
         "set_number", "title", "theme", "year_released", "year_retired",
         "parts_count", "weight", "image_url", "retiring_soon",
+        "release_date", "retired_date",
     ]
     return [dict(zip(columns, row)) for row in result]
 
