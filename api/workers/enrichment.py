@@ -18,6 +18,23 @@ if TYPE_CHECKING:
 logger = logging.getLogger("bws.worker")
 
 
+def _parse_job_url(job_url: str) -> tuple[str, str | None]:
+    """Parse set_number and optional source from a job URL like '75192:bricklink'."""
+    parts = job_url.split(":", 1)
+    return (parts[0], parts[1] if len(parts) > 1 else None)
+
+
+def _error_result(set_number: str, error: str) -> dict:
+    """Build a standardised error result dict."""
+    return {
+        "set_number": set_number,
+        "fields_found": 0,
+        "fields_total": 0,
+        "error": error,
+        "field_details": [],
+    }
+
+
 class EnrichmentWorker:
     scraper_id = "enrichment"
     max_concurrency = 2
@@ -39,8 +56,7 @@ def _create_scrape_tasks(job_url: str) -> dict:
     from services.scrape_queue.models import TaskType
     from services.scrape_queue.repository import create_task, create_tasks_for_set
 
-    set_number = job_url.split(":")[0]
-    source_str = job_url.split(":")[1] if ":" in job_url else None
+    set_number, source_str = _parse_job_url(job_url)
 
     conn = get_connection()
     init_schema(conn)
@@ -50,7 +66,6 @@ def _create_scrape_tasks(job_url: str) -> dict:
             source_to_type = {
                 "bricklink": TaskType.BRICKLINK_METADATA,
                 "brickeconomy": TaskType.BRICKECONOMY,
-                "brickranker": TaskType.BRICKLINK_METADATA,
             }
             task_type = source_to_type.get(source_str)
             if task_type:

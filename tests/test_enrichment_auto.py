@@ -1,12 +1,14 @@
 """Tests for auto-enrichment dedup and queue helpers."""
 
-import asyncio
+from contextlib import contextmanager
+from unittest.mock import MagicMock, patch
 
+import duckdb
 import pytest
 
 from api.jobs import JobManager
+from db.schema import init_schema
 from services.enrichment.auto import (
-    _get_pending_enrichment_set_numbers,
     queue_enrichment_batch,
     queue_enrichment_if_needed,
 )
@@ -18,110 +20,93 @@ def manager():
     return JobManager()
 
 
-class TestGetPendingSetNumbers:
-    """Tests for _get_pending_enrichment_set_numbers."""
+@pytest.fixture
+def mem_conn():
+    """In-memory DuckDB connection with schema initialised."""
+    conn = duckdb.connect(":memory:")
+    init_schema(conn)
+    yield conn
+    conn.close()
 
-    def test_empty_manager(self, manager):
-        """Given no jobs. Then returns empty set."""
-        assert _get_pending_enrichment_set_numbers(manager) == set()
 
-    def test_finds_queued_enrichment(self, manager):
-        """Given a queued enrichment job. Then set number is in pending."""
-        manager.create_job("enrichment", "75192")
-        pending = _get_pending_enrichment_set_numbers(manager)
-        assert "75192" in pending
+class _NoCloseProxy:
+    """Wraps a DuckDB connection but suppresses close()."""
 
-    def test_finds_running_enrichment(self, manager):
-        """Given a running enrichment job. Then set number is in pending."""
-        job = manager.create_job("enrichment", "75192")
-        manager.mark_running(job.job_id)
-        pending = _get_pending_enrichment_set_numbers(manager)
-        assert "75192" in pending
+    def __init__(self, conn):
+        self._conn = conn
 
-    def test_ignores_completed(self, manager):
-        """Given a completed enrichment job. Then NOT in pending."""
-        job = manager.create_job("enrichment", "75192")
-        manager.mark_completed(job.job_id, items_found=3)
-        pending = _get_pending_enrichment_set_numbers(manager)
-        assert "75192" not in pending
+    def close(self):
+        pass  # suppress
 
-    def test_ignores_failed(self, manager):
-        """Given a failed enrichment job. Then NOT in pending."""
-        job = manager.create_job("enrichment", "75192")
-        manager.mark_failed(job.job_id, "error")
-        pending = _get_pending_enrichment_set_numbers(manager)
-        assert "75192" not in pending
+    def __getattr__(self, name):
+        return getattr(self._conn, name)
 
-    def test_ignores_non_enrichment_jobs(self, manager):
-        """Given a shopee job. Then NOT in enrichment pending."""
-        manager.create_job("shopee", "https://shopee.com.my/...")
-        pending = _get_pending_enrichment_set_numbers(manager)
-        assert len(pending) == 0
 
-    def test_parses_source_from_url(self, manager):
-        """Given enrichment job with source '75192:bricklink'.
-        Then set number '75192' is in pending."""
-        manager.create_job("enrichment", "75192:bricklink")
-        pending = _get_pending_enrichment_set_numbers(manager)
-        assert "75192" in pending
+@contextmanager
+def _patch_db(conn):
+    """Patch get_connection/init_schema so auto.py uses our in-memory DB."""
+    proxy = _NoCloseProxy(conn)
+    with (
+        patch("db.connection.get_connection", return_value=proxy),
+        patch("db.schema.init_schema"),
+    ):
+        yield
 
 
 class TestQueueEnrichmentIfNeeded:
     """Tests for queue_enrichment_if_needed -- single set dedup."""
 
-    def test_queues_new_set(self, manager):
-        """Given no pending jobs for set. Then queues and returns True."""
-        result = queue_enrichment_if_needed(manager, "75192")
+    def test_queues_new_set(self, manager, mem_conn):
+        """Given no pending tasks for set. Then queues and returns True."""
+        with _patch_db(mem_conn):
+            result = queue_enrichment_if_needed(manager, "75192")
         assert result is True
-        assert len(manager.list_jobs()) == 1
 
-    def test_skips_already_pending(self, manager):
-        """Given already queued job for set. Then skips and returns False."""
-        manager.create_job("enrichment", "75192")
-        result = queue_enrichment_if_needed(manager, "75192")
-        assert result is False
-        assert len(manager.list_jobs()) == 1  # still just 1
-
-    def test_skips_when_source_specific_pending(self, manager):
-        """Given queued '75192:bricklink'. When queue '75192'.
-        Then skips (same set number)."""
-        manager.create_job("enrichment", "75192:bricklink")
-        result = queue_enrichment_if_needed(manager, "75192")
+    def test_skips_already_pending(self, manager, mem_conn):
+        """Given already active tasks for set. Then skips and returns False."""
+        with _patch_db(mem_conn):
+            queue_enrichment_if_needed(manager, "75192")
+            result = queue_enrichment_if_needed(manager, "75192")
         assert result is False
 
-    def test_queues_after_previous_completed(self, manager):
-        """Given previously completed enrichment. Then queues new one."""
-        job = manager.create_job("enrichment", "75192")
-        manager.mark_completed(job.job_id, items_found=5)
-        result = queue_enrichment_if_needed(manager, "75192")
+    def test_queues_after_all_completed(self, manager, mem_conn):
+        """Given previously completed tasks. Then queues new ones."""
+        with _patch_db(mem_conn):
+            queue_enrichment_if_needed(manager, "75192")
+            mem_conn.execute(
+                "UPDATE scrape_tasks SET status = 'completed' "
+                "WHERE set_number = '75192'"
+            )
+            result = queue_enrichment_if_needed(manager, "75192")
         assert result is True
-        assert len(manager.list_jobs()) == 2
 
 
 class TestQueueEnrichmentBatch:
     """Tests for queue_enrichment_batch -- multiple sets with dedup."""
 
-    def test_queues_all_new(self, manager):
+    def test_queues_all_new(self, manager, mem_conn):
         """Given 3 new set numbers. Then all 3 queued."""
-        queued = queue_enrichment_batch(manager, ["75192", "42151", "31009"])
+        with _patch_db(mem_conn):
+            queued = queue_enrichment_batch(manager, ["75192", "42151", "31009"])
         assert queued == 3
-        assert len(manager.list_jobs()) == 3
 
-    def test_deduplicates_against_pending(self, manager):
+    def test_deduplicates_against_pending(self, manager, mem_conn):
         """Given '75192' already pending. Then only queues the other 2."""
-        manager.create_job("enrichment", "75192")
-        queued = queue_enrichment_batch(manager, ["75192", "42151", "31009"])
+        with _patch_db(mem_conn):
+            queue_enrichment_if_needed(manager, "75192")
+            queued = queue_enrichment_batch(manager, ["75192", "42151", "31009"])
         assert queued == 2
-        assert len(manager.list_jobs()) == 3  # 1 existing + 2 new
 
-    def test_deduplicates_within_batch(self, manager):
+    def test_deduplicates_within_batch(self, manager, mem_conn):
         """Given duplicate set numbers in batch. Then only queues unique."""
-        queued = queue_enrichment_batch(
-            manager, ["75192", "42151", "75192", "42151"]
-        )
+        with _patch_db(mem_conn):
+            queued = queue_enrichment_batch(
+                manager, ["75192", "42151", "75192", "42151"]
+            )
         assert queued == 2
 
-    def test_empty_batch(self, manager):
+    def test_empty_batch(self, manager, mem_conn):
         """Given empty list. Then queues 0."""
-        queued = queue_enrichment_batch(manager, [])
+        with _patch_db(mem_conn):
+            queued = queue_enrichment_batch(manager, [])
         assert queued == 0
