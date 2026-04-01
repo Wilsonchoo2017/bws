@@ -7,6 +7,7 @@ Cloudflare challenge or login CAPTCHA requires human intervention.
 """
 
 import asyncio
+import dataclasses
 import logging
 import re
 import secrets
@@ -260,8 +261,21 @@ async def scrape_keepa(
             # Extract product data from the DOM statistics tables
             product_data = await extract_product_data(page, set_number)
 
+            # Take screenshot of the chart area
+            screenshot_path = await _take_chart_screenshot(
+                page, set_number, product_data.asin
+            )
+            if screenshot_path:
+                product_data = dataclasses.replace(
+                    product_data, chart_screenshot_path=screenshot_path
+                )
+
             # Sweep the chart canvas to extract historical data via tooltips
-            chart_points = await _sweep_chart_tooltips(page)
+            # Pass x-axis ticks + totalDays for year inference
+            raw = await page.evaluate(_EXTRACT_JS_XTICKS)
+            x_ticks = raw.get("xTicks", [])
+            total_days = raw.get("totalDays")
+            chart_points = await _sweep_chart_tooltips(page, x_ticks, total_days)
             if chart_points:
                 logger.info(
                     "Chart sweep collected %d tooltip readings", len(chart_points)
@@ -270,12 +284,16 @@ async def scrape_keepa(
 
             logger.info(
                 "Keepa scrape for %s: amazon=%d pts, new=%d pts, "
-                "buy_box=%d pts, sales_rank=%d pts",
+                "buy_box=%d pts, sales_rank=%d pts, "
+                "rating=%s, reviews=%s, tracking=%s",
                 set_number,
                 len(product_data.amazon_price),
                 len(product_data.new_price),
                 len(product_data.buy_box),
                 len(product_data.sales_rank),
+                product_data.rating,
+                product_data.review_count,
+                product_data.tracking_users,
             )
 
             return KeepaScrapeResult(
@@ -385,17 +403,157 @@ async def _click_first_result(page: Page, set_number: str) -> bool:
     return False
 
 
-async def _sweep_chart_tooltips(page: Page) -> list[dict[str, Any]]:
+_EXTRACT_JS_XTICKS = """() => {
+    const xTicks = [];
+    const tickLabels = document.querySelectorAll('.tickLabel');
+    for (const el of tickLabels) {
+        const text = (el.textContent || '').trim();
+        const rect = el.getBoundingClientRect();
+        const m = text.match(/(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\\s+(\\d{4})/);
+        if (m) {
+            xTicks.push({
+                text: text,
+                x: Math.round(rect.x + rect.width / 2),
+                month: m[1],
+                year: parseInt(m[2], 10),
+            });
+        }
+    }
+    // Extract "All (1915 days)" for date range calculation
+    let totalDays = null;
+    const rangeCells = document.querySelectorAll('td.legendRange');
+    for (const c of rangeCells) {
+        const t = c.textContent.trim();
+        const daysMatch = t.match(/All\\s*\\((\\d+)\\s*days?\\)/);
+        if (daysMatch) {
+            totalDays = parseInt(daysMatch[1], 10);
+            break;
+        }
+    }
+    return { xTicks, totalDays };
+}"""
+
+
+def _infer_year(
+    x_pos: int,
+    month_str: str,
+    day: int,
+    x_ticks: list[dict[str, Any]],
+    chart_x: float,
+    chart_width: float,
+    total_days: int | None,
+) -> int:
+    """Infer the year for a tooltip date.
+
+    Primary method: use totalDays from "All (N days)" to calculate
+    the chart start date, then interpolate based on x position.
+
+    Fallback: use x-axis tick labels for interpolation.
+    """
+    from datetime import timedelta
+
+    months_map = {
+        "Jan": 1, "Feb": 2, "Mar": 3, "Apr": 4, "May": 5, "Jun": 6,
+        "Jul": 7, "Aug": 8, "Sep": 9, "Oct": 10, "Nov": 11, "Dec": 12,
+    }
+
+    now = datetime.now(tz=timezone.utc)
+
+    # Primary: use totalDays to compute exact date from x position
+    if total_days and chart_width > 0:
+        chart_start = now - timedelta(days=total_days)
+        frac = max(0.0, min(1.0, (x_pos - chart_x) / chart_width))
+        interp_date = chart_start + timedelta(days=total_days * frac)
+        # The tooltip gives us month+day; use interpolated date for year
+        tooltip_month = months_map.get(month_str, 1)
+        candidate_year = interp_date.year
+        # If the interpolated month is far from tooltip month, adjust
+        interp_month = interp_date.month
+        if tooltip_month <= 2 and interp_month >= 11:
+            candidate_year += 1
+        elif tooltip_month >= 11 and interp_month <= 2:
+            candidate_year -= 1
+        return candidate_year
+
+    # Fallback: use x-axis tick labels
+    if x_ticks:
+        sorted_ticks = sorted(x_ticks, key=lambda t: t["x"])
+
+        for i in range(len(sorted_ticks) - 1):
+            if sorted_ticks[i]["x"] <= x_pos <= sorted_ticks[i + 1]["x"]:
+                t1 = sorted_ticks[i]
+                t2 = sorted_ticks[i + 1]
+                y1 = t1["year"] + (months_map.get(t1["month"], 1) - 1) / 12
+                y2 = t2["year"] + (months_map.get(t2["month"], 1) - 1) / 12
+                dx = t2["x"] - t1["x"]
+                if dx == 0:
+                    return t1["year"]
+                frac = (x_pos - t1["x"]) / dx
+                interp_year = y1 + frac * (y2 - y1)
+                candidate_year = int(interp_year)
+                tooltip_month = months_map.get(month_str, 6)
+                if interp_year - candidate_year > 0.9 and tooltip_month <= 2:
+                    candidate_year += 1
+                return candidate_year
+
+        if x_pos <= sorted_ticks[0]["x"]:
+            return sorted_ticks[0]["year"]
+        return sorted_ticks[-1]["year"]
+
+    return now.year
+
+
+async def _take_chart_screenshot(
+    page: Page, set_number: str, asin: str | None
+) -> str | None:
+    """Take a screenshot of the chart area and save it."""
+    try:
+        from config.settings import BWS_IMAGES_PATH
+
+        canvases = await page.query_selector_all("canvas")
+        for canvas in canvases:
+            box = await canvas.bounding_box()
+            if box and box["width"] > 400 and box["height"] > 200:
+                screenshot_dir = BWS_IMAGES_PATH / "keepa"
+                screenshot_dir.mkdir(parents=True, exist_ok=True)
+                filename = f"{set_number}_{asin or 'unknown'}.png"
+                path = screenshot_dir / filename
+                await page.screenshot(
+                    path=str(path),
+                    clip={
+                        "x": box["x"] - 30,
+                        "y": box["y"] - 60,
+                        "width": box["width"] + 200,
+                        "height": box["height"] + 80,
+                    },
+                )
+                logger.info("Chart screenshot saved: %s", path)
+                return str(path)
+    except Exception:
+        logger.debug("Could not take chart screenshot")
+    return None
+
+
+async def _sweep_chart_tooltips(
+    page: Page,
+    x_ticks: list[dict[str, Any]] | None = None,
+    total_days: int | None = None,
+) -> list[dict[str, Any]]:
     """Sweep the mouse across the chart canvas to collect tooltip data.
 
-    Keepa shows date and price tooltips when hovering over the canvas.
-    We move the mouse across the chart width in steps to collect
-    historical data points.
+    Uses totalDays from "All (N days)" and x-axis tick labels to infer
+    the year for each tooltip date (Keepa tooltips show "Sat, Sep 25 4:15"
+    without year).
 
     Returns a list of dicts with 'date', 'label', 'price' keys.
     """
+    ticks = x_ticks or []
+    months_map = {
+        "Jan": 1, "Feb": 2, "Mar": 3, "Apr": 4, "May": 5, "Jun": 6,
+        "Jul": 7, "Aug": 8, "Sep": 9, "Oct": 10, "Nov": 11, "Dec": 12,
+    }
+
     try:
-        # Find the chart canvas
         canvases = await page.query_selector_all("canvas")
         chart_box = None
         for canvas in canvases:
@@ -409,13 +567,12 @@ async def _sweep_chart_tooltips(page: Page) -> list[dict[str, Any]]:
             return []
 
         logger.info(
-            "Sweeping chart canvas: x=%.0f y=%.0f w=%.0f h=%.0f",
+            "Sweeping chart canvas: x=%.0f y=%.0f w=%.0f h=%.0f (%d x-ticks)",
             chart_box["x"], chart_box["y"],
             chart_box["width"], chart_box["height"],
+            len(ticks),
         )
 
-        # Sweep using Playwright mouse.move (triggers jQuery/Flot events)
-        # then batch-read tooltips periodically
         chart_x = chart_box["x"]
         chart_y_mid = chart_box["y"] + chart_box["height"] * 0.4
         chart_width = chart_box["width"]
@@ -429,7 +586,6 @@ async def _sweep_chart_tooltips(page: Page) -> list[dict[str, Any]]:
             await asyncio.sleep(0.1)
 
             tooltip = await page.evaluate("""() => {
-                // Read flotTip divs
                 const tips = document.querySelectorAll('.flotTip, [id^="flotTip"]');
                 const parts = [];
                 for (const t of tips) {
@@ -439,7 +595,6 @@ async def _sweep_chart_tooltips(page: Page) -> list[dict[str, Any]]:
                 }
                 if (parts.length > 0) return parts.join(' | ');
 
-                // Read combined info line near chart top
                 const els = document.querySelectorAll('div, span');
                 for (const el of els) {
                     if (!el.offsetParent) continue;
@@ -460,22 +615,34 @@ async def _sweep_chart_tooltips(page: Page) -> list[dict[str, Any]]:
         points: list[dict[str, Any]] = []
         seen_dates: set[str] = set()
 
-        for item in (raw_tooltips or []):
+        for item in raw_tooltips:
             tooltip = item.get("text", "")
             if not tooltip:
                 continue
 
+            # Parse: "Sat, Sep 25 4:15Amazon$ 24.99..."
             date_match = re.search(
-                r"((?:Mon|Tue|Wed|Thu|Fri|Sat|Sun),\s+"
-                r"(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+"
-                r"\d{1,2}\s+\d{1,2}:\d{2})",
+                r"(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun),\s+"
+                r"(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+"
+                r"(\d{1,2})\s+\d{1,2}:\d{2}",
                 tooltip,
             )
 
-            date_str = date_match.group(1).strip() if date_match else f"step_{item['step']}"
-            if date_str in seen_dates:
+            if date_match:
+                month_str = date_match.group(1)
+                day = int(date_match.group(2))
+                year = _infer_year(
+                    item["x"], month_str, day, ticks,
+                    chart_x, chart_width, total_days,
+                )
+                month_num = months_map.get(month_str, 1)
+                date_iso = f"{year:04d}-{month_num:02d}-{day:02d}"
+            else:
+                date_iso = f"step_{item['step']}"
+
+            if date_iso in seen_dates:
                 continue
-            seen_dates.add(date_str)
+            seen_dates.add(date_iso)
 
             search_text = tooltip[date_match.end():] if date_match else tooltip
             price_matches = re.findall(
@@ -488,14 +655,12 @@ async def _sweep_chart_tooltips(page: Page) -> list[dict[str, Any]]:
 
             for label, price in price_matches:
                 points.append({
-                    "date": date_str,
+                    "date": date_iso,
                     "label": label.strip(),
                     "price": price.strip(),
                 })
 
-        # Move mouse away from chart
         await page.mouse.move(0, 0)
-
         return points
     except Exception:
         logger.exception("Chart tooltip sweep failed")
@@ -578,6 +743,10 @@ def _merge_chart_points(
         current_new_cents=product_data.current_new_cents,
         lowest_ever_cents=product_data.lowest_ever_cents,
         highest_ever_cents=product_data.highest_ever_cents,
+        rating=product_data.rating,
+        review_count=product_data.review_count,
+        tracking_users=product_data.tracking_users,
+        chart_screenshot_path=product_data.chart_screenshot_path,
     )
 
 

@@ -19,6 +19,7 @@ from services.enrichment.circuit_breaker import (
 )
 from services.enrichment.config import (
     FIELD_SOURCE_PRIORITY,
+    MANDATORY_SOURCES,
     SOURCE_CONFIGS,
     is_placeholder_title,
 )
@@ -101,9 +102,10 @@ def determine_sources_needed(
     """Determine which sources to call, deduplicated and ordered.
 
     Groups missing fields by source priority, deduplicates sources,
-    and filters out circuit-broken sources.
+    and filters out circuit-broken sources.  Mandatory sources (e.g.
+    BrickEconomy) are always included when their circuit breaker allows.
 
-    Returns sources in a stable order: BRICKLINK, BRICKRANKER.
+    Returns sources in a stable order: BRICKLINK, BRICKRANKER, BRICKECONOMY.
     """
     needed: set[SourceId] = set()
 
@@ -114,8 +116,14 @@ def determine_sources_needed(
             if is_available(cb_state, source_id, config.circuit_breaker_cooldown_seconds):
                 needed.add(source_id)
 
+    # Always include mandatory sources when available
+    for source_id in MANDATORY_SOURCES:
+        config = SOURCE_CONFIGS[source_id]
+        if is_available(cb_state, source_id, config.circuit_breaker_cooldown_seconds):
+            needed.add(source_id)
+
     # Stable ordering
-    order = (SourceId.BRICKLINK, SourceId.BRICKRANKER)
+    order = (SourceId.BRICKLINK, SourceId.BRICKRANKER, SourceId.BRICKECONOMY)
     return tuple(s for s in order if s in needed)
 
 
@@ -207,13 +215,13 @@ def enrich(
     """
     missing = detect_missing_fields(item, fields)
 
-    if not missing:
+    sources_needed = determine_sources_needed(missing, cb_state)
+
+    if not missing and not sources_needed:
         return (
             EnrichmentResult(set_number=set_number, field_results=()),
             cb_state,
         )
-
-    sources_needed = determine_sources_needed(missing, cb_state)
 
     if not sources_needed:
         # All sources circuit-broken

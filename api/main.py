@@ -12,6 +12,7 @@ from api.routes import enrichment, images, items, portfolio, scrape
 from api.worker import run_worker
 from services.enrichment.scheduler import run_enrichment_sweep
 from services.images.sweep import run_image_download_sweep
+from services.keepa.scheduler import run_keepa_sweep
 from services.shopee.saturation_scheduler import run_saturation_sweep
 
 logging.basicConfig(
@@ -32,13 +33,15 @@ async def lifespan(app: FastAPI):
     sweep_task = asyncio.create_task(run_enrichment_sweep(job_manager))
     saturation_task = asyncio.create_task(run_saturation_sweep(job_manager))
     image_task = asyncio.create_task(run_image_download_sweep())
-    logger.info("Background worker, enrichment sweep, saturation sweep, and image sweep started")
+    keepa_task = asyncio.create_task(run_keepa_sweep(job_manager))
+    logger.info("Background worker, enrichment/saturation/image/keepa sweeps started")
     yield
+    keepa_task.cancel()
     image_task.cancel()
     saturation_task.cancel()
     sweep_task.cancel()
     worker_task.cancel()
-    for task in (worker_task, sweep_task, saturation_task, image_task):
+    for task in (worker_task, sweep_task, saturation_task, image_task, keepa_task):
         try:
             await task
         except asyncio.CancelledError:

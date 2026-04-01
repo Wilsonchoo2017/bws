@@ -12,6 +12,7 @@ from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING
 
 from services.enrichment.source_adapter import (
+    adapt_brickeconomy,
     adapt_bricklink,
     adapt_brickranker,
     make_failed_result,
@@ -187,5 +188,72 @@ def fetch_from_brickranker(
     except Exception as e:
         logger.exception("BrickRanker fetch failed for %s", set_number)
         return make_failed_result(SourceId.BRICKRANKER, str(e))
+
+
+def fetch_from_brickeconomy(
+    conn: "DuckDBPyConnection",
+    set_number: str,
+    *,
+    freshness: timedelta = _DEFAULT_FRESHNESS,
+) -> SourceResult:
+    """Fetch metadata from BrickEconomy (cache-first, then browser scrape).
+
+    Also saves the snapshot and records the current value as a side effect,
+    mirroring the standalone BrickEconomy worker behaviour.
+    """
+    # Check cache: brickeconomy_snapshots table
+    try:
+        from services.brickeconomy.repository import get_latest_snapshot
+
+        cached = get_latest_snapshot(conn, set_number)
+        if cached and cached.get("scraped_at"):
+            scraped_at = cached["scraped_at"]
+            if isinstance(scraped_at, str):
+                from db.queries import parse_timestamp
+                scraped_at = parse_timestamp(scraped_at)
+            if scraped_at and (datetime.now(tz=timezone.utc) - scraped_at) < freshness:
+                from services.brickeconomy.parser import BrickeconomySnapshot
+                snapshot = BrickeconomySnapshot(
+                    set_number=cached["set_number"],
+                    scraped_at=scraped_at,
+                    title=cached.get("title"),
+                    theme=cached.get("theme"),
+                    subtheme=cached.get("subtheme"),
+                    year_released=cached.get("year_released"),
+                    pieces=cached.get("pieces"),
+                    minifigs=cached.get("minifigs"),
+                    availability=cached.get("availability"),
+                    image_url=cached.get("image_url"),
+                    brickeconomy_url=cached.get("brickeconomy_url"),
+                    value_new_cents=cached.get("value_new_cents"),
+                    value_used_cents=cached.get("value_used_cents"),
+                )
+                logger.info("BrickEconomy cache hit for %s", set_number)
+                return adapt_brickeconomy(snapshot)
+    except Exception:
+        logger.debug("BrickEconomy cache lookup failed for %s, falling back to scrape", set_number, exc_info=True)
+
+    # Browser scrape
+    try:
+        from services.brickeconomy.repository import record_current_value, save_snapshot
+        from services.brickeconomy.scraper import scrape_set_sync
+
+        scrape_result = scrape_set_sync(set_number)
+
+        if not scrape_result.success:
+            return make_failed_result(SourceId.BRICKECONOMY, scrape_result.error or "Unknown error")
+
+        if scrape_result.snapshot is None:
+            return make_failed_result(SourceId.BRICKECONOMY, "No data returned")
+
+        # Persist snapshot and price record (same as standalone worker)
+        save_snapshot(conn, scrape_result.snapshot)
+        record_current_value(conn, scrape_result.snapshot)
+
+        return adapt_brickeconomy(scrape_result.snapshot)
+
+    except Exception as e:
+        logger.exception("BrickEconomy fetch failed for %s", set_number)
+        return make_failed_result(SourceId.BRICKECONOMY, str(e))
 
 

@@ -115,6 +115,19 @@ SCRAPERS: list[ScraperInfo] = [
             ),
         ],
     ),
+    ScraperInfo(
+        id="keepa",
+        name="Keepa",
+        description="Scrape Amazon price history from Keepa.com -- Buy Box, New, 3P FBA/FBM, Used prices",
+        targets=[
+            ScrapeTargetInfo(
+                id="single-set",
+                label="Single Set by Number",
+                url="60305",
+                description="Scrape Keepa price history for a LEGO set (e.g. 60305)",
+            ),
+        ],
+    ),
 ]
 
 VALID_SCRAPER_IDS = {s.id for s in SCRAPERS}
@@ -194,6 +207,12 @@ async def start_scrape(request: ScrapeRequest):
         raise HTTPException(
             status_code=400,
             detail="Search query must not be empty",
+        )
+
+    if request.scraper_id == "keepa" and not request.url.strip().replace("-", "").isalnum():
+        raise HTTPException(
+            status_code=400,
+            detail="URL must be a LEGO set number",
         )
 
     job = job_manager.create_job(request.scraper_id, request.url)

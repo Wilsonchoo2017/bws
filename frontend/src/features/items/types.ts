@@ -248,6 +248,10 @@ export interface KeepaData {
   warehouse_deals_json: string | [string, number][] | null;
   collectible_json: string | [string, number][] | null;
   sales_rank_json: string | [string, number][] | null;
+  rating: number | null;
+  review_count: number | null;
+  tracking_users: number | null;
+  chart_screenshot_path: string | null;
 }
 
 export function formatPrice(

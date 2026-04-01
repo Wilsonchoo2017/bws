@@ -16,7 +16,6 @@ export function AddTransactionForm({ onSuccess }: AddTransactionFormProps) {
   const [txnType, setTxnType] = useState<'BUY' | 'SELL'>('BUY');
   const [quantity, setQuantity] = useState('1');
   const [priceRM, setPriceRM] = useState('');
-  const [condition, setCondition] = useState<'new' | 'used'>('new');
   const [txnDate, setTxnDate] = useState(
     new Date().toISOString().split('T')[0]
   );
@@ -27,7 +26,6 @@ export function AddTransactionForm({ onSuccess }: AddTransactionFormProps) {
     setTxnType('BUY');
     setQuantity('1');
     setPriceRM('');
-    setCondition('new');
     setTxnDate(new Date().toISOString().split('T')[0]);
     setNotes('');
     setError(null);
@@ -54,7 +52,6 @@ export function AddTransactionForm({ onSuccess }: AddTransactionFormProps) {
           txn_type: txnType,
           quantity: parseInt(quantity, 10),
           price_cents: priceCents,
-          condition,
           txn_date: new Date(txnDate).toISOString(),
           notes: notes.trim() || null,
         }),
@@ -154,17 +151,6 @@ export function AddTransactionForm({ onSuccess }: AddTransactionFormProps) {
             placeholder='299.90'
             className='border-input bg-background mt-1 w-full rounded border px-2 py-1.5 text-sm'
           />
-        </div>
-        <div>
-          <label className='text-muted-foreground text-xs'>Condition</label>
-          <select
-            value={condition}
-            onChange={(e) => setCondition(e.target.value as 'new' | 'used')}
-            className='border-input bg-background mt-1 w-full rounded border px-2 py-1.5 text-sm'
-          >
-            <option value='new'>New</option>
-            <option value='used'>Used</option>
-          </select>
         </div>
         <div>
           <label className='text-muted-foreground text-xs'>Date</label>

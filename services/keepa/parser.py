@@ -118,6 +118,11 @@ async def extract_product_data(page: Page, set_number: str) -> KeepaProductData:
     all_lows = [v for v in [amazon_lowest, new_lowest, bb_lowest_ever] if v]
     all_highs = [v for v in [amazon_highest, new_highest, bb_highest_ever] if v]
 
+    # Parse rating, reviews, tracking
+    rating = raw.get("rating")
+    review_count = raw.get("reviewCount")
+    tracking_users = raw.get("trackingUsers")
+
     return KeepaProductData(
         set_number=set_number,
         asin=asin,
@@ -140,6 +145,9 @@ async def extract_product_data(page: Page, set_number: str) -> KeepaProductData:
         current_new_cents=new_current or new_cents,
         lowest_ever_cents=min(all_lows) if all_lows else None,
         highest_ever_cents=max(all_highs) if all_highs else None,
+        rating=rating,
+        review_count=review_count,
+        tracking_users=tracking_users,
     )
 
 
@@ -322,6 +330,51 @@ _EXTRACT_JS = """() => {
     // Remove internal column map
     delete stats._colMap;
     result.stats = stats;
+
+    // Rating and review count from header (e.g. "4.8 (2,731 reviews)")
+    const fullText = document.querySelector('#productInfoBox')?.textContent || '';
+    const ratingMatch = fullText.match(/(\\d+\\.\\d+)\\s*\\((\\d[\\d,]*)\\s*reviews?\\)/);
+    if (ratingMatch) {
+        result.rating = parseFloat(ratingMatch[1]);
+        result.reviewCount = parseInt(ratingMatch[2].replace(/,/g, ''), 10);
+    }
+
+    // Tracking users (e.g. "41 users are tracking this product")
+    const bodyText = document.body.textContent || '';
+    const trackMatch = bodyText.match(/(\\d+)\\s+users?\\s+are\\s+tracking/);
+    if (trackMatch) {
+        result.trackingUsers = parseInt(trackMatch[1], 10);
+    }
+
+    // X-axis tick labels with positions for year inference
+    const xTicks = [];
+    const tickLabels = document.querySelectorAll('.tickLabel');
+    for (const el of tickLabels) {
+        const text = (el.textContent || '').trim();
+        const rect = el.getBoundingClientRect();
+        const m = text.match(/(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\\s+(\\d{4})/);
+        if (m) {
+            xTicks.push({
+                text: text,
+                x: Math.round(rect.x + rect.width / 2),
+                y: Math.round(rect.y),
+                month: m[1],
+                year: parseInt(m[2], 10),
+            });
+        }
+    }
+    result.xTicks = xTicks;
+
+    // "All (1915 days)" -- extract total days for date range calculation
+    const rangeCells = document.querySelectorAll('td.legendRange');
+    for (const c of rangeCells) {
+        const t = c.textContent.trim();
+        const daysMatch = t.match(/All\\s*\\((\\d+)\\s*days?\\)/);
+        if (daysMatch) {
+            result.totalDays = parseInt(daysMatch[1], 10);
+            break;
+        }
+    }
 
     return result;
 }"""

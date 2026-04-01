@@ -26,15 +26,15 @@ class SourceConfig:
 
 # Which sources provide which fields, in priority order per field.
 FIELD_SOURCE_PRIORITY: dict[MetadataField, tuple[SourceId, ...]] = {
-    MetadataField.TITLE: (SourceId.BRICKLINK,),
-    MetadataField.YEAR_RELEASED: (SourceId.BRICKLINK,),
+    MetadataField.TITLE: (SourceId.BRICKLINK, SourceId.BRICKECONOMY),
+    MetadataField.YEAR_RELEASED: (SourceId.BRICKLINK, SourceId.BRICKECONOMY),
     MetadataField.YEAR_RETIRED: (),
-    MetadataField.PARTS_COUNT: (SourceId.BRICKLINK,),
-    MetadataField.THEME: (SourceId.BRICKRANKER, SourceId.BRICKLINK),
-    MetadataField.IMAGE_URL: (SourceId.BRICKLINK,),
+    MetadataField.PARTS_COUNT: (SourceId.BRICKLINK, SourceId.BRICKECONOMY),
+    MetadataField.THEME: (SourceId.BRICKRANKER, SourceId.BRICKLINK, SourceId.BRICKECONOMY),
+    MetadataField.IMAGE_URL: (SourceId.BRICKLINK, SourceId.BRICKECONOMY),
     MetadataField.WEIGHT: (SourceId.BRICKLINK,),
     MetadataField.RETIRING_SOON: (SourceId.BRICKRANKER,),
-    MetadataField.MINIFIG_COUNT: (SourceId.BRICKLINK,),
+    MetadataField.MINIFIG_COUNT: (SourceId.BRICKLINK, SourceId.BRICKECONOMY),
     MetadataField.DIMENSIONS: (SourceId.BRICKLINK,),
 }
 
@@ -60,7 +60,24 @@ SOURCE_CONFIGS: dict[SourceId, SourceConfig] = {
             MetadataField.RETIRING_SOON,
         }),
     ),
+    SourceId.BRICKECONOMY: SourceConfig(
+        source_id=SourceId.BRICKECONOMY,
+        fields_provided=frozenset({
+            MetadataField.TITLE,
+            MetadataField.YEAR_RELEASED,
+            MetadataField.PARTS_COUNT,
+            MetadataField.THEME,
+            MetadataField.IMAGE_URL,
+            MetadataField.MINIFIG_COUNT,
+        }),
+        circuit_breaker_cooldown_seconds=3600,  # 1 hour
+    ),
 }
+
+# Sources that must always be called during enrichment, regardless of
+# which fields are missing.  This ensures every item gets a BrickEconomy
+# snapshot even when all metadata fields are already filled.
+MANDATORY_SOURCES: frozenset[SourceId] = frozenset({SourceId.BRICKECONOMY})
 
 
 # Validation rules

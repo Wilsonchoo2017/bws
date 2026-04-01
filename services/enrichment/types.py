@@ -22,6 +22,7 @@ class SourceId(Enum):
 
     BRICKLINK = "bricklink"
     BRICKRANKER = "brickranker"
+    BRICKECONOMY = "brickeconomy"
 
 
 class MetadataField(Enum):

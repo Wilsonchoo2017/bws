@@ -39,6 +39,12 @@ class KeepaProductData:
     current_new_cents: int | None = None
     lowest_ever_cents: int | None = None
     highest_ever_cents: int | None = None
+    # Product metadata
+    rating: float | None = None
+    review_count: int | None = None
+    tracking_users: int | None = None
+    # Chart screenshot (local file path)
+    chart_screenshot_path: str | None = None
 
 
 @dataclass(frozen=True)

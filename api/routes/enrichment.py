@@ -16,7 +16,7 @@ logger = logging.getLogger("bws.enrichment.routes")
 router = APIRouter(prefix="/enrichment", tags=["enrichment"])
 
 
-VALID_SOURCES = {"bricklink", "brickranker"}
+VALID_SOURCES = {"bricklink", "brickranker", "brickeconomy"}
 
 
 class EnrichRequest(BaseModel):
@@ -95,7 +95,11 @@ async def enrich_missing(
                     OR li.theme IS NULL
                     OR li.year_released IS NULL
                     OR li.parts_count IS NULL
-                    OR li.image_url IS NULL)
+                    OR li.image_url IS NULL
+                    OR NOT EXISTS (
+                        SELECT 1 FROM brickeconomy_snapshots bs
+                        WHERE bs.set_number = li.set_number
+                    ))
                 """,  # noqa: S608
                 request.set_numbers,
             ).fetchall()

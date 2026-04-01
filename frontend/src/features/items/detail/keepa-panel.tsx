@@ -266,7 +266,7 @@ export function KeepaPanel({ setNumber }: KeepaDataPanelProps) {
       </div>
 
       {/* Summary cards */}
-      <div className="mb-4 grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">
+      <div className="mb-4 grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-8">
         <SummaryCard label="Buy Box" value={formatUsd(data.current_buy_box_cents)} />
         <SummaryCard label="Amazon" value={formatUsd(data.current_amazon_cents)} />
         <SummaryCard label="New (Lowest)" value={formatUsd(data.current_new_cents)} />
@@ -280,7 +280,31 @@ export function KeepaPanel({ setNumber }: KeepaDataPanelProps) {
           value={formatUsd(data.highest_ever_cents)}
           color="text-red-500"
         />
+        <SummaryCard
+          label="Rating"
+          value={data.rating != null ? `${data.rating}/5` : '-'}
+          sub={data.review_count ? `${data.review_count.toLocaleString()} reviews` : undefined}
+        />
+        <SummaryCard
+          label="Tracking"
+          value={data.tracking_users != null ? `${data.tracking_users}` : '-'}
+          sub="users"
+        />
+        {data.asin && (
+          <SummaryCard label="ASIN" value={data.asin} />
+        )}
       </div>
+
+      {/* Keepa chart screenshot */}
+      {data.chart_screenshot_path && (
+        <div className="mb-4 overflow-hidden rounded-lg border">
+          <img
+            src={`/api/images/keepa/${setNumber}`}
+            alt="Keepa price chart"
+            className="w-full"
+          />
+        </div>
+      )}
 
       {/* Tab navigation */}
       <div className="mb-4 flex gap-1">
@@ -356,9 +380,8 @@ export function KeepaPanel({ setNumber }: KeepaDataPanelProps) {
         )}
       </div>
 
-      {/* ASIN and scrape info */}
+      {/* Scrape info */}
       <div className="text-muted-foreground mt-3 flex items-center gap-4 text-xs">
-        {data.asin && <span>ASIN: {data.asin}</span>}
         <span>{chartData.length} data points</span>
         {data.scraped_at && (
           <span>

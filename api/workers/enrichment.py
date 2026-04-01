@@ -42,6 +42,7 @@ def _run_enrichment(job_url: str) -> dict:
     from services.enrichment.circuit_breaker import CircuitBreakerState
     from services.enrichment.config import SOURCE_CONFIGS
     from services.enrichment.fetchers import (
+        fetch_from_brickeconomy,
         fetch_from_bricklink,
         fetch_from_brickranker,
     )
@@ -55,6 +56,7 @@ def _run_enrichment(job_url: str) -> dict:
     all_fetchers = {
         SourceId.BRICKLINK: fetch_from_bricklink,
         SourceId.BRICKRANKER: fetch_from_brickranker,
+        SourceId.BRICKECONOMY: fetch_from_brickeconomy,
     }
 
     source_map = {s.value: s for s in SourceId}

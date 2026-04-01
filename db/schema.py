@@ -341,7 +341,11 @@ CREATE TABLE IF NOT EXISTS keepa_snapshots (
     list_price_json VARCHAR,
     warehouse_deals_json VARCHAR,
     collectible_json VARCHAR,
-    sales_rank_json VARCHAR
+    sales_rank_json VARCHAR,
+    rating FLOAT,
+    review_count INTEGER,
+    tracking_users INTEGER,
+    chart_screenshot_path VARCHAR
 );
 """
 

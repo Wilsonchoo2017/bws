@@ -59,6 +59,29 @@ async def serve_image(asset_type: str, item_id: str):
     return JSONResponse(status_code=404, content={"error": "Image not found"})
 
 
+@router.get("/keepa/{set_number}")
+async def serve_keepa_chart(set_number: str):
+    """Serve the Keepa chart screenshot for a set."""
+    from pathlib import Path
+
+    from config.settings import BWS_IMAGES_PATH
+
+    screenshot_dir = BWS_IMAGES_PATH / "keepa"
+    # Find any matching screenshot
+    for path in sorted(screenshot_dir.glob(f"{set_number}_*.png"), reverse=True):
+        if path.exists():
+            return FileResponse(
+                path=str(path),
+                media_type="image/png",
+                headers={"Cache-Control": "public, max-age=3600"},
+            )
+
+    return JSONResponse(
+        status_code=404,
+        content={"detail": "Keepa chart screenshot not found"},
+    )
+
+
 @router.post("/download")
 async def trigger_download(background_tasks: BackgroundTasks, batch_size: int = 50):
     """Trigger a batch image download in the background."""

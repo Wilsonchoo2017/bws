@@ -143,14 +143,6 @@ export function TransactionsTable() {
       size: 110,
     },
     {
-      accessorKey: 'condition',
-      header: 'Cond.',
-      cell: ({ row }) => (
-        <span className='text-xs capitalize'>{row.getValue('condition')}</span>
-      ),
-      size: 60,
-    },
-    {
       accessorKey: 'notes',
       header: 'Notes',
       cell: ({ row }) => (

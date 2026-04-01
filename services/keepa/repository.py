@@ -34,7 +34,8 @@ def save_keepa_snapshot(
             amazon_price_json, new_price_json, new_3p_fba_json,
             new_3p_fbm_json, used_price_json, used_like_new_json,
             buy_box_json, list_price_json, warehouse_deals_json,
-            collectible_json, sales_rank_json
+            collectible_json, sales_rank_json,
+            rating, review_count, tracking_users, chart_screenshot_path
         ) VALUES (
             ?, ?, ?, ?, ?, ?,
             ?, ?, ?,
@@ -42,7 +43,8 @@ def save_keepa_snapshot(
             ?, ?, ?,
             ?, ?, ?,
             ?, ?, ?,
-            ?, ?
+            ?, ?,
+            ?, ?, ?, ?
         )
         """,
         [
@@ -68,6 +70,10 @@ def save_keepa_snapshot(
             _series_to_json(data.warehouse_deals),
             _series_to_json(data.collectible),
             _series_to_json(data.sales_rank),
+            data.rating,
+            data.review_count,
+            data.tracking_users,
+            data.chart_screenshot_path,
         ],
     )
 

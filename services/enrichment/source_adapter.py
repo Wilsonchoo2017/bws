@@ -4,6 +4,7 @@ Pure functions mapping source-specific data models to the unified MetadataField 
 """
 
 from bws_types.models import BricklinkData
+from services.brickeconomy.parser import BrickeconomySnapshot
 from services.brickranker.parser import RetirementItem
 from services.enrichment.types import MetadataField, SourceId, SourceResult
 
@@ -40,6 +41,23 @@ def adapt_brickranker(item: RetirementItem) -> SourceResult:
     }
     return SourceResult(
         source=SourceId.BRICKRANKER,
+        success=True,
+        fields=fields,
+    )
+
+
+def adapt_brickeconomy(snapshot: BrickeconomySnapshot) -> SourceResult:
+    """Extract enrichment fields from BrickeconomySnapshot."""
+    fields: dict[MetadataField, str | int | bool | None] = {
+        MetadataField.TITLE: snapshot.title,
+        MetadataField.YEAR_RELEASED: snapshot.year_released,
+        MetadataField.PARTS_COUNT: snapshot.pieces,
+        MetadataField.THEME: snapshot.theme,
+        MetadataField.IMAGE_URL: snapshot.image_url,
+        MetadataField.MINIFIG_COUNT: snapshot.minifigs,
+    }
+    return SourceResult(
+        source=SourceId.BRICKECONOMY,
         success=True,
         fields=fields,
     )
