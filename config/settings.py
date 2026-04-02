@@ -333,6 +333,33 @@ class HourlyRateLimiter:
         """Number of consecutive cooldown trips without a success."""
         return self._consecutive_failures
 
+    def to_snapshot(self) -> dict:
+        """Export cooldown state as a JSON-serialisable dict using wall-clock time."""
+        remaining = self.cooldown_remaining()
+        return {
+            "blocked_until_wallclock": time.time() + remaining if remaining > 0 else 0.0,
+            "escalation_level": self._escalation_level,
+            "consecutive_failures": self._consecutive_failures,
+            "was_blocked": self._was_blocked,
+        }
+
+    def restore_snapshot(self, snap: dict) -> None:
+        """Restore cooldown state from a previously saved snapshot."""
+        blocked_wall = snap.get("blocked_until_wallclock", 0.0)
+        remaining = blocked_wall - time.time()
+        if remaining > 0:
+            self._blocked_until = time.monotonic() + remaining
+            logger = logging.getLogger("bws.cooldown")
+            logger.info(
+                "Restored %s cooldown: %.0f min remaining",
+                self._source_name, remaining / 60,
+            )
+        else:
+            self._blocked_until = 0.0
+        self._escalation_level = snap.get("escalation_level", 0)
+        self._consecutive_failures = snap.get("consecutive_failures", 0)
+        self._was_blocked = snap.get("was_blocked", False)
+
     def _check_rest_period(self, now: float) -> float:
         """Enforce mandatory rest after sustained continuous scraping.
 
@@ -462,3 +489,64 @@ KEEPA_RATE_LIMITER = register_domain_limiter(
     KEEPA_CONFIG.max_requests_per_hour,
     source_name="Keepa",
 )
+
+
+# ---------------------------------------------------------------------------
+# Cooldown persistence
+# ---------------------------------------------------------------------------
+
+_COOLDOWN_FILE = Path.home() / ".bws" / "cooldowns.json"
+
+
+def save_cooldowns() -> None:
+    """Persist all domain limiter cooldown state to disk."""
+    import json
+
+    data: dict[str, dict] = {}
+    for domain, limiter in _domain_registry.items():
+        snap = limiter.to_snapshot()
+        if snap["blocked_until_wallclock"] > 0 or snap["escalation_level"] > 0:
+            data[domain] = snap
+
+    # Include Google Trends cooldown if the module has been imported
+    try:
+        from services.scrape_queue.executors import get_trends_cooldown_snapshot
+        trends_snap = get_trends_cooldown_snapshot()
+        if trends_snap["blocked_until_wallclock"] > 0:
+            data["google_trends"] = trends_snap
+    except ImportError:
+        pass
+
+    _COOLDOWN_FILE.parent.mkdir(parents=True, exist_ok=True)
+    _COOLDOWN_FILE.write_text(json.dumps(data, indent=2))
+    logging.getLogger("bws.cooldown").info(
+        "Saved cooldown state for %d source(s)", len(data),
+    )
+
+
+def restore_cooldowns() -> None:
+    """Restore domain limiter cooldown state from disk."""
+    import json
+
+    if not _COOLDOWN_FILE.exists():
+        return
+
+    try:
+        data = json.loads(_COOLDOWN_FILE.read_text())
+    except (json.JSONDecodeError, OSError):
+        logging.getLogger("bws.cooldown").warning(
+            "Failed to read cooldown state from %s", _COOLDOWN_FILE,
+        )
+        return
+
+    for domain, snap in data.items():
+        if domain == "google_trends":
+            try:
+                from services.scrape_queue.executors import restore_trends_cooldown_snapshot
+                restore_trends_cooldown_snapshot(snap)
+            except ImportError:
+                pass
+            continue
+        limiter = _domain_registry.get(domain)
+        if limiter is not None:
+            limiter.restore_snapshot(snap)

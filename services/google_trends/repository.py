@@ -14,7 +14,9 @@ logger = logging.getLogger("bws.google_trends.repository")
 
 def _interest_to_json(points: tuple[TrendsDataPoint, ...]) -> str:
     """Serialize interest data points to JSON array of [date, value]."""
-    return json.dumps([[p.date, p.value] for p in points])
+    from db.serialization import datapoints_to_json
+
+    return datapoints_to_json(points)
 
 
 def save_trends_snapshot(
@@ -63,16 +65,6 @@ def get_latest_trends_snapshot(
     conn: "DuckDBPyConnection", set_number: str
 ) -> dict | None:
     """Get the most recent Google Trends snapshot for a set."""
-    row = conn.execute(
-        """
-        SELECT * FROM google_trends_snapshots
-        WHERE set_number = ?
-        ORDER BY scraped_at DESC
-        LIMIT 1
-        """,
-        [set_number],
-    ).fetchone()
-    if not row:
-        return None
-    columns = [desc[0] for desc in conn.description]
-    return dict(zip(columns, row))
+    from db.queries import get_latest_row
+
+    return get_latest_row(conn, "google_trends_snapshots", key_value=set_number)

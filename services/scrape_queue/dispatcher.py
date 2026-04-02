@@ -61,14 +61,14 @@ TASK_TYPE_CONFIGS: dict[TaskType, TaskTypeConfig] = {
     TaskType.BRICKECONOMY: TaskTypeConfig(
         task_type=TaskType.BRICKECONOMY,
         executor=execute_brickeconomy,
-        concurrency=1,
+        concurrency=2,
         timeout_seconds=300,
         browser_profile="brickeconomy-profile",
     ),
     TaskType.KEEPA: TaskTypeConfig(
         task_type=TaskType.KEEPA,
         executor=execute_keepa,
-        concurrency=2,
+        concurrency=3,
         timeout_seconds=300,
         browser_profile="keepa-profile",
     ),

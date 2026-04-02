@@ -137,19 +137,9 @@ def get_latest_snapshot(
     conn: "DuckDBPyConnection", set_number: str
 ) -> dict | None:
     """Get the most recent snapshot for a set."""
-    row = conn.execute(
-        """
-        SELECT * FROM brickeconomy_snapshots
-        WHERE set_number = ?
-        ORDER BY scraped_at DESC
-        LIMIT 1
-        """,
-        [set_number],
-    ).fetchone()
-    if not row:
-        return None
-    columns = [desc[0] for desc in conn.description]
-    return dict(zip(columns, row))
+    from db.queries import get_latest_row
+
+    return get_latest_row(conn, "brickeconomy_snapshots", key_value=set_number)
 
 
 def get_snapshots(
@@ -165,5 +155,6 @@ def get_snapshots(
         """,
         [set_number, limit],
     ).fetchall()
-    columns = [desc[0] for desc in conn.description]
-    return [dict(zip(columns, row)) for row in rows]
+    from db.queries import rows_to_dicts
+
+    return rows_to_dicts(conn, rows)

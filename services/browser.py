@@ -156,6 +156,9 @@ class PersistentBrowser:
         Returns:
             Whatever coro_fn returns.
         """
+        if self._closed:
+            raise RuntimeError(f"Browser '{self._config.profile_name}' is closed")
+
         loop = self._ensure_loop()
 
         async def _run() -> Any:
@@ -197,7 +200,11 @@ class PersistentBrowser:
         Use after a scrape failure that may indicate stale browser state
         (e.g. elements not found, page didn't load). The next call to
         run() will automatically launch a new browser via _ensure_page().
+
+        No-op if the browser has been permanently closed (shutdown in progress).
         """
+        if self._closed:
+            return
         if self._loop and self._loop.is_running():
             future = asyncio.run_coroutine_threadsafe(
                 self._shutdown(), self._loop,

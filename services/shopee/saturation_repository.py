@@ -47,30 +47,17 @@ def get_latest_saturation(
     set_number: str,
 ) -> dict | None:
     """Get the most recent saturation snapshot for a set."""
-    row = conn.execute(
-        """
-        SELECT set_number, listings_count, unique_sellers,
-               min_price_cents, max_price_cents, avg_price_cents,
-               median_price_cents, price_spread_pct,
-               saturation_score, saturation_level, search_query, scraped_at
-        FROM shopee_saturation
-        WHERE set_number = ?
-        ORDER BY scraped_at DESC
-        LIMIT 1
-        """,
-        [set_number],
-    ).fetchone()
+    from db.queries import get_latest_row
 
-    if not row:
-        return None
-
-    columns = [
-        "set_number", "listings_count", "unique_sellers",
-        "min_price_cents", "max_price_cents", "avg_price_cents",
-        "median_price_cents", "price_spread_pct",
-        "saturation_score", "saturation_level", "search_query", "scraped_at",
-    ]
-    return dict(zip(columns, row))
+    _SATURATION_COLUMNS = (
+        "set_number, listings_count, unique_sellers, "
+        "min_price_cents, max_price_cents, avg_price_cents, "
+        "median_price_cents, price_spread_pct, "
+        "saturation_score, saturation_level, search_query, scraped_at"
+    )
+    return get_latest_row(
+        conn, "shopee_saturation", key_value=set_number, columns=_SATURATION_COLUMNS,
+    )
 
 
 def get_all_latest_saturations(

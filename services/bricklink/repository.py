@@ -255,29 +255,34 @@ def upsert_item(conn: "DuckDBPyConnection", data: BricklinkData) -> int:
     return item_id
 
 
+def _has_recent_record(
+    conn: "DuckDBPyConnection",
+    table: str,
+    key_column: str,
+    key_value: str,
+    freshness: timedelta,
+) -> bool:
+    """Check if a recent record exists within the freshness window."""
+    from db.queries import is_fresh
+
+    # Table and column names are developer-controlled constants.
+    sql = f"SELECT MAX(scraped_at) FROM {table} WHERE {key_column} = ?"  # noqa: S608
+    try:
+        row = conn.execute(sql, [key_value]).fetchone()
+    except Exception:
+        return False
+    if not row or row[0] is None:
+        return False
+    return is_fresh(row[0], freshness)
+
+
 def has_recent_pricing(
     conn: "DuckDBPyConnection",
     item_id: str,
     freshness: timedelta,
 ) -> bool:
-    """Check if a recent price history record exists within the freshness window.
-
-    Args:
-        conn: DuckDB connection
-        item_id: Bricklink item ID (e.g., "75192-1")
-        freshness: Maximum age of pricing data to consider fresh
-
-    Returns:
-        True if fresh pricing exists, False otherwise
-    """
-    row = conn.execute(
-        "SELECT MAX(scraped_at) FROM bricklink_price_history WHERE item_id = ?",
-        [item_id],
-    ).fetchone()
-    if not row or row[0] is None:
-        return False
-    scraped_at = parse_timestamp(row[0])
-    return scraped_at is not None and (datetime.now(tz=_UTC) - scraped_at) < freshness
+    """Check if a recent price history record exists within the freshness window."""
+    return _has_recent_record(conn, "bricklink_price_history", "item_id", item_id, freshness)
 
 
 def has_recent_minifig_pricing(
@@ -285,27 +290,8 @@ def has_recent_minifig_pricing(
     minifig_id: str,
     freshness: timedelta,
 ) -> bool:
-    """Check if a recent minifig price history record exists within the freshness window.
-
-    Args:
-        conn: DuckDB connection
-        minifig_id: Minifigure ID
-        freshness: Maximum age of pricing data to consider fresh
-
-    Returns:
-        True if fresh pricing exists, False otherwise
-    """
-    try:
-        row = conn.execute(
-            "SELECT MAX(scraped_at) FROM minifig_price_history WHERE minifig_id = ?",
-            [minifig_id],
-        ).fetchone()
-    except Exception:
-        return False
-    if not row or row[0] is None:
-        return False
-    scraped_at = parse_timestamp(row[0])
-    return scraped_at is not None and (datetime.now(tz=_UTC) - scraped_at) < freshness
+    """Check if a recent minifig price history record exists within the freshness window."""
+    return _has_recent_record(conn, "minifig_price_history", "minifig_id", minifig_id, freshness)
 
 
 def create_price_history(
@@ -377,41 +363,59 @@ def upsert_monthly_sales(
     Returns:
         Number of records upserted
     """
+    import duckdb
+
     now = datetime.now(tz=_UTC).isoformat()
     count = 0
 
     for sale in sales:
-        sale_id = get_next_id(conn, "bricklink_monthly_sales_id_seq")
-        conn.execute(
-            """
-            INSERT INTO bricklink_monthly_sales (
-                id, item_id, year, month, condition, times_sold, total_quantity,
-                min_price, max_price, avg_price, currency, scraped_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT (item_id, year, month, condition) DO UPDATE SET
-                times_sold = EXCLUDED.times_sold,
-                total_quantity = EXCLUDED.total_quantity,
-                min_price = EXCLUDED.min_price,
-                max_price = EXCLUDED.max_price,
-                avg_price = EXCLUDED.avg_price,
-                currency = EXCLUDED.currency,
-                scraped_at = EXCLUDED.scraped_at
-            """,
-            [
-                sale_id,
-                item_id,
-                sale.year,
-                sale.month,
-                sale.condition.value,
-                sale.times_sold,
-                sale.total_quantity,
-                sale.min_price.amount if sale.min_price else None,
-                sale.max_price.amount if sale.max_price else None,
-                sale.avg_price.amount if sale.avg_price else None,
-                sale.currency,
-                now,
-            ],
-        )
+        params = [
+            sale.times_sold,
+            sale.total_quantity,
+            sale.min_price.amount if sale.min_price else None,
+            sale.max_price.amount if sale.max_price else None,
+            sale.avg_price.amount if sale.avg_price else None,
+            sale.currency,
+            now,
+        ]
+
+        # Try UPDATE first (most common path for re-scrapes).
+        affected = conn.execute(
+            """UPDATE bricklink_monthly_sales
+               SET times_sold = ?, total_quantity = ?,
+                   min_price = ?, max_price = ?, avg_price = ?,
+                   currency = ?, scraped_at = ?
+               WHERE item_id = ? AND year = ? AND month = ? AND condition = ?""",
+            [*params, item_id, sale.year, sale.month, sale.condition.value],
+        ).fetchone()
+        rows_changed = affected[0] if affected else 0
+
+        if rows_changed == 0:
+            # New row -- retry with fresh MAX(id) on PK collision
+            # (concurrent writers can race on the same max id).
+            for _attempt in range(3):
+                try:
+                    conn.execute(
+                        """INSERT INTO bricklink_monthly_sales (
+                               id, item_id, year, month, condition, times_sold,
+                               total_quantity, min_price, max_price, avg_price,
+                               currency, scraped_at
+                           ) VALUES (
+                               (SELECT COALESCE(MAX(id), 0) + 1
+                                FROM bricklink_monthly_sales),
+                               ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+                           )""",
+                        [
+                            item_id,
+                            sale.year,
+                            sale.month,
+                            sale.condition.value,
+                            *params,
+                        ],
+                    )
+                    break
+                except duckdb.ConstraintException:
+                    continue
         count += 1
 
     return count

@@ -75,6 +75,10 @@ async def lifespan(app: FastAPI):
 
     logger.info("Starting BWS API...")
 
+    # Restore cooldown state from previous run (before dispatcher starts)
+    from config.settings import restore_cooldowns
+    restore_cooldowns()
+
     # Crash recovery: reclaim stale scrape tasks before starting dispatcher
     await recover_scrape_queue()
 
@@ -86,6 +90,12 @@ async def lifespan(app: FastAPI):
     logger.info("Background worker, enrichment/saturation/image sweeps + scrape dispatcher started")
     yield
     logger.info("BWS API shutting down...")
+    # Persist cooldown state before tearing down workers
+    from config.settings import save_cooldowns
+    try:
+        save_cooldowns()
+    except Exception:
+        logger.warning("Failed to save cooldown state", exc_info=True)
     # Everything inside _shutdown has a hard 10s ceiling
     all_tasks = [worker_task, sweep_task, saturation_task, image_task, scrape_dispatcher_task]
     try:

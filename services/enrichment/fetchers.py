@@ -51,11 +51,9 @@ def fetch_from_bricklink(
         ).fetchone()
 
         if row and row[8] is not None:
-            scraped_at = row[8]
-            if isinstance(scraped_at, str):
-                from db.queries import parse_timestamp
-                scraped_at = parse_timestamp(scraped_at)
-            if scraped_at and (datetime.now(tz=timezone.utc) - scraped_at) < freshness:
+            from db.queries import is_fresh
+
+            if is_fresh(row[8], freshness):
                 from bws_types.models import BricklinkData
                 cached = BricklinkData(
                     item_id=row[0],
@@ -126,11 +124,9 @@ def fetch_from_brickeconomy(
 
         cached = get_latest_snapshot(conn, set_number)
         if cached and cached.get("scraped_at"):
-            scraped_at = cached["scraped_at"]
-            if isinstance(scraped_at, str):
-                from db.queries import parse_timestamp
-                scraped_at = parse_timestamp(scraped_at)
-            if scraped_at and (datetime.now(tz=timezone.utc) - scraped_at) < freshness:
+            from db.queries import is_fresh
+
+            if is_fresh(cached["scraped_at"], freshness):
                 from services.brickeconomy.parser import BrickeconomySnapshot
                 snapshot = BrickeconomySnapshot(
                     set_number=cached["set_number"],

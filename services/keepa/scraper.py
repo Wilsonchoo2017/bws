@@ -294,6 +294,7 @@ async def scrape_keepa(
     *,
     headless: bool | None = None,
     page: Page | None = None,
+    item_title: str | None = None,
 ) -> KeepaScrapeResult:
     """Scrape Keepa price history for a LEGO set.
 
@@ -302,7 +303,7 @@ async def scrape_keepa(
     2. Navigate directly to Keepa search URL
     3. Handle Cloudflare challenge if present
     4. Log in if needed
-    5. Click first matching result
+    5. Click first matching result (verify it's by LEGO)
     6. Enable all chart legend series
     7. Set date range to 'All'
     8. Sweep chart tooltips for historical data
@@ -311,6 +312,7 @@ async def scrape_keepa(
         set_number: LEGO set number (e.g. "60305")
         headless: Override headless setting
         page: Reuse an existing Playwright page (for persistent browser).
+        item_title: Known title from DB for verification (e.g. "Monkie Kid...")
 
     Returns:
         KeepaScrapeResult with parsed product data or error
@@ -318,12 +320,12 @@ async def scrape_keepa(
     await KEEPA_RATE_LIMITER.acquire()
 
     if page is not None:
-        return await scrape_with_page(page, set_number)
+        return await scrape_with_page(page, set_number, item_title)
 
     try:
         async with _keepa_browser() as browser:
             page = await browser.new_page()
-            return await scrape_with_page(page, set_number)
+            return await scrape_with_page(page, set_number, item_title)
 
     except Exception as exc:
         logger.exception("Keepa scrape failed for set: %s", set_number)
@@ -337,6 +339,7 @@ async def scrape_keepa(
 async def scrape_with_page(
     page: Page,
     set_number: str,
+    item_title: str | None = None,
 ) -> KeepaScrapeResult:
     """Core Keepa scraping logic operating on an existing page."""
     try:
@@ -413,13 +416,13 @@ async def scrape_with_page(
 
         await human_delay(1_000, 2_000)
 
-        # Click first matching result
-        clicked = await _click_first_result(page, set_number)
+        # Click first matching result (verifies it's a LEGO product)
+        clicked = await _click_first_result(page, set_number, item_title)
         if not clicked:
             return KeepaScrapeResult(
                 success=False,
                 set_number=set_number,
-                error=f"No search results found for {set_number}",
+                error=f"Not listed on Amazon (no LEGO product found for {set_number})",
             )
 
         await human_delay(5_000, 8_000)
@@ -434,6 +437,20 @@ async def scrape_with_page(
 
         # Extract product data from the DOM statistics tables
         product_data = await extract_product_data(page, set_number)
+
+        # Cross-check: verify the Keepa product actually matches our set number.
+        # The product title should contain the set number (e.g. "LEGO 60305 ...").
+        # Without this, high-number sets like 122222 can match wrong products.
+        if not _title_contains_set_number(product_data.title, set_number):
+            logger.warning(
+                "Keepa product mismatch for %s: title='%s' does not contain set number",
+                set_number, product_data.title,
+            )
+            return KeepaScrapeResult(
+                success=False,
+                set_number=set_number,
+                error=f"Keepa product title mismatch: '{product_data.title}' does not contain {_bare_set_number(set_number)}",
+            )
 
         # Sweep the chart canvas to extract historical data via tooltips
         raw = await page.evaluate(_EXTRACT_JS_XTICKS)
@@ -530,41 +547,293 @@ async def _find_search_box(page: Page) -> Any | None:
     return None
 
 
-async def _click_first_result(page: Page, set_number: str) -> bool:
-    """Click the first search result matching the set number.
+_ACCESSORY_KEYWORDS: tuple[str, ...] = (
+    "display case",
+    "acrylic",
+    "storage",
+    "carrying case",
+    "light kit",
+    "lighting kit",
+    "led light",
+    "dust cover",
+    "baseplate",
+    "base plate",
+    "wall mount",
+    "display stand",
+    "display box",
+    "protective case",
+    "compatible with",
+    "not included",
+    "custom",
+    "moc ",
+    "alternative",
+    "building blocks",
+)
 
-    Keepa uses ag-grid for search results. The clickable product title
-    is an <a> tag inside a grid cell within an ag-row.
+_MAX_RESULT_ATTEMPTS: int = 5
+
+
+def _bare_set_number(set_number: str) -> str:
+    """Strip the variant suffix (e.g. '60305-1' -> '60305')."""
+    return set_number.split("-")[0]
+
+
+def _title_contains_set_number(title: str | None, set_number: str) -> bool:
+    """Check if a product title contains the bare set number."""
+    if not title:
+        return False
+    return _bare_set_number(set_number) in title.lower()
+
+
+def _score_result(title: str, set_number: str) -> int:
+    """Score a search result title for relevance to the actual LEGO set.
+
+    Higher score = more likely to be the real LEGO product.
+    Returns -1 for results that should be excluded (obvious accessories).
     """
-    # Primary: click the <a> link inside the first ag-row containing the set number
-    selectors = (
-        f'.ag-row a:has-text("{set_number}")',
-        f'div[role="row"] a:has-text("{set_number}")',
-        ".ag-row-first a",
-        'div[role="row"]:first-child a',
-        f'a:has-text("{set_number}")',
-    )
+    lower = title.lower()
 
-    for sel in selectors:
-        try:
-            el = await page.wait_for_selector(sel, timeout=5_000)
-            if el and await el.is_visible():
-                await el.click()
-                logger.info("Clicked search result: %s", sel)
-                return True
-        except Exception:
+    if any(kw in lower for kw in _ACCESSORY_KEYWORDS):
+        return -1
+
+    score = 0
+
+    if _title_contains_set_number(title, set_number):
+        score += 10
+
+    if lower.startswith("lego"):
+        score += 20
+
+    if "by lego" in lower or "lego group" in lower:
+        score += 15
+
+    if any(w in lower for w in ("building set", "building kit", "toy set", "pieces")):
+        score += 5
+
+    if "by " in lower and "by lego" not in lower:
+        score -= 10
+
+    return score
+
+
+async def _get_search_candidates(
+    page: Page, set_number: str,
+) -> list[tuple[dict[str, Any], int]]:
+    """Extract and rank search result candidates from the ag-grid.
+
+    Returns a sorted list of (candidate, score) tuples, best first.
+    Candidates with score -1 (obvious accessories) are excluded.
+    """
+    try:
+        candidates = await page.evaluate(
+            """() => {
+                const rows = document.querySelectorAll(
+                    '.ag-row, div[role="row"]'
+                );
+                const results = [];
+                for (const row of rows) {
+                    const link = row.querySelector('a');
+                    if (!link) continue;
+                    const title = link.textContent.trim();
+                    if (!title) continue;
+                    const rowIndex = row.getAttribute('row-index')
+                        || row.getAttribute('aria-rowindex')
+                        || '999';
+                    results.push({
+                        title: title,
+                        rowIndex: parseInt(rowIndex, 10),
+                    });
+                }
+                return results;
+            }""",
+        )
+    except Exception as exc:
+        logger.debug("Failed to extract search candidates: %s", exc)
+        return []
+
+    scored = [
+        (c, _score_result(c["title"], set_number)) for c in candidates
+    ]
+    valid = [(c, s) for c, s in scored if s >= 0]
+    valid.sort(key=lambda x: (-x[1], x[0]["rowIndex"]))
+
+    skipped = [c["title"][:60] for c, s in scored if s < 0]
+    if skipped:
+        logger.info(
+            "Filtered %d accessory results: %s", len(skipped), skipped,
+        )
+
+    return valid
+
+
+async def _click_candidate(page: Page, title: str) -> bool:
+    """Click a specific search result by its exact title text."""
+    try:
+        return await page.evaluate(
+            """(targetTitle) => {
+                const rows = document.querySelectorAll(
+                    '.ag-row, div[role="row"]'
+                );
+                for (const row of rows) {
+                    const link = row.querySelector('a');
+                    if (link && link.textContent.trim() === targetTitle) {
+                        link.click();
+                        return true;
+                    }
+                }
+                return false;
+            }""",
+            title,
+        )
+    except Exception as exc:
+        logger.debug("Failed to click candidate '%s': %s", title[:40], exc)
+        return False
+
+
+async def _verify_lego_product(
+    page: Page,
+    set_number: str,
+    item_title: str | None = None,
+) -> bool:
+    """Check if the current Keepa product page is for the correct LEGO product.
+
+    Inspects the product info box for manufacturer/brand indicators
+    and optionally cross-checks against the known item title from DB.
+    Returns True if the product appears to be the right LEGO set.
+    """
+    try:
+        info = await page.evaluate("""() => {
+            const box = document.querySelector('#productInfoBox');
+            if (!box) return { text: '', title: '' };
+            const text = box.textContent || '';
+            return {
+                text: text.substring(0, 2000),
+                title: document.title || '',
+            };
+        }""")
+
+        page_text = info.get("text", "")
+        combined = (page_text + " " + info.get("title", "")).lower()
+
+        # Check for third-party brand signals first (fast reject)
+        if any(kw in combined for kw in _ACCESSORY_KEYWORDS):
+            logger.info("Rejected: accessory keywords in product page")
+            return False
+
+        # If "by " is present but not "by lego", it's third-party
+        by_match = re.search(r"by\s+([A-Z][\w\s&]+)", page_text)
+        if by_match:
+            brand = by_match.group(1).strip().lower()
+            if "lego" not in brand:
+                logger.info(
+                    "Rejected: brand is '%s', not LEGO",
+                    by_match.group(1).strip(),
+                )
+                return False
+
+        # Positive signals for LEGO
+        is_lego = (
+            "by lego" in combined
+            or "lego group" in combined
+            or page_text.strip().lower().startswith("lego")
+        )
+
+        if not is_lego:
+            logger.info("Rejected: no LEGO brand signal on product page")
+            return False
+
+        # If we have a known title, verify the set number appears on the
+        # product page (catches wrong-LEGO-set selections like picking
+        # set 76244 when searching for 122220)
+        if _bare_set_number(set_number) in combined:
+            return True
+
+        # Set number not on page -- cross-check with known title
+        if item_title:
+            # Check if significant words from the known title appear
+            title_words = {
+                w.lower()
+                for w in item_title.split()
+                if len(w) > 3 and w.lower() not in {"lego", "the", "with", "and"}
+            }
+            if title_words:
+                matches = sum(1 for w in title_words if w in combined)
+                ratio = matches / len(title_words)
+                if ratio >= 0.3:
+                    logger.info(
+                        "Verified via title match (%.0f%% words): %s",
+                        ratio * 100, item_title[:60],
+                    )
+                    return True
+                logger.info(
+                    "Rejected: title match too low (%.0f%%): expected '%s'",
+                    ratio * 100, item_title[:60],
+                )
+                return False
+
+        # LEGO product but can't verify it's the right one -- accept
+        return True
+
+    except Exception as exc:
+        logger.debug("LEGO verification failed: %s", exc)
+        return True  # fail-open to avoid breaking the scrape
+
+
+async def _click_first_result(
+    page: Page,
+    set_number: str,
+    item_title: str | None = None,
+) -> bool:
+    """Click the best search result that is the correct LEGO product.
+
+    Iterates through scored candidates, clicking each and verifying
+    on the product page that it's the right LEGO set. If a result
+    turns out to be wrong (third-party accessory or different set),
+    navigates back and tries the next candidate.
+    """
+    search_url = page.url
+
+    candidates = await _get_search_candidates(page, set_number)
+    if not candidates:
+        logger.warning("No valid search candidates for %s", set_number)
+        return False
+
+    for i, (candidate, score) in enumerate(candidates[:_MAX_RESULT_ATTEMPTS]):
+        logger.info(
+            "Trying result %d/%d (score=%d): %s",
+            i + 1, min(len(candidates), _MAX_RESULT_ATTEMPTS),
+            score, candidate["title"][:80],
+        )
+
+        clicked = await _click_candidate(page, candidate["title"])
+        if not clicked:
             continue
 
-    # Fallback: click the first visible ag-row itself
-    try:
-        row = await page.query_selector(".ag-row-first, .ag-row[row-index='0']")
-        if row and await row.is_visible():
-            await row.click()
-            logger.info("Clicked first ag-row directly")
-            return True
-    except Exception:
-        pass
+        # Wait for product page to load
+        await human_delay(3_000, 5_000)
 
+        # Verify this is the correct LEGO product
+        if await _verify_lego_product(page, set_number, item_title):
+            logger.info(
+                "Verified LEGO product: %s", candidate["title"][:80],
+            )
+            return True
+
+        # Wrong product -- go back to search results and try next
+        logger.info(
+            "Wrong product, going back: %s", candidate["title"][:80],
+        )
+        await page.goto(search_url, wait_until="domcontentloaded")
+        await human_delay(2_000, 3_000)
+
+        # Re-wait for search results to reload
+        await _wait_for_search_results(page)
+        await human_delay(1_000, 2_000)
+
+    logger.warning(
+        "Exhausted %d candidates for %s -- not listed on Amazon",
+        min(len(candidates), _MAX_RESULT_ATTEMPTS), set_number,
+    )
     return False
 
 

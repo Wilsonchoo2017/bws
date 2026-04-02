@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING
 
 from api.workers.base import WorkResult
 from api.workers.transforms import brickeconomy_snapshot_to_dict
+from services.brickeconomy.parser import is_excluded_packaging
 
 if TYPE_CHECKING:
     from api.jobs import Job, JobManager
@@ -59,6 +60,22 @@ class BrickeconomyWorker:
 
         conn = get_connection()
         init_schema(conn)
+
+        # Delete non-standard packaging sets (foil packs, polybags, etc.)
+        if is_excluded_packaging(result.snapshot.packaging):
+            from services.items.repository import delete_item
+
+            deleted = delete_item(conn, set_number)
+            action = "deleted" if deleted else "not found"
+            return WorkResult(
+                items_found=0,
+                items=[],
+                log_summary=(
+                    f"{set_number} has excluded packaging "
+                    f"'{result.snapshot.packaging}' -- {action}"
+                ),
+            )
+
         save_snapshot(conn, result.snapshot)
         record_current_value(conn, result.snapshot)
 

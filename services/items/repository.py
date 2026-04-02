@@ -19,6 +19,16 @@ def _bricklink_image_url(set_number: str) -> str:
     return f"https://img.bricklink.com/ItemImage/SN/0/{set_number}-1.png"
 
 
+def is_polybag(set_number: str) -> bool:
+    """Return True if the set number indicates a polybag, foil pack, or blister pack.
+
+    Regular LEGO sets have 5-digit set numbers (e.g. 75335).
+    Polybags, foil packs, and blister packs use 6+ digit numbers (e.g. 892291).
+    """
+    digits = set_number.split("-")[0]
+    return len(digits) >= 6
+
+
 def get_or_create_item(
     conn: "DuckDBPyConnection",
     set_number: str,
@@ -44,7 +54,10 @@ def get_or_create_item(
     (preserves existing data, enriches with new sources).
     If no image_url is provided, falls back to BrickLink constructed URL
     for new inserts only -- existing image_urls are never overwritten by fallback.
+    Skips polybags/foil packs (6+ digit set numbers).
     """
+    if is_polybag(set_number):
+        return
     # For INSERT: use BrickLink fallback when no image provided.
     # For UPDATE: only pass caller's original value so COALESCE preserves existing.
     insert_image_url = image_url if image_url is not None else _bricklink_image_url(set_number)
@@ -323,6 +336,43 @@ def update_buy_rating(
         [rating, set_number],
     )
     return rating
+
+
+def delete_item(conn: "DuckDBPyConnection", set_number: str) -> bool:
+    """Delete a lego_items row and all related data across tables.
+
+    Returns True if the item existed and was deleted.
+    """
+    row = conn.execute(
+        "SELECT 1 FROM lego_items WHERE set_number = ?", [set_number]
+    ).fetchone()
+    if row is None:
+        return False
+
+    # Delete from all tables that reference set_number
+    for table in (
+        "price_records",
+        "brickeconomy_snapshots",
+        "keepa_snapshots",
+        "google_trends_snapshots",
+        "shopee_saturation",
+        "portfolio_transactions",
+        "scrape_tasks",
+        "ml_feature_store",
+    ):
+        conn.execute(f"DELETE FROM {table} WHERE set_number = ?", [set_number])  # noqa: S608
+
+    # set_minifigures uses set_item_id, image_assets uses item_id
+    conn.execute(
+        "DELETE FROM set_minifigures WHERE set_item_id = ?", [set_number]
+    )
+    conn.execute(
+        "DELETE FROM image_assets WHERE asset_type = 'set' AND item_id = ?",
+        [set_number],
+    )
+
+    conn.execute("DELETE FROM lego_items WHERE set_number = ?", [set_number])
+    return True
 
 
 def toggle_watchlist(conn: "DuckDBPyConnection", set_number: str) -> bool | None:

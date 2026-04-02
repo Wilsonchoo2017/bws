@@ -15,6 +15,24 @@ from bs4 import BeautifulSoup
 
 logger = logging.getLogger("bws.brickeconomy.parser")
 
+# Packaging types that indicate non-standard sets we don't want to track.
+# Standard sets have "Box" or no packaging field at all.
+EXCLUDED_PACKAGING: frozenset[str] = frozenset({
+    "Foil Pack",
+    "Polybag",
+    "Bucket",
+    "Bag",
+    "Tub",
+    "Canister",
+})
+
+
+def is_excluded_packaging(packaging: str | None) -> bool:
+    """Return True if the set has non-standard packaging we want to skip."""
+    if packaging is None:
+        return False
+    return packaging.strip() in EXCLUDED_PACKAGING
+
 
 @dataclass(frozen=True)
 class BrickeconomySnapshot:
@@ -38,6 +56,7 @@ class BrickeconomySnapshot:
     availability: str | None = None
     retiring_soon: bool | None = None
     image_url: str | None = None
+    packaging: str | None = None  # e.g. "Box", "Foil Pack", "Polybag"
     brickeconomy_url: str | None = None
 
     # Identifiers
@@ -386,6 +405,8 @@ def _parse_sidebar(soup: BeautifulSoup) -> dict:
         elif avail_lower == "retired":
             result["retiring_soon"] = False
 
+    result["packaging"] = _get_after("Packaging")
+
     pieces_str = _get_after("Pieces")
     if pieces_str:
         m = re.search(r"([\d,]+)", pieces_str)
@@ -489,6 +510,17 @@ def _parse_sidebar(soup: BeautifulSoup) -> dict:
     return result
 
 
+def _safe_price_cents(match: re.Match[str] | None) -> int | None:
+    """Convert a regex price match to cents, tolerating trailing dots."""
+    if match is None:
+        return None
+    raw = match.group(1).replace(",", "").rstrip(".")
+    try:
+        return _dollars_to_cents(float(raw))
+    except ValueError:
+        return None
+
+
 def _parse_regional_prices(
     soup: BeautifulSoup,
 ) -> dict[str, int | None]:
@@ -496,34 +528,19 @@ def _parse_regional_prices(
     text = soup.get_text()
     prices: dict[str, int | None] = {}
 
-    gbp_match = re.search(r"United Kingdom[^£]*£([\d,.]+\d)", text)
-    prices["gbp"] = (
-        _dollars_to_cents(float(gbp_match.group(1).replace(",", "")))
-        if gbp_match
-        else None
+    prices["gbp"] = _safe_price_cents(
+        re.search(r"United Kingdom[^£]*£([\d,.]+\d)", text)
     )
-
-    eur_match = re.search(r"Europe[^€]*€([\d,.]+\d)", text)
-    prices["eur"] = (
-        _dollars_to_cents(float(eur_match.group(1).replace(",", "")))
-        if eur_match
-        else None
+    prices["eur"] = _safe_price_cents(
+        re.search(r"Europe[^€]*€([\d,.]+\d)", text)
     )
-
     # Canada uses $ symbol -- look for "Canada" then next dollar amount
-    cad_match = re.search(r"Canada[^$]*\$([\d,.]+\d)", text)
-    prices["cad"] = (
-        _dollars_to_cents(float(cad_match.group(1).replace(",", "")))
-        if cad_match
-        else None
+    prices["cad"] = _safe_price_cents(
+        re.search(r"Canada[^$]*\$([\d,.]+\d)", text)
     )
-
     # Australia uses $ symbol
-    aud_match = re.search(r"Australia[^$]*\$([\d,.]+\d)", text)
-    prices["aud"] = (
-        _dollars_to_cents(float(aud_match.group(1).replace(",", "")))
-        if aud_match
-        else None
+    prices["aud"] = _safe_price_cents(
+        re.search(r"Australia[^$]*\$([\d,.]+\d)", text)
     )
 
     return prices
@@ -704,6 +721,7 @@ def parse_brickeconomy_page(
         exclusive_minifigs=sidebar.get("exclusive_minifigs"),
         availability=sidebar.get("availability"),
         retiring_soon=sidebar.get("retiring_soon"),
+        packaging=sidebar.get("packaging"),
         image_url=image_url,
         brickeconomy_url=url,
         upc=upc,
