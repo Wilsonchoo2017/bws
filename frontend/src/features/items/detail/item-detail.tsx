@@ -11,13 +11,14 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import type { BuyRating, ItemDetail, PriceRecord } from '../types';
-import { formatPrice } from '../types';
+import { formatPrice, getLatestPriceBySource } from '../types';
 import { KellyPanel } from '../kelly-panel';
 import { SignalsPanel } from '../signals-table';
 import { BrickeconomyPanel } from './brickeconomy-panel';
 import { BricklinkPriceChart } from './bricklink-price-chart';
 import { KeepaPanel } from './keepa-panel';
 import { MinifiguresPanel } from './minifigures-panel';
+import { ListingPanel } from './listing-panel';
 import { MinifigureValueChart } from './minifigure-value-chart';
 
 export interface ChartDateRange {
@@ -262,13 +263,7 @@ export function ItemDetailView({ setNumber }: ItemDetailViewProps) {
   }
 
   // Group prices by source for summary
-  const latestBySource = new Map<string, PriceRecord>();
-  for (const p of item.prices) {
-    const existing = latestBySource.get(p.source);
-    if (!existing || p.recorded_at > existing.recorded_at) {
-      latestBySource.set(p.source, p);
-    }
-  }
+  const latestBySource = getLatestPriceBySource(item.prices);
 
   return (
     <div className='flex flex-col gap-6'>
@@ -416,6 +411,9 @@ export function ItemDetailView({ setNumber }: ItemDetailViewProps) {
           </div>
         </div>
       </div>
+
+      {/* Listing helper */}
+      <ListingPanel item={item} />
 
       {/* Trading signals */}
       <SignalsPanel setNumber={setNumber} />

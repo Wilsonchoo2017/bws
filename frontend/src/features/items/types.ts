@@ -75,6 +75,7 @@ export interface ItemDetail {
   parts_count: number | null;
   minifig_count: number | null;
   dimensions: string | null;
+  weight: string | null;
   image_url: string | null;
   buy_rating: BuyRating | null;
   prices: PriceRecord[];
@@ -265,6 +266,19 @@ export interface KeepaData {
   review_count: number | null;
   tracking_users: number | null;
   chart_screenshot_path: string | null;
+}
+
+export function getLatestPriceBySource(
+  prices: PriceRecord[]
+): Map<string, PriceRecord> {
+  const latest = new Map<string, PriceRecord>();
+  for (const p of prices) {
+    const existing = latest.get(p.source);
+    if (!existing || p.recorded_at > existing.recorded_at) {
+      latest.set(p.source, p);
+    }
+  }
+  return latest;
 }
 
 export function formatPrice(
