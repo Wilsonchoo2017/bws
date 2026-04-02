@@ -14,7 +14,7 @@ from services.bricklink.repository import (
     get_set_minifig_value_history,
 )
 from services.bricklink.scraper import scrape_set_minifigures
-from services.backtesting.kelly import (
+from services.backtesting.position_sizing import (
     compute_position_sizing,
     kelly_to_dict,
 )

@@ -3,11 +3,11 @@
 import pytest
 
 from config.kelly import NEIGHBOR_FALLBACK_DISCOUNT, SCORE_BIN_LABELS, SCORE_BINS
-from services.backtesting.kelly import (
-    KellyParams,
+from services.backtesting.kelly import KellyParams
+from services.backtesting.position_sizing import (
     PositionSizing,
-    _discount_kelly_params,
-    _find_neighbor_bin,
+    discount_kelly_params,
+    find_neighbor_bin,
     size_position,
 )
 
@@ -46,7 +46,7 @@ def _make_table(
 class TestFindNeighborBin:
     def test_finds_nearest_above(self) -> None:
         table = _make_table({"Neutral (50-64)": 0.08})
-        result = _find_neighbor_bin("Weak (35-49)", table)
+        result = find_neighbor_bin("Weak (35-49)", table)
         assert result is not None
         label, horizons = result
         assert label == "Neutral (50-64)"
@@ -54,7 +54,7 @@ class TestFindNeighborBin:
 
     def test_finds_nearest_below(self) -> None:
         table = _make_table({"Neutral (50-64)": 0.08})
-        result = _find_neighbor_bin("Good (65-79)", table)
+        result = find_neighbor_bin("Good (65-79)", table)
         assert result is not None
         assert result[0] == "Neutral (50-64)"
 
@@ -64,28 +64,28 @@ class TestFindNeighborBin:
             "Good (65-79)": 0.12,
         })
         # Weak is distance 1 from Poor and distance 2 from Good
-        result = _find_neighbor_bin("Weak (35-49)", table)
+        result = find_neighbor_bin("Weak (35-49)", table)
         assert result is not None
         assert result[0] == "Poor (0-34)"
 
     def test_returns_none_when_table_empty(self) -> None:
-        result = _find_neighbor_bin("Weak (35-49)", {})
+        result = find_neighbor_bin("Weak (35-49)", {})
         assert result is None
 
     def test_returns_none_for_unknown_bin(self) -> None:
         table = _make_table({"Good (65-79)": 0.10})
-        result = _find_neighbor_bin("Unknown Bin", table)
+        result = find_neighbor_bin("Unknown Bin", table)
         assert result is None
 
     def test_edge_bin_poor_searches_upward(self) -> None:
         table = _make_table({"Neutral (50-64)": 0.08})
-        result = _find_neighbor_bin("Poor (0-34)", table)
+        result = find_neighbor_bin("Poor (0-34)", table)
         assert result is not None
         assert result[0] == "Neutral (50-64)"
 
     def test_edge_bin_strong_searches_downward(self) -> None:
         table = _make_table({"Good (65-79)": 0.12})
-        result = _find_neighbor_bin("Strong (80+)", table)
+        result = find_neighbor_bin("Strong (80+)", table)
         assert result is not None
         assert result[0] == "Good (65-79)"
 
@@ -93,12 +93,12 @@ class TestFindNeighborBin:
 class TestDiscountKellyParams:
     def test_scales_half_kelly(self) -> None:
         params = _make_kelly_params(half_kelly=0.10)
-        discounted = _discount_kelly_params(params, 0.6)
+        discounted = discount_kelly_params(params, 0.6)
         assert discounted.half_kelly == 0.06
 
     def test_preserves_other_fields(self) -> None:
         params = _make_kelly_params(half_kelly=0.10, sample_count=50)
-        discounted = _discount_kelly_params(params, 0.6)
+        discounted = discount_kelly_params(params, 0.6)
         assert discounted.win_rate == params.win_rate
         assert discounted.avg_win == params.avg_win
         assert discounted.avg_loss == params.avg_loss
@@ -108,7 +108,7 @@ class TestDiscountKellyParams:
 
     def test_returns_new_instance(self) -> None:
         params = _make_kelly_params(half_kelly=0.10)
-        discounted = _discount_kelly_params(params, 0.6)
+        discounted = discount_kelly_params(params, 0.6)
         assert discounted is not params
         assert params.half_kelly == 0.10  # original unchanged
 

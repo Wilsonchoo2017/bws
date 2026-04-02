@@ -30,23 +30,61 @@ def ensure_db_directory() -> None:
 
 
 def _handle_wal_recovery(path: Path) -> bool:
-    """Check for and remove stale WAL file from ungraceful shutdown.
+    """Attempt WAL replay via subprocess; remove only if replay crashes.
 
-    DuckDB crashes can corrupt the WAL, and replaying a corrupt WAL
-    on connect triggers an uncatchable FATAL error that kills the process.
+    DuckDB replays the WAL on connect. A valid WAL (e.g. from Ctrl+C)
+    contains committed transactions that should be recovered. Only a
+    corrupt WAL triggers an uncatchable FATAL error.
 
-    Returns True if WAL was removed (indicating potential corruption).
+    Strategy: try connecting in a subprocess (which triggers WAL replay).
+    If it succeeds, data is recovered. If it crashes, the WAL is corrupt
+    and we remove it.
+
+    Returns True if WAL was corrupt and removed (needs table rebuild).
     """
     wal_path = Path(f"{path}.wal")
-    if wal_path.exists() and wal_path.stat().st_size > 0:
-        logger.warning(
-            "Stale WAL file detected (%d bytes) -- removing to prevent "
-            "corruption replay. Some recent writes may be lost.",
-            wal_path.stat().st_size,
+    if not wal_path.exists() or wal_path.stat().st_size == 0:
+        return False
+
+    wal_size = wal_path.stat().st_size
+    logger.info(
+        "WAL file found (%d bytes) -- attempting replay via subprocess",
+        wal_size,
+    )
+
+    replay_script = (
+        "import sys, duckdb\n"
+        "conn = duckdb.connect(sys.argv[1])\n"
+        "conn.execute('CHECKPOINT')\n"
+        "conn.close()\n"
+    )
+
+    try:
+        result = subprocess.run(
+            [sys.executable, "-c", replay_script, str(path)],
+            capture_output=True,
+            timeout=30,
         )
+    except subprocess.TimeoutExpired:
+        logger.warning("WAL replay timed out -- removing WAL to unblock startup")
         wal_path.unlink()
         return True
-    return False
+
+    if result.returncode == 0:
+        logger.info("WAL replayed successfully -- all pending writes recovered")
+        return False
+
+    stderr = result.stderr.decode(errors="replace")
+    logger.warning(
+        "WAL replay crashed (exit %d) -- removing corrupt WAL. "
+        "stderr: %.500s",
+        result.returncode,
+        stderr,
+    )
+    # WAL may have been partially consumed; remove if still present
+    if wal_path.exists():
+        wal_path.unlink()
+    return True
 
 
 def get_connection(db_path: Path | None = None) -> "DuckDBPyConnection":

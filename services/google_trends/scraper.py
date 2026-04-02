@@ -21,9 +21,15 @@ def _build_timeframe(year_released: int | None) -> tuple[str, str]:
     today = datetime.now(tz=timezone.utc).date()
     end_date = today.strftime("%Y-%m-%d")
 
-    if year_released:
+    if year_released and 1900 <= year_released <= today.year:
         start_date = f"{year_released}-01-01"
     else:
+        if year_released and (year_released < 1900 or year_released > today.year):
+            logger.warning(
+                "Invalid year_released=%d, falling back to %d-year lookback",
+                year_released,
+                DEFAULT_LOOKBACK_YEARS,
+            )
         start_year = today.year - DEFAULT_LOOKBACK_YEARS
         start_date = f"{start_year}-01-01"
 

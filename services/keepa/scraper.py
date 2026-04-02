@@ -110,8 +110,9 @@ def _notify_captcha(query: str) -> None:
 async def _detect_cloudflare(page: Page) -> bool:
     """Check if the current page is a Cloudflare challenge.
 
-    Detects both full-page challenges (title-based) and in-page
-    Turnstile widgets (iframe/div checkbox dialogs).
+    Detects full-page challenges (title-based), in-page Turnstile
+    widgets (iframe/div checkbox dialogs), and Keepa's custom
+    anti-bot modal dialog.
     """
     try:
         title = await page.title()
@@ -134,6 +135,85 @@ async def _detect_cloudflare(page: Page) -> bool:
     except Exception:
         pass
 
+    # Check for Keepa's in-page anti-bot modal (contains Turnstile
+    # widget inside a dialog that may not match standard CF selectors)
+    try:
+        body_text = await page.evaluate(
+            "() => document.body.innerText.substring(0, 1000)"
+        )
+        if "anti-bot check" in body_text.lower():
+            logger.info("Keepa anti-bot check dialog detected via page text")
+            return True
+    except Exception:
+        pass
+
+    return False
+
+
+async def _try_click_turnstile(page: Page) -> bool:
+    """Attempt to click the Cloudflare Turnstile checkbox.
+
+    The Turnstile widget renders inside an iframe. Locate the iframe,
+    then click the checkbox input inside it. Uses human-like mouse
+    movement to the checkbox center.
+
+    Returns True if a click was attempted, False if widget not found.
+    """
+    # Find the Turnstile iframe
+    iframe_selectors = (
+        'iframe[src*="challenges.cloudflare.com"]',
+        'iframe[src*="cloudflare.com/cdn-cgi/challenge"]',
+        'iframe[title*="Cloudflare"]',
+        'iframe[title*="cloudflare"]',
+        'iframe[src*="turnstile"]',
+    )
+
+    for selector in iframe_selectors:
+        try:
+            iframe_el = await page.query_selector(selector)
+            if not iframe_el or not await iframe_el.is_visible():
+                continue
+
+            # Click the center of the iframe — the checkbox is typically
+            # positioned near the left side of the widget
+            box = await iframe_el.bounding_box()
+            if not box:
+                continue
+
+            # Checkbox is roughly at (30, center_y) inside the widget
+            click_x = box["x"] + min(30, box["width"] * 0.15)
+            click_y = box["y"] + box["height"] / 2
+
+            logger.info(
+                "Clicking Turnstile checkbox at (%.0f, %.0f) via selector: %s",
+                click_x, click_y, selector,
+            )
+
+            # Human-like: move then click with slight randomness
+            await human_delay(300, 800)
+            await page.mouse.move(click_x + secrets.randbelow(5), click_y + secrets.randbelow(3))
+            await human_delay(100, 300)
+            await page.mouse.click(click_x, click_y)
+            return True
+        except Exception as exc:
+            logger.debug("Turnstile click failed for %s: %s", selector, exc)
+            continue
+
+    # Fallback: try clicking inside the anti-bot dialog directly
+    # (some implementations render the checkbox outside an iframe)
+    try:
+        checkbox = await page.query_selector(
+            'input[type="checkbox"], .cf-turnstile input, '
+            '#turnstile-wrapper input'
+        )
+        if checkbox and await checkbox.is_visible():
+            logger.info("Clicking Turnstile checkbox element directly")
+            await human_delay(300, 800)
+            await checkbox.click()
+            return True
+    except Exception:
+        pass
+
     return False
 
 
@@ -144,23 +224,42 @@ async def _wait_for_cloudflare(
 ) -> bool:
     """Wait for a Cloudflare challenge to be solved.
 
-    Sends an ntfy notification, then polls until the challenge page
-    is gone or the timeout is reached.
+    First attempts to auto-click the Turnstile checkbox. If that
+    doesn't resolve it, sends an ntfy notification and polls until
+    the challenge is gone or the timeout is reached.
 
     Returns True if challenge was solved, False on timeout.
     """
     timeout = timeout_s or KEEPA_CONFIG.captcha_timeout_s
     logger.warning("Cloudflare challenge detected for query: %s", query)
+
+    # Attempt auto-click before notifying for human help
+    await human_delay(1_000, 2_000)
+    clicked = await _try_click_turnstile(page)
+    if clicked:
+        # Wait a few seconds for Turnstile to validate the click
+        await human_delay(3_000, 5_000)
+        if not await _detect_cloudflare(page):
+            logger.info("Cloudflare challenge auto-solved via checkbox click")
+            return True
+        logger.info("Auto-click did not resolve challenge, waiting for human")
+
     _notify_captcha(query)
 
     elapsed = 0
     poll_interval = 3
+    click_retry_interval = 15
+    last_click_attempt = 0
     while elapsed < timeout:
         await asyncio.sleep(poll_interval)
         elapsed += poll_interval
         if not await _detect_cloudflare(page):
             logger.info("Cloudflare challenge solved after %ds", elapsed)
             return True
+        # Retry clicking periodically (widget may re-render)
+        if elapsed - last_click_attempt >= click_retry_interval:
+            last_click_attempt = elapsed
+            await _try_click_turnstile(page)
 
     logger.error(
         "Cloudflare challenge timeout after %ds for query: %s",
@@ -194,11 +293,12 @@ async def scrape_keepa(
     set_number: str,
     *,
     headless: bool | None = None,
+    page: Page | None = None,
 ) -> KeepaScrapeResult:
     """Scrape Keepa price history for a LEGO set.
 
     Flow:
-    1. Launch browser with persistent keepa profile
+    1. Launch browser with persistent keepa profile (or reuse page)
     2. Navigate directly to Keepa search URL
     3. Handle Cloudflare challenge if present
     4. Log in if needed
@@ -210,144 +310,162 @@ async def scrape_keepa(
     Args:
         set_number: LEGO set number (e.g. "60305")
         headless: Override headless setting
+        page: Reuse an existing Playwright page (for persistent browser).
 
     Returns:
         KeepaScrapeResult with parsed product data or error
     """
     await KEEPA_RATE_LIMITER.acquire()
 
+    if page is not None:
+        return await scrape_with_page(page, set_number)
+
     try:
         async with _keepa_browser() as browser:
             page = await browser.new_page()
+            return await scrape_with_page(page, set_number)
 
-            # Navigate directly to search results
-            search_url = f"{KEEPA_BASE}/#!search/1-{set_number}%20lego"
-            logger.info("Navigating to search: %s", search_url)
-            await page.goto(search_url, wait_until="domcontentloaded")
-            await human_delay(3_000, 5_000)
+    except Exception as exc:
+        logger.exception("Keepa scrape failed for set: %s", set_number)
+        return KeepaScrapeResult(
+            success=False,
+            set_number=set_number,
+            error=str(exc),
+        )
 
-            # Handle Cloudflare challenge
-            if await _detect_cloudflare(page):
-                _record_cf_challenge(set_number)
-                solved = await _wait_for_cloudflare(page, set_number)
-                if not solved:
-                    return KeepaScrapeResult(
-                        success=False,
-                        set_number=set_number,
-                        error="Cloudflare challenge not solved within timeout",
-                    )
-                # Retry search URL after Cloudflare
-                await page.goto(search_url, wait_until="domcontentloaded")
-                await human_delay(3_000, 5_000)
 
-            # Check login state, log in if needed
-            if not await is_logged_in(page):
-                logged_in = await login(page)
-                if not logged_in:
-                    return KeepaScrapeResult(
-                        success=False,
-                        set_number=set_number,
-                        error="Keepa login failed",
-                    )
-                # Navigate back to search after login
-                await page.goto(search_url, wait_until="domcontentloaded")
-                await human_delay(3_000, 5_000)
+async def scrape_with_page(
+    page: Page,
+    set_number: str,
+) -> KeepaScrapeResult:
+    """Core Keepa scraping logic operating on an existing page."""
+    try:
+        search_url = f"{KEEPA_BASE}/#!search/1-{set_number}%20lego"
+        logger.info("Navigating to search: %s", search_url)
+        await page.goto(search_url, wait_until="domcontentloaded")
+        await human_delay(3_000, 5_000)
 
-            # Handle Cloudflare after login redirect
-            if await _detect_cloudflare(page):
-                _record_cf_challenge(set_number)
-                solved = await _wait_for_cloudflare(page, set_number)
-                if not solved:
-                    return KeepaScrapeResult(
-                        success=False,
-                        set_number=set_number,
-                        error="Cloudflare challenge not solved within timeout",
-                    )
-                await human_delay(3_000, 5_000)
-
-            # Wait for search results — try multiple selectors
-            result_found = await _wait_for_search_results(page)
-
-            if not result_found:
-                # Check if CF widget appeared during/after search load
-                if await _detect_cloudflare(page):
-                    _record_cf_challenge(set_number)
-                    solved = await _wait_for_cloudflare(page, set_number)
-                    if solved:
-                        await page.goto(search_url, wait_until="domcontentloaded")
-                        await human_delay(3_000, 5_000)
-                        result_found = await _wait_for_search_results(page)
-
-                if not result_found:
-                    body_text = await page.evaluate(
-                        "() => document.body.innerText.substring(0, 500)"
-                    )
-                    logger.warning(
-                        "No search result selectors matched. Page text: %s",
-                        body_text[:200],
-                    )
-                    return KeepaScrapeResult(
-                        success=False,
-                        set_number=set_number,
-                        error="Search results did not load within timeout",
-                    )
-
-            await human_delay(1_000, 2_000)
-
-            # Click first matching result
-            clicked = await _click_first_result(page, set_number)
-            if not clicked:
+        # Handle Cloudflare challenge
+        if await _detect_cloudflare(page):
+            _record_cf_challenge(set_number)
+            solved = await _wait_for_cloudflare(page, set_number)
+            if not solved:
                 return KeepaScrapeResult(
                     success=False,
                     set_number=set_number,
-                    error=f"No search results found for {set_number}",
+                    error="Cloudflare challenge not solved within timeout",
+                )
+            # Retry search URL after Cloudflare
+            await page.goto(search_url, wait_until="domcontentloaded")
+            await human_delay(3_000, 5_000)
+
+        # Check login state, log in if needed
+        if not await is_logged_in(page):
+            logged_in = await login(page)
+            if not logged_in:
+                return KeepaScrapeResult(
+                    success=False,
+                    set_number=set_number,
+                    error="Keepa login failed",
+                )
+            # Navigate back to search after login
+            await page.goto(search_url, wait_until="domcontentloaded")
+            await human_delay(3_000, 5_000)
+
+        # Handle Cloudflare after login redirect
+        if await _detect_cloudflare(page):
+            _record_cf_challenge(set_number)
+            solved = await _wait_for_cloudflare(page, set_number)
+            if not solved:
+                return KeepaScrapeResult(
+                    success=False,
+                    set_number=set_number,
+                    error="Cloudflare challenge not solved within timeout",
+                )
+            await human_delay(3_000, 5_000)
+
+        # Wait for search results
+        result_found = await _wait_for_search_results(page)
+
+        if not result_found:
+            # Check if CF widget appeared during/after search load
+            if await _detect_cloudflare(page):
+                _record_cf_challenge(set_number)
+                solved = await _wait_for_cloudflare(page, set_number)
+                if solved:
+                    await page.goto(search_url, wait_until="domcontentloaded")
+                    await human_delay(3_000, 5_000)
+                    result_found = await _wait_for_search_results(page)
+
+            if not result_found:
+                body_text = await page.evaluate(
+                    "() => document.body.innerText.substring(0, 500)"
+                )
+                logger.warning(
+                    "No search result selectors matched. Page text: %s",
+                    body_text[:200],
+                )
+                return KeepaScrapeResult(
+                    success=False,
+                    set_number=set_number,
+                    error="Search results did not load within timeout",
                 )
 
-            await human_delay(5_000, 8_000)
+        await human_delay(1_000, 2_000)
 
-            # Enable all chart legend series before sweeping
-            await _enable_all_legend_series(page)
-            await human_delay(2_000, 3_000)
-
-            # Click "All" date range to load full history
-            await click_all_date_range(page)
-            await human_delay(4_000, 6_000)
-
-            # Extract product data from the DOM statistics tables
-            product_data = await extract_product_data(page, set_number)
-
-            # Sweep the chart canvas to extract historical data via tooltips
-            # Pass x-axis ticks + totalDays for year inference
-            raw = await page.evaluate(_EXTRACT_JS_XTICKS)
-            x_ticks = raw.get("xTicks", [])
-            total_days = raw.get("totalDays")
-            chart_points = await _sweep_chart_tooltips(page, x_ticks, total_days)
-            if chart_points:
-                logger.info(
-                    "Chart sweep collected %d tooltip readings", len(chart_points)
-                )
-                product_data = _merge_chart_points(product_data, chart_points)
-
-            logger.info(
-                "Keepa scrape for %s: amazon=%d pts, new=%d pts, "
-                "buy_box=%d pts, sales_rank=%d pts, "
-                "rating=%s, reviews=%s, tracking=%s",
-                set_number,
-                len(product_data.amazon_price),
-                len(product_data.new_price),
-                len(product_data.buy_box),
-                len(product_data.sales_rank),
-                product_data.rating,
-                product_data.review_count,
-                product_data.tracking_users,
-            )
-
-            _record_cf_clear()
+        # Click first matching result
+        clicked = await _click_first_result(page, set_number)
+        if not clicked:
             return KeepaScrapeResult(
-                success=True,
+                success=False,
                 set_number=set_number,
-                product_data=product_data,
+                error=f"No search results found for {set_number}",
             )
+
+        await human_delay(5_000, 8_000)
+
+        # Enable all chart legend series before sweeping
+        await _enable_all_legend_series(page)
+        await human_delay(2_000, 3_000)
+
+        # Click "All" date range to load full history
+        await click_all_date_range(page)
+        await human_delay(4_000, 6_000)
+
+        # Extract product data from the DOM statistics tables
+        product_data = await extract_product_data(page, set_number)
+
+        # Sweep the chart canvas to extract historical data via tooltips
+        raw = await page.evaluate(_EXTRACT_JS_XTICKS)
+        x_ticks = raw.get("xTicks", [])
+        total_days = raw.get("totalDays")
+        chart_points = await _sweep_chart_tooltips(page, x_ticks, total_days)
+        if chart_points:
+            logger.info(
+                "Chart sweep collected %d tooltip readings", len(chart_points)
+            )
+            product_data = _merge_chart_points(product_data, chart_points)
+
+        logger.info(
+            "Keepa scrape for %s: amazon=%d pts, new=%d pts, "
+            "buy_box=%d pts, sales_rank=%d pts, "
+            "rating=%s, reviews=%s, tracking=%s",
+            set_number,
+            len(product_data.amazon_price),
+            len(product_data.new_price),
+            len(product_data.buy_box),
+            len(product_data.sales_rank),
+            product_data.rating,
+            product_data.review_count,
+            product_data.tracking_users,
+        )
+
+        _record_cf_clear()
+        return KeepaScrapeResult(
+            success=True,
+            set_number=set_number,
+            product_data=product_data,
+        )
 
     except Exception as exc:
         logger.exception("Keepa scrape failed for set: %s", set_number)
@@ -639,52 +757,57 @@ async def _sweep_chart_tooltips(
         # each move, and collect only when the tooltip text changes.
         # Move exactly 1 step per animation frame so the chart has
         # time to update tooltips between moves.
-        raw_tooltips: list[dict[str, Any]] = await page.evaluate(
-            """([chartX, yMid, chartWidth, step]) => {
-            return new Promise(resolve => {
-                const results = [];
-                const numSteps = Math.floor(chartWidth / step);
-                let lastText = '';
-                let i = 0;
+        # Timeout prevents hang if requestAnimationFrame stops firing
+        # (e.g. tab backgrounded, browser frozen).
+        raw_tooltips: list[dict[str, Any]] = await asyncio.wait_for(
+            page.evaluate(
+                """([chartX, yMid, chartWidth, step]) => {
+                return new Promise(resolve => {
+                    const results = [];
+                    const numSteps = Math.floor(chartWidth / step);
+                    let lastText = '';
+                    let i = 0;
 
-                function readTooltip() {
-                    const date = document.getElementById('flotTipDate');
-                    if (!date || date.style.display === 'none') return null;
-                    const dateText = date.textContent.trim();
-                    if (!dateText) return null;
-                    const parts = [dateText];
-                    const tips = document.querySelectorAll('.flotTip');
-                    for (const tip of tips) {
-                        if (tip.id === 'flotTipDate') continue;
-                        if (tip.style.display === 'none') continue;
-                        const text = tip.textContent.trim();
-                        if (text && text.includes('$')) parts.push(text);
+                    function readTooltip() {
+                        const date = document.getElementById('flotTipDate');
+                        if (!date || date.style.display === 'none') return null;
+                        const dateText = date.textContent.trim();
+                        if (!dateText) return null;
+                        const parts = [dateText];
+                        const tips = document.querySelectorAll('.flotTip');
+                        for (const tip of tips) {
+                            if (tip.id === 'flotTipDate') continue;
+                            if (tip.style.display === 'none') continue;
+                            const text = tip.textContent.trim();
+                            if (text && text.includes('$')) parts.push(text);
+                        }
+                        return parts.length > 1 ? parts.join('') : null;
                     }
-                    return parts.length > 1 ? parts.join('') : null;
-                }
 
-                function tick() {
-                    if (i >= numSteps) { resolve(results); return; }
-                    const x = chartX + step * i;
-                    const target = document.elementFromPoint(x, yMid);
-                    if (target) {
-                        target.dispatchEvent(new MouseEvent('mousemove', {
-                            clientX: x, clientY: yMid,
-                            bubbles: true, cancelable: true,
-                        }));
+                    function tick() {
+                        if (i >= numSteps) { resolve(results); return; }
+                        const x = chartX + step * i;
+                        const target = document.elementFromPoint(x, yMid);
+                        if (target) {
+                            target.dispatchEvent(new MouseEvent('mousemove', {
+                                clientX: x, clientY: yMid,
+                                bubbles: true, cancelable: true,
+                            }));
+                        }
+                        const text = readTooltip();
+                        if (text && text !== lastText) {
+                            results.push({step: i, x: Math.round(x), text: text});
+                            lastText = text;
+                        }
+                        i++;
+                        requestAnimationFrame(tick);
                     }
-                    const text = readTooltip();
-                    if (text && text !== lastText) {
-                        results.push({step: i, x: Math.round(x), text: text});
-                        lastText = text;
-                    }
-                    i++;
                     requestAnimationFrame(tick);
-                }
-                requestAnimationFrame(tick);
-            });
-            }""",
-            [chart_x, chart_y_mid, chart_width, step_size],
+                });
+                }""",
+                [chart_x, chart_y_mid, chart_width, step_size],
+            ),
+            timeout=120,
         )
 
         points: list[dict[str, Any]] = []

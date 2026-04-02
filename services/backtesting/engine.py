@@ -8,27 +8,14 @@ from typing import TYPE_CHECKING
 
 import pandas as pd
 
-from services.backtesting.modifiers import (
-    compute_niche_penalty,
-    compute_shelf_life,
-    compute_subtheme_premium,
+from services.backtesting.signal_registry import (
+    SignalContext,
+    compute_modifiers,
+    compute_signals,
 )
-from services.backtesting.signals import (
-    _extract_avg_price,
-    compute_collector_premium,
-    compute_demand_pressure,
-    compute_lifecycle_position,
-    compute_listing_ratio,
-    compute_new_used_spread,
-    compute_price_trend,
-    compute_price_vs_rrp,
-    compute_price_wall,
-    compute_stock_level,
-    compute_supply_velocity,
-    compute_theme_growth,
-    compute_value_opportunity,
-)
+from services.backtesting.signals import _extract_avg_price
 from services.backtesting.types import BacktestConfig, SignalSnapshot, TradeResult
+from services.backtesting.utils import safe_get, safe_get_int
 
 if TYPE_CHECKING:
     from duckdb import DuckDBPyConnection
@@ -90,16 +77,11 @@ def run_backtest(
                 metadata["set_number"] == base_id
             ]
 
-        theme = _safe_get(item_meta, "theme")
-        year_released = _safe_get_int(item_meta, "year_released")
-        year_retired = _safe_get_int(item_meta, "year_retired")
-        rrp_cents = _safe_get_int(item_meta, "rrp_cents")
-        rrp_currency = _safe_get(item_meta, "rrp_currency")
-
-        # Precompute static modifiers
-        mod_shelf_life = compute_shelf_life(year_released, year_retired)
-        mod_subtheme = compute_subtheme_premium(theme)
-        mod_niche = compute_niche_penalty(theme)
+        theme = safe_get(item_meta, "theme")
+        year_released = safe_get_int(item_meta, "year_released")
+        year_retired = safe_get_int(item_meta, "year_retired")
+        rrp_cents = safe_get_int(item_meta, "rrp_cents")
+        rrp_currency = safe_get(item_meta, "rrp_currency")
 
         # Walk forward from min_history_months onward
         for idx in range(config.min_history_months, len(item_sales)):
@@ -111,49 +93,28 @@ def run_backtest(
             if entry_price is None or entry_price <= 0:
                 continue
 
-            # Compute all signals at this point in time
+            ctx = SignalContext(
+                item_id=str(item_id),
+                eval_year=eval_year,
+                eval_month=eval_month,
+                item_sales=item_sales,
+                snapshots=snapshots,
+                theme=theme,
+                year_released=year_released,
+                year_retired=year_retired,
+                rrp_cents=rrp_cents,
+                rrp_currency=rrp_currency,
+            )
+
+            signals = compute_signals(ctx)
+            mods = compute_modifiers(ctx)
+
             snapshot = SignalSnapshot(
                 item_id=str(item_id),
                 year=eval_year,
                 month=eval_month,
-                demand_pressure=compute_demand_pressure(
-                    item_sales, eval_year, eval_month
-                ),
-                supply_velocity=compute_supply_velocity(
-                    snapshots, str(item_id), eval_year, eval_month
-                ),
-                price_trend=compute_price_trend(
-                    item_sales, eval_year, eval_month
-                ),
-                price_vs_rrp=compute_price_vs_rrp(
-                    item_sales, eval_year, eval_month, rrp_cents, rrp_currency
-                ),
-                lifecycle_position=compute_lifecycle_position(
-                    year_released, year_retired, eval_year
-                ),
-                stock_level=compute_stock_level(
-                    snapshots, str(item_id), eval_year, eval_month
-                ),
-                collector_premium=compute_collector_premium(
-                    item_sales, eval_year, eval_month
-                ),
-                theme_growth=compute_theme_growth(theme),
-                value_opportunity=compute_value_opportunity(
-                    item_sales, eval_year, eval_month
-                ),
-                price_wall=compute_price_wall(
-                    snapshots, str(item_id), eval_year, eval_month
-                ),
-                listing_ratio=compute_listing_ratio(
-                    snapshots, str(item_id), item_sales,
-                    eval_year, eval_month,
-                ),
-                new_used_spread=compute_new_used_spread(
-                    snapshots, str(item_id), eval_year, eval_month
-                ),
-                mod_shelf_life=mod_shelf_life,
-                mod_subtheme=mod_subtheme,
-                mod_niche=mod_niche,
+                **signals,
+                **mods,
             )
 
             # Calculate returns at each horizon
@@ -203,26 +164,3 @@ def _calculate_returns(
             returns[label] = None
 
     return returns
-
-
-def _safe_get(df: pd.DataFrame, col: str) -> str | None:
-    """Safely get a string value from a metadata DataFrame."""
-    if df.empty or col not in df.columns:
-        return None
-    val = df.iloc[0][col]
-    if pd.isna(val):
-        return None
-    return str(val)
-
-
-def _safe_get_int(df: pd.DataFrame, col: str) -> int | None:
-    """Safely get an int value from a metadata DataFrame."""
-    if df.empty or col not in df.columns:
-        return None
-    val = df.iloc[0][col]
-    if pd.isna(val):
-        return None
-    try:
-        return int(val)
-    except (ValueError, TypeError):
-        return None

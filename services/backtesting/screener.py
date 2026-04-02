@@ -16,26 +16,13 @@ from services.backtesting.data_loader import (
     load_monthly_sales,
     load_price_snapshots,
 )
-from services.backtesting.modifiers import (
-    compute_niche_penalty,
-    compute_shelf_life,
-    compute_subtheme_premium,
+from services.backtesting.signal_registry import (
+    SignalContext,
+    compute_modifiers,
+    compute_signals,
 )
-from services.backtesting.signals import (
-    _extract_avg_price,
-    compute_collector_premium,
-    compute_demand_pressure,
-    compute_lifecycle_position,
-    compute_listing_ratio,
-    compute_new_used_spread,
-    compute_price_trend,
-    compute_price_vs_rrp,
-    compute_price_wall,
-    compute_stock_level,
-    compute_supply_velocity,
-    compute_theme_growth,
-    compute_value_opportunity,
-)
+from services.backtesting.signals import _extract_avg_price
+from services.backtesting.utils import safe_get, safe_get_bool, safe_get_int
 
 if TYPE_CHECKING:
     from duckdb import DuckDBPyConnection
@@ -70,60 +57,34 @@ def _compute_item_signals(
     if entry_price is None or entry_price <= 0:
         return None
 
-    theme = _safe_get(item_meta, "theme")
-    title = _safe_get(item_meta, "title")
-    set_number = _safe_get(item_meta, "set_number")
-    year_released = _safe_get_int(item_meta, "year_released")
-    year_retired = _safe_get_int(item_meta, "year_retired")
-    rrp_cents = _safe_get_int(item_meta, "rrp_cents")
-    rrp_currency = _safe_get(item_meta, "rrp_currency")
-    retiring_soon = _safe_get_bool(item_meta, "retiring_soon")
-    release_date = _safe_get(item_meta, "release_date")
-    parts_count = _safe_get_int(item_meta, "parts_count")
-    rrp_usd_cents = _safe_get_int(item_meta, "rrp_usd_cents")
+    theme = safe_get(item_meta, "theme")
+    title = safe_get(item_meta, "title")
+    set_number = safe_get(item_meta, "set_number")
+    year_released = safe_get_int(item_meta, "year_released")
+    year_retired = safe_get_int(item_meta, "year_retired")
+    rrp_cents = safe_get_int(item_meta, "rrp_cents")
+    rrp_currency = safe_get(item_meta, "rrp_currency")
+    retiring_soon = safe_get_bool(item_meta, "retiring_soon")
+    release_date = safe_get(item_meta, "release_date")
+    parts_count = safe_get_int(item_meta, "parts_count")
+    rrp_usd_cents = safe_get_int(item_meta, "rrp_usd_cents")
 
-    signals = {
-        "demand_pressure": compute_demand_pressure(
-            item_sales, eval_year, eval_month
-        ),
-        "supply_velocity": compute_supply_velocity(
-            snapshots, item_id, eval_year, eval_month
-        ),
-        "price_trend": compute_price_trend(
-            item_sales, eval_year, eval_month
-        ),
-        "price_vs_rrp": compute_price_vs_rrp(
-            item_sales, eval_year, eval_month, rrp_cents, rrp_currency
-        ),
-        "lifecycle_position": compute_lifecycle_position(
-            year_released, year_retired, eval_year, retiring_soon
-        ),
-        "stock_level": compute_stock_level(
-            snapshots, item_id, eval_year, eval_month
-        ),
-        "collector_premium": compute_collector_premium(
-            item_sales, eval_year, eval_month
-        ),
-        "theme_growth": compute_theme_growth(theme),
-        "value_opportunity": compute_value_opportunity(
-            item_sales, eval_year, eval_month
-        ),
-        "price_wall": compute_price_wall(
-            snapshots, item_id, eval_year, eval_month
-        ),
-        "listing_ratio": compute_listing_ratio(
-            snapshots, item_id, item_sales, eval_year, eval_month
-        ),
-        "new_used_spread": compute_new_used_spread(
-            snapshots, item_id, eval_year, eval_month
-        ),
-    }
+    ctx = SignalContext(
+        item_id=item_id,
+        eval_year=eval_year,
+        eval_month=eval_month,
+        item_sales=item_sales,
+        snapshots=snapshots,
+        theme=theme,
+        year_released=year_released,
+        year_retired=year_retired,
+        rrp_cents=rrp_cents,
+        rrp_currency=rrp_currency,
+        retiring_soon=retiring_soon,
+    )
 
-    modifiers = {
-        "mod_shelf_life": compute_shelf_life(year_released, year_retired),
-        "mod_subtheme": compute_subtheme_premium(theme),
-        "mod_niche": compute_niche_penalty(theme),
-    }
+    signals = compute_signals(ctx)
+    modifiers = compute_modifiers(ctx)
 
     # Weighted composite score
     weights = signal_weights if signal_weights is not None else SIGNAL_WEIGHTS
@@ -199,7 +160,7 @@ def compute_item_signals(
         return None
 
     # Try item_id from metadata first, then fallback patterns
-    item_id_val = _safe_get(item_meta, "item_id")
+    item_id_val = safe_get(item_meta, "item_id")
     candidate_ids = [
         item_id_val,
         f"{set_number}-1",
@@ -275,33 +236,3 @@ def compute_all_signals_with_cohort(
 
     items = compute_all_signals(conn, condition, signal_weights)
     return enrich_with_cohort_ranks(items)
-
-
-def _safe_get(df: pd.DataFrame, col: str) -> str | None:
-    if df.empty or col not in df.columns:
-        return None
-    val = df.iloc[0][col]
-    if pd.isna(val):
-        return None
-    return str(val)
-
-
-def _safe_get_bool(df: pd.DataFrame, col: str) -> bool:
-    if df.empty or col not in df.columns:
-        return False
-    val = df.iloc[0][col]
-    if pd.isna(val):
-        return False
-    return bool(val)
-
-
-def _safe_get_int(df: pd.DataFrame, col: str) -> int | None:
-    if df.empty or col not in df.columns:
-        return None
-    val = df.iloc[0][col]
-    if pd.isna(val):
-        return None
-    try:
-        return int(val)
-    except (ValueError, TypeError):
-        return None

@@ -7,6 +7,7 @@ from contextlib import asynccontextmanager
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
+import colorlog
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -22,9 +23,23 @@ _LOG_DIR.mkdir(exist_ok=True)
 
 _LOG_FORMAT = "%(asctime)s [%(name)s] %(levelname)s: %(message)s"
 
+# Colored console handler
+_color_handler = colorlog.StreamHandler()
+_color_handler.setFormatter(colorlog.ColoredFormatter(
+    "%(asctime)s %(log_color)s[%(name)s] %(levelname)s%(reset)s: %(message)s",
+    log_colors={
+        "DEBUG": "cyan",
+        "INFO": "green",
+        "WARNING": "yellow",
+        "ERROR": "red",
+        "CRITICAL": "bold_red",
+    },
+))
+_color_handler.setLevel(logging.INFO)
+
 logging.basicConfig(
     level=logging.INFO,
-    format=_LOG_FORMAT,
+    handlers=[_color_handler],
 )
 
 # Persist logs to rotating file (10 MB per file, keep 5 backups)
@@ -71,18 +86,38 @@ async def lifespan(app: FastAPI):
     logger.info("Background worker, enrichment/saturation/image sweeps + scrape dispatcher started")
     yield
     logger.info("BWS API shutting down...")
-    # Signal dispatcher workers to finish current task and stop
+    # Everything inside _shutdown has a hard 10s ceiling
+    all_tasks = [worker_task, sweep_task, saturation_task, image_task, scrape_dispatcher_task]
+    try:
+        await asyncio.wait_for(_shutdown(all_tasks), timeout=10)
+    except (asyncio.TimeoutError, asyncio.CancelledError):
+        logger.warning("Shutdown timed out -- force-cancelling all tasks")
+        for task in all_tasks:
+            task.cancel()
+    # Always checkpoint, no matter what happened above
+    from db.connection import get_connection
+    conn = get_connection()
+    try:
+        conn.execute("FORCE CHECKPOINT")
+        logger.info("Shutdown checkpoint completed -- WAL flushed")
+    except Exception:
+        logger.warning("Shutdown checkpoint FAILED -- WAL data may be at risk", exc_info=True)
+    finally:
+        conn.close()
+    logger.info("BWS API shut down")
+
+
+async def _shutdown(tasks: list[asyncio.Task]) -> None:
+    """Graceful shutdown sequence with no unbounded waits."""
+    # Signal dispatcher to stop after current task
     shutdown_scrape_dispatcher()
-    # Cancel all background tasks
-    tasks = [worker_task, sweep_task, saturation_task, image_task, scrape_dispatcher_task]
+    # Kill browsers (Ctrl+C already killed subprocesses via SIGINT)
+    from services.browser import close_all_browsers
+    close_all_browsers()
+    # Cancel all tasks and wait for them to finish
     for task in tasks:
         task.cancel()
-    # Wait for all tasks to finish with a timeout
-    results = await asyncio.gather(*tasks, return_exceptions=True)
-    for task, result in zip(tasks, results):
-        if isinstance(result, Exception) and not isinstance(result, asyncio.CancelledError):
-            logger.warning("Task %s raised during shutdown: %s", task.get_name(), result)
-    logger.info("BWS API shut down")
+    await asyncio.gather(*tasks, return_exceptions=True)
 
 
 app = FastAPI(

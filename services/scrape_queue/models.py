@@ -1,9 +1,24 @@
-"""Scrape queue models -- task types, statuses, priorities, and dependencies."""
+"""Scrape queue models -- task types, statuses, priorities, and dependencies.
+
+Also defines ``ExecutorResult`` (the typed contract between executors and
+the dispatcher) and ``TaskTypeConfig`` (single-source-of-truth for every
+per-type knob the dispatcher needs).
+"""
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from enum import Enum
+from typing import TYPE_CHECKING, Protocol
+
+if TYPE_CHECKING:
+    from duckdb import DuckDBPyConnection
+
+
+# ---------------------------------------------------------------------------
+# Enums
+# ---------------------------------------------------------------------------
 
 
 class TaskType(str, Enum):
@@ -20,6 +35,90 @@ class TaskStatus(str, Enum):
     RUNNING = "running"
     COMPLETED = "completed"
     FAILED = "failed"
+
+
+# ---------------------------------------------------------------------------
+# Executor result -- replaces the fragile (bool, str|None) + "cooldown:" hack
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class ExecutorResult:
+    """Typed return value from every executor function.
+
+    Replaces the old ``(bool, str | None)`` tuple where cooldowns were
+    encoded as magic ``"cooldown:123"`` strings.
+
+    Exactly one of ``success``, ``error``, or ``cooldown_seconds`` should
+    be set per result:
+      - success=True, error=None, cooldown=None  -> task completed
+      - success=False, error="...", cooldown=None -> task failed
+      - success=False, error=None, cooldown=3600  -> source in cooldown
+    """
+
+    success: bool
+    error: str | None = None
+    cooldown_seconds: float | None = None
+
+    @staticmethod
+    def ok() -> ExecutorResult:
+        return ExecutorResult(success=True)
+
+    @staticmethod
+    def fail(error: str) -> ExecutorResult:
+        return ExecutorResult(success=False, error=error)
+
+    @staticmethod
+    def cooldown(seconds: float) -> ExecutorResult:
+        return ExecutorResult(success=False, cooldown_seconds=seconds)
+
+    @property
+    def is_cooldown(self) -> bool:
+        return self.cooldown_seconds is not None and self.cooldown_seconds > 0
+
+
+# ---------------------------------------------------------------------------
+# Executor protocol -- type-safe interface for all executor functions
+# ---------------------------------------------------------------------------
+
+
+class Executor(Protocol):
+    """Interface that every task-type executor must satisfy."""
+
+    def __call__(
+        self,
+        conn: DuckDBPyConnection,
+        set_number: str,
+    ) -> ExecutorResult: ...
+
+
+# ---------------------------------------------------------------------------
+# Per-type configuration -- single source of truth
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class TaskTypeConfig:
+    """All dispatcher knobs for a single task type, in one place.
+
+    Adding a new task type means adding ONE entry to TASK_TYPE_CONFIGS
+    instead of updating 5+ separate dicts.
+    """
+
+    task_type: TaskType
+    executor: Executor
+    concurrency: int = 1
+    timeout_seconds: float = 300
+    browser_profile: str | None = None
+
+    @property
+    def uses_browser(self) -> bool:
+        return self.browser_profile is not None
+
+
+# ---------------------------------------------------------------------------
+# Task model
+# ---------------------------------------------------------------------------
 
 
 @dataclass(frozen=True)
@@ -40,6 +139,10 @@ class ScrapeTask:
     locked_by: str | None
     locked_at: object | None
 
+
+# ---------------------------------------------------------------------------
+# Static tables
+# ---------------------------------------------------------------------------
 
 # Lower number = higher priority.  Priority 1 tasks run first.
 TASK_PRIORITIES: dict[TaskType, int] = {

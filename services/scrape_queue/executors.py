@@ -1,7 +1,8 @@
 """Scrape task executors -- one function per task type.
 
-Each executor is extracted from the monolithic enrichment worker and reuses
-existing fetchers/scrapers.  Every executor returns ``(success, error)``.
+Each executor returns an ``ExecutorResult`` (typed, not a raw tuple).
+Browser-based executors use ``PersistentBrowser`` to reuse a single
+Firefox instance across tasks.
 """
 
 from __future__ import annotations
@@ -11,23 +12,56 @@ import threading
 import time
 from typing import TYPE_CHECKING
 
+from services.scrape_queue.models import ExecutorResult
+
 if TYPE_CHECKING:
     from duckdb import DuckDBPyConnection
 
 logger = logging.getLogger("bws.scrape_queue.executor")
 
-# Consecutive 0-field results threshold before assuming silent IP ban.
-_SILENT_BAN_THRESHOLD = 5
-_consecutive_zero_fields = 0
+
+# ---------------------------------------------------------------------------
+# BrickLink -- tracks consecutive 0-field responses for silent ban detection
+# ---------------------------------------------------------------------------
+
+
+class _BrickLinkBanTracker:
+    """Thread-safe tracker for consecutive 0-field BrickLink responses.
+
+    Triggers a "silent ban" cooldown after N consecutive zero-field results,
+    indicating BrickLink is serving empty pages without an explicit 429.
+    """
+
+    THRESHOLD = 5
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._consecutive_zeros = 0
+
+    def record_zero(self) -> bool:
+        """Record a 0-field response. Returns True if threshold hit."""
+        with self._lock:
+            self._consecutive_zeros += 1
+            return self._consecutive_zeros >= self.THRESHOLD
+
+    def reset(self) -> None:
+        with self._lock:
+            self._consecutive_zeros = 0
+
+    @property
+    def count(self) -> int:
+        with self._lock:
+            return self._consecutive_zeros
+
+
+_bl_ban_tracker = _BrickLinkBanTracker()
 
 
 def execute_bricklink_metadata(
     conn: DuckDBPyConnection,
     set_number: str,
-) -> tuple[bool, str | None]:
+) -> ExecutorResult:
     """Scrape BrickLink catalog page and store enrichment fields."""
-    global _consecutive_zero_fields  # noqa: PLW0603
-
     from config.settings import BRICKLINK_RATE_LIMITER
     from services.enrichment.circuit_breaker import CircuitBreakerState
     from services.enrichment.fetchers import fetch_from_bricklink
@@ -36,14 +70,14 @@ def execute_bricklink_metadata(
     from services.enrichment.types import SourceId
     from services.items.repository import get_item_detail
 
-    # Check cooldown before doing any work -- signal dispatcher to pause
     remaining = BRICKLINK_RATE_LIMITER.cooldown_remaining()
     if remaining > 0:
-        return False, f"cooldown:{remaining:.0f}"
+        logger.info("BrickLink in cooldown -- %d min remaining", int(remaining / 60))
+        return ExecutorResult.cooldown(remaining)
 
     item = get_item_detail(conn, set_number)
     if not item:
-        return False, f"Item {set_number} not found in lego_items"
+        return ExecutorResult.fail(f"Item {set_number} not found in lego_items")
 
     fetchers = {
         SourceId.BRICKLINK: lambda sn: fetch_from_bricklink(conn, sn),
@@ -53,22 +87,19 @@ def execute_bricklink_metadata(
     result, _ = enrich(set_number, item, fetchers, cb_state)
 
     if result.fields_found == 0:
-        _consecutive_zero_fields += 1
-        if _consecutive_zero_fields >= _SILENT_BAN_THRESHOLD:
+        if _bl_ban_tracker.record_zero():
             logger.warning(
-                "Silent ban detected: %d consecutive 0-field responses — tripping circuit breaker",
-                _consecutive_zero_fields,
+                "Silent ban detected: %d consecutive 0-field responses "
+                "-- tripping circuit breaker",
+                _bl_ban_tracker.count,
             )
             BRICKLINK_RATE_LIMITER.trip_silent_ban()
-            _consecutive_zero_fields = 0
-            remaining = BRICKLINK_RATE_LIMITER.cooldown_remaining()
-            return False, f"cooldown:{remaining:.0f}"
-        return False, "No data returned (0 fields)"
+            _bl_ban_tracker.reset()
+            return ExecutorResult.cooldown(BRICKLINK_RATE_LIMITER.cooldown_remaining())
+        return ExecutorResult.fail("No data returned (0 fields)")
 
-    # Success — reset failure counters
-    _consecutive_zero_fields = 0
+    _bl_ban_tracker.reset()
     BRICKLINK_RATE_LIMITER.record_success()
-
     store_enrichment_result(conn, result)
 
     logger.info(
@@ -77,34 +108,60 @@ def execute_bricklink_metadata(
         result.fields_found,
         len(result.field_results),
     )
-    return True, None
+    return ExecutorResult.ok()
+
+
+# ---------------------------------------------------------------------------
+# BrickEconomy -- browser-based, uses PersistentBrowser
+# ---------------------------------------------------------------------------
 
 
 def execute_brickeconomy(
     conn: DuckDBPyConnection,
     set_number: str,
-) -> tuple[bool, str | None]:
+) -> ExecutorResult:
     """Scrape BrickEconomy and store enrichment fields + snapshot."""
+    from config.settings import BRICKECONOMY_CONFIG
+    from services.brickeconomy.scraper import scrape_with_search
+    from services.browser import BrowserConfig, get_persistent_browser
     from services.enrichment.circuit_breaker import CircuitBreakerState
-    from services.enrichment.fetchers import fetch_from_brickeconomy
     from services.enrichment.orchestrator import enrich
     from services.enrichment.repository import store_enrichment_result
+    from services.enrichment.source_adapter import adapt_brickeconomy, make_failed_result
     from services.enrichment.types import SourceId
     from services.items.repository import get_item_detail
 
     item = get_item_detail(conn, set_number)
     if not item:
-        return False, f"Item {set_number} not found in lego_items"
+        return ExecutorResult.fail(f"Item {set_number} not found in lego_items")
 
-    fetchers = {
-        SourceId.BRICKECONOMY: lambda sn: fetch_from_brickeconomy(conn, sn),
-    }
+    browser = get_persistent_browser(BrowserConfig(
+        profile_name="brickeconomy",
+        headless=BRICKECONOMY_CONFIG.headless,
+        locale=BRICKECONOMY_CONFIG.locale,
+    ))
 
+    def _fetch_be(sn: str):
+        from services.brickeconomy.repository import record_current_value, save_snapshot
+
+        scrape_result = browser.run(scrape_with_search, sn)
+
+        if not scrape_result.success:
+            return make_failed_result(SourceId.BRICKECONOMY, scrape_result.error or "Unknown error")
+        if scrape_result.snapshot is None:
+            return make_failed_result(SourceId.BRICKECONOMY, "No data returned")
+
+        save_snapshot(conn, scrape_result.snapshot)
+        record_current_value(conn, scrape_result.snapshot)
+        return adapt_brickeconomy(scrape_result.snapshot)
+
+    fetchers = {SourceId.BRICKECONOMY: _fetch_be}
     cb_state = CircuitBreakerState()
     result, _ = enrich(set_number, item, fetchers, cb_state)
 
     if result.fields_found == 0:
-        return False, "BrickEconomy returned no data (0 fields)"
+        browser.restart()
+        return ExecutorResult.fail("BrickEconomy returned no data (0 fields)")
 
     store_enrichment_result(conn, result)
 
@@ -114,50 +171,65 @@ def execute_brickeconomy(
         result.fields_found,
         len(result.field_results),
     )
-    return True, None
+    return ExecutorResult.ok()
+
+
+# ---------------------------------------------------------------------------
+# Keepa -- browser-based, uses PersistentBrowser
+# ---------------------------------------------------------------------------
 
 
 def execute_keepa(
     conn: DuckDBPyConnection,
     set_number: str,
-) -> tuple[bool, str | None]:
-    """Scrape Keepa for Amazon price history.
-
-    Called from a sync thread (via asyncio.to_thread), so asyncio.run()
-    is safe and correct -- no event loop exists in this thread.
-    """
-    import asyncio
-
+) -> ExecutorResult:
+    """Scrape Keepa for Amazon price history."""
+    from config.settings import KEEPA_CONFIG
+    from services.browser import BrowserConfig, get_persistent_browser
     from services.keepa.repository import record_keepa_prices, save_keepa_snapshot
     from services.keepa.scheduler import record_keepa_failure, record_keepa_success
-    from services.keepa.scraper import scrape_keepa
+    from services.keepa.scraper import scrape_with_page
+
+    browser = get_persistent_browser(BrowserConfig(
+        profile_name="keepa",
+        headless=KEEPA_CONFIG.headless,
+        locale=KEEPA_CONFIG.locale,
+        window=(KEEPA_CONFIG.viewport_width, KEEPA_CONFIG.viewport_height),
+    ))
 
     try:
-        result = asyncio.run(scrape_keepa(set_number))
+        result = browser.run(scrape_with_page, set_number)
     except Exception as exc:
         record_keepa_failure(set_number)
-        return False, str(exc)
+        browser.restart()
+        return ExecutorResult.fail(str(exc))
 
     if not result.success:
         record_keepa_failure(set_number)
-        return False, result.error or "Keepa scrape failed"
+        browser.restart()
+        return ExecutorResult.fail(result.error or "Keepa scrape failed")
 
     record_keepa_success(set_number)
     try:
         save_keepa_snapshot(conn, result.product_data)
     except Exception:
         logger.error("Keepa snapshot insert failed for %s", set_number, exc_info=True)
-        return False, "Failed to save Keepa snapshot"
+        return ExecutorResult.fail("Failed to save Keepa snapshot")
     record_keepa_prices(conn, result.product_data)
 
     logger.info("Keepa for %s: OK", set_number)
-    return True, None
+    return ExecutorResult.ok()
+
+
+# ---------------------------------------------------------------------------
+# Minifigures
+# ---------------------------------------------------------------------------
 
 
 def execute_minifigures(
     conn: DuckDBPyConnection,
     set_number: str,
-) -> tuple[bool, str | None]:
+) -> ExecutorResult:
     """Scrape BrickLink minifigure inventory and individual minifig pages."""
     from services.bricklink.scraper import scrape_set_minifigures_sync
     from services.enrichment.config import PRICING_FRESHNESS
@@ -169,7 +241,9 @@ def execute_minifigures(
         [item_id],
     ).fetchone()
     if not bl_row:
-        return False, f"BrickLink item {item_id} not found (metadata not scraped?)"
+        return ExecutorResult.fail(
+            f"BrickLink item {item_id} not found (metadata not scraped?)"
+        )
 
     mf_result = scrape_set_minifigures_sync(
         conn, item_id, save=True, scrape_prices=True,
@@ -181,29 +255,62 @@ def execute_minifigures(
         mf_result.minifigures_scraped,
         mf_result.minifig_count,
     )
-    return True, None
+    return ExecutorResult.ok()
 
 
-# Google Trends rate-limit cooldown (module-level, thread-safe).
-_TRENDS_COOLDOWN_SECONDS = 3600
-_trends_lock = threading.Lock()
-_trends_last_failure_at: float | None = None
+# ---------------------------------------------------------------------------
+# Google Trends -- thread-safe cooldown tracker
+# ---------------------------------------------------------------------------
+
+
+class _TrendsCooldown:
+    """Thread-safe cooldown state for Google Trends rate limiting.
+
+    Only enters cooldown on actual rate-limit responses (429), not on
+    data errors like invalid year_released values.
+    """
+
+    DURATION_SECONDS = 3600
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._last_failure_at: float | None = None
+
+    def remaining(self) -> float:
+        """Seconds remaining in cooldown, or 0 if inactive."""
+        with self._lock:
+            if self._last_failure_at is None:
+                return 0.0
+            elapsed = time.time() - self._last_failure_at
+            return max(self.DURATION_SECONDS - elapsed, 0.0)
+
+    def activate(self) -> None:
+        """Enter cooldown (called on rate-limit only)."""
+        with self._lock:
+            self._last_failure_at = time.time()
+        logger.warning(
+            "Google Trends rate limited -- entering %ds cooldown",
+            self.DURATION_SECONDS,
+        )
+
+    def clear(self) -> None:
+        """Clear cooldown after a successful request."""
+        with self._lock:
+            self._last_failure_at = None
+
+
+_trends_cooldown = _TrendsCooldown()
 
 
 def get_trends_cooldown_remaining() -> float:
-    """Return seconds remaining in Google Trends cooldown, or 0 if inactive."""
-    with _trends_lock:
-        if _trends_last_failure_at is None:
-            return 0.0
-        elapsed = time.time() - _trends_last_failure_at
-        remaining = _TRENDS_COOLDOWN_SECONDS - elapsed
-        return max(remaining, 0.0)
+    """Public accessor for the dispatcher timeout handler."""
+    return _trends_cooldown.remaining()
 
 
 def execute_google_trends(
     conn: DuckDBPyConnection,
     set_number: str,
-) -> tuple[bool, str | None]:
+) -> ExecutorResult:
     """Fetch Google Trends interest data for a LEGO set."""
     from datetime import datetime, timedelta, timezone
 
@@ -211,35 +318,28 @@ def execute_google_trends(
     from services.google_trends.repository import save_trends_snapshot
     from services.google_trends.scraper import fetch_interest
 
-    global _trends_last_failure_at  # noqa: PLW0603
+    # Check cooldown
+    remaining = _trends_cooldown.remaining()
+    if remaining > 0:
+        return ExecutorResult.cooldown(remaining)
 
-    # Check cooldown (thread-safe)
-    with _trends_lock:
-        if _trends_last_failure_at is not None:
-            elapsed = time.time() - _trends_last_failure_at
-            if elapsed < _TRENDS_COOLDOWN_SECONDS:
-                remaining = _TRENDS_COOLDOWN_SECONDS - elapsed
-                return False, f"cooldown:{remaining:.0f}"
-
-    # Get prerequisites from DB
+    # Prerequisites
     item_row = conn.execute(
         "SELECT title, year_released FROM lego_items WHERE set_number = ?",
         [set_number],
     ).fetchone()
     if not item_row or not item_row[0] or not item_row[1]:
-        return False, "Missing title or year_released"
+        return ExecutorResult.fail("Missing title or year_released")
 
     title, year_released = item_row[0], int(item_row[1])
     if is_placeholder_title(title):
-        return False, "Placeholder title"
+        return ExecutorResult.fail("Placeholder title")
 
-    # Check freshness
+    # Freshness check
     row = conn.execute(
-        """
-        SELECT scraped_at FROM google_trends_snapshots
-        WHERE set_number = ?
-        ORDER BY scraped_at DESC LIMIT 1
-        """,
+        """SELECT scraped_at FROM google_trends_snapshots
+           WHERE set_number = ?
+           ORDER BY scraped_at DESC LIMIT 1""",
         [set_number],
     ).fetchone()
     if row and row[0]:
@@ -249,20 +349,20 @@ def execute_google_trends(
             scraped_at = parse_timestamp(scraped_at)
         cutoff = datetime.now(tz=timezone.utc) - timedelta(days=30)
         if scraped_at and scraped_at > cutoff:
-            return True, None  # Already fresh
+            return ExecutorResult.ok()  # Already fresh
 
     # Fetch
     trends_result = fetch_interest(set_number, year_released=year_released)
     if not trends_result.success:
-        with _trends_lock:
-            _trends_last_failure_at = time.time()
         if trends_result.rate_limited:
-            return False, f"cooldown:{_TRENDS_COOLDOWN_SECONDS}"
-        return False, trends_result.error or "Google Trends fetch failed"
+            _trends_cooldown.activate()
+            return ExecutorResult.cooldown(_trends_cooldown.DURATION_SECONDS)
+        return ExecutorResult.fail(
+            trends_result.error or "Google Trends fetch failed"
+        )
 
     save_trends_snapshot(conn, trends_result.data)
-    with _trends_lock:
-        _trends_last_failure_at = None
+    _trends_cooldown.clear()
 
     logger.info(
         "Google Trends for %s: %d pts, peak=%s",
@@ -270,4 +370,4 @@ def execute_google_trends(
         len(trends_result.data.interest_over_time),
         trends_result.data.peak_value,
     )
-    return True, None
+    return ExecutorResult.ok()

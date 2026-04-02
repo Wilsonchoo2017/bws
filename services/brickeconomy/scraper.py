@@ -109,7 +109,7 @@ async def scrape_set(
 
     try:
         if page is not None:
-            return await _scrape_with_search(page, set_number)
+            return await scrape_with_search(page, set_number)
 
         async with stealth_browser(
             headless=headless,
@@ -117,7 +117,7 @@ async def scrape_set(
             profile_name="brickeconomy",
         ) as browser:
             p = await new_page(browser)
-            return await _scrape_with_search(p, set_number)
+            return await scrape_with_search(p, set_number)
 
     except Exception as exc:
         logger.exception("BrickEconomy scrape failed for set: %s", set_number)
@@ -143,7 +143,10 @@ async def _navigate_and_bypass_cf(page, url: str, set_number: str) -> bool:
         await page.goto(url, wait_until="domcontentloaded")
         await human_delay(2_000, 4_000)
 
-    await page.wait_for_load_state("networkidle")
+    try:
+        await page.wait_for_load_state("networkidle", timeout=30_000)
+    except Exception:
+        logger.debug("networkidle timeout on %s, continuing anyway", url)
     await human_delay(1_000, 2_000)
     return True
 
@@ -187,7 +190,10 @@ async def _resolve_set_url(page, set_number: str) -> str | None:
         )
 
     await human_delay(2_000, 4_000)
-    await page.wait_for_load_state("networkidle")
+    try:
+        await page.wait_for_load_state("networkidle", timeout=30_000)
+    except Exception:
+        logger.debug("networkidle timeout on search results, continuing")
     await human_delay(1_000, 2_000)
 
     final_url = page.url
@@ -227,7 +233,7 @@ async def _resolve_set_url(page, set_number: str) -> str | None:
     return None
 
 
-async def _scrape_with_search(page, set_number: str) -> BrickeconomyScrapeResult:
+async def scrape_with_search(page, set_number: str) -> BrickeconomyScrapeResult:
     """Resolve the set URL via search bar, then scrape the page."""
     resolved = await _resolve_set_url(page, set_number)
     if not resolved:

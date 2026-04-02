@@ -3,12 +3,18 @@
 Each task type (BrickLink, BrickEconomy, Keepa, etc.) gets its own
 worker coroutine so all data sources make progress concurrently,
 regardless of how many pending tasks other sources have.
+
+All per-type configuration lives in ``TASK_TYPE_CONFIGS`` -- adding a
+new scraper means adding ONE entry there, not updating 5+ dicts.
 """
 
 from __future__ import annotations
 
 import asyncio
 import logging
+import os
+import signal
+import subprocess
 from typing import TYPE_CHECKING
 
 from services.scrape_queue.executors import (
@@ -19,7 +25,11 @@ from services.scrape_queue.executors import (
     execute_minifigures,
     get_trends_cooldown_remaining,
 )
-from services.scrape_queue.models import TaskType
+from services.scrape_queue.models import (
+    ExecutorResult,
+    TaskType,
+    TaskTypeConfig,
+)
 from services.scrape_queue.repository import (
     claim_next,
     complete_task,
@@ -28,49 +38,62 @@ from services.scrape_queue.repository import (
     force_fail_task,
     re_evaluate_blocked,
     reclaim_stale,
+    requeue_for_cooldown,
 )
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
     from duckdb import DuckDBPyConnection
 
 logger = logging.getLogger("bws.scrape_queue.dispatcher")
 
-# Shutdown flag -- set by the lifespan handler to signal workers to stop
+
+# ---------------------------------------------------------------------------
+# Single source of truth -- one entry per task type
+# ---------------------------------------------------------------------------
+
+TASK_TYPE_CONFIGS: dict[TaskType, TaskTypeConfig] = {
+    TaskType.BRICKLINK_METADATA: TaskTypeConfig(
+        task_type=TaskType.BRICKLINK_METADATA,
+        executor=execute_bricklink_metadata,
+        concurrency=2,
+        timeout_seconds=300,
+    ),
+    TaskType.BRICKECONOMY: TaskTypeConfig(
+        task_type=TaskType.BRICKECONOMY,
+        executor=execute_brickeconomy,
+        concurrency=1,
+        timeout_seconds=300,
+        browser_profile="brickeconomy-profile",
+    ),
+    TaskType.KEEPA: TaskTypeConfig(
+        task_type=TaskType.KEEPA,
+        executor=execute_keepa,
+        concurrency=1,
+        timeout_seconds=300,
+        browser_profile="keepa-profile",
+    ),
+    TaskType.MINIFIGURES: TaskTypeConfig(
+        task_type=TaskType.MINIFIGURES,
+        executor=execute_minifigures,
+        concurrency=1,
+        timeout_seconds=600,
+    ),
+    TaskType.GOOGLE_TRENDS: TaskTypeConfig(
+        task_type=TaskType.GOOGLE_TRENDS,
+        executor=execute_google_trends,
+        concurrency=1,
+        timeout_seconds=180,
+    ),
+}
+
+
+# ---------------------------------------------------------------------------
+# Shutdown flag
+# ---------------------------------------------------------------------------
+
 _shutting_down = False
-
-_EXECUTOR_MAP: dict[TaskType, Callable] = {
-    TaskType.BRICKLINK_METADATA: execute_bricklink_metadata,
-    TaskType.BRICKECONOMY: execute_brickeconomy,
-    TaskType.KEEPA: execute_keepa,
-    TaskType.MINIFIGURES: execute_minifigures,
-    TaskType.GOOGLE_TRENDS: execute_google_trends,
-}
-
-# Max concurrent workers per task type.
-# Browser-based scrapers (Keepa, BrickEconomy) limited to 1.
-_MAX_CONCURRENCY: dict[TaskType, int] = {
-    TaskType.BRICKLINK_METADATA: 2,
-    TaskType.BRICKECONOMY: 1,
-    TaskType.KEEPA: 1,
-    TaskType.MINIFIGURES: 1,
-    TaskType.GOOGLE_TRENDS: 1,
-}
-
-# Seconds to sleep when a type's queue is empty.
 _POLL_INTERVAL = 3
-
-# Per-type executor timeout (seconds).  Prevents tasks from hanging
-# indefinitely due to browser/network issues and breaking the reclaim loop.
-_EXECUTOR_TIMEOUT: dict[TaskType, float] = {
-    TaskType.BRICKLINK_METADATA: 300,   # 5 min
-    TaskType.BRICKECONOMY: 300,         # 5 min
-    TaskType.KEEPA: 300,                # 5 min
-    TaskType.MINIFIGURES: 600,          # 10 min (sets with many minifigs)
-    TaskType.GOOGLE_TRENDS: 180,        # 3 min (60s request delay + overhead)
-}
-
-# Schema initialization flag (set once, read by all workers).
+_CHECKPOINT_INTERVAL = 30  # seconds between WAL flushes
 _schema_initialized = False
 
 
@@ -81,11 +104,48 @@ def shutdown_scrape_dispatcher() -> None:
     logger.info("Scrape dispatcher shutdown requested")
 
 
-async def recover_scrape_queue() -> None:
-    """Crash recovery: reclaim stale tasks and re-evaluate blocked ones.
+def checkpoint_database() -> None:
+    """Flush the WAL to the main DB file.
 
-    Called once during application startup before the dispatcher starts.
+    Called during shutdown and periodically to minimize data loss
+    if the process is killed ungracefully.
     """
+    from db.connection import get_connection
+
+    conn = get_connection()
+    try:
+        conn.execute("FORCE CHECKPOINT")
+        logger.debug("Database checkpoint completed")
+    except Exception:
+        logger.debug("Database checkpoint skipped", exc_info=True)
+    finally:
+        conn.close()
+
+
+async def _periodic_checkpoint() -> None:
+    """Flush WAL to the main DB file every CHECKPOINT_INTERVAL seconds."""
+    while not _shutting_down:
+        try:
+            await asyncio.sleep(_CHECKPOINT_INTERVAL)
+        except asyncio.CancelledError:
+            return
+        if _shutting_down:
+            return
+        try:
+            await asyncio.to_thread(checkpoint_database)
+        except asyncio.CancelledError:
+            return
+        except Exception:
+            logger.warning("Periodic checkpoint failed", exc_info=True)
+
+
+# ---------------------------------------------------------------------------
+# Startup recovery
+# ---------------------------------------------------------------------------
+
+
+async def recover_scrape_queue() -> None:
+    """Crash recovery: reclaim stale tasks and re-evaluate blocked ones."""
     from db.connection import get_connection
     from db.schema import init_schema
 
@@ -97,59 +157,66 @@ async def recover_scrape_queue() -> None:
         if reclaimed or unblocked:
             logger.info(
                 "Scrape queue recovery: reclaimed=%d, unblocked=%d",
-                reclaimed,
-                unblocked,
+                reclaimed, unblocked,
             )
     finally:
         conn.close()
 
 
-async def run_scrape_dispatcher(**_kwargs: object) -> None:
-    """Spawn independent workers for each task type.
+# ---------------------------------------------------------------------------
+# Dispatcher entry point
+# ---------------------------------------------------------------------------
 
-    Each data source gets its own worker(s) so BrickEconomy, Keepa,
-    Google Trends etc. all make progress simultaneously.
-    """
+
+async def run_scrape_dispatcher(**_kwargs: object) -> None:
+    """Spawn independent workers for each task type."""
     workers: list[asyncio.Task] = []
 
-    for task_type in TaskType:
-        concurrency = _MAX_CONCURRENCY.get(task_type, 1)
-        for i in range(concurrency):
+    for task_type, cfg in TASK_TYPE_CONFIGS.items():
+        for i in range(cfg.concurrency):
             worker_id = (
-                f"{task_type.value}-{i}" if concurrency > 1
+                f"{task_type.value}-{i}" if cfg.concurrency > 1
                 else task_type.value
             )
             workers.append(
-                asyncio.create_task(_worker_loop(worker_id, task_type))
+                asyncio.create_task(_worker_loop(worker_id, cfg))
             )
+
+    # Periodic checkpoint to flush WAL to the main DB file
+    workers.append(asyncio.create_task(_periodic_checkpoint()))
 
     logger.info(
         "Scrape dispatcher started: %d workers across %d task types",
-        len(workers),
-        len(TaskType),
+        len(workers), len(TASK_TYPE_CONFIGS),
     )
     await asyncio.gather(*workers)
 
 
-async def _worker_loop(worker_id: str, task_type: TaskType) -> None:
-    """Single worker: claim a task of the given type, execute it, repeat."""
-    timeout = _EXECUTOR_TIMEOUT.get(task_type, 300)
+# ---------------------------------------------------------------------------
+# Worker loop
+# ---------------------------------------------------------------------------
+
+
+async def _worker_loop(worker_id: str, cfg: TaskTypeConfig) -> None:
+    """Single worker: claim a task, execute it, repeat."""
     while not _shutting_down:
         try:
             try:
                 result = await asyncio.wait_for(
                     asyncio.to_thread(
-                        _claim_and_execute, worker_id, task_type
+                        _claim_and_execute, worker_id, cfg,
                     ),
-                    timeout=timeout,
+                    timeout=cfg.timeout_seconds,
                 )
             except asyncio.TimeoutError:
                 logger.error(
                     "[%s] Executor timed out after %ds, force-failing task",
-                    worker_id, timeout,
+                    worker_id, cfg.timeout_seconds,
                 )
-                _fail_current_task(worker_id, task_type)
-                if task_type == TaskType.GOOGLE_TRENDS:
+                _fail_current_task(worker_id, cfg)
+                if cfg.uses_browser:
+                    await asyncio.sleep(3)
+                if cfg.task_type == TaskType.GOOGLE_TRENDS:
                     remaining = get_trends_cooldown_remaining()
                     if remaining > 0:
                         logger.info(
@@ -166,18 +233,16 @@ async def _worker_loop(worker_id: str, task_type: TaskType) -> None:
             logger.info("[%s] Worker cancelled, shutting down", worker_id)
             return
 
-        # float return = cooldown seconds, sleep until source is available
-        if isinstance(result, float):
-            logger.info(
-                "[%s] Source in cooldown, sleeping %.0fs",
-                worker_id, result,
-            )
+        if isinstance(result, float) and result > 0:
+            # Source in cooldown -- sleep until available
+            logger.info("[%s] Source in cooldown, sleeping %.0fs", worker_id, result)
             try:
                 await asyncio.sleep(result)
             except asyncio.CancelledError:
                 logger.info("[%s] Worker cancelled during cooldown sleep", worker_id)
                 return
-        elif not result:
+        elif result is None:
+            # Queue empty
             try:
                 await asyncio.sleep(_POLL_INTERVAL)
             except asyncio.CancelledError:
@@ -185,31 +250,20 @@ async def _worker_loop(worker_id: str, task_type: TaskType) -> None:
                 return
 
 
-def _fail_current_task(worker_id: str, task_type: TaskType) -> None:
-    """Force-fail whatever task this worker currently has locked.
-
-    Opens a fresh DB connection so it works even when the executor's
-    connection is still in use by the (now-orphaned) thread.
-    Timeouts are non-retriable -- the task is failed immediately.
-    """
-    from db.connection import get_connection
-
-    conn = get_connection()
-    try:
-        force_fail_by_worker(
-            conn, worker_id, task_type.value, "Executor timed out"
-        )
-    finally:
-        conn.close()
+# ---------------------------------------------------------------------------
+# Claim + execute (runs in thread via asyncio.to_thread)
+# ---------------------------------------------------------------------------
 
 
-def _claim_and_execute(worker_id: str, task_type: TaskType) -> bool | float:
-    """Claim the next pending task of the given type and run its executor.
+def _claim_and_execute(
+    worker_id: str,
+    cfg: TaskTypeConfig,
+) -> float | None:
+    """Claim the next pending task and run its executor.
 
     Returns:
-        True  — a task was executed (success or failure)
-        False — the queue was empty
-        float — executor returned a cooldown; value is seconds to sleep
+        None   -- queue was empty OR task executed (success/failure)
+        float  -- cooldown seconds; dispatcher should sleep this long
     """
     global _schema_initialized  # noqa: PLW0603
 
@@ -223,68 +277,98 @@ def _claim_and_execute(worker_id: str, task_type: TaskType) -> bool | float:
 
     try:
         try:
-            task = claim_next(conn, worker_id, task_type)
+            task = claim_next(conn, worker_id, cfg.task_type)
         except Exception as exc:
             if "Conflict" in str(exc):
                 logger.debug("[%s] Transaction conflict on claim, will retry", worker_id)
-                return False
+                return None
             raise
         if task is None:
-            return False
+            return None
 
         logger.info(
             "[%s] %s (attempt %d/%d)",
-            worker_id,
-            task.set_number,
-            task.attempt_count,
-            task.max_attempts,
+            worker_id, task.set_number,
+            task.attempt_count, task.max_attempts,
         )
 
-        executor = _EXECUTOR_MAP.get(task.task_type)
-        if executor is None:
-            fail_task(conn, task.task_id, f"No executor for {task.task_type.value}")
-            return True
-
         try:
-            success, error = executor(conn, task.set_number)
+            result = cfg.executor(conn, task.set_number)
         except Exception as exc:
-            logger.exception(
-                "[%s] %s failed", worker_id, task.set_number,
-            )
+            logger.exception("[%s] %s crashed", worker_id, task.set_number)
             fail_task(conn, task.task_id, str(exc))
-            return True
+            return None
 
-        if success:
-            complete_task(conn, task.task_id)
-            logger.info("[%s] %s completed", worker_id, task.set_number)
-        elif error and error.startswith("cooldown:"):
-            # Source is in cooldown — put task back to pending (don't burn
-            # attempts) and tell the worker loop to sleep until cooldown ends.
-            sleep_seconds = float(error.split(":", 1)[1])
-            conn.execute(
-                """UPDATE scrape_tasks
-                   SET status = 'pending', locked_by = NULL, locked_at = NULL,
-                       attempt_count = attempt_count - 1
-                   WHERE task_id = ?""",
-                [task.task_id],
-            )
-            logger.info(
-                "[%s] %s returned to queue (source cooldown, %.0fs remaining)",
-                worker_id, task.set_number, sleep_seconds,
-            )
-            return sleep_seconds
-        elif error and "cooldown" in error.lower():
-            # Other cooldown errors (e.g. Google Trends) — non-retriable
-            force_fail_task(conn, task.task_id, error)
-            logger.warning(
-                "[%s] %s failed (non-retriable): %s", worker_id, task.set_number, error,
-            )
-        else:
-            fail_task(conn, task.task_id, error or "Unknown error")
-            logger.warning(
-                "[%s] %s failed: %s", worker_id, task.set_number, error,
-            )
-
-        return True
+        return _handle_result(conn, worker_id, task, result)
     finally:
         conn.close()
+
+
+def _handle_result(
+    conn: DuckDBPyConnection,
+    worker_id: str,
+    task: object,
+    result: ExecutorResult,
+) -> float | None:
+    """Process an ExecutorResult -- no magic strings, just typed fields."""
+    if result.success:
+        complete_task(conn, task.task_id)
+        logger.info("[%s] %s completed", worker_id, task.set_number)
+        return None
+
+    if result.is_cooldown:
+        requeue_for_cooldown(conn, task.task_id)
+        logger.info(
+            "[%s] %s returned to queue (source cooldown, %.0fs remaining)",
+            worker_id, task.set_number, result.cooldown_seconds,
+        )
+        return result.cooldown_seconds
+
+    # Regular failure
+    fail_task(conn, task.task_id, result.error or "Unknown error")
+    logger.warning("[%s] %s failed: %s", worker_id, task.set_number, result.error)
+    return None
+
+
+# ---------------------------------------------------------------------------
+# Timeout cleanup
+# ---------------------------------------------------------------------------
+
+
+def _fail_current_task(worker_id: str, cfg: TaskTypeConfig) -> None:
+    """Force-fail the timed-out task and kill orphaned browsers."""
+    from db.connection import get_connection
+
+    conn = get_connection()
+    try:
+        force_fail_by_worker(
+            conn, worker_id, cfg.task_type.value, "Executor timed out"
+        )
+    finally:
+        conn.close()
+
+    if cfg.uses_browser:
+        _kill_orphaned_browsers(cfg.browser_profile)
+
+
+def _kill_orphaned_browsers(profile: str | None) -> None:
+    """Kill Camoufox/Firefox processes using the given profile directory."""
+    if not profile:
+        return
+
+    try:
+        proc = subprocess.run(
+            ["pgrep", "-f", profile],
+            capture_output=True, text=True, timeout=5,
+        )
+        pids = [int(p) for p in proc.stdout.strip().split() if p.isdigit()]
+        for pid in pids:
+            try:
+                os.kill(pid, signal.SIGTERM)
+                logger.warning(
+                    "Killed orphaned browser process pid=%d (%s)", pid, profile,
+                )
+            except ProcessLookupError:
+                pass
+    except Exception:
+        logger.debug("Failed to clean up orphaned browsers for %s", profile)

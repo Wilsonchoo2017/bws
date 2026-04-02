@@ -15,7 +15,6 @@ import httpx
 from config.settings import (
     BRICKLINK_RATE_LIMITER,
     RETRY_CONFIG,
-    calculate_backoff,
     get_random_accept_language,
     get_random_delay,
     get_random_user_agent,
@@ -147,16 +146,11 @@ async def _fetch_page(client: httpx.AsyncClient, url: str) -> str:
         is_rate_limited = response.status_code in (429, 503) or _is_rate_limited(response)
 
         if is_rate_limited:
-            if attempt < RETRY_CONFIG.max_retries:
-                backoff = calculate_backoff(attempt)
-                logging.getLogger("bws.bricklink").warning(
-                    "Rate limited (attempt %d/%d), backing off %.0fs: %s",
-                    attempt, RETRY_CONFIG.max_retries, backoff, url,
-                )
-                await asyncio.sleep(backoff)
-                continue
+            logging.getLogger("bws.bricklink").warning(
+                "Rate limited — activating 1h+ cooldown immediately: %s", url,
+            )
             BRICKLINK_RATE_LIMITER.trip_quota_exceeded()
-            raise BricklinkQuotaExceeded(f"Quota exceeded after {RETRY_CONFIG.max_retries} retries: {url}")
+            raise BricklinkQuotaExceeded(f"Quota exceeded (immediate cooldown): {url}")
 
         response.raise_for_status()
         return response.text

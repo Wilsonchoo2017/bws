@@ -309,6 +309,24 @@ def force_fail_task(
     )
 
 
+def requeue_for_cooldown(
+    conn: DuckDBPyConnection,
+    task_id: str,
+) -> None:
+    """Return a task to pending without burning an attempt.
+
+    Used when a source is in cooldown -- the task should be retried
+    later, not counted as a failure.
+    """
+    conn.execute(
+        """UPDATE scrape_tasks
+           SET status = 'pending', locked_by = NULL, locked_at = NULL,
+               attempt_count = attempt_count - 1
+           WHERE task_id = ?""",
+        [task_id],
+    )
+
+
 def force_fail_by_worker(
     conn: DuckDBPyConnection,
     worker_id: str,

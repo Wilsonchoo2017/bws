@@ -26,8 +26,8 @@ BWS_IMAGES_PARTS_PATH = BWS_IMAGES_PATH / "parts"
 class RateLimitSettings:
     """Rate limiting configuration."""
 
-    min_delay_ms: int = 5_000  # 5 seconds
-    max_delay_ms: int = 15_000  # 15 seconds
+    min_delay_ms: int = 10_000  # 10 seconds
+    max_delay_ms: int = 25_000  # 25 seconds
     max_requests_per_hour: int = 1_500
 
 
