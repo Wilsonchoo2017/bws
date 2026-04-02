@@ -16,18 +16,30 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger("bws.scrape_queue.executor")
 
+# Consecutive 0-field results threshold before assuming silent IP ban.
+_SILENT_BAN_THRESHOLD = 5
+_consecutive_zero_fields = 0
+
 
 def execute_bricklink_metadata(
     conn: DuckDBPyConnection,
     set_number: str,
 ) -> tuple[bool, str | None]:
     """Scrape BrickLink catalog page and store enrichment fields."""
+    global _consecutive_zero_fields  # noqa: PLW0603
+
+    from config.settings import BRICKLINK_RATE_LIMITER
     from services.enrichment.circuit_breaker import CircuitBreakerState
     from services.enrichment.fetchers import fetch_from_bricklink
     from services.enrichment.orchestrator import enrich
     from services.enrichment.repository import store_enrichment_result
     from services.enrichment.types import SourceId
     from services.items.repository import get_item_detail
+
+    # Check cooldown before doing any work -- signal dispatcher to pause
+    remaining = BRICKLINK_RATE_LIMITER.cooldown_remaining()
+    if remaining > 0:
+        return False, f"cooldown:{remaining:.0f}"
 
     item = get_item_detail(conn, set_number)
     if not item:
@@ -39,6 +51,24 @@ def execute_bricklink_metadata(
 
     cb_state = CircuitBreakerState()
     result, _ = enrich(set_number, item, fetchers, cb_state)
+
+    if result.fields_found == 0:
+        _consecutive_zero_fields += 1
+        if _consecutive_zero_fields >= _SILENT_BAN_THRESHOLD:
+            logger.warning(
+                "Silent ban detected: %d consecutive 0-field responses — tripping circuit breaker",
+                _consecutive_zero_fields,
+            )
+            BRICKLINK_RATE_LIMITER.trip_silent_ban()
+            _consecutive_zero_fields = 0
+            remaining = BRICKLINK_RATE_LIMITER.cooldown_remaining()
+            return False, f"cooldown:{remaining:.0f}"
+        return False, "No data returned (0 fields)"
+
+    # Success — reset failure counters
+    _consecutive_zero_fields = 0
+    BRICKLINK_RATE_LIMITER.record_success()
+
     store_enrichment_result(conn, result)
 
     logger.info(
@@ -72,6 +102,10 @@ def execute_brickeconomy(
 
     cb_state = CircuitBreakerState()
     result, _ = enrich(set_number, item, fetchers, cb_state)
+
+    if result.fields_found == 0:
+        return False, "BrickEconomy returned no data (0 fields)"
+
     store_enrichment_result(conn, result)
 
     logger.info(
@@ -156,6 +190,16 @@ _trends_lock = threading.Lock()
 _trends_last_failure_at: float | None = None
 
 
+def get_trends_cooldown_remaining() -> float:
+    """Return seconds remaining in Google Trends cooldown, or 0 if inactive."""
+    with _trends_lock:
+        if _trends_last_failure_at is None:
+            return 0.0
+        elapsed = time.time() - _trends_last_failure_at
+        remaining = _TRENDS_COOLDOWN_SECONDS - elapsed
+        return max(remaining, 0.0)
+
+
 def execute_google_trends(
     conn: DuckDBPyConnection,
     set_number: str,
@@ -174,7 +218,8 @@ def execute_google_trends(
         if _trends_last_failure_at is not None:
             elapsed = time.time() - _trends_last_failure_at
             if elapsed < _TRENDS_COOLDOWN_SECONDS:
-                return False, f"Google Trends cooldown ({_TRENDS_COOLDOWN_SECONDS - elapsed:.0f}s remaining)"
+                remaining = _TRENDS_COOLDOWN_SECONDS - elapsed
+                return False, f"cooldown:{remaining:.0f}"
 
     # Get prerequisites from DB
     item_row = conn.execute(
@@ -211,6 +256,8 @@ def execute_google_trends(
     if not trends_result.success:
         with _trends_lock:
             _trends_last_failure_at = time.time()
+        if trends_result.rate_limited:
+            return False, f"cooldown:{_TRENDS_COOLDOWN_SECONDS}"
         return False, trends_result.error or "Google Trends fetch failed"
 
     save_trends_snapshot(conn, trends_result.data)

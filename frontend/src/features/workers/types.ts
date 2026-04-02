@@ -1,5 +1,13 @@
 export type JobStatus = 'queued' | 'running' | 'completed' | 'failed';
 
+export interface QueueStats {
+  total: number;
+  queued: number;
+  running: number;
+  completed: number;
+  failed: number;
+}
+
 export interface WorkerJob {
   job_id: string;
   status: JobStatus;

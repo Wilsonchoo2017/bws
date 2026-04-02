@@ -6,6 +6,7 @@ from api.workers.carousell import CarousellWorker
 from api.workers.enrichment import EnrichmentWorker
 from api.workers.google_trends import GoogleTrendsWorker
 from api.workers.keepa import KeepaWorker
+
 from api.workers.mightyutan import MightyutanWorker
 from api.workers.shopee import ShopeeWorker
 from api.workers.shopee_saturation import ShopeeSaturationWorker

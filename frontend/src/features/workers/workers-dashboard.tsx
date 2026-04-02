@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { ImageDownloadCard } from './image-download-card';
-import type { JobStatus, WorkerJob } from './types';
+import type { JobStatus, QueueStats, WorkerJob } from './types';
 import { formatDuration, formatRelativeTime } from './types';
 
 const SCRAPER_LABELS: Record<string, string> = {
@@ -35,6 +35,7 @@ const PAGE_SIZE = 20;
 
 export function WorkersDashboard() {
   const [jobs, setJobs] = useState<WorkerJob[]>([]);
+  const [serverStats, setServerStats] = useState<QueueStats | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState<FilterStatus>('all');
@@ -48,6 +49,7 @@ export function WorkersDashboard() {
       const json = await res.json();
       if (json.success) {
         setJobs(json.data);
+        setServerStats(json.stats ?? null);
         setError(null);
       } else {
         setError(json.error ?? 'Failed to load jobs');
@@ -103,8 +105,8 @@ export function WorkersDashboard() {
     safePage * PAGE_SIZE
   );
 
-  // Stats
-  const stats = {
+  // Stats -- prefer server-side counts (accurate across all tasks, not limited by page size)
+  const stats = serverStats ?? {
     total: jobs.length,
     queued: jobs.filter((j) => j.status === 'queued').length,
     running: jobs.filter((j) => j.status === 'running').length,
@@ -343,6 +345,14 @@ function ActiveWorkers({ jobs }: { jobs: WorkerJob[] }) {
 
   if (running.length === 0) return null;
 
+  // Count queued jobs per scraper_id
+  const queuedByScraper: Record<string, number> = {};
+  for (const job of jobs) {
+    if (job.status === 'queued') {
+      queuedByScraper[job.scraper_id] = (queuedByScraper[job.scraper_id] ?? 0) + 1;
+    }
+  }
+
   return (
     <div className='grid grid-cols-2 gap-3'>
       {running.map((job) => {
@@ -352,6 +362,7 @@ function ActiveWorkers({ jobs }: { jobs: WorkerJob[] }) {
           job.scraper_id === 'enrichment' || isScrapeTask(job)
             ? job.url
             : truncateUrl(job.url);
+        const queued = queuedByScraper[job.scraper_id] ?? 0;
 
         return (
           <div
@@ -375,6 +386,16 @@ function ActiveWorkers({ jobs }: { jobs: WorkerJob[] }) {
                 </div>
               )}
             </div>
+            {queued > 0 && (
+              <div className='mt-2 flex items-center gap-2'>
+                <div className='h-1.5 flex-1 overflow-hidden rounded-full bg-blue-200 dark:bg-blue-900'>
+                  <div className='h-full animate-pulse rounded-full bg-blue-500' style={{ width: '100%' }} />
+                </div>
+                <span className='text-muted-foreground shrink-0 text-xs'>
+                  {queued} queued
+                </span>
+              </div>
+            )}
           </div>
         );
       })}

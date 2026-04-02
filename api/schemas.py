@@ -32,6 +32,19 @@ class ScrapeJobResponse(BaseModel):
     worker_no: int | None = None
 
 
+class ScrapeQueueStats(BaseModel):
+    total: int = 0
+    queued: int = 0
+    running: int = 0
+    completed: int = 0
+    failed: int = 0
+
+
+class ScrapeJobsResponse(BaseModel):
+    jobs: list[ScrapeJobResponse] = []
+    stats: ScrapeQueueStats = ScrapeQueueStats()
+
+
 class ScrapeItemResponse(BaseModel):
     title: str
     price_display: str

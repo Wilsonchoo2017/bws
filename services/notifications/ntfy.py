@@ -8,7 +8,8 @@ import httpx
 logger = logging.getLogger("bws.notifications.ntfy")
 
 NTFY_BASE_URL = "https://dxp.tail83c2f.ts.net:8093"
-NTFY_TOPIC = "bws-deals"
+NTFY_TOPIC_DEALS = "bws-deals"
+NTFY_TOPIC_ALERTS = "bws-alerts"
 
 
 @dataclass(frozen=True)
@@ -19,13 +20,14 @@ class NtfyMessage:
     message: str
     priority: int = 4  # high
     tags: tuple[str, ...] = ("chart_with_upwards_trend", "money_with_wings")
+    topic: str = NTFY_TOPIC_DEALS
 
 
 def send_notification(msg: NtfyMessage) -> bool:
     """Send a notification to Ntfy. Returns True on success."""
     url = NTFY_BASE_URL
     payload = {
-        "topic": NTFY_TOPIC,
+        "topic": msg.topic,
         "title": msg.title,
         "message": msg.message,
         "priority": msg.priority,

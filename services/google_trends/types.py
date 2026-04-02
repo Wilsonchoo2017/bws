@@ -37,3 +37,4 @@ class TrendsScrapeResult:
     set_number: str
     data: TrendsData | None = None
     error: str | None = None
+    rate_limited: bool = False

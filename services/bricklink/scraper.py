@@ -103,9 +103,18 @@ class BricklinkQuotaExceeded(Exception):
     """Raised when BrickLink returns a quota exceeded redirect."""
 
 
-def _is_quota_exceeded(response: httpx.Response) -> bool:
-    """Check if BrickLink redirected to a quota exceeded error page."""
+def _is_rate_limited(response: httpx.Response) -> bool:
+    """Check if BrickLink redirected to a rate-limit error page (429)."""
     return "error.page" in str(response.url) and "code=429" in str(response.url)
+
+
+def _is_forbidden(response: httpx.Response) -> bool:
+    """Check if BrickLink redirected to a forbidden error page (403).
+
+    BrickLink escalates from 429 -> 403 after sustained scraping.
+    A 403 indicates a hard IP ban, requiring a much longer cooldown.
+    """
+    return "error.page" in str(response.url) and "code=403" in str(response.url)
 
 
 async def _fetch_page(client: httpx.AsyncClient, url: str) -> str:
@@ -130,7 +139,12 @@ async def _fetch_page(client: httpx.AsyncClient, url: str) -> str:
         await BRICKLINK_RATE_LIMITER.acquire()
         response = await client.get(url, headers=_get_headers(), follow_redirects=True)
 
-        is_rate_limited = response.status_code in (429, 503) or _is_quota_exceeded(response)
+        # 403 = hard IP ban -- trip immediately, no retries
+        if response.status_code == 403 or _is_forbidden(response):
+            BRICKLINK_RATE_LIMITER.trip_forbidden()
+            raise BricklinkQuotaExceeded(f"403 Forbidden (IP banned): {url}")
+
+        is_rate_limited = response.status_code in (429, 503) or _is_rate_limited(response)
 
         if is_rate_limited:
             if attempt < RETRY_CONFIG.max_retries:

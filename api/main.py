@@ -14,7 +14,6 @@ from api.routes import enrichment, images, items, ml, portfolio, scrape
 from api.worker import run_worker
 from services.enrichment.scheduler import run_enrichment_sweep
 from services.images.sweep import run_image_download_sweep
-from services.keepa.scheduler import run_keepa_sweep
 from services.scrape_queue.dispatcher import recover_scrape_queue, run_scrape_dispatcher, shutdown_scrape_dispatcher
 from services.shopee.saturation_scheduler import run_saturation_sweep
 
@@ -39,6 +38,18 @@ _file_handler.setLevel(logging.WARNING)
 _file_handler.setFormatter(logging.Formatter(_LOG_FORMAT))
 logging.getLogger().addHandler(_file_handler)
 
+# Bricklink and scrape-queue logs at INFO level to file (track success/failure)
+_scrape_file_handler = RotatingFileHandler(
+    _LOG_DIR / "bws.log",
+    maxBytes=10 * 1024 * 1024,
+    backupCount=5,
+    encoding="utf-8",
+)
+_scrape_file_handler.setLevel(logging.INFO)
+_scrape_file_handler.setFormatter(logging.Formatter(_LOG_FORMAT))
+for _logger_name in ("bws.bricklink", "bws.scrape_queue.dispatcher", "bws.scrape_queue.executor"):
+    logging.getLogger(_logger_name).addHandler(_scrape_file_handler)
+
 logger = logging.getLogger("bws.api")
 
 
@@ -56,15 +67,14 @@ async def lifespan(app: FastAPI):
     sweep_task = asyncio.create_task(run_enrichment_sweep(job_manager))
     saturation_task = asyncio.create_task(run_saturation_sweep(job_manager))
     image_task = asyncio.create_task(run_image_download_sweep())
-    keepa_task = asyncio.create_task(run_keepa_sweep(job_manager))
     scrape_dispatcher_task = asyncio.create_task(run_scrape_dispatcher())
-    logger.info("Background worker, enrichment/saturation/image/keepa sweeps + scrape dispatcher started")
+    logger.info("Background worker, enrichment/saturation/image sweeps + scrape dispatcher started")
     yield
     logger.info("BWS API shutting down...")
     # Signal dispatcher workers to finish current task and stop
     shutdown_scrape_dispatcher()
     # Cancel all background tasks
-    tasks = [worker_task, sweep_task, saturation_task, image_task, keepa_task, scrape_dispatcher_task]
+    tasks = [worker_task, sweep_task, saturation_task, image_task, scrape_dispatcher_task]
     for task in tasks:
         task.cancel()
     # Wait for all tasks to finish with a timeout

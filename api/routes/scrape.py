@@ -9,6 +9,8 @@ from api.schemas import (
     ScrapeItemResponse,
     ScrapeJobDetailResponse,
     ScrapeJobResponse,
+    ScrapeJobsResponse,
+    ScrapeQueueStats,
     ScrapeRequest,
     ScraperInfo,
     ScrapeTargetInfo,
@@ -249,27 +251,55 @@ async def clear_jobs():
     return {"cleared": removed}
 
 
-@router.get("/jobs", response_model=list[ScrapeJobResponse])
-async def list_jobs(limit: int = 1000):
-    """List recent scrape jobs, including persistent scrape queue tasks."""
+@router.get("/jobs", response_model=ScrapeJobsResponse)
+async def list_jobs(limit: int = 10000):
+    """List recent scrape jobs, including persistent scrape queue tasks.
+
+    Returns jobs (paginated by LIMIT) and accurate queue stats
+    computed directly from the DB (not affected by the LIMIT).
+    """
     # In-memory jobs (Shopee, ToysRUs, BrickLink catalog, etc.)
     jobs = [_job_to_response(j) for j in job_manager.list_jobs(limit)]
+    stats = ScrapeQueueStats()
 
     # Persistent scrape queue tasks (enrichment pipeline)
     try:
         from db.connection import get_connection
         from db.schema import init_schema
+        from services.scrape_queue.repository import get_queue_stats
 
         conn = get_connection()
         try:
             init_schema(conn)
             jobs.extend(_scrape_tasks_as_jobs(conn, limit))
+
+            # Compute accurate stats from DB (not affected by LIMIT)
+            raw_stats = get_queue_stats(conn)
+            stats = ScrapeQueueStats(
+                total=sum(raw_stats.values()),
+                queued=raw_stats.get("pending", 0) + raw_stats.get("blocked", 0),
+                running=raw_stats.get("running", 0),
+                completed=raw_stats.get("completed", 0),
+                failed=raw_stats.get("failed", 0),
+            )
         finally:
             conn.close()
     except Exception:
         pass  # Graceful degradation -- show in-memory jobs even if DB fails
 
-    return jobs
+    # Add in-memory job stats
+    for job in job_manager.list_jobs(limit):
+        stats.total += 1
+        if job.status == JobStatus.QUEUED:
+            stats.queued += 1
+        elif job.status == JobStatus.RUNNING:
+            stats.running += 1
+        elif job.status == JobStatus.COMPLETED:
+            stats.completed += 1
+        elif job.status == JobStatus.FAILED:
+            stats.failed += 1
+
+    return ScrapeJobsResponse(jobs=jobs, stats=stats)
 
 
 @router.get("/jobs/{job_id}", response_model=ScrapeJobDetailResponse)

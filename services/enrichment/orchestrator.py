@@ -240,7 +240,6 @@ def enrich(
     for source_id in sources_needed:
         fetcher = fetchers.get(source_id)
         if fetcher is None:
-            logger.warning("No fetcher registered for %s", source_id.value)
             continue
 
         sources_called.append(source_id)

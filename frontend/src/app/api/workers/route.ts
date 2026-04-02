@@ -14,7 +14,12 @@ export async function GET() {
       );
     }
 
-    return NextResponse.json({ success: true, data });
+    // Backend returns { jobs, stats } -- pass through both
+    return NextResponse.json({
+      success: true,
+      data: data.jobs ?? data,
+      stats: data.stats ?? null,
+    });
   } catch (error) {
     const message =
       error instanceof Error ? error.message : 'Failed to connect to API';

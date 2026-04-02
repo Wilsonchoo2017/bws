@@ -28,7 +28,7 @@ class RateLimitSettings:
 
     min_delay_ms: int = 5_000  # 5 seconds
     max_delay_ms: int = 15_000  # 15 seconds
-    max_requests_per_hour: int = 1_000
+    max_requests_per_hour: int = 1_500
 
 
 @dataclass(frozen=True)
@@ -213,19 +213,42 @@ def calculate_backoff(attempt: int) -> float:
 
 
 class HourlyRateLimiter:
-    """Sliding-window rate limiter with quota-exceeded circuit breaker.
+    """Sliding-window rate limiter with escalating circuit breaker.
 
     Tracks request timestamps and enforces max requests per hour.
-    When trip_quota_exceeded() is called, blocks all requests for 1 hour.
+    Cooldowns escalate on consecutive trips: 1h -> 2h -> 4h -> 8h (max).
+    A 403 Forbidden triggers a longer initial cooldown (4h) that also escalates.
+    Successful requests (via ``record_success``) reset the escalation level.
+
+    Enforces a mandatory rest period after sustained scraping to avoid
+    triggering bot detection from continuous overnight activity.
     """
 
-    COOLDOWN_SECONDS = 3600.0  # 1 hour
+    BASE_COOLDOWN_SECONDS = 3600.0       # 1 hour base for 429
+    FORBIDDEN_COOLDOWN_SECONDS = 14400.0  # 4 hours base for 403
+    MAX_COOLDOWN_SECONDS = 28800.0       # 8 hours cap
 
-    def __init__(self, max_per_hour: int) -> None:
+    # Rest period: after this many seconds of continuous scraping, pause.
+    MAX_CONTINUOUS_SCRAPE_SECONDS = 3 * 3600.0  # 3 hours
+    REST_PERIOD_SECONDS = 1800.0                # 30 min rest
+
+    def __init__(self, max_per_hour: int, source_name: str = "BrickLink") -> None:
         self._max_per_hour = max_per_hour
+        self._source_name = source_name
         self._timestamps: list[float] = []
-        self._lock = asyncio.Lock()
+        self._lock: asyncio.Lock | None = None
         self._blocked_until: float = 0.0
+        self._escalation_level: int = 0
+        self._consecutive_failures: int = 0
+        self._scraping_since: float = 0.0  # monotonic time when continuous scraping began
+        self._was_blocked: bool = False  # track recovery
+
+    def _get_lock(self) -> asyncio.Lock:
+        """Return a lock bound to the current event loop, recreating if needed."""
+        loop = asyncio.get_running_loop()
+        if self._lock is None or self._lock._loop is not loop:  # type: ignore[attr-defined]
+            self._lock = asyncio.Lock()
+        return self._lock
 
     def _prune(self, now: float) -> None:
         """Remove timestamps older than 1 hour."""
@@ -233,29 +256,127 @@ class HourlyRateLimiter:
         while self._timestamps and self._timestamps[0] <= cutoff:
             self._timestamps.pop(0)
 
+    def _escalated_cooldown(self, base: float) -> float:
+        """Calculate cooldown with exponential escalation."""
+        cooldown = base * (2 ** self._escalation_level)
+        return min(cooldown, self.MAX_COOLDOWN_SECONDS)
+
     def trip_quota_exceeded(self) -> None:
-        """Block all requests for 1 hour starting now."""
-        self._blocked_until = time.monotonic() + self.COOLDOWN_SECONDS
+        """Block requests with escalating cooldown (429 rate limit)."""
+        from services.notifications.scraper_alerts import alert_rate_limited
+
+        cooldown = self._escalated_cooldown(self.BASE_COOLDOWN_SECONDS)
+        self._blocked_until = time.monotonic() + cooldown
+        self._escalation_level += 1
+        self._consecutive_failures += 1
+        self._was_blocked = True
+        self._scraping_since = 0.0
         logging.getLogger("bws.bricklink").warning(
-            "Quota exceeded — pausing BrickLink requests for 1 hour"
+            "Quota exceeded (level %d) — pausing %s requests for %.0f min",
+            self._escalation_level, self._source_name, cooldown / 60,
         )
+        alert_rate_limited(self._source_name, cooldown / 60, self._escalation_level)
+
+    def trip_forbidden(self) -> None:
+        """Block requests with long cooldown (403 Forbidden = IP ban)."""
+        from services.notifications.scraper_alerts import alert_forbidden
+
+        cooldown = self._escalated_cooldown(self.FORBIDDEN_COOLDOWN_SECONDS)
+        self._blocked_until = time.monotonic() + cooldown
+        self._escalation_level += 1
+        self._consecutive_failures += 1
+        self._was_blocked = True
+        self._scraping_since = 0.0
+        logging.getLogger("bws.bricklink").warning(
+            "403 Forbidden / IP banned (level %d) — pausing %s requests for %.0f min",
+            self._escalation_level, self._source_name, cooldown / 60,
+        )
+        alert_forbidden(self._source_name, cooldown / 60, self._escalation_level)
+
+    def trip_silent_ban(self) -> None:
+        """Block requests when consecutive 0-field responses suggest a silent ban."""
+        from services.notifications.scraper_alerts import alert_silent_ban
+
+        cooldown = self._escalated_cooldown(self.FORBIDDEN_COOLDOWN_SECONDS)
+        self._blocked_until = time.monotonic() + cooldown
+        self._escalation_level += 1
+        self._consecutive_failures += 1
+        self._was_blocked = True
+        self._scraping_since = 0.0
+        logging.getLogger("bws.bricklink").warning(
+            "Silent ban detected (consecutive 0-field responses, level %d) "
+            "— pausing %s requests for %.0f min",
+            self._escalation_level, self._source_name, cooldown / 60,
+        )
+        alert_silent_ban(self._source_name, self._consecutive_failures, cooldown / 60)
+
+    def record_success(self) -> None:
+        """Reset escalation after a successful scrape."""
+        from services.notifications.scraper_alerts import alert_recovered
+
+        if self._was_blocked:
+            alert_recovered(self._source_name)
+            self._was_blocked = False
+        self._escalation_level = 0
+        self._consecutive_failures = 0
 
     def is_blocked(self) -> bool:
         """Check if the limiter is currently in cooldown."""
         return time.monotonic() < self._blocked_until
 
+    def cooldown_remaining(self) -> float:
+        """Seconds remaining in cooldown, or 0.0 if not blocked."""
+        return max(0.0, self._blocked_until - time.monotonic())
+
+    @property
+    def consecutive_failures(self) -> int:
+        """Number of consecutive cooldown trips without a success."""
+        return self._consecutive_failures
+
+    def _check_rest_period(self, now: float) -> float:
+        """Enforce mandatory rest after sustained continuous scraping.
+
+        Returns seconds to rest, or 0.0 if no rest needed.
+        """
+        from services.notifications.scraper_alerts import alert_rest_period
+
+        if self._scraping_since == 0.0:
+            self._scraping_since = now
+            return 0.0
+
+        elapsed = now - self._scraping_since
+        if elapsed >= self.MAX_CONTINUOUS_SCRAPE_SECONDS:
+            self._scraping_since = 0.0  # will reset on next acquire
+            logging.getLogger("bws.bricklink").warning(
+                "Continuous scraping for %.0f min — resting for %.0f min",
+                elapsed / 60, self.REST_PERIOD_SECONDS / 60,
+            )
+            alert_rest_period(
+                self._source_name,
+                self.REST_PERIOD_SECONDS / 60,
+                elapsed / 3600,
+            )
+            return self.REST_PERIOD_SECONDS
+        return 0.0
+
     async def acquire(self) -> None:
         """Wait until a request slot is available, then record it."""
-        async with self._lock:
+        async with self._get_lock():
             now = time.monotonic()
 
             # Wait out quota cooldown if active
             if now < self._blocked_until:
                 wait = self._blocked_until - now
                 logging.getLogger("bws.bricklink").info(
-                    "BrickLink quota cooldown: %.0fs remaining", wait,
+                    "BrickLink cooldown: %.0f min remaining", wait / 60,
                 )
                 await asyncio.sleep(wait)
+                now = time.monotonic()
+
+            # Enforce mandatory rest after sustained scraping
+            rest = self._check_rest_period(now)
+            if rest > 0:
+                await asyncio.sleep(rest)
                 now = time.monotonic()
 
             self._prune(now)
@@ -270,7 +391,46 @@ class HourlyRateLimiter:
             self._timestamps.append(now)
 
 
-BRICKLINK_RATE_LIMITER = HourlyRateLimiter(RATE_LIMIT_CONFIG.max_requests_per_hour)
+# ---------------------------------------------------------------------------
+# Domain rate limiter registry
+#
+# RULE: all requests to the same domain MUST share a single rate limiter.
+# Register once via ``register_domain_limiter``, then look up with
+# ``get_domain_limiter``.  Any new scraper/downloader hitting a registered
+# domain gets the same limiter automatically -- no duplicate instances.
+# ---------------------------------------------------------------------------
+
+_domain_registry: dict[str, HourlyRateLimiter] = {}
+
+
+def register_domain_limiter(
+    domain: str,
+    max_per_hour: int,
+    source_name: str,
+) -> HourlyRateLimiter:
+    """Register (or retrieve) the rate limiter for a domain.
+
+    If the domain already has a limiter, returns the existing one.
+    This enforces one-limiter-per-domain across the whole codebase.
+    """
+    if domain in _domain_registry:
+        return _domain_registry[domain]
+    limiter = HourlyRateLimiter(max_per_hour, source_name=source_name)
+    _domain_registry[domain] = limiter
+    return limiter
+
+
+def get_domain_limiter(domain: str) -> HourlyRateLimiter | None:
+    """Look up the rate limiter for a domain. Returns None if unregistered."""
+    return _domain_registry.get(domain)
+
+
+# --- BrickLink (www.bricklink.com + img.bricklink.com = same domain) ---
+BRICKLINK_RATE_LIMITER = register_domain_limiter(
+    "bricklink.com",
+    RATE_LIMIT_CONFIG.max_requests_per_hour,
+    source_name="BrickLink",
+)
 
 
 @dataclass(frozen=True)
@@ -278,7 +438,7 @@ class BrickeconomySettings:
     """BrickEconomy browser automation configuration."""
 
     base_url: str = "https://www.brickeconomy.com"
-    headless: bool = False
+    headless: bool = True
     timeout_ms: int = 30_000
     locale: str = "en-US"
     captcha_timeout_s: int = 120
@@ -288,7 +448,17 @@ class BrickeconomySettings:
 
 
 BRICKECONOMY_CONFIG = BrickeconomySettings()
-BRICKECONOMY_RATE_LIMITER = HourlyRateLimiter(
-    BRICKECONOMY_CONFIG.max_requests_per_hour
+
+# --- BrickEconomy (brickeconomy.com) ---
+BRICKECONOMY_RATE_LIMITER = register_domain_limiter(
+    "brickeconomy.com",
+    BRICKECONOMY_CONFIG.max_requests_per_hour,
+    source_name="BrickEconomy",
 )
-KEEPA_RATE_LIMITER = HourlyRateLimiter(KEEPA_CONFIG.max_requests_per_hour)
+
+# --- Keepa (keepa.com) ---
+KEEPA_RATE_LIMITER = register_domain_limiter(
+    "keepa.com",
+    KEEPA_CONFIG.max_requests_per_hour,
+    source_name="Keepa",
+)

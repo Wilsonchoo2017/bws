@@ -9,9 +9,8 @@ from services.google_trends.types import TrendsData, TrendsDataPoint, TrendsScra
 logger = logging.getLogger("bws.google_trends.scraper")
 
 # Delay between requests to avoid Google rate limiting (seconds).
-REQUEST_DELAY_SECONDS = 10
-MAX_RETRIES = 3
-RETRY_BACKOFF_BASE_SECONDS = 120  # 2 min, 4 min, 8 min with exponential backoff
+REQUEST_DELAY_SECONDS = 60
+MAX_RETRIES = 1
 
 # Default lookback if no release year is known.
 DEFAULT_LOOKBACK_YEARS = 5
@@ -137,6 +136,20 @@ def fetch_interest(
         except Exception as exc:
             error_str = str(exc)
             is_rate_limit = "429" in error_str or "Too Many" in error_str
+
+            if is_rate_limit:
+                logger.warning(
+                    "Rate limited fetching %s: %s -- signalling cooldown",
+                    keyword,
+                    error_str,
+                )
+                return TrendsScrapeResult(
+                    success=False,
+                    set_number=set_number,
+                    error=f"Rate limited: {error_str}",
+                    rate_limited=True,
+                )
+
             logger.warning(
                 "Attempt %d/%d failed for %s: %s",
                 attempt,
@@ -144,9 +157,9 @@ def fetch_interest(
                 keyword,
                 error_str,
             )
-            if attempt < MAX_RETRIES and is_rate_limit:
+            if attempt < MAX_RETRIES:
                 wait = RETRY_BACKOFF_BASE_SECONDS * (2 ** (attempt - 1))
-                logger.info("Rate limited, waiting %ds before retry (exponential backoff)", wait)
+                logger.info("Waiting %ds before retry (exponential backoff)", wait)
                 time.sleep(wait)
                 continue
 

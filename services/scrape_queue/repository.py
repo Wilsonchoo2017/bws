@@ -229,7 +229,11 @@ def complete_task(
     conn: DuckDBPyConnection,
     task_id: str,
 ) -> None:
-    """Mark a task as completed and unblock dependents."""
+    """Mark a task as completed and unblock dependents.
+
+    Only updates if the task is still running (guards against late writes
+    from orphaned executor threads after a timeout).
+    """
     row = conn.execute(
         "SELECT set_number, task_type FROM scrape_tasks WHERE task_id = ?",
         [task_id],
@@ -244,7 +248,7 @@ def complete_task(
         UPDATE scrape_tasks
         SET status = 'completed', completed_at = now(),
             locked_by = NULL, locked_at = NULL
-        WHERE task_id = ?
+        WHERE task_id = ? AND status = 'running'
         """,
         [task_id],
     )
@@ -302,6 +306,28 @@ def force_fail_task(
         WHERE task_id = ?
         """,
         [error, task_id],
+    )
+
+
+def force_fail_by_worker(
+    conn: DuckDBPyConnection,
+    worker_id: str,
+    task_type_value: str,
+    error: str,
+) -> None:
+    """Force-fail the running task locked by a specific worker.
+
+    Used by the dispatcher timeout handler when only the worker_id
+    and task_type are known (no task_id available).
+    """
+    conn.execute(
+        """
+        UPDATE scrape_tasks
+        SET status = 'failed', error = ?, completed_at = now(),
+            locked_by = NULL, locked_at = NULL
+        WHERE locked_by = ? AND task_type = ? AND status = 'running'
+        """,
+        [error, worker_id, task_type_value],
     )
 
 
@@ -473,3 +499,13 @@ def get_queue_stats(conn: DuckDBPyConnection) -> dict[str, int]:
         "SELECT status, COUNT(*) FROM scrape_tasks GROUP BY status",
     ).fetchall()
     return {status: count for status, count in rows}
+
+
+def has_pending_bricklink_tasks(conn: DuckDBPyConnection) -> bool:
+    """Check if there are pending or in-progress BrickLink metadata tasks."""
+    row = conn.execute(
+        """SELECT COUNT(*) FROM scrape_tasks
+           WHERE task_type = 'bricklink_metadata'
+             AND status IN ('pending', 'in_progress')""",
+    ).fetchone()
+    return bool(row and row[0] > 0)

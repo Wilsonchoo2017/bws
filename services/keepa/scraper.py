@@ -11,6 +11,7 @@ import dataclasses
 import logging
 import re
 import secrets
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -24,6 +25,7 @@ from services.keepa.auth import is_logged_in, login
 from services.keepa.parser import click_all_date_range, extract_product_data
 from services.keepa.types import KeepaDataPoint, KeepaProductData, KeepaScrapeResult
 from services.notifications.ntfy import NtfyMessage, send_notification
+from services.notifications.scraper_alerts import alert_cloudflare_blocked
 
 logger = logging.getLogger("bws.keepa.scraper")
 
@@ -35,6 +37,39 @@ CF_CHALLENGE_TITLES: tuple[str, ...] = (
     "attention required",
     "checking your browser",
 )
+
+# In-page Cloudflare Turnstile widget selectors (iframe/div)
+CF_WIDGET_SELECTORS: tuple[str, ...] = (
+    'iframe[src*="challenges.cloudflare.com"]',
+    'iframe[src*="cloudflare.com/cdn-cgi/challenge"]',
+    "#cf-turnstile",
+    ".cf-turnstile",
+    "#turnstile-wrapper",
+)
+
+# Consecutive Cloudflare challenge tracking for preventive alerts
+_cf_challenge_count: int = 0
+_cf_last_challenge: float = 0.0
+_CF_RESET_INTERVAL: float = 3600.0  # reset counter after 1 hour of no challenges
+_CF_ALERT_THRESHOLD: int = 2  # alert after N consecutive challenges
+
+
+def _record_cf_challenge(set_number: str) -> None:
+    """Track a Cloudflare challenge occurrence and alert if pattern detected."""
+    global _cf_challenge_count, _cf_last_challenge
+    now = time.monotonic()
+    if now - _cf_last_challenge > _CF_RESET_INTERVAL:
+        _cf_challenge_count = 0
+    _cf_challenge_count += 1
+    _cf_last_challenge = now
+    if _cf_challenge_count >= _CF_ALERT_THRESHOLD:
+        alert_cloudflare_blocked("Keepa", _cf_challenge_count, set_number)
+
+
+def _record_cf_clear() -> None:
+    """Reset Cloudflare challenge counter after a successful scrape."""
+    global _cf_challenge_count
+    _cf_challenge_count = 0
 
 
 def _keepa_browser() -> AsyncCamoufox:
@@ -73,12 +108,33 @@ def _notify_captcha(query: str) -> None:
 
 
 async def _detect_cloudflare(page: Page) -> bool:
-    """Check if the current page is a Cloudflare challenge."""
+    """Check if the current page is a Cloudflare challenge.
+
+    Detects both full-page challenges (title-based) and in-page
+    Turnstile widgets (iframe/div checkbox dialogs).
+    """
     try:
         title = await page.title()
-        return any(cf in title.lower() for cf in CF_CHALLENGE_TITLES)
+        if any(cf in title.lower() for cf in CF_CHALLENGE_TITLES):
+            return True
     except Exception:
-        return False
+        pass
+
+    # Check for in-page Turnstile widget (checkbox dialog)
+    try:
+        for selector in CF_WIDGET_SELECTORS:
+            el = await page.query_selector(selector)
+            if el:
+                visible = await el.is_visible()
+                if visible:
+                    logger.info(
+                        "Cloudflare Turnstile widget detected: %s", selector,
+                    )
+                    return True
+    except Exception:
+        pass
+
+    return False
 
 
 async def _wait_for_cloudflare(
@@ -110,6 +166,27 @@ async def _wait_for_cloudflare(
         "Cloudflare challenge timeout after %ds for query: %s",
         timeout, query,
     )
+    return False
+
+
+_SEARCH_RESULT_SELECTORS: tuple[str, ...] = (
+    ".ag-row",
+    ".ag-row-first",
+    'div[role="row"]',
+    'div[role="gridcell"]',
+    "#searchResultTable",
+)
+
+
+async def _wait_for_search_results(page: Page) -> bool:
+    """Wait for Keepa search results to appear on page."""
+    for selector in _SEARCH_RESULT_SELECTORS:
+        try:
+            await page.wait_for_selector(selector, timeout=5_000)
+            logger.info("Search results found with selector: %s", selector)
+            return True
+        except Exception:
+            continue
     return False
 
 
@@ -151,6 +228,7 @@ async def scrape_keepa(
 
             # Handle Cloudflare challenge
             if await _detect_cloudflare(page):
+                _record_cf_challenge(set_number)
                 solved = await _wait_for_cloudflare(page, set_number)
                 if not solved:
                     return KeepaScrapeResult(
@@ -177,6 +255,7 @@ async def scrape_keepa(
 
             # Handle Cloudflare after login redirect
             if await _detect_cloudflare(page):
+                _record_cf_challenge(set_number)
                 solved = await _wait_for_cloudflare(page, set_number)
                 if not solved:
                     return KeepaScrapeResult(
@@ -187,36 +266,31 @@ async def scrape_keepa(
                 await human_delay(3_000, 5_000)
 
             # Wait for search results — try multiple selectors
-            result_found = False
-            for selector in (
-                ".ag-row",
-                ".ag-row-first",
-                'div[role="row"]',
-                'div[role="gridcell"]',
-                "#searchResultTable",
-            ):
-                try:
-                    await page.wait_for_selector(selector, timeout=5_000)
-                    logger.info("Search results found with selector: %s", selector)
-                    result_found = True
-                    break
-                except Exception:
-                    continue
+            result_found = await _wait_for_search_results(page)
 
             if not result_found:
-                # Log what's actually on the page for debugging
-                body_text = await page.evaluate(
-                    "() => document.body.innerText.substring(0, 500)"
-                )
-                logger.warning(
-                    "No search result selectors matched. Page text: %s",
-                    body_text[:200],
-                )
-                return KeepaScrapeResult(
-                    success=False,
-                    set_number=set_number,
-                    error="Search results did not load within timeout",
-                )
+                # Check if CF widget appeared during/after search load
+                if await _detect_cloudflare(page):
+                    _record_cf_challenge(set_number)
+                    solved = await _wait_for_cloudflare(page, set_number)
+                    if solved:
+                        await page.goto(search_url, wait_until="domcontentloaded")
+                        await human_delay(3_000, 5_000)
+                        result_found = await _wait_for_search_results(page)
+
+                if not result_found:
+                    body_text = await page.evaluate(
+                        "() => document.body.innerText.substring(0, 500)"
+                    )
+                    logger.warning(
+                        "No search result selectors matched. Page text: %s",
+                        body_text[:200],
+                    )
+                    return KeepaScrapeResult(
+                        success=False,
+                        set_number=set_number,
+                        error="Search results did not load within timeout",
+                    )
 
             await human_delay(1_000, 2_000)
 
@@ -268,6 +342,7 @@ async def scrape_keepa(
                 product_data.tracking_users,
             )
 
+            _record_cf_clear()
             return KeepaScrapeResult(
                 success=True,
                 set_number=set_number,

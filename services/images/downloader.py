@@ -11,12 +11,12 @@ from typing import TYPE_CHECKING
 import httpx
 
 from config.settings import (
+    BRICKLINK_RATE_LIMITER,
     BWS_IMAGES_PATH,
     BWS_IMAGES_MINIFIGS_PATH,
     BWS_IMAGES_PARTS_PATH,
     BWS_IMAGES_SETS_PATH,
     get_random_accept_language,
-    get_random_delay,
     get_random_user_agent,
 )
 from services.images.repository import (
@@ -29,10 +29,6 @@ if TYPE_CHECKING:
     from duckdb import DuckDBPyConnection
 
 logger = logging.getLogger("bws.images")
-
-# Lighter rate limiting for CDN image downloads (static assets)
-_IMAGE_MIN_DELAY_MS = 500
-_IMAGE_MAX_DELAY_MS = 1500
 
 
 def _ensure_directories() -> None:
@@ -139,9 +135,8 @@ async def download_batch(
             if on_progress:
                 on_progress(i + 1, len(pending))
 
-            # Rate limit between downloads
-            delay = get_random_delay(min_ms=_IMAGE_MIN_DELAY_MS, max_ms=_IMAGE_MAX_DELAY_MS)
-            await asyncio.sleep(delay)
+            # Share BrickLink rate limiter (same domain: img.bricklink.com)
+            await BRICKLINK_RATE_LIMITER.acquire()
 
     logger.info("Image batch complete: %d downloaded, %d failed", downloaded, failed)
     return downloaded, failed
