@@ -1,51 +1,19 @@
 'use client';
 
-import { useState } from 'react';
 import { Button } from '@/components/ui/button';
-
-type Status = 'idle' | 'loading' | 'success' | 'error';
+import { useAsyncAction, formatQueuedMessage } from '@/lib/hooks/use-async-action';
 
 interface ScrapeMissingMetadataButtonProps {
   setNumbers: string[];
 }
 
 export function ScrapeMissingMetadataButton({ setNumbers }: ScrapeMissingMetadataButtonProps) {
-  const [status, setStatus] = useState<Status>('idle');
-  const [message, setMessage] = useState<string | null>(null);
-
-  const handleClick = async () => {
-    if (setNumbers.length === 0) return;
-
-    setStatus('loading');
-    setMessage(null);
-
-    try {
-      const res = await fetch('/api/enrichment/enrich-missing', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ set_numbers: setNumbers }),
-      });
-      const json = await res.json();
-
-      if (!json.success) {
-        setStatus('error');
-        setMessage(json.error ?? 'Failed');
-        return;
-      }
-
-      const { queued, set_numbers: queued_numbers } = json.data;
-      if (queued === 0) {
-        setStatus('success');
-        setMessage('All items already have metadata');
-      } else {
-        setStatus('success');
-        setMessage(`Queued ${queued}: ${queued_numbers.slice(0, 5).join(', ')}${queued > 5 ? '...' : ''}`);
-      }
-    } catch (err) {
-      setStatus('error');
-      setMessage(err instanceof Error ? err.message : 'Network error');
-    }
-  };
+  const { status, message, execute } = useAsyncAction({
+    endpoint: '/api/enrichment/enrich-missing',
+    buildBody: () => ({ set_numbers: setNumbers }),
+    onSuccess: (data) =>
+      formatQueuedMessage(data, 'All items already have metadata'),
+  });
 
   if (setNumbers.length === 0) return null;
 
@@ -61,7 +29,7 @@ export function ScrapeMissingMetadataButton({ setNumbers }: ScrapeMissingMetadat
       <Button
         variant='outline'
         size='sm'
-        onClick={handleClick}
+        onClick={execute}
         disabled={status === 'loading'}
       >
         {status === 'loading' ? 'Scraping...' : `Scrape Metadata (${setNumbers.length})`}

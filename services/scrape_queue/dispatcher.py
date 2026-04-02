@@ -68,7 +68,7 @@ TASK_TYPE_CONFIGS: dict[TaskType, TaskTypeConfig] = {
     TaskType.KEEPA: TaskTypeConfig(
         task_type=TaskType.KEEPA,
         executor=execute_keepa,
-        concurrency=1,
+        concurrency=2,
         timeout_seconds=300,
         browser_profile="keepa-profile",
     ),
@@ -179,7 +179,7 @@ async def run_scrape_dispatcher(**_kwargs: object) -> None:
                 else task_type.value
             )
             workers.append(
-                asyncio.create_task(_worker_loop(worker_id, cfg))
+                asyncio.create_task(_worker_loop(worker_id, cfg, worker_index=i))
             )
 
     # Periodic checkpoint to flush WAL to the main DB file
@@ -197,7 +197,12 @@ async def run_scrape_dispatcher(**_kwargs: object) -> None:
 # ---------------------------------------------------------------------------
 
 
-async def _worker_loop(worker_id: str, cfg: TaskTypeConfig) -> None:
+async def _worker_loop(
+    worker_id: str,
+    cfg: TaskTypeConfig,
+    *,
+    worker_index: int = 0,
+) -> None:
     """Single worker: claim a task, execute it, repeat."""
     while not _shutting_down:
         try:
@@ -205,6 +210,7 @@ async def _worker_loop(worker_id: str, cfg: TaskTypeConfig) -> None:
                 result = await asyncio.wait_for(
                     asyncio.to_thread(
                         _claim_and_execute, worker_id, cfg,
+                        worker_index=worker_index,
                     ),
                     timeout=cfg.timeout_seconds,
                 )
@@ -213,7 +219,7 @@ async def _worker_loop(worker_id: str, cfg: TaskTypeConfig) -> None:
                     "[%s] Executor timed out after %ds, force-failing task",
                     worker_id, cfg.timeout_seconds,
                 )
-                _fail_current_task(worker_id, cfg)
+                _fail_current_task(worker_id, cfg, worker_index=worker_index)
                 if cfg.uses_browser:
                     await asyncio.sleep(3)
                 if cfg.task_type == TaskType.GOOGLE_TRENDS:
@@ -258,6 +264,8 @@ async def _worker_loop(worker_id: str, cfg: TaskTypeConfig) -> None:
 def _claim_and_execute(
     worker_id: str,
     cfg: TaskTypeConfig,
+    *,
+    worker_index: int = 0,
 ) -> float | None:
     """Claim the next pending task and run its executor.
 
@@ -293,7 +301,7 @@ def _claim_and_execute(
         )
 
         try:
-            result = cfg.executor(conn, task.set_number)
+            result = cfg.executor(conn, task.set_number, worker_index=worker_index)
         except Exception as exc:
             logger.exception("[%s] %s crashed", worker_id, task.set_number)
             fail_task(conn, task.task_id, str(exc))
@@ -335,7 +343,12 @@ def _handle_result(
 # ---------------------------------------------------------------------------
 
 
-def _fail_current_task(worker_id: str, cfg: TaskTypeConfig) -> None:
+def _fail_current_task(
+    worker_id: str,
+    cfg: TaskTypeConfig,
+    *,
+    worker_index: int = 0,
+) -> None:
     """Force-fail the timed-out task and kill orphaned browsers."""
     from db.connection import get_connection
 
@@ -348,7 +361,7 @@ def _fail_current_task(worker_id: str, cfg: TaskTypeConfig) -> None:
         conn.close()
 
     if cfg.uses_browser:
-        _kill_orphaned_browsers(cfg.browser_profile)
+        _kill_orphaned_browsers(cfg.browser_profile_for(worker_index))
 
 
 def _kill_orphaned_browsers(profile: str | None) -> None:

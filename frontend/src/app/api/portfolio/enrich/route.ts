@@ -1,20 +1,5 @@
-import { NextResponse } from 'next/server';
+import { proxyPost } from '@/lib/api-proxy';
 
-const API_BASE = process.env.BWS_API_URL || 'http://localhost:8005';
-
-export async function POST() {
-  try {
-    const res = await fetch(`${API_BASE}/api/portfolio/enrich`, {
-      method: 'POST',
-    });
-    const data = await res.json();
-    return NextResponse.json(data);
-  } catch (error) {
-    const message =
-      error instanceof Error ? error.message : 'Failed to enrich portfolio';
-    return NextResponse.json(
-      { success: false, error: message },
-      { status: 500 }
-    );
-  }
-}
+export const POST = proxyPost('/api/portfolio/enrich', {
+  errorMessage: 'Failed to enrich portfolio',
+});

@@ -1,50 +1,28 @@
 'use client';
 
-import { useState } from 'react';
 import { Button } from '@/components/ui/button';
-
-type Status = 'idle' | 'loading' | 'success' | 'error';
+import { useAsyncAction } from '@/lib/hooks/use-async-action';
 
 export function SyncRetirementButton() {
-  const [status, setStatus] = useState<Status>('idle');
-  const [message, setMessage] = useState<string | null>(null);
+  const { status, message, execute } = useAsyncAction({
+    endpoint: '/api/enrichment/sync-retirement',
+    onSuccess: (data) => {
+      const synced = data.synced as number;
+      const cleared = data.cleared as number;
+      const setNumbers = data.set_numbers as string[];
 
-  const handleClick = async () => {
-    setStatus('loading');
-    setMessage(null);
+      if (synced === 0 && cleared === 0) return 'Retirement status already in sync';
 
-    try {
-      const res = await fetch('/api/enrichment/sync-retirement', {
-        method: 'POST',
-      });
-      const json = await res.json();
-
-      if (!json.success) {
-        setStatus('error');
-        setMessage(json.error ?? 'Failed');
-        return;
+      const parts: string[] = [];
+      if (synced > 0) {
+        parts.push(`${synced} marked retiring: ${setNumbers.slice(0, 5).join(', ')}${synced > 5 ? '...' : ''}`);
       }
-
-      const { synced, cleared, set_numbers } = json.data;
-      if (synced === 0 && cleared === 0) {
-        setStatus('success');
-        setMessage('Retirement status already in sync');
-      } else {
-        const parts: string[] = [];
-        if (synced > 0) {
-          parts.push(`${synced} marked retiring: ${set_numbers.slice(0, 5).join(', ')}${synced > 5 ? '...' : ''}`);
-        }
-        if (cleared > 0) {
-          parts.push(`${cleared} cleared`);
-        }
-        setStatus('success');
-        setMessage(parts.join(' | '));
+      if (cleared > 0) {
+        parts.push(`${cleared} cleared`);
       }
-    } catch (err) {
-      setStatus('error');
-      setMessage(err instanceof Error ? err.message : 'Network error');
-    }
-  };
+      return parts.join(' | ');
+    },
+  });
 
   return (
     <div className='flex items-center gap-3'>
@@ -58,7 +36,7 @@ export function SyncRetirementButton() {
       <Button
         variant='outline'
         size='sm'
-        onClick={handleClick}
+        onClick={execute}
         disabled={status === 'loading'}
       >
         {status === 'loading' ? 'Syncing...' : 'Sync Retirement'}

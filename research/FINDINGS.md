@@ -508,3 +508,80 @@ Same pattern -- Keepa features alone are useless, and adding them to intrinsics 
 ### Data Inventory Script
 
 Created `research/check_data.py` for quick data volume checks.
+
+---
+
+## Future Features to Test (need more data)
+
+Features we've identified as promising but can't test yet due to insufficient data coverage.
+
+### Google Trends (currently 17 sets, need 100+)
+- **Average search interest** (r=+0.20 on 17 sets) -- sustained demand signal
+- **Interest trend near retirement** -- rising/falling search buzz before EOL
+- **Interest shape** -- spike-and-fade vs steady interest (from 223-point weekly time series)
+- **Interest relative to theme baseline** -- does this set get more searches than typical for its theme?
+- **Peak timing** -- when did peak interest occur relative to retirement date?
+
+Priority: HIGH. This is likely the missing "cultural relevance" signal that could predict breakout sets (BD-1, Nano Gauntlet) that intrinsics always underpredict.
+
+### Amazon Sellout Dynamics (currently 49 sets, need 100+)
+- **Sellout speed** -- how fast did Amazon go OOS after first discount? (fast = high demand)
+- **Pre-OOS price trajectory** -- was Amazon raising or lowering price before stock ran out?
+- **Buy box premium at OOS** (r=+0.49 on 49 sets) -- free market valuation at retirement
+- **3P seller entry speed** -- how quickly did FBA sellers appear after Amazon OOS?
+
+Priority: MEDIUM. Strong signal from bb_premium_at_oos but borderline leaky.
+
+### Cohort-Relative Traction (need richer activity data)
+- **Relative sales velocity** -- within sets released same year/month, which sold faster?
+- **Relative Google Trends interest** -- which sets got disproportionate attention?
+- **Ranking within theme+year** -- best-in-class within its cohort
+
+Priority: HIGH. User's insight -- relative performance within a cohort removes time-period effects.
+
+### External Data (would need new scrapers)
+- **Reddit mention frequency** -- r/lego, r/legomarket buzz
+- **YouTube review view counts** -- popular reviews = popular set
+- **BrickSet want-list count** -- direct collector demand signal
+- **Instagram hashtag count** -- social media traction
+
+Priority: LOW (requires new infrastructure).
+
+---
+
+## 09 - Enriched Intrinsics: Theme-relative + Cohort + Interactions (157 sets)
+
+Tested 19 new engineered features on top of the 12 baseline intrinsics.
+
+### Ablation Results
+
+| Config | Feats | LOO R2 | LOO Corr | AUC |
+|--------|-------|--------|----------|-----|
+| **A: Baseline** | **12** | **0.432** | **0.662** | **0.798** |
+| B: + Theme-relative | 18 | 0.388 | 0.624 | 0.763 |
+| C: + Cohort ranking | 19 | 0.391 | 0.627 | 0.763 |
+| D: + Interactions | 16 | 0.436 | 0.666 | 0.794 |
+| E: + Category proxy | 14 | **0.444** | **0.675** | 0.783 |
+| F: + Theme-rel + Cohort | 25 | 0.394 | 0.630 | 0.740 |
+| G: ALL 31 features | 31 | 0.357 | 0.599 | 0.720 |
+
+### Key Findings
+
+1. **Baseline (12 features) remains the best overall model.** Adding features hurts due to overfitting on 157 samples. More features = worse.
+
+2. **Category proxy (E) slightly improved R2** (0.432 -> 0.444) but at the cost of AUC (0.798 -> 0.783). The `collector_score` and `value_density` features add marginal regression signal but don't improve classification.
+
+3. **Interactions (D) are neutral** -- nearly identical to baseline. The GBM can already capture these interactions at depth=3.
+
+4. **Theme-relative and cohort features hurt** -- they add noise on this sample size. The z-scores and rankings within small groups (e.g., 5 SPEED CHAMPIONS sets) are unstable.
+
+5. **Breakout sets remain unpredictable** -- none of the new features helped predict BD-1, Venom, Nano Gauntlet, etc. The model still underpredicts all top performers by 10-20 percentage points.
+
+6. **New feature correlations are weak**: best is `rating_rank_cohort` at r=+0.22. None reach the r>0.3 threshold for strong signal.
+
+### Conclusion
+
+With 157 sets, the 12-feature baseline is at or near optimal complexity. Adding features only adds noise. The path to improvement is:
+1. **More data** (500+ sets would allow richer features without overfitting)
+2. **Google Trends** (cultural relevance signal to catch breakout sets)
+3. **Pre-retirement Keepa** (Amazon demand dynamics)

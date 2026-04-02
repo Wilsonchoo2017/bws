@@ -15,10 +15,9 @@ import httpx
 from config.settings import (
     BRICKLINK_RATE_LIMITER,
     RETRY_CONFIG,
-    get_random_accept_language,
     get_random_delay,
-    get_random_user_agent,
 )
+from services.http import get_browser_headers
 from services.bricklink.parser import (
     build_catalog_list_url,
     build_item_url,
@@ -87,15 +86,14 @@ class CatalogScrapeResult:
 
 def _get_headers() -> dict[str, str]:
     """Generate random browser-like headers."""
-    return {
-        "User-Agent": get_random_user_agent(),
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
-        "Accept-Language": get_random_accept_language(),
-        "Accept-Encoding": "gzip, deflate, br",
-        "Connection": "keep-alive",
-        "Upgrade-Insecure-Requests": "1",
-        "Cache-Control": "max-age=0",
-    }
+    return get_browser_headers(
+        accept="text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+        extra={
+            "Accept-Encoding": "gzip, deflate, br",
+            "Upgrade-Insecure-Requests": "1",
+            "Cache-Control": "max-age=0",
+        },
+    )
 
 
 class BricklinkQuotaExceeded(Exception):

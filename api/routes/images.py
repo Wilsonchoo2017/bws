@@ -1,8 +1,11 @@
 """Image assets API routes -- serve local images, trigger downloads."""
 
-from fastapi import APIRouter, BackgroundTasks
+from typing import TYPE_CHECKING
+
+from fastapi import APIRouter, BackgroundTasks, Depends
 from fastapi.responses import FileResponse, RedirectResponse, JSONResponse
 
+from api.dependencies import get_db
 from db.connection import get_connection
 from db.schema import init_schema
 from services.images.downloader import download_batch, get_absolute_path
@@ -12,26 +15,22 @@ from services.images.repository import (
     register_existing_images,
 )
 
+if TYPE_CHECKING:
+    from duckdb import DuckDBPyConnection
+
 router = APIRouter(prefix="/images", tags=["images"])
 
 
 @router.get("/stats")
-async def image_stats():
+async def image_stats(conn: "DuckDBPyConnection" = Depends(get_db)):
     """Get image download statistics."""
-    conn = get_connection()
-    init_schema(conn)
-    stats = get_download_stats(conn)
-    conn.close()
-    return stats
+    return get_download_stats(conn)
 
 
 @router.get("/{asset_type}/{item_id}")
-async def serve_image(asset_type: str, item_id: str):
+async def serve_image(asset_type: str, item_id: str, conn: "DuckDBPyConnection" = Depends(get_db)):
     """Serve a locally downloaded image, or redirect to CDN if not yet downloaded."""
-    conn = get_connection()
-    init_schema(conn)
     asset = get_asset(conn, asset_type, item_id)
-    conn.close()
 
     if asset and asset["status"] == "downloaded":
         file_path = get_absolute_path(asset["local_path"])
@@ -83,11 +82,12 @@ async def serve_keepa_chart(set_number: str):
 
 
 @router.post("/download")
-async def trigger_download(background_tasks: BackgroundTasks, batch_size: int = 50):
+async def trigger_download(
+    background_tasks: BackgroundTasks,
+    batch_size: int = 50,
+    conn: "DuckDBPyConnection" = Depends(get_db),
+):
     """Trigger a batch image download in the background."""
-    conn = get_connection()
-    init_schema(conn)
-
     # Register any unregistered existing items first
     registered = register_existing_images(conn)
 
@@ -100,7 +100,6 @@ async def trigger_download(background_tasks: BackgroundTasks, batch_size: int = 
     background_tasks.add_task(_run_batch)
 
     stats = get_download_stats(conn)
-    conn.close()
     return {
         "message": f"Download triggered. {registered} new assets registered.",
         "stats": stats,

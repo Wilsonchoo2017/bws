@@ -7,11 +7,10 @@ Pure functions for CRUD operations on ToysRUs data in DuckDB.
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 
-import re
-
 from db.queries import get_next_id
 from services.items.repository import get_or_create_item, record_price
 from services.items.set_number import extract_set_number
+from services.pricing import parse_myr_cents as _parse_myr_cents
 from services.toysrus.parser import ToysRUsProduct
 
 
@@ -20,17 +19,6 @@ if TYPE_CHECKING:
 
 
 _UTC = timezone.utc
-
-
-def _parse_myr_cents(price_myr: str) -> int | None:
-    """Parse a MYR price string to cents. e.g. '123.45' -> 12345."""
-    match = re.search(r"([\d,]+\.?\d*)", price_myr)
-    if not match:
-        return None
-    try:
-        return int(float(match.group(1).replace(",", "")) * 100)
-    except ValueError:
-        return None
 
 
 def upsert_product(conn: "DuckDBPyConnection", product: ToysRUsProduct) -> int:

@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useEffect, useMemo, useState } from 'react';
+import { useState } from 'react';
 import {
   useReactTable,
   getCoreRowModel,
@@ -13,12 +13,9 @@ import {
 import { DataTable } from '@/components/ui/table/data-table';
 import { DataTableColumnHeader } from '@/components/ui/table/data-table-column-header';
 import { Badge } from '@/components/ui/badge';
+import { formatPrice } from '@/lib/formatting';
+import { useFetchData } from '@/lib/hooks/use-fetch-data';
 import type { Holding } from './types';
-
-function formatRM(cents: number | null): string {
-  if (cents === null) return '-';
-  return `RM${(cents / 100).toFixed(2)}`;
-}
 
 const columns: ColumnDef<Holding>[] = [
   {
@@ -91,7 +88,7 @@ const columns: ColumnDef<Holding>[] = [
     ),
     cell: ({ row }) => (
       <span className='font-mono text-sm'>
-        {formatRM(row.getValue('avg_cost_cents'))}
+        {formatPrice(row.getValue('avg_cost_cents'))}
       </span>
     ),
     size: 100,
@@ -103,7 +100,7 @@ const columns: ColumnDef<Holding>[] = [
     ),
     cell: ({ row }) => (
       <span className='font-mono text-sm'>
-        {formatRM(row.getValue('market_price_cents'))}
+        {formatPrice(row.getValue('market_price_cents'))}
       </span>
     ),
     size: 100,
@@ -115,7 +112,7 @@ const columns: ColumnDef<Holding>[] = [
     ),
     cell: ({ row }) => (
       <span className='font-mono text-sm font-medium'>
-        {formatRM(row.getValue('current_value_cents'))}
+        {formatPrice(row.getValue('current_value_cents'))}
       </span>
     ),
     size: 110,
@@ -133,7 +130,7 @@ const columns: ColumnDef<Holding>[] = [
       const sign = pl > 0 ? '+' : '';
       return (
         <div className={`font-mono text-sm ${color}`}>
-          <div>{sign}{formatRM(pl)}</div>
+          <div>{sign}{formatPrice(pl)}</div>
           <div className='text-xs opacity-70'>{sign}{pct.toFixed(1)}%</div>
         </div>
       );
@@ -143,18 +140,8 @@ const columns: ColumnDef<Holding>[] = [
 ];
 
 export function HoldingsTable() {
-  const [data, setData] = useState<Holding[]>([]);
-  const [loading, setLoading] = useState(true);
+  const { data, loading } = useFetchData<Holding>('/api/portfolio/holdings');
   const [sorting, setSorting] = useState<SortingState>([]);
-
-  useEffect(() => {
-    fetch('/api/portfolio/holdings')
-      .then((r) => r.json())
-      .then((d) => {
-        if (d.success) setData(d.data);
-      })
-      .finally(() => setLoading(false));
-  }, []);
 
   const table = useReactTable({
     data,

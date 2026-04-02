@@ -54,11 +54,12 @@ const SERIES_COLORS: Record<string, string> = {
 };
 
 interface PricePoint {
+  [key: string]: string | number | undefined;
   date: string;
   label: string;
   ts: number;
   amazon?: number;
-  amazon_in_stock?: number; // set to yMax for full-height band, undefined when OOS
+  amazon_in_stock?: number;
   new?: number;
   new_3p_fba?: number;
   new_3p_fbm?: number;
@@ -111,7 +112,7 @@ function buildChartData(data: KeepaData): PricePoint[] {
       const point = dateMap.get(date)!;
       // null or negative cents = out of stock: omit the key to create a gap
       if (cents != null && cents >= 0) {
-        (point as Record<string, unknown>)[key] = cents / 100;
+        point[key] = cents / 100;
       }
     }
   }
@@ -125,7 +126,7 @@ function buildChartData(data: KeepaData): PricePoint[] {
   // The actual y-height is set at render time via the YAxis domain.
   for (const p of sorted) {
     if (p.amazon != null) {
-      (p as Record<string, unknown>)['amazon_in_stock'] = 1;
+      p['amazon_in_stock'] = 1;
     }
   }
 
@@ -274,7 +275,7 @@ export function KeepaPanel({ setNumber, globalDateRange, onDateRange }: KeepaDat
   }
 
   const activeSeries = TAB_SERIES[tab].filter((s) =>
-    chartData.some((p) => (p as Record<string, unknown>)[s.key] != null)
+    chartData.some((p) => p[s.key] != null)
   );
 
   const tabs: { key: ChartTab; label: string }[] = [
@@ -288,7 +289,7 @@ export function KeepaPanel({ setNumber, globalDateRange, onDateRange }: KeepaDat
   const visibleKeys = activeSeries.map((s) => s.key);
   const allValues = chartData.flatMap((p) =>
     visibleKeys
-      .map((k) => (p as Record<string, unknown>)[k] as number | undefined)
+      .map((k) => p[k] as number | undefined)
       .filter((v): v is number => v != null && v > 0)
   );
   const yMin = allValues.length > 0 ? Math.floor(Math.min(...allValues) * 0.9) : 0;

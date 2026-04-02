@@ -1,54 +1,22 @@
 'use client';
 
-import { useState } from 'react';
 import { Button } from '@/components/ui/button';
-
-type Status = 'idle' | 'loading' | 'success' | 'error';
+import { useAsyncAction, formatQueuedMessage } from '@/lib/hooks/use-async-action';
 
 interface EnrichMissingDimensionsButtonProps {
   setNumbers?: string[];
 }
 
 export function EnrichMissingDimensionsButton({ setNumbers }: EnrichMissingDimensionsButtonProps) {
-  const [status, setStatus] = useState<Status>('idle');
-  const [message, setMessage] = useState<string | null>(null);
-
-  const handleClick = async () => {
-    setStatus('loading');
-    setMessage(null);
-
-    try {
+  const { status, message, execute } = useAsyncAction({
+    endpoint: '/api/enrichment/enrich-missing-dimensions',
+    buildBody: () => {
       const hasFilter = setNumbers && setNumbers.length > 0;
-      const res = await fetch('/api/enrichment/enrich-missing-dimensions', {
-        method: 'POST',
-        ...(hasFilter
-          ? {
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ set_numbers: setNumbers }),
-            }
-          : {}),
-      });
-      const json = await res.json();
-
-      if (!json.success) {
-        setStatus('error');
-        setMessage(json.error ?? 'Failed');
-        return;
-      }
-
-      const { queued, set_numbers: queued_numbers } = json.data;
-      if (queued === 0) {
-        setStatus('success');
-        setMessage('All items already have dimensions');
-      } else {
-        setStatus('success');
-        setMessage(`Queued ${queued}: ${queued_numbers.slice(0, 5).join(', ')}${queued > 5 ? '...' : ''}`);
-      }
-    } catch (err) {
-      setStatus('error');
-      setMessage(err instanceof Error ? err.message : 'Network error');
-    }
-  };
+      return hasFilter ? { set_numbers: setNumbers } : undefined;
+    },
+    onSuccess: (data) =>
+      formatQueuedMessage(data, 'All items already have dimensions'),
+  });
 
   const count = setNumbers?.length;
   const label = count ? `Enrich Dims (${count})` : 'Enrich Dims';
@@ -65,7 +33,7 @@ export function EnrichMissingDimensionsButton({ setNumbers }: EnrichMissingDimen
       <Button
         variant='outline'
         size='sm'
-        onClick={handleClick}
+        onClick={execute}
         disabled={status === 'loading' || count === 0}
       >
         {status === 'loading' ? 'Enriching...' : label}

@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { useDebounce } from '@/lib/hooks/use-debounce';
 import type { KellyHorizon, KellySizing } from './types';
 
 function pct(value: number): string {
@@ -10,15 +11,6 @@ function pct(value: number): string {
 function signedPct(value: number): string {
   const prefix = value >= 0 ? '+' : '';
   return `${prefix}${(value * 100).toFixed(1)}%`;
-}
-
-function useDebounce<T>(value: T, delay: number): T {
-  const [debounced, setDebounced] = useState(value);
-  useEffect(() => {
-    const timer = setTimeout(() => setDebounced(value), delay);
-    return () => clearTimeout(timer);
-  }, [value, delay]);
-  return debounced;
 }
 
 function confidenceColor(confidence: string): string {

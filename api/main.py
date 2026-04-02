@@ -111,7 +111,7 @@ async def _shutdown(tasks: list[asyncio.Task]) -> None:
     """Graceful shutdown sequence with no unbounded waits."""
     # Signal dispatcher to stop after current task
     shutdown_scrape_dispatcher()
-    # Kill browsers (Ctrl+C already killed subprocesses via SIGINT)
+    # Force-close all persistent browsers (including OS processes)
     from services.browser import close_all_browsers
     close_all_browsers()
     # Cancel all tasks and wait for them to finish

@@ -12,7 +12,8 @@ from typing import TYPE_CHECKING
 
 import httpx
 
-from config.settings import get_random_delay, get_random_user_agent, get_random_accept_language
+from config.settings import get_random_delay
+from services.http import get_browser_headers
 from services.mightyutan.parser import MightyUtanProduct, parse_page
 from services.mightyutan.repository import upsert_products
 
@@ -41,13 +42,7 @@ class ScrapeResult:
 
 
 def _get_headers() -> dict[str, str]:
-    return {
-        "User-Agent": get_random_user_agent(),
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        "Accept-Language": get_random_accept_language(),
-        "Connection": "keep-alive",
-        "Referer": f"{_BASE_URL}/",
-    }
+    return get_browser_headers(referer=f"{_BASE_URL}/")
 
 
 async def _fetch_page(client: httpx.AsyncClient, page: int) -> str:

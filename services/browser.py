@@ -12,7 +12,10 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import secrets
+import signal
+import subprocess
 import threading
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
@@ -175,12 +178,14 @@ class PersistentBrowser:
                 self._shutdown(), self._loop,
             )
             try:
-                future.result(timeout=15)
+                future.result(timeout=5)
             except Exception:
                 logger.debug("Browser shutdown error", exc_info=True)
             self._loop.call_soon_threadsafe(self._loop.stop)
         if self._thread and self._thread.is_alive():
-            self._thread.join(timeout=5)
+            self._thread.join(timeout=3)
+        # Force-kill any lingering browser OS processes
+        self._kill_browser_processes()
         self._loop = None
         self._thread = None
         self._browser = None
@@ -212,6 +217,24 @@ class PersistentBrowser:
             and self._page is not None
             and not self._page.is_closed()
         )
+
+    def _kill_browser_processes(self) -> None:
+        """Force-kill any Camoufox/Firefox processes for this profile."""
+        profile = self._config.profile_name
+        try:
+            proc = subprocess.run(
+                ["pgrep", "-f", f"{profile}-profile"],
+                capture_output=True, text=True, timeout=5,
+            )
+            pids = [int(p) for p in proc.stdout.strip().split() if p.isdigit()]
+            for pid in pids:
+                try:
+                    os.kill(pid, signal.SIGKILL)
+                    logger.info("Force-killed browser process pid=%d (%s)", pid, profile)
+                except ProcessLookupError:
+                    pass
+        except Exception:
+            logger.debug("Failed to kill browser processes for %s", profile, exc_info=True)
 
     # -- internals ---------------------------------------------------------
 

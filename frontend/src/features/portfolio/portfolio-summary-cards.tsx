@@ -1,11 +1,8 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { formatPrice } from '@/lib/formatting';
 import type { PortfolioSummary } from './types';
-
-function formatRM(cents: number): string {
-  return `RM${(cents / 100).toFixed(2)}`;
-}
 
 function PLText({ cents, pct }: { cents: number; pct?: number }) {
   const color =
@@ -13,7 +10,7 @@ function PLText({ cents, pct }: { cents: number; pct?: number }) {
   const sign = cents > 0 ? '+' : '';
   return (
     <span className={color}>
-      {sign}{formatRM(cents)}
+      {sign}{formatPrice(cents)}
       {pct !== undefined && ` (${sign}${pct.toFixed(1)}%)`}
     </span>
   );
@@ -53,12 +50,12 @@ export function PortfolioSummaryCards() {
   const cards = [
     {
       label: 'Total Cost',
-      value: formatRM(summary.total_cost_cents),
+      value: formatPrice(summary.total_cost_cents),
       sub: `${summary.unique_sets} sets, ${summary.holdings_count} units`,
     },
     {
       label: 'Market Value',
-      value: formatRM(summary.total_market_value_cents),
+      value: formatPrice(summary.total_market_value_cents),
     },
     {
       label: 'Unrealized P&L',

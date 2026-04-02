@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import {
   useReactTable,
   getCoreRowModel,
@@ -14,11 +14,9 @@ import { DataTable } from '@/components/ui/table/data-table';
 import { DataTableColumnHeader } from '@/components/ui/table/data-table-column-header';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { formatPrice } from '@/lib/formatting';
+import { useFetchData } from '@/lib/hooks/use-fetch-data';
 import type { Transaction } from './types';
-
-function formatRM(cents: number): string {
-  return `RM${(cents / 100).toFixed(2)}`;
-}
 
 function formatDate(iso: string): string {
   return new Date(iso).toLocaleDateString('en-MY', {
@@ -29,23 +27,8 @@ function formatDate(iso: string): string {
 }
 
 export function TransactionsTable() {
-  const [data, setData] = useState<Transaction[]>([]);
-  const [loading, setLoading] = useState(true);
+  const { data, loading, setData } = useFetchData<Transaction>('/api/portfolio/transactions?limit=500');
   const [sorting, setSorting] = useState<SortingState>([]);
-
-  const fetchData = () => {
-    setLoading(true);
-    fetch('/api/portfolio/transactions?limit=500')
-      .then((r) => r.json())
-      .then((d) => {
-        if (d.success) setData(d.data);
-      })
-      .finally(() => setLoading(false));
-  };
-
-  useEffect(() => {
-    fetchData();
-  }, []);
 
   const handleDelete = async (id: number) => {
     const res = await fetch(`/api/portfolio/transactions/${id}`, {
@@ -127,7 +110,7 @@ export function TransactionsTable() {
       ),
       cell: ({ row }) => (
         <span className='font-mono text-sm'>
-          {formatRM(row.getValue('price_cents'))}
+          {formatPrice(row.getValue('price_cents'))}
         </span>
       ),
       size: 100,
@@ -137,7 +120,7 @@ export function TransactionsTable() {
       header: 'Total',
       cell: ({ row }) => (
         <span className='font-mono text-sm font-medium'>
-          {formatRM(row.original.price_cents * row.original.quantity)}
+          {formatPrice(row.original.price_cents * row.original.quantity)}
         </span>
       ),
       size: 110,

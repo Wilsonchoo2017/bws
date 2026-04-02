@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import {
   useReactTable,
   getCoreRowModel,
@@ -9,28 +9,13 @@ import {
   type SortingState
 } from '@tanstack/react-table';
 import { DataTable } from '@/components/ui/table/data-table';
+import { useFetchData } from '@/lib/hooks/use-fetch-data';
 import { columns } from './columns';
 import type { ItemWithAnalysis } from './types';
 
 export function ItemsTable() {
-  const [data, setData] = useState<ItemWithAnalysis[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const { data, loading, error } = useFetchData<ItemWithAnalysis>('/api/items');
   const [sorting, setSorting] = useState<SortingState>([]);
-
-  useEffect(() => {
-    fetch('/api/items')
-      .then((res) => res.json())
-      .then((json) => {
-        if (json.success) {
-          setData(json.data);
-        } else {
-          setError(json.error ?? 'Failed to load items');
-        }
-      })
-      .catch((err) => setError(err.message))
-      .finally(() => setLoading(false));
-  }, []);
 
   const table = useReactTable({
     data,

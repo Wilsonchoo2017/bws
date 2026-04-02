@@ -405,7 +405,7 @@ def _parse_sidebar(soup: BeautifulSoup) -> dict:
         if tok == "Minifigs" and i + 1 < len(tokens):
             # Scan subsequent tokens for value and exclusivity
             for j in range(i + 1, min(i + 5, len(tokens))):
-                val_match = re.search(r"Value\s+\$([\d,.]+)", tokens[j])
+                val_match = re.search(r"Value\s+\$([\d,.]+\d)", tokens[j])
                 if val_match:
                     result["minifig_value_cents"] = _dollars_to_cents(
                         float(val_match.group(1).replace(",", ""))
@@ -496,14 +496,14 @@ def _parse_regional_prices(
     text = soup.get_text()
     prices: dict[str, int | None] = {}
 
-    gbp_match = re.search(r"United Kingdom[^£]*£([\d,.]+)", text)
+    gbp_match = re.search(r"United Kingdom[^£]*£([\d,.]+\d)", text)
     prices["gbp"] = (
         _dollars_to_cents(float(gbp_match.group(1).replace(",", "")))
         if gbp_match
         else None
     )
 
-    eur_match = re.search(r"Europe[^€]*€([\d,.]+)", text)
+    eur_match = re.search(r"Europe[^€]*€([\d,.]+\d)", text)
     prices["eur"] = (
         _dollars_to_cents(float(eur_match.group(1).replace(",", "")))
         if eur_match
@@ -511,7 +511,7 @@ def _parse_regional_prices(
     )
 
     # Canada uses $ symbol -- look for "Canada" then next dollar amount
-    cad_match = re.search(r"Canada[^$]*\$([\d,.]+)", text)
+    cad_match = re.search(r"Canada[^$]*\$([\d,.]+\d)", text)
     prices["cad"] = (
         _dollars_to_cents(float(cad_match.group(1).replace(",", "")))
         if cad_match
@@ -519,7 +519,7 @@ def _parse_regional_prices(
     )
 
     # Australia uses $ symbol
-    aud_match = re.search(r"Australia[^$]*\$([\d,.]+)", text)
+    aud_match = re.search(r"Australia[^$]*\$([\d,.]+\d)", text)
     prices["aud"] = (
         _dollars_to_cents(float(aud_match.group(1).replace(",", "")))
         if aud_match

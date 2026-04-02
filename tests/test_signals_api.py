@@ -296,7 +296,7 @@ class TestSanitizeNaN:
         When we sanitize,
         Then composite_score becomes None.
         """
-        from api.routes.items import _sanitize_nan
+        from api.serialization import sanitize_nan as _sanitize_nan
 
         data = [{"set_number": "75192", "composite_score": float("nan"), "demand_pressure": 55.0}]
         result = _sanitize_nan(data)
@@ -310,7 +310,7 @@ class TestSanitizeNaN:
         When we sanitize,
         Then all values remain unchanged.
         """
-        from api.routes.items import _sanitize_nan
+        from api.serialization import sanitize_nan as _sanitize_nan
 
         data = [{"set_number": "75192", "composite_score": 72.5, "title": None}]
         result = _sanitize_nan(data)
@@ -323,7 +323,7 @@ class TestSanitizeNaN:
         When we sanitize,
         Then all NaN values become None.
         """
-        from api.routes.items import _sanitize_nan
+        from api.serialization import sanitize_nan as _sanitize_nan
 
         data = [{"composite_score": float("nan"), "demand_pressure": float("nan"), "price_trend": 60.0}]
         result = _sanitize_nan(data)

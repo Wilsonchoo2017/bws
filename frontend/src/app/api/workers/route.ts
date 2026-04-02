@@ -1,6 +1,5 @@
 import { NextResponse } from 'next/server';
-
-const API_BASE = process.env.BWS_API_URL || 'http://localhost:8005';
+import { API_BASE } from '@/lib/api-proxy';
 
 export async function GET() {
   try {
@@ -14,7 +13,6 @@ export async function GET() {
       );
     }
 
-    // Backend returns { jobs, stats } -- pass through both
     return NextResponse.json({
       success: true,
       data: data.jobs ?? data,

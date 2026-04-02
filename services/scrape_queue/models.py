@@ -89,6 +89,8 @@ class Executor(Protocol):
         self,
         conn: DuckDBPyConnection,
         set_number: str,
+        *,
+        worker_index: int = 0,
     ) -> ExecutorResult: ...
 
 
@@ -114,6 +116,20 @@ class TaskTypeConfig:
     @property
     def uses_browser(self) -> bool:
         return self.browser_profile is not None
+
+    def browser_profile_for(self, worker_index: int) -> str | None:
+        """Derive the concrete browser profile name for a given worker slot.
+
+        Single source of truth for profile naming across executors and
+        dispatcher cleanup.  Returns the base profile unchanged when
+        concurrency is 1, and ``{base}-{worker_index}-profile`` otherwise.
+        """
+        if self.browser_profile is None:
+            return None
+        if self.concurrency <= 1:
+            return self.browser_profile
+        base = self.browser_profile.removesuffix("-profile")
+        return f"{base}-{worker_index}-profile"
 
 
 # ---------------------------------------------------------------------------

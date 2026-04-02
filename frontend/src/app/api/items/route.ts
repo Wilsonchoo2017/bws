@@ -1,21 +1,7 @@
 import { type NextRequest, NextResponse } from 'next/server';
+import { API_BASE, proxyGet } from '@/lib/api-proxy';
 
-const API_BASE = process.env.BWS_API_URL || 'http://localhost:8005';
-
-export async function GET() {
-  try {
-    const res = await fetch(`${API_BASE}/api/items`);
-    const data = await res.json();
-    return NextResponse.json(data);
-  } catch (error) {
-    const message =
-      error instanceof Error ? error.message : 'Failed to fetch items';
-    return NextResponse.json(
-      { success: false, error: message },
-      { status: 500 }
-    );
-  }
-}
+export const GET = proxyGet('/api/items');
 
 export async function POST(request: NextRequest) {
   try {

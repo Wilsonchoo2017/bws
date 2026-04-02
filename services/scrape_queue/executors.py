@@ -60,6 +60,8 @@ _bl_ban_tracker = _BrickLinkBanTracker()
 def execute_bricklink_metadata(
     conn: DuckDBPyConnection,
     set_number: str,
+    *,
+    worker_index: int = 0,
 ) -> ExecutorResult:
     """Scrape BrickLink catalog page and store enrichment fields."""
     from config.settings import BRICKLINK_RATE_LIMITER
@@ -119,6 +121,8 @@ def execute_bricklink_metadata(
 def execute_brickeconomy(
     conn: DuckDBPyConnection,
     set_number: str,
+    *,
+    worker_index: int = 0,
 ) -> ExecutorResult:
     """Scrape BrickEconomy and store enrichment fields + snapshot."""
     from config.settings import BRICKECONOMY_CONFIG
@@ -182,6 +186,8 @@ def execute_brickeconomy(
 def execute_keepa(
     conn: DuckDBPyConnection,
     set_number: str,
+    *,
+    worker_index: int = 0,
 ) -> ExecutorResult:
     """Scrape Keepa for Amazon price history."""
     from config.settings import KEEPA_CONFIG
@@ -191,7 +197,7 @@ def execute_keepa(
     from services.keepa.scraper import scrape_with_page
 
     browser = get_persistent_browser(BrowserConfig(
-        profile_name="keepa",
+        profile_name=f"keepa-{worker_index}",
         headless=KEEPA_CONFIG.headless,
         locale=KEEPA_CONFIG.locale,
         window=(KEEPA_CONFIG.viewport_width, KEEPA_CONFIG.viewport_height),
@@ -229,6 +235,8 @@ def execute_keepa(
 def execute_minifigures(
     conn: DuckDBPyConnection,
     set_number: str,
+    *,
+    worker_index: int = 0,
 ) -> ExecutorResult:
     """Scrape BrickLink minifigure inventory and individual minifig pages."""
     from services.bricklink.scraper import scrape_set_minifigures_sync
@@ -310,6 +318,8 @@ def get_trends_cooldown_remaining() -> float:
 def execute_google_trends(
     conn: DuckDBPyConnection,
     set_number: str,
+    *,
+    worker_index: int = 0,
 ) -> ExecutorResult:
     """Fetch Google Trends interest data for a LEGO set."""
     from datetime import datetime, timedelta, timezone

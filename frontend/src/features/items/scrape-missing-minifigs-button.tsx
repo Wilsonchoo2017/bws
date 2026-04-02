@@ -1,54 +1,22 @@
 'use client';
 
-import { useState } from 'react';
 import { Button } from '@/components/ui/button';
-
-type Status = 'idle' | 'loading' | 'success' | 'error';
+import { useAsyncAction, formatQueuedMessage } from '@/lib/hooks/use-async-action';
 
 interface ScrapeMissingMinifigsButtonProps {
   setNumbers?: string[];
 }
 
 export function ScrapeMissingMinifigsButton({ setNumbers }: ScrapeMissingMinifigsButtonProps) {
-  const [status, setStatus] = useState<Status>('idle');
-  const [message, setMessage] = useState<string | null>(null);
-
-  const handleClick = async () => {
-    setStatus('loading');
-    setMessage(null);
-
-    try {
+  const { status, message, execute } = useAsyncAction({
+    endpoint: '/api/enrichment/scrape-missing-minifigs',
+    buildBody: () => {
       const hasFilter = setNumbers && setNumbers.length > 0;
-      const res = await fetch('/api/enrichment/scrape-missing-minifigs', {
-        method: 'POST',
-        ...(hasFilter
-          ? {
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ set_numbers: setNumbers }),
-            }
-          : {}),
-      });
-      const json = await res.json();
-
-      if (!json.success) {
-        setStatus('error');
-        setMessage(json.error ?? 'Failed');
-        return;
-      }
-
-      const { queued, set_numbers: queued_numbers } = json.data;
-      if (queued === 0) {
-        setStatus('success');
-        setMessage('All items already have minifig data');
-      } else {
-        setStatus('success');
-        setMessage(`Queued ${queued}: ${queued_numbers.slice(0, 5).join(', ')}${queued > 5 ? '...' : ''}`);
-      }
-    } catch (err) {
-      setStatus('error');
-      setMessage(err instanceof Error ? err.message : 'Network error');
-    }
-  };
+      return hasFilter ? { set_numbers: setNumbers } : undefined;
+    },
+    onSuccess: (data) =>
+      formatQueuedMessage(data, 'All items already have minifig data'),
+  });
 
   const count = setNumbers?.length;
   const label = count ? `Scrape Minifigs (${count})` : 'Scrape Minifigs';
@@ -65,7 +33,7 @@ export function ScrapeMissingMinifigsButton({ setNumbers }: ScrapeMissingMinifig
       <Button
         variant='outline'
         size='sm'
-        onClick={handleClick}
+        onClick={execute}
         disabled={status === 'loading' || count === 0}
       >
         {status === 'loading' ? 'Scraping...' : label}
