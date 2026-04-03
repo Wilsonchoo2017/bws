@@ -51,6 +51,13 @@ class MLPipelineConfig:
     model_artifact_dir: str = "models"
     max_features: int = 30
     correlation_threshold: float = 0.90
+    # Cross-validation
+    n_cv_repeats: int = 3
+    # Hyperparameter tuning (Optuna)
+    tuning_trials: int = 50
+    model_candidates: tuple[str, ...] = ("lightgbm", "gbm")
+    # Only prefer LightGBM if it beats GBM by this margin
+    min_improvement_for_complex: float = 0.01
 
 
 # Features are restricted to data available this many months before retirement.

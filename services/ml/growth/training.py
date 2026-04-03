@@ -12,10 +12,9 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 import pandas as pd
-from sklearn.ensemble import GradientBoostingRegressor
 from sklearn.preprocessing import StandardScaler
 
-from config.ml import FEATURE_CUTOFF_MONTHS_BEFORE_RETIREMENT
+from config.ml import FEATURE_CUTOFF_MONTHS_BEFORE_RETIREMENT, MLPipelineConfig
 from services.ml.extractors import extract_all as _extract_all_plugin
 from services.ml.growth.evaluation import CIRCULAR_FEATURES
 from services.ml.growth.features import (
@@ -23,6 +22,13 @@ from services.ml.growth.features import (
     TIER2_FEATURES,
     engineer_intrinsic_features,
     engineer_keepa_features,
+)
+from services.ml.growth.model_selection import (
+    CVResult,
+    build_model,
+    clip_outliers,
+    cross_validate_model,
+    select_best_model,
 )
 from services.ml.growth.types import TrainedEnsemble, TrainedGrowthModel
 from services.ml.helpers import compute_cutoff_dates
@@ -37,15 +43,59 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+_cfg = MLPipelineConfig()
 
-def _build_model() -> GradientBoostingRegressor:
-    return GradientBoostingRegressor(
-        n_estimators=300,
-        max_depth=4,
-        min_samples_leaf=5,
-        learning_rate=0.02,
-        random_state=42,
+
+def _build_model() -> object:
+    """Legacy default model builder (used as fallback)."""
+    return build_model("gbm")
+
+
+def _select_and_train(
+    X: pd.DataFrame,
+    y: np.ndarray,
+    tier_name: str,
+) -> tuple[object, StandardScaler, str, dict, CVResult | None]:
+    """Select best model via Optuna tuning + CV, then fit on all data.
+
+    Returns (fitted_model, fitted_scaler, model_name, best_params, cv_result).
+    """
+    X_clipped = clip_outliers(X)
+    X_arr = X_clipped.values
+
+    # Log target distribution
+    logger.info(
+        "%s target: mean=%.1f%%, median=%.1f%%, std=%.1f%%, range=[%.1f%%, %.1f%%]",
+        tier_name, np.mean(y), np.median(y), np.std(y), np.min(y), np.max(y),
     )
+    extreme = np.sum(np.abs(y - np.mean(y)) > 3 * np.std(y))
+    if extreme > len(y) * 0.05:
+        logger.warning("%s: %d extreme targets (>3 std)", tier_name, extreme)
+
+    # Tune and select
+    if _cfg.tuning_trials > 0:
+        model_name, best_params, cv_result = select_best_model(
+            X_arr, y,
+            candidates=_cfg.model_candidates,
+            n_trials=_cfg.tuning_trials,
+            n_splits=_cfg.n_cv_splits,
+            n_repeats=_cfg.n_cv_repeats,
+            min_improvement=_cfg.min_improvement_for_complex,
+        )
+    else:
+        model_name, best_params, cv_result = "gbm", {}, None
+
+    logger.info("%s selected: %s", tier_name, model_name)
+    if cv_result:
+        logger.info("  %s", cv_result.summary())
+
+    # Fit final model on all data
+    scaler = StandardScaler()
+    X_scaled = scaler.fit_transform(X_clipped)
+    model = build_model(model_name, best_params)
+    model.fit(X_scaled, y)
+
+    return model, scaler, model_name, best_params, cv_result
 
 
 def train_growth_models(
@@ -73,12 +123,8 @@ def train_growth_models(
     fill1 = X1.median()
     X1 = X1.fillna(fill1)
 
-    scaler1 = StandardScaler()
-    X1s = scaler1.fit_transform(X1)
-
-    model1 = _build_model()
-    model1.fit(X1s, y)
-    y_pred1 = model1.predict(X1s)
+    model1, scaler1, m1_name, _, cv1 = _select_and_train(X1, y, "Tier 1")
+    y_pred1 = model1.predict(scaler1.transform(clip_outliers(X1)))
     r2_1 = float(1 - np.sum((y - y_pred1) ** 2) / np.sum((y - y.mean()) ** 2))
 
     tier1 = TrainedGrowthModel(
@@ -90,10 +136,14 @@ def train_growth_models(
         n_train=len(y),
         train_r2=r2_1,
         trained_at=datetime.now().isoformat(),
+        model_name=m1_name,
+        cv_r2_mean=cv1.r2_mean if cv1 else None,
+        cv_r2_std=cv1.r2_std if cv1 else None,
     )
     logger.info(
-        "Tier 1 trained: %d sets, %d features, train R2=%.3f",
+        "Tier 1 trained: %d sets, %d features, train R2=%.3f, CV R2=%.3f",
         len(y), len(tier1_features), r2_1,
+        cv1.r2_mean if cv1 else float("nan"),
     )
 
     # Tier 2: intrinsics + Keepa (with temporal cutoff for training)
@@ -119,12 +169,8 @@ def train_growth_models(
         fill2 = X2.median()
         X2 = X2.fillna(fill2)
 
-        scaler2 = StandardScaler()
-        X2s = scaler2.fit_transform(X2)
-
-        model2 = _build_model()
-        model2.fit(X2s, y_kp)
-        y_pred2 = model2.predict(X2s)
+        model2, scaler2, m2_name, _, cv2 = _select_and_train(X2, y_kp, "Tier 2")
+        y_pred2 = model2.predict(scaler2.transform(clip_outliers(X2)))
         r2_2 = float(1 - np.sum((y_kp - y_pred2) ** 2) / np.sum((y_kp - y_kp.mean()) ** 2))
 
         tier2 = TrainedGrowthModel(
@@ -136,10 +182,14 @@ def train_growth_models(
             n_train=len(y_kp),
             train_r2=r2_2,
             trained_at=datetime.now().isoformat(),
+            model_name=m2_name,
+            cv_r2_mean=cv2.r2_mean if cv2 else None,
+            cv_r2_std=cv2.r2_std if cv2 else None,
         )
         logger.info(
-            "Tier 2 trained: %d sets, %d features, train R2=%.3f",
+            "Tier 2 trained: %d sets, %d features, train R2=%.3f, CV R2=%.3f",
             len(y_kp), len(tier2_features), r2_2,
+            cv2.r2_mean if cv2 else float("nan"),
         )
     else:
         logger.info("Tier 2 skipped: only %d Keepa sets (need 50+)", len(y_kp))
@@ -248,46 +298,9 @@ def _train_tier3(
         sum(1 for c in merged.columns if c in CIRCULAR_FEATURES),
     )
 
-    # -- Temporal OOS validation (80/20 split) for honest metrics --
-    yr_map = base.set_index("set_number").get("year_released")
-    if yr_map is not None:
-        merged["_yr"] = merged["set_number"].map(yr_map)
-        sorted_merged = merged.sort_values("_yr")
-    else:
-        sorted_merged = merged.sample(frac=1, random_state=42)
-
-    split_idx = int(len(sorted_merged) * 0.8)
-    train_idx = sorted_merged.index[:split_idx]
-    test_idx = sorted_merged.index[split_idx:]
-
-    X_tr_oos = X.loc[train_idx]
-    X_te_oos = X.loc[test_idx]
-    y_tr_oos = merged.loc[train_idx, "annual_growth_pct"].values.astype(float)
-    y_te_oos = merged.loc[test_idx, "annual_growth_pct"].values.astype(float)
-
-    scaler_oos = StandardScaler()
-    X_tr_s = scaler_oos.fit_transform(X_tr_oos)
-    X_te_s = scaler_oos.transform(X_te_oos)
-
-    model_oos = _build_model()
-    model_oos.fit(X_tr_s, y_tr_oos)
-    y_pred_oos = model_oos.predict(X_te_s)
-    ss_res = np.sum((y_te_oos - y_pred_oos) ** 2)
-    ss_tot = np.sum((y_te_oos - y_te_oos.mean()) ** 2)
-    oos_r2 = float(1 - ss_res / ss_tot) if ss_tot > 0 else 0.0
-
-    logger.info(
-        "Tier 3 OOS validation: train=%d, test=%d, OOS R2=%.3f",
-        len(y_tr_oos), len(y_te_oos), oos_r2,
-    )
-
-    # -- Train final production model on ALL data --
-    scaler = StandardScaler()
-    X_scaled = scaler.fit_transform(X)
-
-    model = _build_model()
-    model.fit(X_scaled, y)
-    y_pred = model.predict(X_scaled)
+    # -- Model selection + CV evaluation + final training --
+    model, scaler, m3_name, _, cv3 = _select_and_train(X, y, "Tier 3")
+    y_pred = model.predict(scaler.transform(clip_outliers(X)))
     r2 = float(1 - np.sum((y - y_pred) ** 2) / np.sum((y - y.mean()) ** 2))
 
     tier3 = TrainedGrowthModel(
@@ -299,10 +312,15 @@ def _train_tier3(
         n_train=len(y),
         train_r2=r2,
         trained_at=datetime.now().isoformat(),
+        model_name=m3_name,
+        cv_r2_mean=cv3.r2_mean if cv3 else None,
+        cv_r2_std=cv3.r2_std if cv3 else None,
     )
     logger.info(
-        "Tier 3 trained: %d sets, %d features, train R2=%.3f (OOS R2=%.3f)",
-        len(y), len(feature_cols), r2, oos_r2,
+        "Tier 3 trained: %d sets, %d features, train R2=%.3f, CV R2=%.3f +/-%.3f",
+        len(y), len(feature_cols), r2,
+        cv3.r2_mean if cv3 else float("nan"),
+        cv3.r2_std if cv3 else float("nan"),
     )
 
     # Log top 10 feature importances
@@ -404,30 +422,28 @@ def _train_ensemble(
         logger.info("Ensemble skipped: only %d sets with all tier predictions", len(y_clean))
         return None
 
-    # Temporal split for OOS evaluation
-    n_clean = len(y_clean)
-    split_idx = int(n_clean * 0.8)
-    meta_X_tr = meta_X_clean[:split_idx]
-    meta_X_te = meta_X_clean[split_idx:]
-    y_tr = y_clean[:split_idx]
-    y_te = y_clean[split_idx:]
+    # CV evaluation of meta-learner (try Ridge and ElasticNet)
+    from sklearn.linear_model import ElasticNet
 
-    meta_scaler = StandardScaler()
-    meta_X_tr_s = meta_scaler.fit_transform(meta_X_tr)
-    meta_X_te_s = meta_scaler.transform(meta_X_te)
+    best_meta_cv: CVResult | None = None
+    best_meta_cls = Ridge
 
-    meta_model = Ridge(alpha=1.0)
-    meta_model.fit(meta_X_tr_s, y_tr)
+    for meta_cls, meta_name in [(Ridge, "Ridge"), (ElasticNet, "ElasticNet")]:
+        meta_cv = cross_validate_model(
+            meta_X_clean, y_clean,
+            lambda cls=meta_cls: cls(alpha=1.0, random_state=42) if hasattr(cls, "random_state") else cls(alpha=1.0),
+            n_splits=_cfg.n_cv_splits,
+            n_repeats=_cfg.n_cv_repeats,
+        )
+        logger.info("  Ensemble meta (%s): CV R2=%.3f +/-%.3f", meta_name, meta_cv.r2_mean, meta_cv.r2_std)
+        if best_meta_cv is None or meta_cv.r2_mean > best_meta_cv.r2_mean:
+            best_meta_cv = meta_cv
+            best_meta_cls = meta_cls
 
-    y_pred_te = meta_model.predict(meta_X_te_s)
-    ss_res = np.sum((y_te - y_pred_te) ** 2)
-    ss_tot = np.sum((y_te - y_te.mean()) ** 2)
-    oos_r2 = float(1 - ss_res / ss_tot) if ss_tot > 0 else 0.0
-
-    # Refit meta-model on ALL clean data for production
+    # Fit final meta-model on ALL clean data
     meta_scaler_final = StandardScaler()
     meta_X_all_s = meta_scaler_final.fit_transform(meta_X_clean)
-    meta_model_final = Ridge(alpha=1.0)
+    meta_model_final = best_meta_cls(alpha=1.0)
     meta_model_final.fit(meta_X_all_s, y_clean)
 
     # Extract weights
@@ -439,14 +455,17 @@ def _train_ensemble(
         meta_model=meta_model_final,
         meta_scaler=meta_scaler_final,
         n_train=len(y_clean),
-        oos_r2=oos_r2,
+        oos_r2=best_meta_cv.r2_mean if best_meta_cv else 0.0,
         trained_at=datetime.now().isoformat(),
         weights=weights,
+        cv_scores=best_meta_cv.r2_folds if best_meta_cv else (),
     )
 
     logger.info(
-        "Ensemble trained: %d sets, %d tiers, OOS R2=%.3f",
-        len(y_clean), len(valid_tiers), oos_r2,
+        "Ensemble trained: %d sets, %d tiers, CV R2=%.3f +/-%.3f",
+        len(y_clean), len(valid_tiers),
+        best_meta_cv.r2_mean if best_meta_cv else 0.0,
+        best_meta_cv.r2_std if best_meta_cv else 0.0,
     )
     for name, w in weights:
         logger.info("  Ensemble weight: %-10s  %.3f", name, w)

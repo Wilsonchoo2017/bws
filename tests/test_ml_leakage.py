@@ -232,17 +232,14 @@ class TestFeatureRegistration:
 class TestOOSValidation:
     """Ensure training reports honest out-of-sample metrics."""
 
-    def test_tier3_reports_oos_r2(self):
-        """_train_tier3 must log OOS R2 (not just train R2)."""
+    def test_tier3_reports_cv_metrics(self):
+        """_train_tier3 must report cross-validated metrics (not just train R2)."""
         import inspect
         from services.ml.growth.training import _train_tier3
 
         source = inspect.getsource(_train_tier3)
-        assert "oos_r2" in source or "OOS" in source, (
-            "_train_tier3 must compute and report out-of-sample R2"
-        )
-        assert "split_idx" in source or "train_idx" in source, (
-            "_train_tier3 must split data for OOS validation"
+        assert "cv_r2" in source or "cv3" in source or "_select_and_train" in source, (
+            "_train_tier3 must compute cross-validated R2 via _select_and_train or directly"
         )
 
     def test_ensemble_uses_cross_validation(self):

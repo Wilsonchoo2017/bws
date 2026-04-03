@@ -5,7 +5,6 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-from sklearn.ensemble import GradientBoostingRegressor
 from sklearn.preprocessing import StandardScaler
 
 
@@ -27,13 +26,16 @@ class TrainedGrowthModel:
     """A fitted growth model with scaler and metadata."""
 
     tier: int
-    model: GradientBoostingRegressor
+    model: Any  # GBM, LightGBM, or similar .predict()/.feature_importances_ API
     scaler: StandardScaler
     feature_names: tuple[str, ...]
     fill_values: tuple[tuple[str, float], ...]
     n_train: int
     train_r2: float
     trained_at: str
+    model_name: str = "gbm"
+    cv_r2_mean: float | None = None
+    cv_r2_std: float | None = None
 
 
 @dataclass(frozen=True)
@@ -47,3 +49,4 @@ class TrainedEnsemble:
     oos_r2: float
     trained_at: str
     weights: tuple[tuple[str, float], ...] = ()  # (model_name, weight) pairs
+    cv_scores: tuple[float, ...] = ()
