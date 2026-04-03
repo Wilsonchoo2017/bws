@@ -30,8 +30,8 @@ def save_prediction_snapshot(conn: DuckDBPyConnection) -> int:
     """
     from services.ml.growth_model import predict_growth, train_growth_models
 
-    tier1, tier2, ts, ss = train_growth_models(conn)
-    predictions = predict_growth(conn, tier1, tier2, ts, ss)
+    tier1, tier2, ts, ss, tier3, ensemble = train_growth_models(conn)
+    predictions = predict_growth(conn, tier1, tier2, ts, ss, tier3=tier3, ensemble=ensemble)
 
     if not predictions:
         logger.warning("No predictions to save")

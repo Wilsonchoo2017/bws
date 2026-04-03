@@ -125,6 +125,19 @@ register("bl_months_with_sales", "bricklink_monthly_sales", "Months with at leas
 register("bl_sales_consistency", "bricklink_monthly_sales", "% of months with sales")
 register("bl_avg_spread_pct", "bricklink_monthly_sales", "Avg (max-min)/avg spread %")
 
+# Group K: Minifigure composition
+register("mf_exclusive_count", "set_minifigures", "Number of exclusive (single-set) minifigs", "int")
+register("mf_exclusive_pct", "derived", "% of minifigs that are exclusive to this set")
+register("mf_total_value", "minifig_price_history", "Sum of avg minifig prices (MYR cents)")
+register("mf_value_vs_rrp", "derived", "Total minifig value / set RRP ratio")
+register("mf_hero_value", "minifig_price_history", "Most valuable minifig avg price (MYR cents)")
+register("mf_hero_vs_rrp", "derived", "Hero minifig value / set RRP ratio")
+register("mf_avg_value", "minifig_price_history", "Mean avg minifig price (MYR cents)")
+register("mf_value_cv", "derived", "Coefficient of variation of minifig values")
+register("mf_total_sales", "minifig_price_history", "Sum of 6-month sales across all minifigs", "int")
+register("mf_avg_sales", "minifig_price_history", "Avg 6-month sales per minifig")
+register("mf_liquidity_score", "derived", "Total minifig lots / total figs (market depth)")
+
 # Group J: Google Trends theme-level
 register("gt_theme_lego_share", "google_trends_theme_snapshots", "LEGO share of theme search interest")
 register("gt_theme_avg_lego", "google_trends_theme_snapshots", "Avg LEGO search interest for theme")

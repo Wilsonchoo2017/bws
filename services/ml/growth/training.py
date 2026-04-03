@@ -24,7 +24,7 @@ from services.ml.growth.features import (
     engineer_intrinsic_features,
     engineer_keepa_features,
 )
-from services.ml.growth.types import TrainedGrowthModel
+from services.ml.growth.types import TrainedEnsemble, TrainedGrowthModel
 from services.ml.helpers import compute_cutoff_dates
 from services.ml.queries import (
     load_base_metadata,
@@ -50,11 +50,11 @@ def _build_model() -> GradientBoostingRegressor:
 
 def train_growth_models(
     conn: DuckDBPyConnection,
-) -> tuple[TrainedGrowthModel, TrainedGrowthModel | None, dict, dict, TrainedGrowthModel | None]:
-    """Train Tier 1 and Tier 2 growth models.
+) -> tuple[TrainedGrowthModel, TrainedGrowthModel | None, dict, dict, TrainedGrowthModel | None, TrainedEnsemble | None]:
+    """Train Tier 1, 2, 3, and ensemble growth models.
 
     Returns:
-        (tier1_model, tier2_model_or_none, theme_stats, subtheme_stats)
+        (tier1, tier2_or_none, theme_stats, subtheme_stats, tier3_or_none, ensemble_or_none)
     """
     df_raw = load_growth_training_data(conn)
     keepa_df = load_keepa_timelines(conn)
@@ -145,15 +145,22 @@ def train_growth_models(
         logger.info("Tier 2 skipped: only %d Keepa sets (need 50+)", len(y_kp))
 
     # Tier 3: all extractor-based features
-    tier3 = _train_tier3(conn, df_raw)
+    tier3, tier3_X, tier3_y = _train_tier3(conn, df_raw)
 
-    return tier1, tier2, theme_stats, subtheme_stats, tier3
+    # Ensemble: stack Tier 1/2/3 predictions via cross-validated meta-learner
+    base_models = [m for m in (tier1, tier2, tier3) if m is not None]
+    ensemble = _train_ensemble(
+        df_raw, df_feat, df_kp, base_models,
+        tier3_X=tier3_X, tier3_y=tier3_y,
+    ) if len(base_models) >= 2 else None
+
+    return tier1, tier2, theme_stats, subtheme_stats, tier3, ensemble
 
 
 def _train_tier3(
     conn: DuckDBPyConnection,
     df_raw: pd.DataFrame,
-) -> TrainedGrowthModel | None:
+) -> tuple[TrainedGrowthModel | None, pd.DataFrame | None, np.ndarray | None]:
     """Train Tier 3 model using all plugin extractor features.
 
     Combines Tier 1 intrinsics with BrickLink momentum, BE charts,
@@ -163,9 +170,10 @@ def _train_tier3(
 
     # Build base metadata with cutoff dates
     base = load_base_metadata(conn, set_numbers)
+    _none3 = (None, None, None)
     if base.empty:
         logger.info("Tier 3 skipped: no base metadata")
-        return None
+        return _none3
 
     base = compute_cutoff_dates(base, FEATURE_CUTOFF_MONTHS_BEFORE_RETIREMENT)
 
@@ -173,7 +181,7 @@ def _train_tier3(
     extractor_features = _extract_all_plugin(conn, base)
     if extractor_features.empty:
         logger.info("Tier 3 skipped: no extractor features")
-        return None
+        return _none3
 
     # Merge extractor features with the training target
     target_df = df_raw[["set_number", "annual_growth_pct"]].drop_duplicates(subset=["set_number"])
@@ -185,7 +193,7 @@ def _train_tier3(
 
     if len(merged) < 30:
         logger.info("Tier 3 skipped: only %d sets with features (need 30+)", len(merged))
-        return None
+        return _none3
 
     y = merged["annual_growth_pct"].values.astype(float)
 
@@ -207,7 +215,7 @@ def _train_tier3(
 
     if len(feature_cols) < 5:
         logger.info("Tier 3 skipped: only %d features with coverage (need 5+)", len(feature_cols))
-        return None
+        return _none3
 
     X = merged[feature_cols].copy()
     for c in X.columns:
@@ -303,4 +311,144 @@ def _train_tier3(
     for name, imp in ranked:
         logger.info("  Tier 3 feature: %-30s  %.4f", name, imp)
 
-    return tier3
+    return tier3, X, y
+
+
+def _train_ensemble(
+    df_raw: pd.DataFrame,
+    df_feat_t1: pd.DataFrame,
+    df_feat_t2: pd.DataFrame,
+    base_models: list[TrainedGrowthModel],
+    *,
+    tier3_X: pd.DataFrame | None = None,
+    tier3_y: np.ndarray | None = None,
+) -> TrainedEnsemble | None:
+    """Train a stacked ensemble from cross-validated base model predictions.
+
+    Uses 5-fold cross-validation to generate out-of-fold predictions from
+    each base model, then fits a Ridge meta-learner on those predictions.
+    Final OOS metric uses a temporal holdout of the 20% newest sets.
+    """
+    from sklearn.linear_model import Ridge
+    from sklearn.model_selection import KFold
+
+    y_all = df_raw["annual_growth_pct"].values.astype(float)
+    n = len(y_all)
+    if n < 50:
+        logger.info("Ensemble skipped: only %d sets", n)
+        return None
+
+    # Generate out-of-fold predictions for each base model
+    oof_preds: dict[int, np.ndarray] = {}
+
+    for m in base_models:
+        tier = m.tier
+        oof = np.full(n, np.nan)
+
+        # Select the right feature DataFrame for this tier
+        if tier == 1:
+            feat_cols = [f for f in m.feature_names if f in df_feat_t1.columns]
+            X_full = df_feat_t1[feat_cols].copy()
+        elif tier == 2:
+            feat_cols = [f for f in m.feature_names if f in df_feat_t2.columns]
+            X_full = df_feat_t2[feat_cols].copy()
+            # Tier 2 may have fewer rows; align with df_raw
+            if len(X_full) != n:
+                # Tier 2 has Keepa data -- pad missing rows with NaN
+                X_full = X_full.reindex(df_raw.index)
+        elif tier == 3 and tier3_X is not None and tier3_y is not None:
+            feat_cols = [f for f in m.feature_names if f in tier3_X.columns]
+            X_full = tier3_X[feat_cols].copy()
+            # Tier 3 may have fewer rows than df_raw; pad to align
+            if len(X_full) != n:
+                X_full = X_full.reindex(df_raw.index)
+        else:
+            oof_preds[tier] = np.full(n, np.nan)
+            continue
+
+        for c in X_full.columns:
+            X_full[c] = pd.to_numeric(X_full[c], errors="coerce")
+        fill = X_full.median()
+        X_full = X_full.fillna(fill)
+
+        kf = KFold(n_splits=5, shuffle=True, random_state=42)
+        for train_idx, val_idx in kf.split(X_full):
+            X_tr = X_full.iloc[train_idx]
+            y_tr = y_all[train_idx]
+            X_va = X_full.iloc[val_idx]
+
+            scaler = StandardScaler()
+            X_tr_s = scaler.fit_transform(X_tr)
+            X_va_s = scaler.transform(X_va)
+
+            fold_model = _build_model()
+            fold_model.fit(X_tr_s, y_tr)
+            oof[val_idx] = fold_model.predict(X_va_s)
+
+        oof_preds[tier] = oof
+
+    # Build meta-features matrix (only tiers with actual OOF predictions)
+    valid_tiers = [t for t in sorted(oof_preds) if not np.all(np.isnan(oof_preds[t]))]
+    if len(valid_tiers) < 2:
+        logger.info("Ensemble skipped: only %d tiers with OOF predictions", len(valid_tiers))
+        return None
+
+    meta_X = np.column_stack([oof_preds[t] for t in valid_tiers])
+
+    # Handle rows where some tiers have NaN (e.g. Tier 2 missing Keepa data)
+    valid_rows = ~np.any(np.isnan(meta_X), axis=1)
+    meta_X_clean = meta_X[valid_rows]
+    y_clean = y_all[valid_rows]
+
+    if len(y_clean) < 30:
+        logger.info("Ensemble skipped: only %d sets with all tier predictions", len(y_clean))
+        return None
+
+    # Temporal split for OOS evaluation
+    n_clean = len(y_clean)
+    split_idx = int(n_clean * 0.8)
+    meta_X_tr = meta_X_clean[:split_idx]
+    meta_X_te = meta_X_clean[split_idx:]
+    y_tr = y_clean[:split_idx]
+    y_te = y_clean[split_idx:]
+
+    meta_scaler = StandardScaler()
+    meta_X_tr_s = meta_scaler.fit_transform(meta_X_tr)
+    meta_X_te_s = meta_scaler.transform(meta_X_te)
+
+    meta_model = Ridge(alpha=1.0)
+    meta_model.fit(meta_X_tr_s, y_tr)
+
+    y_pred_te = meta_model.predict(meta_X_te_s)
+    ss_res = np.sum((y_te - y_pred_te) ** 2)
+    ss_tot = np.sum((y_te - y_te.mean()) ** 2)
+    oos_r2 = float(1 - ss_res / ss_tot) if ss_tot > 0 else 0.0
+
+    # Refit meta-model on ALL clean data for production
+    meta_scaler_final = StandardScaler()
+    meta_X_all_s = meta_scaler_final.fit_transform(meta_X_clean)
+    meta_model_final = Ridge(alpha=1.0)
+    meta_model_final.fit(meta_X_all_s, y_clean)
+
+    # Extract weights
+    tier_names = [f"tier{t}" for t in valid_tiers]
+    weights = tuple(zip(tier_names, meta_model_final.coef_.tolist()))
+
+    ensemble = TrainedEnsemble(
+        base_models=tuple(base_models),
+        meta_model=meta_model_final,
+        meta_scaler=meta_scaler_final,
+        n_train=len(y_clean),
+        oos_r2=oos_r2,
+        trained_at=datetime.now().isoformat(),
+        weights=weights,
+    )
+
+    logger.info(
+        "Ensemble trained: %d sets, %d tiers, OOS R2=%.3f",
+        len(y_clean), len(valid_tiers), oos_r2,
+    )
+    for name, w in weights:
+        logger.info("  Ensemble weight: %-10s  %.3f", name, w)
+
+    return ensemble

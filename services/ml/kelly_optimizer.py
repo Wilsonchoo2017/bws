@@ -198,12 +198,14 @@ def compute_ml_kelly_sizing(
     from services.ml.growth_model import predict_growth, train_growth_models
 
     # Train models
-    tier1, tier2, theme_stats, subtheme_stats = train_growth_models(conn)
+    tier1, tier2, theme_stats, subtheme_stats, tier3, ensemble = train_growth_models(conn)
 
     # Get predictions
     predictions = predict_growth(
         conn, tier1, tier2, theme_stats, subtheme_stats,
         only_retiring=only_retiring,
+        tier3=tier3,
+        ensemble=ensemble,
     )
 
     if not predictions:

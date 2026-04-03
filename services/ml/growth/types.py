@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from typing import Any
 
 from sklearn.ensemble import GradientBoostingRegressor
 from sklearn.preprocessing import StandardScaler
@@ -17,7 +18,7 @@ class GrowthPrediction:
     theme: str
     predicted_growth_pct: float
     confidence: str  # "high", "moderate", "low"
-    tier: int  # 1 or 2
+    tier: int  # 1, 2, 3, or 4 (ensemble)
     feature_contributions: tuple[tuple[str, float], ...] = ()
 
 
@@ -33,3 +34,16 @@ class TrainedGrowthModel:
     n_train: int
     train_r2: float
     trained_at: str
+
+
+@dataclass(frozen=True)
+class TrainedEnsemble:
+    """Stacked ensemble combining Tier 1/2/3 predictions."""
+
+    base_models: tuple[TrainedGrowthModel, ...]
+    meta_model: Any  # Ridge or similar linear meta-learner
+    meta_scaler: StandardScaler
+    n_train: int
+    oos_r2: float
+    trained_at: str
+    weights: tuple[tuple[str, float], ...] = ()  # (model_name, weight) pairs

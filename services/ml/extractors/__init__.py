@@ -20,6 +20,7 @@ from services.ml.extractors.gtrends_theme import GoogleTrendsThemeExtractor
 from services.ml.extractors.intrinsics import IntrinsicsExtractor
 from services.ml.extractors.keepa import KeepaExtractor
 from services.ml.extractors.keepa_timeline import KeepaTimelineExtractor
+from services.ml.extractors.minifigs import MinifigExtractor
 from services.ml.extractors.shopee import ShopeeExtractor
 
 if TYPE_CHECKING:
@@ -35,6 +36,7 @@ _ALL_EXTRACTORS: tuple[FeatureExtractor, ...] = (
     KeepaExtractor(),
     KeepaTimelineExtractor(),
     BrickLinkExtractor(),
+    MinifigExtractor(),
     GoogleTrendsExtractor(),
     GoogleTrendsThemeExtractor(),
     ShopeeExtractor(),

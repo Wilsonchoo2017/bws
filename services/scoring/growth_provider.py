@@ -68,7 +68,7 @@ class GrowthScoringProvider:
         if not _cache:
             from services.ml.growth_model import train_growth_models
 
-            tier1, tier2, ts, ss = train_growth_models(conn)
+            tier1, tier2, ts, ss, *_ = train_growth_models(conn)
             _cache["tier1"] = tier1
             _cache["tier2"] = tier2
             _cache["theme_stats"] = ts

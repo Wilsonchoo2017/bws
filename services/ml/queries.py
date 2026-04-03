@@ -44,15 +44,26 @@ def load_base_metadata(
     query = f"""
         SELECT
             li.set_number,
-            li.title,
-            li.theme,
-            li.year_released,
-            li.year_retired,
-            li.retired_date,
-            li.parts_count,
-            li.minifig_count,
-            li.retiring_soon
+            COALESCE(NULLIF(li.title, ''), be.title) AS title,
+            COALESCE(li.theme, be.theme) AS theme,
+            CASE
+                WHEN li.year_released IS NOT NULL AND li.year_released <= 2026
+                    THEN li.year_released
+                WHEN be.year_released IS NOT NULL
+                    THEN be.year_released
+                ELSE li.year_released
+            END AS year_released,
+            COALESCE(li.year_retired, be.year_retired) AS year_retired,
+            COALESCE(li.retired_date, be.retired_date) AS retired_date,
+            COALESCE(be.pieces, li.parts_count) AS parts_count,
+            COALESCE(be.minifigs, li.minifig_count) AS minifig_count,
+            COALESCE(li.retiring_soon, be.retiring_soon) AS retiring_soon
         FROM lego_items li
+        LEFT JOIN (
+            SELECT DISTINCT ON (set_number) *
+            FROM brickeconomy_snapshots
+            ORDER BY set_number, scraped_at DESC
+        ) be ON li.set_number = be.set_number
         {where_clause}
         ORDER BY li.set_number
     """
@@ -404,30 +415,51 @@ def load_latest_shopee_snapshots(conn: DuckDBPyConnection) -> pd.DataFrame:
 
 
 def load_growth_training_data(conn: DuckDBPyConnection) -> pd.DataFrame:
-    """Load all sets with BrickEconomy growth data for growth model training."""
+    """Load all sets with BrickEconomy growth data for growth model training.
+
+    Uses the latest BE snapshot per set to avoid duplicate rows.
+    """
     return conn.execute("""
         SELECT
-            li.set_number, li.title, li.theme,
-            li.parts_count, li.minifig_count,
+            li.set_number,
+            COALESCE(NULLIF(li.title, ''), be.title) AS title,
+            COALESCE(li.theme, be.theme) AS theme,
+            COALESCE(be.pieces, li.parts_count) AS parts_count,
+            COALESCE(be.minifigs, li.minifig_count) AS minifig_count,
             be.annual_growth_pct, be.rrp_usd_cents, be.rating_value,
             be.review_count, be.pieces, be.minifigs,
             be.rrp_gbp_cents, be.subtheme
         FROM lego_items li
-        JOIN brickeconomy_snapshots be ON li.set_number = be.set_number
+        JOIN (
+            SELECT DISTINCT ON (set_number) *
+            FROM brickeconomy_snapshots
+            ORDER BY set_number, scraped_at DESC
+        ) be ON li.set_number = be.set_number
         WHERE be.annual_growth_pct IS NOT NULL
           AND be.rrp_usd_cents > 0
     """).df()
 
 
 def load_growth_candidate_sets(conn: DuckDBPyConnection) -> pd.DataFrame:
-    """Load sets eligible for growth prediction."""
+    """Load sets eligible for growth prediction.
+
+    Uses the latest BE snapshot per set to avoid duplicate rows.
+    """
     return conn.execute("""
         SELECT
-            li.set_number, li.title, li.theme,
-            li.parts_count, li.minifig_count, li.retiring_soon,
+            li.set_number,
+            COALESCE(NULLIF(li.title, ''), be.title) AS title,
+            COALESCE(li.theme, be.theme) AS theme,
+            COALESCE(be.pieces, li.parts_count) AS parts_count,
+            COALESCE(be.minifigs, li.minifig_count) AS minifig_count,
+            COALESCE(li.retiring_soon, be.retiring_soon) AS retiring_soon,
             be.rrp_usd_cents, be.rating_value, be.review_count,
             be.pieces, be.minifigs, be.rrp_gbp_cents, be.subtheme
         FROM lego_items li
-        JOIN brickeconomy_snapshots be ON li.set_number = be.set_number
+        JOIN (
+            SELECT DISTINCT ON (set_number) *
+            FROM brickeconomy_snapshots
+            ORDER BY set_number, scraped_at DESC
+        ) be ON li.set_number = be.set_number
         WHERE be.rrp_usd_cents > 0
     """).df()
