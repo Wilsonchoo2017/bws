@@ -8,13 +8,29 @@ Fallback: BrickEconomy value_chart_json time series or value_new_cents
 from snapshots (since BrickLink only keeps 6 months of data).
 """
 
-import json
 import logging
+from datetime import datetime
 from typing import TYPE_CHECKING
 
 import pandas as pd
 
-from config.ml import MLPipelineConfig, TARGET_SMOOTHING_WINDOW
+from config.ml import (
+    OUTCOME_LOSER,
+    OUTCOME_NEUTRAL,
+    OUTCOME_PERFORMER,
+    OUTCOME_STAGNANT,
+    OUTCOME_STRONG_LOSER,
+    InversionConfig,
+    MLPipelineConfig,
+    TARGET_SMOOTHING_WINDOW,
+)
+from services.ml.helpers import offset_months, set_number_to_item_id
+from services.ml.queries import (
+    load_be_snapshot_values,
+    load_be_value_charts,
+    load_bricklink_monthly_prices,
+    load_retired_sets,
+)
 
 if TYPE_CHECKING:
     from duckdb import DuckDBPyConnection
@@ -43,21 +59,77 @@ def compute_retirement_returns(
     if config is None:
         config = MLPipelineConfig()
 
-    # Load retired sets with RRP
-    sets_df = _load_retired_sets(conn)
+    # Load all data upfront (impure boundary)
+    sets_df = _parse_retired_sets(load_retired_sets(conn))
     if sets_df.empty:
         logger.warning("No retired sets with RRP found")
         return pd.DataFrame()
 
-    # Load BrickLink monthly sales
-    bricklink_prices = _load_bricklink_monthly_prices(conn)
+    bricklink_prices = load_bricklink_monthly_prices(conn)
+    be_value_charts = load_be_value_charts(conn)
+    be_snapshots = load_be_snapshot_values(conn)
 
-    # Load BrickEconomy value chart time series
-    be_value_charts = _load_brickeconomy_value_charts(conn)
+    # Pure computation over pre-loaded data
+    return _compute_returns(
+        sets_df, bricklink_prices, be_value_charts, be_snapshots, config
+    )
 
-    # Load BrickEconomy snapshot values (last resort)
-    be_snapshots = _load_brickeconomy_snapshot_values(conn)
 
+def compute_outcome_labels(
+    returns_df: pd.DataFrame,
+    config: InversionConfig | None = None,
+) -> pd.DataFrame:
+    """Add outcome category labels and binary avoid flags to returns DataFrame.
+
+    Takes the output of compute_retirement_returns() and adds columns:
+        outcome_12m/24m/36m: categorical (strong_loser/loser/stagnant/neutral/performer)
+        avoid_12m/24m/36m: boolean (True if return < avoid_threshold)
+
+    Args:
+        returns_df: DataFrame from compute_retirement_returns() with return_12m etc.
+        config: Inversion thresholds. Uses defaults if None.
+
+    Returns:
+        New DataFrame with original columns plus outcome and avoid columns.
+    """
+    if config is None:
+        config = InversionConfig()
+
+    if returns_df.empty:
+        return returns_df
+
+    result = returns_df.copy()
+
+    for horizon in (12, 24, 36):
+        col = f"{horizon}m"
+        return_col = f"return_{col}"
+
+        if return_col not in result.columns:
+            continue
+
+        result[f"outcome_{col}"] = result[return_col].apply(
+            lambda r: _classify_outcome(r, config)
+        )
+        result[f"avoid_{col}"] = result[return_col].apply(
+            lambda r: r < config.avoid_threshold if pd.notna(r) else None
+        )
+
+    return result
+
+
+# ---------------------------------------------------------------------------
+# Pure computation functions
+# ---------------------------------------------------------------------------
+
+
+def _compute_returns(
+    sets_df: pd.DataFrame,
+    bricklink_prices: pd.DataFrame,
+    be_value_charts: dict[str, list[tuple[int, int, int]]],
+    be_snapshots: pd.DataFrame,
+    config: MLPipelineConfig,
+) -> pd.DataFrame:
+    """Compute returns from pre-loaded data (pure function)."""
     rows: list[dict] = []
     half_window = TARGET_SMOOTHING_WINDOW // 2
 
@@ -77,14 +149,14 @@ def compute_retirement_returns(
             "rrp_usd_cents": rrp_usd,
         }
 
-        item_id = _set_number_to_item_id(set_number)
+        item_id = set_number_to_item_id(set_number)
 
         for horizon in config.target_horizons:
-            target_year, target_month = _add_months(
+            target_year, target_month = offset_months(
                 retired_year, retired_month, horizon
             )
 
-            avg_price, source = _get_price_at_horizon(
+            avg_price, source = get_price_at_horizon(
                 set_number=set_number,
                 item_id=item_id,
                 target_year=target_year,
@@ -115,33 +187,12 @@ def compute_retirement_returns(
     return pd.DataFrame(rows)
 
 
-def _load_retired_sets(conn: "DuckDBPyConnection") -> pd.DataFrame:
-    """Load retired sets with RRP in USD."""
-    query = """
-        SELECT
-            li.set_number,
-            li.year_retired,
-            li.retired_date,
-            be.rrp_usd_cents
-        FROM lego_items li
-        JOIN (
-            SELECT
-                set_number,
-                rrp_usd_cents,
-                ROW_NUMBER() OVER (
-                    PARTITION BY set_number ORDER BY scraped_at DESC
-                ) AS rn
-            FROM brickeconomy_snapshots
-            WHERE rrp_usd_cents IS NOT NULL AND rrp_usd_cents > 0
-        ) be ON be.set_number = li.set_number AND be.rn = 1
-        WHERE li.year_retired IS NOT NULL
-        ORDER BY li.set_number
-    """
-    df = conn.execute(query).df()
-    if df.empty:
-        return df
+def _parse_retired_sets(raw_df: pd.DataFrame) -> pd.DataFrame:
+    """Parse retired_date into year/month components."""
+    if raw_df.empty:
+        return raw_df
 
-    # Parse retired_date (ISO "YYYY-MM") into year/month components
+    df = raw_df.copy()
     df["retired_year"] = None
     df["retired_month"] = None
 
@@ -153,106 +204,39 @@ def _load_retired_sets(conn: "DuckDBPyConnection") -> pd.DataFrame:
             df.at[idx, "retired_year"] = int(parts[0])
             df.at[idx, "retired_month"] = int(parts[1])
         elif yr:
-            # Fall back to year_retired with month=12 (end of year)
             df.at[idx, "retired_year"] = int(yr)
             df.at[idx, "retired_month"] = 12
 
-    # Drop rows where we couldn't determine retirement timing
     df = df.dropna(subset=["retired_year", "retired_month"])
     df["retired_year"] = df["retired_year"].astype(int)
     df["retired_month"] = df["retired_month"].astype(int)
     return df
 
 
-def _load_bricklink_monthly_prices(conn: "DuckDBPyConnection") -> pd.DataFrame:
-    """Load BrickLink monthly sales with avg_price in USD cents."""
-    query = """
-        SELECT
-            item_id,
-            year,
-            month,
-            avg_price
-        FROM bricklink_monthly_sales
-        WHERE condition = 'N'
-            AND avg_price IS NOT NULL
-            AND avg_price > 0
-        ORDER BY item_id, year, month
-    """
-    return conn.execute(query).df()
+def _classify_outcome(
+    ret: float | None,
+    config: InversionConfig,
+) -> str | None:
+    """Classify a return value into an outcome category."""
+    if ret is None or pd.isna(ret):
+        return None
+    if ret < config.strong_loser_threshold:
+        return OUTCOME_STRONG_LOSER
+    if ret < config.loser_threshold:
+        return OUTCOME_LOSER
+    if ret < config.stagnant_threshold:
+        return OUTCOME_STAGNANT
+    if ret < config.neutral_threshold:
+        return OUTCOME_NEUTRAL
+    return OUTCOME_PERFORMER
 
 
-def _load_brickeconomy_value_charts(
-    conn: "DuckDBPyConnection",
-) -> dict[str, list[tuple[int, int, int]]]:
-    """Load BrickEconomy value_chart_json parsed into (year, month, cents).
-
-    Returns dict mapping set_number -> sorted list of (year, month, price_cents).
-    """
-    query = """
-        SELECT set_number, value_chart_json
-        FROM (
-            SELECT
-                set_number,
-                value_chart_json,
-                ROW_NUMBER() OVER (
-                    PARTITION BY set_number ORDER BY scraped_at DESC
-                ) AS rn
-            FROM brickeconomy_snapshots
-            WHERE value_chart_json IS NOT NULL
-        )
-        WHERE rn = 1
-    """
-    df = conn.execute(query).df()
-    result: dict[str, list[tuple[int, int, int]]] = {}
-
-    for _, row in df.iterrows():
-        chart_raw = row["value_chart_json"]
-        if not chart_raw:
-            continue
-
-        try:
-            if isinstance(chart_raw, str):
-                chart = json.loads(chart_raw)
-            else:
-                chart = chart_raw
-
-            points: list[tuple[int, int, int]] = []
-            for entry in chart:
-                # Format: ["YYYY-MM-DD", price_cents] or [date_str, price]
-                if not isinstance(entry, (list, tuple)) or len(entry) < 2:
-                    continue
-                date_str = str(entry[0])
-                price = int(entry[1])
-                if "-" in date_str:
-                    parts = date_str.split("-")
-                    points.append((int(parts[0]), int(parts[1]), price))
-
-            if points:
-                points.sort()
-                result[row["set_number"]] = points
-        except (json.JSONDecodeError, ValueError, TypeError):
-            continue
-
-    return result
+# ---------------------------------------------------------------------------
+# Price resolution (pure -- operates on pre-loaded data)
+# ---------------------------------------------------------------------------
 
 
-def _load_brickeconomy_snapshot_values(
-    conn: "DuckDBPyConnection",
-) -> pd.DataFrame:
-    """Load BrickEconomy snapshot value_new_cents over time."""
-    query = """
-        SELECT
-            set_number,
-            scraped_at,
-            value_new_cents
-        FROM brickeconomy_snapshots
-        WHERE value_new_cents IS NOT NULL AND value_new_cents > 0
-        ORDER BY set_number, scraped_at
-    """
-    return conn.execute(query).df()
-
-
-def _get_price_at_horizon(
+def get_price_at_horizon(
     *,
     set_number: str,
     item_id: str,
@@ -272,22 +256,19 @@ def _get_price_at_horizon(
 
     Returns (price_cents, source_name) or (None, "none").
     """
-    # 1. Try BrickLink
-    price = _bricklink_price_at(
+    price = bricklink_price_at(
         bricklink_prices, item_id, target_year, target_month, half_window
     )
     if price is not None:
         return price, "bricklink"
 
-    # 2. Try BrickEconomy value chart
-    price = _be_chart_price_at(
+    price = be_chart_price_at(
         be_value_charts, set_number, target_year, target_month, half_window
     )
     if price is not None:
         return price, "brickeconomy_chart"
 
-    # 3. Try BrickEconomy snapshots
-    price = _be_snapshot_price_at(
+    price = be_snapshot_price_at(
         be_snapshots, set_number, target_year, target_month, half_window
     )
     if price is not None:
@@ -296,7 +277,7 @@ def _get_price_at_horizon(
     return None, "none"
 
 
-def _bricklink_price_at(
+def bricklink_price_at(
     df: pd.DataFrame,
     item_id: str,
     target_year: int,
@@ -310,7 +291,7 @@ def _bricklink_price_at(
 
     prices: list[int] = []
     for offset in range(-half_window, half_window + 1):
-        y, m = _add_months(target_year, target_month, offset)
+        y, m = offset_months(target_year, target_month, offset)
         match = item_df[(item_df["year"] == y) & (item_df["month"] == m)]
         if not match.empty:
             p = match.iloc[0]["avg_price"]
@@ -322,7 +303,7 @@ def _bricklink_price_at(
     return None
 
 
-def _be_chart_price_at(
+def be_chart_price_at(
     charts: dict[str, list[tuple[int, int, int]]],
     set_number: str,
     target_year: int,
@@ -334,10 +315,9 @@ def _be_chart_price_at(
     if not points:
         return None
 
-    # Collect prices within the window
     prices: list[int] = []
     for offset in range(-half_window, half_window + 1):
-        y, m = _add_months(target_year, target_month, offset)
+        y, m = offset_months(target_year, target_month, offset)
         for py, pm, price in points:
             if py == y and pm == m:
                 prices.append(price)
@@ -359,19 +339,17 @@ def _be_chart_price_at(
     return nearest_price
 
 
-def _be_snapshot_price_at(
+def be_snapshot_price_at(
     df: pd.DataFrame,
     set_number: str,
     target_year: int,
     target_month: int,
-    half_window: int,
+    half_window: int,  # noqa: ARG001
 ) -> int | None:
     """Get value_new_cents from BrickEconomy snapshots near target date."""
     item_df = df[df["set_number"] == set_number]
     if item_df.empty:
         return None
-
-    from datetime import datetime
 
     target_date = datetime(target_year, target_month, 15)
     best_price = None
@@ -388,22 +366,8 @@ def _be_snapshot_price_at(
                 continue
 
         dist_days = abs((scraped - target_date).days)
-        # Allow up to 90 days of slack
         if dist_days < best_dist and dist_days <= 90:
             best_dist = dist_days
             best_price = int(row["value_new_cents"])
 
     return best_price
-
-
-def _add_months(year: int, month: int, months: int) -> tuple[int, int]:
-    """Add months to a year/month pair."""
-    total = (year * 12 + month - 1) + months
-    return total // 12, (total % 12) + 1
-
-
-def _set_number_to_item_id(set_number: str) -> str:
-    """Convert set_number (e.g. '75192') to BrickLink item_id ('75192-1')."""
-    if "-" in set_number:
-        return set_number
-    return f"{set_number}-1"

@@ -20,15 +20,20 @@ def select_features(
     target_column: str,
     feature_columns: list[str],
     config: MLPipelineConfig | None = None,
+    task: str = "regression",
 ) -> SelectionResult:
     """Run multiple feature selection methods and combine results.
 
     Methods:
     1. Correlation filter: drop one from pairs with r > threshold
     2. Mutual information: rank by MI with target, keep top N
-    3. L1 (Lasso): features surviving Lasso regularization
+    3. L1 (Lasso/LogReg): features surviving L1 regularization
 
     Features selected by >= 2 methods are kept.
+
+    Args:
+        task: "regression", "classification", or "inversion". Classification
+              tasks use mutual_info_classif and L1 LogisticRegression.
     """
     if config is None:
         config = MLPipelineConfig()
@@ -58,13 +63,18 @@ def select_features(
     )
 
     # 2. Mutual information ranking
-    mi_scores = _mutual_info_ranking(filled, available, target)
+    is_classification = task in ("classification", "inversion")
+    mi_scores = _mutual_info_ranking(
+        filled, available, target, discrete_target=is_classification
+    )
     mi_top_n = min(config.max_features, len(available))
     mi_sorted = sorted(mi_scores.items(), key=lambda x: x[1], reverse=True)
     mi_survivors = [name for name, _ in mi_sorted[:mi_top_n]]
 
-    # 3. L1 (Lasso) selection
-    l1_survivors = _l1_selection(filled, available, target, config)
+    # 3. L1 selection (Lasso for regression, L1-LogReg for classification)
+    l1_survivors = _l1_selection(
+        filled, available, target, config, classification=is_classification
+    )
 
     # Combine by voting: keep features selected by >= 2 methods
     votes: dict[str, int] = {}
@@ -150,12 +160,18 @@ def _mutual_info_ranking(
     df: pd.DataFrame,
     features: list[str],
     target: np.ndarray,
+    *,
+    discrete_target: bool = False,
 ) -> dict[str, float]:
     """Rank features by mutual information with the target."""
-    from sklearn.feature_selection import mutual_info_regression
+    from sklearn.feature_selection import (
+        mutual_info_classif,
+        mutual_info_regression,
+    )
 
     x = df[features].values
-    mi = mutual_info_regression(x, target, random_state=42, n_neighbors=5)
+    mi_fn = mutual_info_classif if discrete_target else mutual_info_regression
+    mi = mi_fn(x, target, random_state=42, n_neighbors=5)
     return dict(zip(features, [float(v) for v in mi]))
 
 
@@ -164,16 +180,55 @@ def _l1_selection(
     features: list[str],
     target: np.ndarray,
     config: MLPipelineConfig,
+    *,
+    classification: bool = False,
 ) -> list[str]:
-    """Return features with non-zero Lasso coefficients."""
-    from sklearn.linear_model import Lasso
+    """Return features with non-zero L1 coefficients.
+
+    Uses Lasso for regression, L1-penalized LogisticRegression for classification.
+    """
+    from sklearn.linear_model import Lasso, LogisticRegression
     from sklearn.preprocessing import StandardScaler
 
     scaler = StandardScaler()
     x_scaled = scaler.fit_transform(df[features].values)
 
-    # Use LassoCV-like alpha search: try a range and pick one that
-    # keeps a reasonable number of features
+    if classification:
+        for c in [0.01, 0.05, 0.1, 0.5, 1.0]:
+            model = LogisticRegression(
+                solver="saga",
+                C=c,
+                l1_ratio=1.0,
+                class_weight="balanced",
+                random_state=config.random_state,
+                max_iter=5000,
+            )
+            model.fit(x_scaled, target.astype(int))
+            non_zero = [
+                features[i]
+                for i in range(len(features))
+                if abs(model.coef_[0][i]) > 1e-6
+            ]
+            if len(non_zero) >= 5:
+                return non_zero
+
+        # Fallback: loosest penalty
+        model = LogisticRegression(
+            solver="saga",
+            C=1.0,
+            l1_ratio=1.0,
+            class_weight="balanced",
+            random_state=config.random_state,
+            max_iter=5000,
+        )
+        model.fit(x_scaled, target.astype(int))
+        return [
+            features[i]
+            for i in range(len(features))
+            if abs(model.coef_[0][i]) > 1e-6
+        ]
+
+    # Regression: Lasso
     for alpha in [0.1, 0.05, 0.01, 0.005, 0.001]:
         model = Lasso(
             alpha=alpha,
@@ -189,7 +244,7 @@ def _l1_selection(
         if len(non_zero) >= 5:
             return non_zero
 
-    # If no alpha gives >= 5 features, return all non-zero from loosest alpha
+    # Fallback: loosest alpha
     model = Lasso(alpha=0.001, random_state=config.random_state, max_iter=5000)
     model.fit(x_scaled, target)
     return [

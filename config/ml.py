@@ -4,6 +4,40 @@ from dataclasses import dataclass
 
 
 @dataclass(frozen=True)
+class InversionConfig:
+    """Thresholds for Munger inversion outcome classification.
+
+    Classifies post-retirement returns into 5 buckets and provides
+    a binary "avoid" threshold for the classifier target.
+    """
+
+    strong_loser_threshold: float = -0.15  # < -15% return
+    loser_threshold: float = -0.05  # -15% to -5%
+    stagnant_threshold: float = 0.05  # -5% to +5%
+    neutral_threshold: float = 0.20  # +5% to +20%
+    # >= +20% = performer
+
+    # Binary: return < avoid_threshold = "avoid"
+    avoid_threshold: float = 0.05
+
+
+# Outcome label constants
+OUTCOME_STRONG_LOSER = "strong_loser"
+OUTCOME_LOSER = "loser"
+OUTCOME_STAGNANT = "stagnant"
+OUTCOME_NEUTRAL = "neutral"
+OUTCOME_PERFORMER = "performer"
+
+OUTCOME_LABELS = (
+    OUTCOME_STRONG_LOSER,
+    OUTCOME_LOSER,
+    OUTCOME_STAGNANT,
+    OUTCOME_NEUTRAL,
+    OUTCOME_PERFORMER,
+)
+
+
+@dataclass(frozen=True)
 class MLPipelineConfig:
     """Configuration for the full ML pipeline."""
 

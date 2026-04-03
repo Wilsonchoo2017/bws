@@ -15,11 +15,13 @@ import pandas as pd
 from config.ml import MLPipelineConfig
 from services.ml.evaluation import (
     evaluate_classification,
+    evaluate_inversion,
     evaluate_regression,
     format_metrics_table,
 )
 from services.ml.feature_selection import select_features
 from services.ml.feature_store import load_feature_store
+from services.ml.queries import load_year_retired
 from services.ml.types import ModelMetrics, TrainedModel
 
 if TYPE_CHECKING:
@@ -63,7 +65,12 @@ def train_pipeline(
         logger.warning("Feature store is empty for horizon=%dm", horizon_months)
         return []
 
-    target_col = "target_return" if task == "regression" else "target_profitable"
+    if task == "regression":
+        target_col = "target_return"
+    elif task == "inversion":
+        target_col = "target_avoid"
+    else:
+        target_col = "target_profitable"
     if target_col not in df.columns:
         logger.warning("Target column %s not found", target_col)
         return []
@@ -79,11 +86,11 @@ def train_pipeline(
         return []
 
     # Identify feature columns (everything except set_number and target cols)
-    exclude = {"set_number", "target_return", "target_profitable"}
+    exclude = {"set_number", "target_return", "target_profitable", "target_avoid"}
     feature_cols = [c for c in valid.columns if c not in exclude]
 
     # 2. Feature selection
-    selection = select_features(valid, target_col, feature_cols, config)
+    selection = select_features(valid, target_col, feature_cols, config, task=task)
     selected = selection.selected_features
     if not selected:
         logger.warning("No features selected")
@@ -118,7 +125,7 @@ def train_pipeline(
     x_test = test_df[selected].fillna(train_df[selected].median())
     y_test = test_df[target_col].values
 
-    if task == "classification":
+    if task in ("classification", "inversion"):
         y_train = y_train.astype(int)
         y_test = y_test.astype(int)
 
@@ -147,6 +154,9 @@ def train_pipeline(
     # 5. Rank results
     if task == "regression":
         results.sort(key=lambda r: r.metrics.quintile_spread, reverse=True)
+    elif task == "inversion":
+        # Rank by hit_rate (bottom quintile accuracy) for inversion
+        results.sort(key=lambda r: r.metrics.hit_rate, reverse=True)
     else:
         results.sort(
             key=lambda r: r.metrics.roc_auc if r.metrics.roc_auc else 0,
@@ -247,18 +257,11 @@ def _sort_chronologically(
     df: pd.DataFrame,
 ) -> pd.DataFrame:
     """Sort DataFrame by set retirement year for time-series splitting."""
-    # Get year_retired for each set
     set_numbers = df["set_number"].tolist()
     if not set_numbers:
         return df
 
-    placeholders = ", ".join(f"'{s}'" for s in set_numbers)
-    query = f"""
-        SELECT set_number, year_retired
-        FROM lego_items
-        WHERE set_number IN ({placeholders})
-    """
-    years_df = conn.execute(query).df()
+    years_df = load_year_retired(conn, set_numbers)
     if years_df.empty:
         return df
 
@@ -302,6 +305,59 @@ def _build_pipelines(task: str, config: MLPipelineConfig) -> list[tuple[str, obj
                     learning_rate=0.05,
                     random_state=config.random_state,
                 ),
+            ),
+        ]
+
+    if task == "inversion":
+        from sklearn.preprocessing import PowerTransformer
+
+        # Balanced class weights to handle minority class (losers ~20%)
+        # Full pre-processing: impute -> power transform (Yeo-Johnson for
+        # skewed features like parts_count, rrp) -> scale -> classify
+        return [
+            (
+                "InversionLR",
+                Pipeline([
+                    ("imputer", SimpleImputer(strategy="median")),
+                    ("power", PowerTransformer(method="yeo-johnson", standardize=False)),
+                    ("scaler", StandardScaler()),
+                    ("model", LogisticRegression(
+                        C=1.0,
+                        class_weight="balanced",
+                        random_state=config.random_state,
+                        max_iter=1000,
+                    )),
+                ]),
+            ),
+            (
+                "InversionLR_L1",
+                Pipeline([
+                    ("imputer", SimpleImputer(strategy="median")),
+                    ("power", PowerTransformer(method="yeo-johnson", standardize=False)),
+                    ("scaler", StandardScaler()),
+                    ("model", LogisticRegression(
+                        solver="saga",
+                        C=0.5,
+                        l1_ratio=1.0,
+                        class_weight="balanced",
+                        random_state=config.random_state,
+                        max_iter=2000,
+                    )),
+                ]),
+            ),
+            (
+                "InversionGBM",
+                Pipeline([
+                    ("imputer", SimpleImputer(strategy="median")),
+                    # GBM handles skew natively, but imputation still needed
+                    ("model", HistGradientBoostingClassifier(
+                        max_iter=200,
+                        max_depth=4,
+                        learning_rate=0.05,
+                        class_weight="balanced",
+                        random_state=config.random_state,
+                    )),
+                ]),
             ),
         ]
 
@@ -371,6 +427,18 @@ def _train_single_model(
         if task == "regression":
             y_pred = pipeline.predict(x_test.values)
             metrics = evaluate_regression(y_test, y_pred, name, horizon_months)
+        elif task == "inversion":
+            if hasattr(pipeline, "predict_proba"):
+                y_prob = pipeline.predict_proba(x_test.values)[:, 1]
+            else:
+                y_prob = pipeline.predict(x_test.values).astype(float)
+            # For inversion, we need actual returns for dollar-impact metrics.
+            # y_test is binary (avoid=1), but we store returns in the DataFrame.
+            # Pass zeros as returns placeholder; research scripts provide real returns.
+            y_returns = np.zeros_like(y_test, dtype=float)
+            metrics = evaluate_inversion(
+                y_test, y_prob, y_returns, name, horizon_months
+            )
         else:
             if hasattr(pipeline, "predict_proba"):
                 y_prob = pipeline.predict_proba(x_test.values)[:, 1]

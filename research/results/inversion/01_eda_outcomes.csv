@@ -1,0 +1,6 @@
+set_number,year_retired,retired_date,rrp_usd_cents,avg_price_12m,price_source_12m,return_12m,profitable_12m,avg_price_24m,price_source_24m,return_24m,profitable_24m,avg_price_36m,price_source_36m,return_36m,profitable_36m,outcome_12m,avoid_12m,outcome_24m,avoid_24m,outcome_36m,avoid_36m
+41425,2021,,999,948,brickeconomy_chart,-0.05105105105105101,False,866,brickeconomy_chart,-0.13313313313313313,False,1089,brickeconomy_chart,0.09009009009009006,True,loser,True,loser,True,neutral,False
+60305,2022,,2999,2868,brickeconomy_chart,-0.043681227075691886,False,2970,brickeconomy_chart,-0.009669889963321077,False,3040,brickeconomy_chart,0.013671223741247074,True,stagnant,True,stagnant,True,stagnant,True
+71380,2022,,5999,4864,brickeconomy_chart,-0.18919819969995,False,5981,brickeconomy_chart,-0.0030005000833471795,False,5463,brickeconomy_chart,-0.08934822470411741,False,strong_loser,True,stagnant,True,loser,True
+75248,2020,,2999,2849,brickeconomy_chart,-0.05001667222407469,False,2849,brickeconomy_chart,-0.05001667222407469,False,4145,brickeconomy_chart,0.38212737579193057,True,loser,True,loser,True,performer,False
+76173,2022,,1999,3214,brickeconomy_chart,0.6078039019509756,True,2697,brickeconomy_chart,0.3491745872936469,True,2956,brickeconomy_chart,0.4787393696848423,True,performer,False,performer,False,performer,False
