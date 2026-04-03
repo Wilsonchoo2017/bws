@@ -131,8 +131,17 @@ def engineer_intrinsic_features(
 def engineer_keepa_features(
     df: pd.DataFrame,
     keepa_df: pd.DataFrame,
+    *,
+    cutoff_dates: dict[str, str] | None = None,
 ) -> pd.DataFrame:
-    """Add Tier 2 Keepa timeline features to the DataFrame."""
+    """Add Tier 2 Keepa timeline features to the DataFrame.
+
+    Args:
+        cutoff_dates: Optional mapping of set_number -> cutoff date string
+            (YYYY-MM). When provided, only Keepa price points BEFORE the
+            cutoff are used, preventing temporal leakage from post-retirement
+            data.
+    """
     result = df.copy()
     keepa_feats: dict[str, dict] = {}
 
@@ -148,11 +157,17 @@ def engineer_keepa_features(
         if not isinstance(amz, list) or len(amz) < 5:
             continue
 
+        # Apply temporal cutoff if available
+        cutoff = (cutoff_dates or {}).get(sn)
+
         prices: list[float] = []
         oos_date: str | None = None
         last_p: float | None = None
 
         for point in amz:
+            # Skip points after cutoff date
+            if cutoff and isinstance(point[0], str) and point[0][:7] > cutoff:
+                break
             if point[1] is not None and point[1] > 0:
                 prices.append(float(point[1]))
                 last_p = float(point[1])
@@ -186,14 +201,17 @@ def engineer_keepa_features(
             except (ValueError, TypeError):
                 pass
 
-            bb_raw = kr.get("buy_box_json")
-            bb = json.loads(bb_raw) if isinstance(bb_raw, str) else (bb_raw or [])
-            if isinstance(bb, list):
-                for point in bb:
-                    if (len(point) >= 2 and point[0] >= oos_date
-                            and point[1] and point[1] > 0):
-                        rec["kp_bb_premium"] = (point[1] - set_rrp) / set_rrp * 100
-                        break
+            # kp_bb_premium uses post-OOS data -- only include if no cutoff
+            # (i.e. prediction mode for active sets, not training)
+            if not cutoff:
+                bb_raw = kr.get("buy_box_json")
+                bb = json.loads(bb_raw) if isinstance(bb_raw, str) else (bb_raw or [])
+                if isinstance(bb, list):
+                    for point in bb:
+                        if (len(point) >= 2 and point[0] >= oos_date
+                                and point[1] and point[1] > 0):
+                            rec["kp_bb_premium"] = (point[1] - set_rrp) / set_rrp * 100
+                            break
 
         keepa_feats[sn] = rec
 

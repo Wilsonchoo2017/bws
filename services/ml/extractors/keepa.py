@@ -58,17 +58,17 @@ def _compute_keepa_features(
     for _, row in keepa_df.iterrows():
         sn = row["set_number"]
         rrp_usd = rrp_map.get(sn)
-        amazon_price = row.get("current_amazon_cents")
-        lowest = row.get("lowest_ever_cents")
-        highest = row.get("highest_ever_cents")
+        amazon_price = safe_float(row.get("current_amazon_cents"))
+        lowest = safe_float(row.get("lowest_ever_cents"))
+        highest = safe_float(row.get("highest_ever_cents"))
 
         discount_pct = None
         if rrp_usd and rrp_usd > 0 and amazon_price:
-            discount_pct = (float(rrp_usd) - float(amazon_price)) / float(rrp_usd) * 100
+            discount_pct = (float(rrp_usd) - amazon_price) / float(rrp_usd) * 100
 
         price_range_pct = None
         if rrp_usd and rrp_usd > 0 and lowest and highest:
-            price_range_pct = (float(highest) - float(lowest)) / float(rrp_usd) * 100
+            price_range_pct = (highest - lowest) / float(rrp_usd) * 100
 
         rows.append({
             "set_number": sn,

@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING
 import pandas as pd
 
 from services.backtesting.cohort import PRICE_TIERS
-from services.ml.helpers import ordinal_bucket, safe_float
+from services.ml.helpers import ordinal_bucket, parse_rating_string, safe_float
 from services.ml.queries import load_be_cutoff_snapshots, load_latest_be_snapshots
 from services.ml.types import FeatureMeta
 
@@ -81,13 +81,7 @@ def _compute_be_features(
         stddev_cents = safe_float(row.get("distribution_stddev_cents"))
         minifig_val = safe_float(row.get("minifig_value_cents"))
 
-        rating_str = row.get("rating_value")
-        rating_num = None
-        if pd.notna(rating_str) and rating_str:
-            try:
-                rating_num = float(str(rating_str).split("/")[0].strip())
-            except (ValueError, IndexError):
-                pass
+        rating_num = parse_rating_string(row.get("rating_value"))
 
         value_vs_rrp = None
         if rrp and rrp > 0 and value_new:
@@ -112,7 +106,9 @@ def _compute_be_features(
         base_row = base[base["set_number"] == sn]
         parts = None
         if not base_row.empty:
-            parts = base_row.iloc[0].get("parts_count")
+            p_raw = base_row.iloc[0].get("parts_count")
+            if pd.notna(p_raw):
+                parts = p_raw
         ppp = None
         if rrp and rrp > 0 and parts and parts > 0:
             ppp = float(rrp) / float(parts)

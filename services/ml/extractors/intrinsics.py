@@ -51,16 +51,16 @@ class IntrinsicsExtractor:
             yr_retired = item.get("year_retired")
 
             shelf_life = None
-            if yr_released and yr_retired:
+            if pd.notna(yr_released) and pd.notna(yr_retired):
                 shelf_life = float(yr_retired - yr_released)
 
             is_licensed = 1 if theme in LICENSED_THEMES else 0
-            pieces_ord = ordinal_bucket(parts, PIECE_GROUPS) if parts else None
+            pieces_ord = ordinal_bucket(parts, PIECE_GROUPS) if pd.notna(parts) and parts else None
 
             rows.append({
                 "set_number": item["set_number"],
-                "parts_count": float(parts) if parts else None,
-                "minifig_count": float(minifigs) if minifigs else None,
+                "parts_count": float(parts) if pd.notna(parts) else None,
+                "minifig_count": float(minifigs) if pd.notna(minifigs) else None,
                 "shelf_life_years": shelf_life,
                 "is_licensed": float(is_licensed),
                 "pieces_bucket_ordinal": float(pieces_ord) if pieces_ord is not None else None,

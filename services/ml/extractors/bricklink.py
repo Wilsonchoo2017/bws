@@ -74,7 +74,7 @@ def _load_bricklink_data(conn: DuckDBPyConnection) -> pd.DataFrame:
             times_sold, total_quantity,
             min_price, max_price, avg_price
         FROM bricklink_monthly_sales
-        WHERE condition = 'N'
+        WHERE condition = 'new'
           AND avg_price IS NOT NULL AND avg_price > 0
         ORDER BY item_id, year, month
     """).df()
@@ -110,7 +110,7 @@ def _compute_bricklink_features(
         sn_to_item[sn] = set_number_to_item_id(sn)
         cy = row.get("cutoff_year")
         cm = row.get("cutoff_month")
-        if cy is not None and cm is not None:
+        if pd.notna(cy) and pd.notna(cm):
             cutoff_lookup[sn] = (int(cy), int(cm))
         else:
             cutoff_lookup[sn] = None

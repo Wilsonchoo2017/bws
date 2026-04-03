@@ -1,33 +1,22 @@
-"""Feature extraction functions for the ML pipeline.
+"""Feature extraction facade for the ML pipeline.
 
-Each function extracts features from one data source, restricted to data
-available before the retirement cutoff (12 months before retirement).
+Delegates to the extractors/ plugin package for actual extraction.
+Maintains backward compatibility for existing imports.
 
-For active sets, the latest available data is used.
+Feature registration still happens here at import time so the
+global feature_registry stays populated for feature_store.py.
 """
 
 import logging
 from typing import TYPE_CHECKING
 
-import numpy as np
 import pandas as pd
 
-from config.ml import (
-    FEATURE_CUTOFF_MONTHS_BEFORE_RETIREMENT,
-    LICENSED_THEMES,
-)
-from services.backtesting.cohort import PIECE_GROUPS, PRICE_TIERS
+from config.ml import FEATURE_CUTOFF_MONTHS_BEFORE_RETIREMENT
+from services.ml.extractors import extract_all
 from services.ml.feature_registry import register
-from services.ml.helpers import offset_months, ordinal_bucket, safe_float
-from services.ml.queries import (
-    load_base_metadata as _query_base_metadata,
-    load_be_cutoff_snapshots,
-    load_latest_be_snapshots,
-    load_latest_gtrends_snapshots,
-    load_latest_keepa_snapshots,
-    load_latest_shopee_snapshots,
-    load_rrp_map,
-)
+from services.ml.helpers import compute_cutoff_dates
+from services.ml.queries import load_base_metadata as _query_base_metadata
 
 if TYPE_CHECKING:
     from duckdb import DuckDBPyConnection
@@ -36,6 +25,8 @@ logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Feature registration (executed at import time)
+# These populate the global registry used by feature_store.py.
+# The actual extraction logic lives in extractors/*.py.
 # ---------------------------------------------------------------------------
 
 # Group A: Set intrinsics
@@ -80,9 +71,70 @@ register("shopee_unique_sellers", "shopee_saturation", "Unique Shopee sellers", 
 register("shopee_price_spread_pct", "shopee_saturation", "Shopee price spread %")
 register("shopee_saturation_score", "shopee_saturation", "Shopee saturation score")
 
+# Group G: Keepa full price timeline
+register("kpt_below_rrp_pct", "keepa_snapshots", "% of time Amazon price < 98% RRP")
+register("kpt_avg_discount", "keepa_snapshots", "Avg Amazon discount from RRP %")
+register("kpt_max_discount", "keepa_snapshots", "Max Amazon discount from RRP %")
+register("kpt_median_discount", "keepa_snapshots", "Median Amazon discount from RRP %")
+register("kpt_price_cv", "keepa_snapshots", "Amazon price coefficient of variation")
+register("kpt_price_trend", "keepa_snapshots", "Early vs late price trend %")
+register("kpt_price_momentum", "keepa_snapshots", "Last-quarter vs first-quarter price ratio")
+register("kpt_price_acceleration", "keepa_snapshots", "Trend change: 2nd half minus 1st half")
+register("kpt_months_in_stock", "keepa_snapshots", "Months Amazon listing was in stock")
+register("kpt_stockout_count", "keepa_snapshots", "Number of stock-out events")
+register("kpt_stockout_pct", "keepa_snapshots", "% of timeline with stock-outs")
+register("kpt_bb_premium_pct", "keepa_snapshots", "Buy box premium after stock-out %")
+register("kpt_bb_max_premium", "keepa_snapshots", "Max buy box premium vs RRP %")
+register("kpt_3p_premium_pct", "keepa_snapshots", "3P FBA avg premium vs Amazon price %")
+register("kpt_3p_price_cv", "keepa_snapshots", "3P FBA price coefficient of variation")
+register("kpt_rank_median", "keepa_snapshots", "Median sales rank")
+register("kpt_rank_trend", "keepa_snapshots", "Sales rank trend (negative = improving)")
+register("kpt_rank_cv", "keepa_snapshots", "Sales rank coefficient of variation")
+register("kpt_data_months", "keepa_snapshots", "Months of Keepa price data available")
+register("kpt_n_price_points", "keepa_snapshots", "Number of price data points")
+
+# Group H: BrickEconomy charts (value chart, candlestick, sales trend)
+register("be_value_months", "brickeconomy_snapshots", "Months of BE value history")
+register("be_value_trend_pct", "brickeconomy_snapshots", "Overall value trend %")
+register("be_value_momentum", "brickeconomy_snapshots", "Recent vs early value ratio")
+register("be_value_cv", "brickeconomy_snapshots", "Value chart coefficient of variation")
+register("be_value_max_drawdown", "brickeconomy_snapshots", "Max peak-to-trough drawdown %")
+register("be_value_recovery", "brickeconomy_snapshots", "Recovery from max drawdown %")
+register("be_candle_avg_range_pct", "brickeconomy_snapshots", "Avg candle range / close %")
+register("be_candle_bearish_pct", "brickeconomy_snapshots", "% of bearish candles")
+register("be_candle_trend_strength", "brickeconomy_snapshots", "Avg body / range ratio")
+register("be_candle_upper_shadow_pct", "brickeconomy_snapshots", "Avg upper shadow relative to range %")
+register("be_candle_volatility_trend", "brickeconomy_snapshots", "Late vs early candle range change")
+register("be_sales_avg_volume", "brickeconomy_snapshots", "Avg monthly transaction volume")
+register("be_sales_volume_trend", "brickeconomy_snapshots", "Volume trend: late vs early ratio")
+register("be_sales_volume_cv", "brickeconomy_snapshots", "Volume coefficient of variation")
+register("be_sales_months_active", "brickeconomy_snapshots", "Months with sales activity")
+register("be_future_est_return", "brickeconomy_snapshots", "BE future estimate vs current value ratio")
+
+# Group I: BrickLink monthly sales (pre-retirement momentum)
+register("bl_price_trend_pct", "bricklink_monthly_sales", "Price trend % over available history")
+register("bl_price_momentum_3m", "bricklink_monthly_sales", "3-month price momentum %")
+register("bl_price_momentum_6m", "bricklink_monthly_sales", "6-month price momentum %")
+register("bl_price_vs_rrp", "bricklink_monthly_sales", "Latest BL price / RRP ratio")
+register("bl_price_cv", "bricklink_monthly_sales", "Price coefficient of variation")
+register("bl_price_range_pct", "bricklink_monthly_sales", "(Max - Min) / Mean price %")
+register("bl_avg_monthly_sales", "bricklink_monthly_sales", "Avg monthly units sold")
+register("bl_sales_trend", "bricklink_monthly_sales", "Sales volume trend ratio")
+register("bl_total_quantity", "bricklink_monthly_sales", "Total units sold", "int")
+register("bl_months_with_sales", "bricklink_monthly_sales", "Months with at least 1 sale", "int")
+register("bl_sales_consistency", "bricklink_monthly_sales", "% of months with sales")
+register("bl_avg_spread_pct", "bricklink_monthly_sales", "Avg (max-min)/avg spread %")
+
+# Group J: Google Trends theme-level
+register("gt_theme_lego_share", "google_trends_theme_snapshots", "LEGO share of theme search interest")
+register("gt_theme_avg_lego", "google_trends_theme_snapshots", "Avg LEGO search interest for theme")
+register("gt_theme_peak_lego", "google_trends_theme_snapshots", "Peak LEGO search interest for theme")
+register("gt_theme_avg_bare", "google_trends_theme_snapshots", "Avg bare keyword search interest")
+register("gt_theme_lego_vs_bare", "google_trends_theme_snapshots", "LEGO interest / bare interest ratio")
+
 
 # ---------------------------------------------------------------------------
-# Main extraction entry point (impure -- orchestrates I/O + computation)
+# Main extraction entry point
 # ---------------------------------------------------------------------------
 
 
@@ -92,8 +144,8 @@ def extract_all_features(
 ) -> pd.DataFrame:
     """Extract all enabled features for the given sets.
 
-    This is the only impure function in this module -- it loads data from
-    the database and delegates to pure extraction functions.
+    Delegates to the extractors/ plugin package. Each extractor handles
+    its own data loading and computation.
 
     Returns DataFrame indexed by set_number with one column per feature.
     """
@@ -101,38 +153,11 @@ def extract_all_features(
     if base.empty:
         return pd.DataFrame()
 
-    # Load data from each source
-    be_df = load_latest_be_snapshots(conn)
-    sets_with_cutoff = base.dropna(subset=["cutoff_year"])
-    if not sets_with_cutoff.empty:
-        cutoff_snapshots = load_be_cutoff_snapshots(conn, sets_with_cutoff)
-        if not cutoff_snapshots.empty:
-            be_df = be_df[~be_df["set_number"].isin(cutoff_snapshots["set_number"])]
-            be_df = pd.concat([be_df, cutoff_snapshots], ignore_index=True)
-
-    keepa_df = load_latest_keepa_snapshots(conn)
-    rrp_map = load_rrp_map(conn)
-    gtrends_df = load_latest_gtrends_snapshots(conn)
-    shopee_df = load_latest_shopee_snapshots(conn)
-
-    # Extract from each source (pure functions -- no I/O)
-    intrinsics = extract_intrinsics(base)
-    be_features = extract_brickeconomy_features(be_df, base)
-    keepa_features = extract_keepa_features(keepa_df, rrp_map)
-    gtrends_features = extract_gtrends_features(gtrends_df)
-    shopee_features = extract_shopee_features(shopee_df)
-
-    # Merge all feature groups on set_number
-    result = intrinsics
-    for df in [be_features, keepa_features, gtrends_features, shopee_features]:
-        if not df.empty:
-            result = result.merge(df, on="set_number", how="left")
-
-    return result
+    return extract_all(conn, base)
 
 
 # ---------------------------------------------------------------------------
-# Base metadata (shared across extractors)
+# Base metadata (shared with extractors and growth model)
 # ---------------------------------------------------------------------------
 
 
@@ -142,236 +167,4 @@ def _load_base_metadata(
 ) -> pd.DataFrame:
     """Load core set metadata and compute cutoff dates."""
     df = _query_base_metadata(conn, set_numbers)
-
-    # Compute cutoff date for each set
-    df["cutoff_year"] = None
-    df["cutoff_month"] = None
-    for idx, row in df.iterrows():
-        rd = row.get("retired_date")
-        yr = row.get("year_retired")
-        if rd and isinstance(rd, str) and "-" in rd:
-            parts = rd.split("-")
-            ret_year, ret_month = int(parts[0]), int(parts[1])
-            cy, cm = offset_months(
-                ret_year, ret_month, -FEATURE_CUTOFF_MONTHS_BEFORE_RETIREMENT
-            )
-            df.at[idx, "cutoff_year"] = cy
-            df.at[idx, "cutoff_month"] = cm
-        elif yr:
-            cy, cm = offset_months(
-                int(yr), 1, -FEATURE_CUTOFF_MONTHS_BEFORE_RETIREMENT
-            )
-            df.at[idx, "cutoff_year"] = cy
-            df.at[idx, "cutoff_month"] = cm
-        # For active sets, cutoff is None -> we use latest data
-
-    return df
-
-
-# ---------------------------------------------------------------------------
-# Group A: Set intrinsics (pure)
-# ---------------------------------------------------------------------------
-
-
-def extract_intrinsics(base: pd.DataFrame) -> pd.DataFrame:
-    """Extract features derived from core set metadata."""
-    rows: list[dict] = []
-    for _, item in base.iterrows():
-        parts = item.get("parts_count")
-        minifigs = item.get("minifig_count")
-        theme = item.get("theme") or ""
-        yr_released = item.get("year_released")
-        yr_retired = item.get("year_retired")
-
-        shelf_life = None
-        if yr_released and yr_retired:
-            shelf_life = float(yr_retired - yr_released)
-
-        is_licensed = 1 if theme in LICENSED_THEMES else 0
-
-        pieces_ord = ordinal_bucket(parts, PIECE_GROUPS) if parts else None
-
-        rows.append({
-            "set_number": item["set_number"],
-            "parts_count": float(parts) if parts else None,
-            "minifig_count": float(minifigs) if minifigs else None,
-            "shelf_life_years": shelf_life,
-            "is_licensed": float(is_licensed),
-            "pieces_bucket_ordinal": float(pieces_ord) if pieces_ord is not None else None,
-        })
-
-    return pd.DataFrame(rows)
-
-
-# ---------------------------------------------------------------------------
-# Group C: BrickEconomy features (includes A extras and B) (pure)
-# ---------------------------------------------------------------------------
-
-
-def extract_brickeconomy_features(
-    be_df: pd.DataFrame,
-    base: pd.DataFrame,
-) -> pd.DataFrame:
-    """Extract features from pre-loaded BrickEconomy snapshots.
-
-    Args:
-        be_df: BrickEconomy snapshot data (already cutoff-filtered if needed).
-        base: Base metadata with set_number, parts_count, etc.
-    """
-    if be_df.empty:
-        return pd.DataFrame(columns=["set_number"])
-
-    rows: list[dict] = []
-    for _, row in be_df.iterrows():
-        sn = row["set_number"]
-        rrp = safe_float(row.get("rrp_usd_cents"))
-        value_new = safe_float(row.get("value_new_cents"))
-        mean_cents = safe_float(row.get("distribution_mean_cents"))
-        stddev_cents = safe_float(row.get("distribution_stddev_cents"))
-        minifig_val = safe_float(row.get("minifig_value_cents"))
-
-        rating_str = row.get("rating_value")
-        rating_num = None
-        if pd.notna(rating_str) and rating_str:
-            try:
-                rating_num = float(str(rating_str).split("/")[0].strip())
-            except (ValueError, IndexError):
-                pass
-
-        value_vs_rrp = None
-        if rrp and rrp > 0 and value_new:
-            value_vs_rrp = value_new / rrp
-
-        dist_cv = None
-        if mean_cents and mean_cents > 0 and stddev_cents:
-            dist_cv = stddev_cents / mean_cents
-
-        minifig_ratio = None
-        if rrp and rrp > 0 and minifig_val:
-            minifig_ratio = minifig_val / rrp
-
-        has_exclusive = None
-        excl_raw = row.get("exclusive_minifigs")
-        if pd.notna(excl_raw):
-            has_exclusive = 1.0 if excl_raw else 0.0
-
-        price_tier_ord = ordinal_bucket(int(rrp), PRICE_TIERS) if rrp else None
-
-        # Compute price_per_part using base metadata
-        base_row = base[base["set_number"] == sn]
-        parts = None
-        if not base_row.empty:
-            parts = base_row.iloc[0].get("parts_count")
-        ppp = None
-        if rrp and rrp > 0 and parts and parts > 0:
-            ppp = float(rrp) / float(parts)
-
-        rows.append({
-            "set_number": sn,
-            "rrp_usd_cents": float(rrp) if rrp else None,
-            "price_per_part": ppp,
-            "annual_growth_pct": safe_float(row.get("annual_growth_pct")),
-            "rolling_growth_pct": safe_float(row.get("rolling_growth_pct")),
-            "growth_90d_pct": safe_float(row.get("growth_90d_pct")),
-            "value_new_vs_rrp": value_vs_rrp,
-            "theme_rank": safe_float(row.get("theme_rank")),
-            "subtheme_avg_growth_pct": safe_float(row.get("subtheme_avg_growth_pct")),
-            "distribution_cv": dist_cv,
-            "rating_value": rating_num,
-            "review_count": safe_float(row.get("review_count")),
-            "has_exclusive_minifigs": has_exclusive,
-            "minifig_value_ratio": minifig_ratio,
-            "price_tier_ordinal": float(price_tier_ord) if price_tier_ord is not None else None,
-        })
-
-    return pd.DataFrame(rows)
-
-
-# ---------------------------------------------------------------------------
-# Group D: Keepa / Amazon features (pure)
-# ---------------------------------------------------------------------------
-
-
-def extract_keepa_features(
-    keepa_df: pd.DataFrame,
-    rrp_map: dict[str, float],
-) -> pd.DataFrame:
-    """Extract features from pre-loaded Keepa snapshots.
-
-    Args:
-        keepa_df: Latest Keepa snapshot data.
-        rrp_map: Dict mapping set_number -> rrp_usd_cents.
-    """
-    if keepa_df.empty:
-        return pd.DataFrame(columns=["set_number"])
-
-    rows: list[dict] = []
-    for _, row in keepa_df.iterrows():
-        sn = row["set_number"]
-        rrp_usd = rrp_map.get(sn)
-        amazon_price = row.get("current_amazon_cents")
-        lowest = row.get("lowest_ever_cents")
-        highest = row.get("highest_ever_cents")
-
-        discount_pct = None
-        if rrp_usd and rrp_usd > 0 and amazon_price:
-            discount_pct = (float(rrp_usd) - float(amazon_price)) / float(rrp_usd) * 100
-
-        price_range_pct = None
-        if rrp_usd and rrp_usd > 0 and lowest and highest:
-            price_range_pct = (float(highest) - float(lowest)) / float(rrp_usd) * 100
-
-        rows.append({
-            "set_number": sn,
-            "amazon_discount_pct": discount_pct,
-            "keepa_price_range_pct": price_range_pct,
-            "keepa_rating": safe_float(row.get("rating")),
-            "keepa_review_count": safe_float(row.get("review_count")),
-            "keepa_tracking_users": safe_float(row.get("tracking_users")),
-        })
-
-    return pd.DataFrame(rows)
-
-
-# ---------------------------------------------------------------------------
-# Group E: Google Trends features (pure)
-# ---------------------------------------------------------------------------
-
-
-def extract_gtrends_features(gt_df: pd.DataFrame) -> pd.DataFrame:
-    """Extract features from pre-loaded Google Trends snapshots."""
-    if gt_df.empty:
-        return pd.DataFrame(columns=["set_number"])
-
-    rows: list[dict] = []
-    for _, row in gt_df.iterrows():
-        rows.append({
-            "set_number": row["set_number"],
-            "gtrends_peak": safe_float(row.get("peak_value")),
-            "gtrends_avg": safe_float(row.get("average_value")),
-        })
-
-    return pd.DataFrame(rows)
-
-
-# ---------------------------------------------------------------------------
-# Group F: Shopee saturation features (pure)
-# ---------------------------------------------------------------------------
-
-
-def extract_shopee_features(ss_df: pd.DataFrame) -> pd.DataFrame:
-    """Extract features from pre-loaded Shopee saturation data."""
-    if ss_df.empty:
-        return pd.DataFrame(columns=["set_number"])
-
-    rows: list[dict] = []
-    for _, row in ss_df.iterrows():
-        rows.append({
-            "set_number": row["set_number"],
-            "shopee_listings": safe_float(row.get("listings_count")),
-            "shopee_unique_sellers": safe_float(row.get("unique_sellers")),
-            "shopee_price_spread_pct": safe_float(row.get("price_spread_pct")),
-            "shopee_saturation_score": safe_float(row.get("saturation_score")),
-        })
-
-    return pd.DataFrame(rows)
+    return compute_cutoff_dates(df, FEATURE_CUTOFF_MONTHS_BEFORE_RETIREMENT)

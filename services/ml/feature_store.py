@@ -11,9 +11,11 @@ from typing import TYPE_CHECKING
 
 import pandas as pd
 
-from config.ml import MLPipelineConfig
-from services.ml.feature_extractors import extract_all_features
+from config.ml import FEATURE_CUTOFF_MONTHS_BEFORE_RETIREMENT, MLPipelineConfig
+from services.ml.extractors import extract_all as _extract_all_plugin
 from services.ml.feature_registry import get_enabled_names
+from services.ml.helpers import offset_months
+from services.ml.queries import load_base_metadata
 from services.ml.target import compute_retirement_returns
 
 if TYPE_CHECKING:
@@ -55,8 +57,8 @@ def materialize_features(
     set_numbers = targets_df["set_number"].tolist()
     logger.info("Computed targets for %d retired sets", len(set_numbers))
 
-    # 2. Extract features
-    features_df = extract_all_features(conn, set_numbers)
+    # 2. Extract features via plugin-based extractors
+    features_df = _extract_features_with_cutoff(conn, set_numbers)
     if features_df.empty:
         logger.warning("No features extracted")
         return pd.DataFrame()
@@ -141,6 +143,38 @@ def get_store_stats(conn: "DuckDBPyConnection") -> dict[str, int]:
         }
     except Exception:
         return {"total_rows": 0}
+
+
+def _extract_features_with_cutoff(
+    conn: "DuckDBPyConnection",
+    set_numbers: list[str],
+) -> pd.DataFrame:
+    """Build base metadata with cutoff dates and run all extractors."""
+    base = load_base_metadata(conn, set_numbers)
+    if base.empty:
+        return pd.DataFrame()
+
+    base["cutoff_year"] = None
+    base["cutoff_month"] = None
+    for idx, row in base.iterrows():
+        rd = row.get("retired_date")
+        yr = row.get("year_retired")
+        if pd.notna(rd) and isinstance(rd, str) and "-" in rd:
+            parts = rd.split("-")
+            ret_year, ret_month = int(parts[0]), int(parts[1])
+            cy, cm = offset_months(
+                ret_year, ret_month, -FEATURE_CUTOFF_MONTHS_BEFORE_RETIREMENT
+            )
+            base.at[idx, "cutoff_year"] = cy
+            base.at[idx, "cutoff_month"] = cm
+        elif pd.notna(yr):
+            cy, cm = offset_months(
+                int(yr), 1, -FEATURE_CUTOFF_MONTHS_BEFORE_RETIREMENT
+            )
+            base.at[idx, "cutoff_year"] = cy
+            base.at[idx, "cutoff_month"] = cm
+
+    return _extract_all_plugin(conn, base)
 
 
 def _write_to_store(

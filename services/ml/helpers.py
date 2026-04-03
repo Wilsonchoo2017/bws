@@ -91,6 +91,47 @@ def parse_retirement_date(
     return None, None
 
 
+def compute_cutoff_dates(
+    df: "pd.DataFrame",
+    cutoff_months: int,
+) -> "pd.DataFrame":
+    """Compute feature cutoff dates for each set in a DataFrame.
+
+    For retired sets, the cutoff is `cutoff_months` before retirement.
+    For active sets, cutoff is None (use latest data).
+
+    Adds cutoff_year and cutoff_month columns to the DataFrame.
+
+    Args:
+        df: DataFrame with retired_date and year_retired columns.
+        cutoff_months: Months before retirement to cut off features.
+
+    Returns:
+        DataFrame with cutoff_year and cutoff_month columns added.
+    """
+    import pandas as pd
+
+    result = df.copy()
+    result["cutoff_year"] = None
+    result["cutoff_month"] = None
+
+    for idx, row in result.iterrows():
+        rd = row.get("retired_date")
+        yr = row.get("year_retired")
+        if pd.notna(rd) and isinstance(rd, str) and "-" in rd:
+            ret_year, ret_month = parse_retirement_date(rd, None)
+            if ret_year is not None:
+                cy, cm = offset_months(ret_year, ret_month, -cutoff_months)
+                result.at[idx, "cutoff_year"] = cy
+                result.at[idx, "cutoff_month"] = cm
+        elif pd.notna(yr):
+            cy, cm = offset_months(int(yr), 1, -cutoff_months)
+            result.at[idx, "cutoff_year"] = cy
+            result.at[idx, "cutoff_month"] = cm
+
+    return result
+
+
 def parse_rating_string(rating_str: object) -> float | None:
     """Parse a rating string like '4.5/5' or '4.5' into a float.
 

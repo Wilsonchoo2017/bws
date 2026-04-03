@@ -143,7 +143,7 @@ def _compute_timeline_features(
         sn = row["set_number"]
         cy = row.get("cutoff_year")
         cm = row.get("cutoff_month")
-        if cy is not None and cm is not None:
+        if pd.notna(cy) and pd.notna(cm):
             cutoff_lookup[sn] = f"{int(cy):04d}-{int(cm):02d}"
         else:
             cutoff_lookup[sn] = None
