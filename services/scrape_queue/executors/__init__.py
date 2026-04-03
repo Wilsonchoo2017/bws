@@ -15,6 +15,9 @@ from services.scrape_queue.executors.google_trends import (
     get_trends_cooldown_snapshot,
     restore_trends_cooldown_snapshot,
 )
+from services.scrape_queue.executors.google_trends_theme import (
+    execute_google_trends_theme,
+)
 from services.scrape_queue.executors.keepa import execute_keepa
 from services.scrape_queue.executors.minifigures import execute_minifigures
 
@@ -22,6 +25,7 @@ __all__ = [
     "execute_brickeconomy",
     "execute_bricklink_metadata",
     "execute_google_trends",
+    "execute_google_trends_theme",
     "execute_keepa",
     "execute_minifigures",
     "get_trends_cooldown_remaining",

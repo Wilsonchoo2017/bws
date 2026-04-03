@@ -6,7 +6,6 @@ available before the retirement cutoff (12 months before retirement).
 For active sets, the latest available data is used.
 """
 
-import json
 import logging
 from typing import TYPE_CHECKING
 
@@ -18,8 +17,17 @@ from config.ml import (
     LICENSED_THEMES,
 )
 from services.backtesting.cohort import PIECE_GROUPS, PRICE_TIERS
-from services.ml.currency import to_usd_cents
 from services.ml.feature_registry import register
+from services.ml.helpers import offset_months, ordinal_bucket, safe_float
+from services.ml.queries import (
+    load_base_metadata as _query_base_metadata,
+    load_be_cutoff_snapshots,
+    load_latest_be_snapshots,
+    load_latest_gtrends_snapshots,
+    load_latest_keepa_snapshots,
+    load_latest_shopee_snapshots,
+    load_rrp_map,
+)
 
 if TYPE_CHECKING:
     from duckdb import DuckDBPyConnection
@@ -74,7 +82,7 @@ register("shopee_saturation_score", "shopee_saturation", "Shopee saturation scor
 
 
 # ---------------------------------------------------------------------------
-# Main extraction entry point
+# Main extraction entry point (impure -- orchestrates I/O + computation)
 # ---------------------------------------------------------------------------
 
 
@@ -84,8 +92,8 @@ def extract_all_features(
 ) -> pd.DataFrame:
     """Extract all enabled features for the given sets.
 
-    Features are restricted to data available before the retirement cutoff.
-    For active sets, latest data is used.
+    This is the only impure function in this module -- it loads data from
+    the database and delegates to pure extraction functions.
 
     Returns DataFrame indexed by set_number with one column per feature.
     """
@@ -93,12 +101,26 @@ def extract_all_features(
     if base.empty:
         return pd.DataFrame()
 
-    # Extract from each source and merge
-    intrinsics = _extract_intrinsics(base)
-    be_features = _extract_brickeconomy_features(conn, base)
-    keepa_features = _extract_keepa_features(conn, base)
-    gtrends_features = _extract_gtrends_features(conn, base)
-    shopee_features = _extract_shopee_features(conn, base)
+    # Load data from each source
+    be_df = load_latest_be_snapshots(conn)
+    sets_with_cutoff = base.dropna(subset=["cutoff_year"])
+    if not sets_with_cutoff.empty:
+        cutoff_snapshots = load_be_cutoff_snapshots(conn, sets_with_cutoff)
+        if not cutoff_snapshots.empty:
+            be_df = be_df[~be_df["set_number"].isin(cutoff_snapshots["set_number"])]
+            be_df = pd.concat([be_df, cutoff_snapshots], ignore_index=True)
+
+    keepa_df = load_latest_keepa_snapshots(conn)
+    rrp_map = load_rrp_map(conn)
+    gtrends_df = load_latest_gtrends_snapshots(conn)
+    shopee_df = load_latest_shopee_snapshots(conn)
+
+    # Extract from each source (pure functions -- no I/O)
+    intrinsics = extract_intrinsics(base)
+    be_features = extract_brickeconomy_features(be_df, base)
+    keepa_features = extract_keepa_features(keepa_df, rrp_map)
+    gtrends_features = extract_gtrends_features(gtrends_df)
+    shopee_features = extract_shopee_features(shopee_df)
 
     # Merge all feature groups on set_number
     result = intrinsics
@@ -118,28 +140,8 @@ def _load_base_metadata(
     conn: "DuckDBPyConnection",
     set_numbers: list[str] | None = None,
 ) -> pd.DataFrame:
-    """Load core set metadata needed for cutoff computation."""
-    where_clause = ""
-    if set_numbers:
-        placeholders = ", ".join(f"'{s}'" for s in set_numbers)
-        where_clause = f"WHERE li.set_number IN ({placeholders})"
-
-    query = f"""
-        SELECT
-            li.set_number,
-            li.title,
-            li.theme,
-            li.year_released,
-            li.year_retired,
-            li.retired_date,
-            li.parts_count,
-            li.minifig_count,
-            li.retiring_soon
-        FROM lego_items li
-        {where_clause}
-        ORDER BY li.set_number
-    """
-    df = conn.execute(query).df()
+    """Load core set metadata and compute cutoff dates."""
+    df = _query_base_metadata(conn, set_numbers)
 
     # Compute cutoff date for each set
     df["cutoff_year"] = None
@@ -150,14 +152,14 @@ def _load_base_metadata(
         if rd and isinstance(rd, str) and "-" in rd:
             parts = rd.split("-")
             ret_year, ret_month = int(parts[0]), int(parts[1])
-            cy, cm = _sub_months(
-                ret_year, ret_month, FEATURE_CUTOFF_MONTHS_BEFORE_RETIREMENT
+            cy, cm = offset_months(
+                ret_year, ret_month, -FEATURE_CUTOFF_MONTHS_BEFORE_RETIREMENT
             )
             df.at[idx, "cutoff_year"] = cy
             df.at[idx, "cutoff_month"] = cm
         elif yr:
-            cy, cm = _sub_months(
-                int(yr), 1, FEATURE_CUTOFF_MONTHS_BEFORE_RETIREMENT
+            cy, cm = offset_months(
+                int(yr), 1, -FEATURE_CUTOFF_MONTHS_BEFORE_RETIREMENT
             )
             df.at[idx, "cutoff_year"] = cy
             df.at[idx, "cutoff_month"] = cm
@@ -167,11 +169,11 @@ def _load_base_metadata(
 
 
 # ---------------------------------------------------------------------------
-# Group A: Set intrinsics
+# Group A: Set intrinsics (pure)
 # ---------------------------------------------------------------------------
 
 
-def _extract_intrinsics(base: pd.DataFrame) -> pd.DataFrame:
+def extract_intrinsics(base: pd.DataFrame) -> pd.DataFrame:
     """Extract features derived from core set metadata."""
     rows: list[dict] = []
     for _, item in base.iterrows():
@@ -187,8 +189,7 @@ def _extract_intrinsics(base: pd.DataFrame) -> pd.DataFrame:
 
         is_licensed = 1 if theme in LICENSED_THEMES else 0
 
-        price_tier_ord = _ordinal_bucket(None, PRICE_TIERS)  # filled after BE merge
-        pieces_ord = _ordinal_bucket(parts, PIECE_GROUPS) if parts else None
+        pieces_ord = ordinal_bucket(parts, PIECE_GROUPS) if parts else None
 
         rows.append({
             "set_number": item["set_number"],
@@ -203,66 +204,31 @@ def _extract_intrinsics(base: pd.DataFrame) -> pd.DataFrame:
 
 
 # ---------------------------------------------------------------------------
-# Group C: BrickEconomy features (includes A extras and B)
+# Group C: BrickEconomy features (includes A extras and B) (pure)
 # ---------------------------------------------------------------------------
 
 
-def _extract_brickeconomy_features(
-    conn: "DuckDBPyConnection",
+def extract_brickeconomy_features(
+    be_df: pd.DataFrame,
     base: pd.DataFrame,
 ) -> pd.DataFrame:
-    """Extract features from BrickEconomy snapshots at cutoff time."""
-    # Build per-set cutoff filter
-    # For sets with cutoff, get latest snapshot before cutoff
-    # For sets without cutoff (active), get latest snapshot
-    query = """
-        SELECT
-            bs.set_number,
-            bs.rrp_usd_cents,
-            bs.annual_growth_pct,
-            bs.rolling_growth_pct,
-            bs.growth_90d_pct,
-            bs.value_new_cents,
-            bs.theme_rank,
-            bs.subtheme_avg_growth_pct,
-            bs.rating_value,
-            bs.review_count,
-            bs.distribution_mean_cents,
-            bs.distribution_stddev_cents,
-            bs.minifig_value_cents,
-            bs.exclusive_minifigs,
-            bs.scraped_at
-        FROM brickeconomy_snapshots bs
-        INNER JOIN (
-            SELECT
-                set_number,
-                MAX(scraped_at) AS latest_scraped
-            FROM brickeconomy_snapshots
-            GROUP BY set_number
-        ) latest ON bs.set_number = latest.set_number
-            AND bs.scraped_at = latest.latest_scraped
+    """Extract features from pre-loaded BrickEconomy snapshots.
+
+    Args:
+        be_df: BrickEconomy snapshot data (already cutoff-filtered if needed).
+        base: Base metadata with set_number, parts_count, etc.
     """
-    be_df = conn.execute(query).df()
     if be_df.empty:
         return pd.DataFrame(columns=["set_number"])
-
-    # For sets with a cutoff, re-query to get the snapshot before cutoff
-    sets_with_cutoff = base.dropna(subset=["cutoff_year"])
-    if not sets_with_cutoff.empty:
-        cutoff_snapshots = _get_cutoff_snapshots(conn, sets_with_cutoff)
-        if not cutoff_snapshots.empty:
-            # Override latest snapshots with cutoff-filtered ones
-            be_df = be_df[~be_df["set_number"].isin(cutoff_snapshots["set_number"])]
-            be_df = pd.concat([be_df, cutoff_snapshots], ignore_index=True)
 
     rows: list[dict] = []
     for _, row in be_df.iterrows():
         sn = row["set_number"]
-        rrp = _safe_float(row.get("rrp_usd_cents"))
-        value_new = _safe_float(row.get("value_new_cents"))
-        mean_cents = _safe_float(row.get("distribution_mean_cents"))
-        stddev_cents = _safe_float(row.get("distribution_stddev_cents"))
-        minifig_val = _safe_float(row.get("minifig_value_cents"))
+        rrp = safe_float(row.get("rrp_usd_cents"))
+        value_new = safe_float(row.get("value_new_cents"))
+        mean_cents = safe_float(row.get("distribution_mean_cents"))
+        stddev_cents = safe_float(row.get("distribution_stddev_cents"))
+        minifig_val = safe_float(row.get("minifig_value_cents"))
 
         rating_str = row.get("rating_value")
         rating_num = None
@@ -289,7 +255,7 @@ def _extract_brickeconomy_features(
         if pd.notna(excl_raw):
             has_exclusive = 1.0 if excl_raw else 0.0
 
-        price_tier_ord = _ordinal_bucket(int(rrp), PRICE_TIERS) if rrp else None
+        price_tier_ord = ordinal_bucket(int(rrp), PRICE_TIERS) if rrp else None
 
         # Compute price_per_part using base metadata
         base_row = base[base["set_number"] == sn]
@@ -304,15 +270,15 @@ def _extract_brickeconomy_features(
             "set_number": sn,
             "rrp_usd_cents": float(rrp) if rrp else None,
             "price_per_part": ppp,
-            "annual_growth_pct": _safe_float(row.get("annual_growth_pct")),
-            "rolling_growth_pct": _safe_float(row.get("rolling_growth_pct")),
-            "growth_90d_pct": _safe_float(row.get("growth_90d_pct")),
+            "annual_growth_pct": safe_float(row.get("annual_growth_pct")),
+            "rolling_growth_pct": safe_float(row.get("rolling_growth_pct")),
+            "growth_90d_pct": safe_float(row.get("growth_90d_pct")),
             "value_new_vs_rrp": value_vs_rrp,
-            "theme_rank": _safe_float(row.get("theme_rank")),
-            "subtheme_avg_growth_pct": _safe_float(row.get("subtheme_avg_growth_pct")),
+            "theme_rank": safe_float(row.get("theme_rank")),
+            "subtheme_avg_growth_pct": safe_float(row.get("subtheme_avg_growth_pct")),
             "distribution_cv": dist_cv,
             "rating_value": rating_num,
-            "review_count": _safe_float(row.get("review_count")),
+            "review_count": safe_float(row.get("review_count")),
             "has_exclusive_minifigs": has_exclusive,
             "minifig_value_ratio": minifig_ratio,
             "price_tier_ordinal": float(price_tier_ord) if price_tier_ord is not None else None,
@@ -321,107 +287,32 @@ def _extract_brickeconomy_features(
     return pd.DataFrame(rows)
 
 
-def _get_cutoff_snapshots(
-    conn: "DuckDBPyConnection",
-    sets_with_cutoff: pd.DataFrame,
-) -> pd.DataFrame:
-    """Get latest BrickEconomy snapshot before each set's cutoff date."""
-    # Build a UNION of per-set queries (DuckDB handles this efficiently)
-    parts: list[str] = []
-    for _, row in sets_with_cutoff.iterrows():
-        sn = row["set_number"]
-        cy = int(row["cutoff_year"])
-        cm = int(row["cutoff_month"])
-        cutoff_ts = f"{cy:04d}-{cm:02d}-28"
-        parts.append(
-            f"SELECT * FROM ("
-            f"  SELECT *, ROW_NUMBER() OVER (ORDER BY scraped_at DESC) AS rn"
-            f"  FROM brickeconomy_snapshots"
-            f"  WHERE set_number = '{sn}' AND scraped_at <= '{cutoff_ts}'"
-            f") WHERE rn = 1"
-        )
-
-    if not parts:
-        return pd.DataFrame()
-
-    # Process in batches to avoid overly large queries
-    batch_size = 50
-    results: list[pd.DataFrame] = []
-    for i in range(0, len(parts), batch_size):
-        batch = parts[i : i + batch_size]
-        query = " UNION ALL ".join(batch)
-        try:
-            df = conn.execute(query).df()
-            if not df.empty:
-                results.append(df)
-        except Exception:
-            logger.warning("Cutoff snapshot query failed for batch %d", i, exc_info=True)
-
-    if not results:
-        return pd.DataFrame()
-
-    combined = pd.concat(results, ignore_index=True)
-    # Drop the rn column
-    if "rn" in combined.columns:
-        combined = combined.drop(columns=["rn"])
-    return combined
-
-
 # ---------------------------------------------------------------------------
-# Group D: Keepa / Amazon features
+# Group D: Keepa / Amazon features (pure)
 # ---------------------------------------------------------------------------
 
 
-def _extract_keepa_features(
-    conn: "DuckDBPyConnection",
-    base: pd.DataFrame,
+def extract_keepa_features(
+    keepa_df: pd.DataFrame,
+    rrp_map: dict[str, float],
 ) -> pd.DataFrame:
-    """Extract features from Keepa snapshots."""
-    query = """
-        SELECT
-            ks.set_number,
-            ks.current_amazon_cents,
-            ks.lowest_ever_cents,
-            ks.highest_ever_cents,
-            ks.rating,
-            ks.review_count,
-            ks.tracking_users
-        FROM keepa_snapshots ks
-        INNER JOIN (
-            SELECT set_number, MAX(scraped_at) AS latest
-            FROM keepa_snapshots
-            GROUP BY set_number
-        ) l ON ks.set_number = l.set_number AND ks.scraped_at = l.latest
+    """Extract features from pre-loaded Keepa snapshots.
+
+    Args:
+        keepa_df: Latest Keepa snapshot data.
+        rrp_map: Dict mapping set_number -> rrp_usd_cents.
     """
-    keepa_df = conn.execute(query).df()
     if keepa_df.empty:
         return pd.DataFrame(columns=["set_number"])
-
-    # Get RRP for discount calculation
-    rrp_map: dict[str, float] = {}
-    be_query = """
-        SELECT set_number, rrp_usd_cents
-        FROM (
-            SELECT set_number, rrp_usd_cents,
-                   ROW_NUMBER() OVER (PARTITION BY set_number ORDER BY scraped_at DESC) AS rn
-            FROM brickeconomy_snapshots
-            WHERE rrp_usd_cents IS NOT NULL
-        ) WHERE rn = 1
-    """
-    rrp_df = conn.execute(be_query).df()
-    if not rrp_df.empty:
-        rrp_map = dict(zip(rrp_df["set_number"], rrp_df["rrp_usd_cents"]))
 
     rows: list[dict] = []
     for _, row in keepa_df.iterrows():
         sn = row["set_number"]
-        rrp_usd = rrp_map.get(sn)  # Already in USD cents from BrickEconomy
-        # Keepa prices are in USD cents (Amazon US locale, domain ID 1)
+        rrp_usd = rrp_map.get(sn)
         amazon_price = row.get("current_amazon_cents")
         lowest = row.get("lowest_ever_cents")
         highest = row.get("highest_ever_cents")
 
-        # Both rrp_usd and amazon_price are in USD cents -- direct comparison
         discount_pct = None
         if rrp_usd and rrp_usd > 0 and amazon_price:
             discount_pct = (float(rrp_usd) - float(amazon_price)) / float(rrp_usd) * 100
@@ -434,37 +325,21 @@ def _extract_keepa_features(
             "set_number": sn,
             "amazon_discount_pct": discount_pct,
             "keepa_price_range_pct": price_range_pct,
-            "keepa_rating": _safe_float(row.get("rating")),
-            "keepa_review_count": _safe_float(row.get("review_count")),
-            "keepa_tracking_users": _safe_float(row.get("tracking_users")),
+            "keepa_rating": safe_float(row.get("rating")),
+            "keepa_review_count": safe_float(row.get("review_count")),
+            "keepa_tracking_users": safe_float(row.get("tracking_users")),
         })
 
     return pd.DataFrame(rows)
 
 
 # ---------------------------------------------------------------------------
-# Group E: Google Trends features
+# Group E: Google Trends features (pure)
 # ---------------------------------------------------------------------------
 
 
-def _extract_gtrends_features(
-    conn: "DuckDBPyConnection",
-    base: pd.DataFrame,
-) -> pd.DataFrame:
-    """Extract features from Google Trends snapshots."""
-    query = """
-        SELECT
-            gt.set_number,
-            gt.peak_value,
-            gt.average_value
-        FROM google_trends_snapshots gt
-        INNER JOIN (
-            SELECT set_number, MAX(scraped_at) AS latest
-            FROM google_trends_snapshots
-            GROUP BY set_number
-        ) l ON gt.set_number = l.set_number AND gt.scraped_at = l.latest
-    """
-    gt_df = conn.execute(query).df()
+def extract_gtrends_features(gt_df: pd.DataFrame) -> pd.DataFrame:
+    """Extract features from pre-loaded Google Trends snapshots."""
     if gt_df.empty:
         return pd.DataFrame(columns=["set_number"])
 
@@ -472,88 +347,31 @@ def _extract_gtrends_features(
     for _, row in gt_df.iterrows():
         rows.append({
             "set_number": row["set_number"],
-            "gtrends_peak": _safe_float(row.get("peak_value")),
-            "gtrends_avg": _safe_float(row.get("average_value")),
+            "gtrends_peak": safe_float(row.get("peak_value")),
+            "gtrends_avg": safe_float(row.get("average_value")),
         })
 
     return pd.DataFrame(rows)
 
 
 # ---------------------------------------------------------------------------
-# Group F: Shopee saturation features
+# Group F: Shopee saturation features (pure)
 # ---------------------------------------------------------------------------
 
 
-def _extract_shopee_features(
-    conn: "DuckDBPyConnection",
-    base: pd.DataFrame,
-) -> pd.DataFrame:
-    """Extract features from Shopee saturation data."""
-    query = """
-        SELECT
-            ss.set_number,
-            ss.listings_count,
-            ss.unique_sellers,
-            ss.price_spread_pct,
-            ss.saturation_score
-        FROM shopee_saturation ss
-        INNER JOIN (
-            SELECT set_number, MAX(scraped_at) AS latest
-            FROM shopee_saturation
-            GROUP BY set_number
-        ) l ON ss.set_number = l.set_number AND ss.scraped_at = l.latest
-    """
-    ss_df = conn.execute(query).df()
+def extract_shopee_features(ss_df: pd.DataFrame) -> pd.DataFrame:
+    """Extract features from pre-loaded Shopee saturation data."""
     if ss_df.empty:
         return pd.DataFrame(columns=["set_number"])
 
     rows: list[dict] = []
     for _, row in ss_df.iterrows():
-        # Shopee prices are in MYR; spread_pct is unitless so no conversion needed.
-        # saturation_score is also unitless.
         rows.append({
             "set_number": row["set_number"],
-            "shopee_listings": _safe_float(row.get("listings_count")),
-            "shopee_unique_sellers": _safe_float(row.get("unique_sellers")),
-            "shopee_price_spread_pct": _safe_float(row.get("price_spread_pct")),
-            "shopee_saturation_score": _safe_float(row.get("saturation_score")),
+            "shopee_listings": safe_float(row.get("listings_count")),
+            "shopee_unique_sellers": safe_float(row.get("unique_sellers")),
+            "shopee_price_spread_pct": safe_float(row.get("price_spread_pct")),
+            "shopee_saturation_score": safe_float(row.get("saturation_score")),
         })
 
     return pd.DataFrame(rows)
-
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-
-def _safe_float(val: object) -> float | None:
-    """Convert a value to float or None."""
-    if val is None:
-        return None
-    try:
-        f = float(val)
-        if np.isnan(f) or np.isinf(f):
-            return None
-        return f
-    except (ValueError, TypeError):
-        return None
-
-
-def _ordinal_bucket(
-    value: int | float | None,
-    tiers: tuple[tuple[str, int, int], ...],
-) -> int | None:
-    """Map a value to its ordinal bucket index (0-based)."""
-    if value is None:
-        return None
-    for i, (_, low, high) in enumerate(tiers):
-        if low <= value < high:
-            return i
-    return None
-
-
-def _sub_months(year: int, month: int, months: int) -> tuple[int, int]:
-    """Subtract months from a year/month pair."""
-    total = (year * 12 + month - 1) - months
-    return total // 12, (total % 12) + 1

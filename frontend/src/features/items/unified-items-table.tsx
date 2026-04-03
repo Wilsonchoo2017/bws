@@ -142,26 +142,26 @@ const columns: ColumnDef<UnifiedItem>[] = [
     size: 90
   },
   {
-    accessorKey: 'composite_score',
+    accessorKey: 'ml_growth_pct',
     header: ({ column }) => (
-      <DataTableColumnHeader column={column} title='Score' />
+      <DataTableColumnHeader column={column} title='ML Growth' />
     ),
     cell: ({ row, table }) => {
-      const score = row.getValue('composite_score') as number | null;
-      if (table.options.meta?.enriching && score == null) return <PriceShimmer />;
-      if (score == null || Number.isNaN(score)) return <span className='text-muted-foreground'>-</span>;
+      const growth = row.getValue('ml_growth_pct') as number | null;
+      if (table.options.meta?.enriching && growth == null) return <PriceShimmer />;
+      if (growth == null || Number.isNaN(growth)) return <span className='text-muted-foreground'>-</span>;
       const color =
-        score >= 65 ? 'text-emerald-600 dark:text-emerald-500' :
-        score >= 50 ? 'text-yellow-600 dark:text-yellow-400' :
-        score >= 35 ? 'text-orange-500' :
+        growth >= 15 ? 'text-emerald-600 dark:text-emerald-500' :
+        growth >= 10 ? 'text-green-600 dark:text-green-400' :
+        growth >= 5 ? 'text-yellow-600 dark:text-yellow-400' :
         'text-red-500';
       return (
         <span className={`font-mono text-sm font-semibold ${color}`}>
-          {Math.round(score)}
+          +{growth.toFixed(1)}%
         </span>
       );
     },
-    size: 70
+    size: 85
   },
   {
     accessorKey: 'rrp_cents',
@@ -368,15 +368,15 @@ export function UnifiedItemsTable() {
       result = result.filter((item) => item.retiring_soon === true && item.year_retired === null);
     }
     if (scoreFilter === '65+') {
-      result = result.filter((item) => item.composite_score !== null && item.composite_score >= 65);
+      result = result.filter((item) => item.ml_growth_pct !== null && item.ml_growth_pct >= 15);
     } else if (scoreFilter === '50+') {
-      result = result.filter((item) => item.composite_score !== null && item.composite_score >= 50);
+      result = result.filter((item) => item.ml_growth_pct !== null && item.ml_growth_pct >= 10);
     } else if (scoreFilter === '35+') {
-      result = result.filter((item) => item.composite_score !== null && item.composite_score >= 35);
+      result = result.filter((item) => item.ml_growth_pct !== null && item.ml_growth_pct >= 5);
     } else if (scoreFilter === '<35') {
-      result = result.filter((item) => item.composite_score !== null && item.composite_score < 35);
+      result = result.filter((item) => item.ml_growth_pct !== null && item.ml_growth_pct < 5);
     } else if (scoreFilter === 'no_score') {
-      result = result.filter((item) => item.composite_score === null);
+      result = result.filter((item) => item.ml_growth_pct === null);
     }
     if (dealFilter) {
       result = dealFilter(result);
@@ -432,19 +432,19 @@ export function UnifiedItemsTable() {
 
       if (!itemsRes.success) return;
 
-      const scoreMap = new Map<string, number>();
+      const growthMap = new Map<string, number>();
       if (signalsRes?.success && Array.isArray(signalsRes.data)) {
         for (const sig of signalsRes.data) {
           const setNum = (sig.set_number ?? sig.item_id?.replace(/-\d+$/, '')) as string | undefined;
-          if (setNum && sig.composite_score != null && !Number.isNaN(sig.composite_score)) {
-            scoreMap.set(setNum, sig.composite_score);
+          if (setNum && sig.ml_growth_pct != null && !Number.isNaN(sig.ml_growth_pct)) {
+            growthMap.set(setNum, sig.ml_growth_pct);
           }
         }
       }
 
       const merged = (itemsRes.data as UnifiedItem[]).map((item) => ({
         ...item,
-        composite_score: scoreMap.get(item.set_number) ?? null,
+        ml_growth_pct: growthMap.get(item.set_number) ?? null,
       }));
 
       setData(merged);
@@ -487,7 +487,7 @@ export function UnifiedItemsTable() {
         bricklink_used_cents: null,
         bricklink_used_currency: null,
         bricklink_used_last_seen: null,
-        composite_score: null,
+        ml_growth_pct: null,
       } as UnifiedItem));
 
       setData(liteItems);
@@ -622,12 +622,12 @@ export function UnifiedItemsTable() {
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value='all'>All scores</SelectItem>
-              <SelectItem value='65+'>Score 65+</SelectItem>
-              <SelectItem value='50+'>Score 50+</SelectItem>
-              <SelectItem value='35+'>Score 35+</SelectItem>
-              <SelectItem value='<35'>Score &lt;35</SelectItem>
-              <SelectItem value='no_score'>No score</SelectItem>
+              <SelectItem value='all'>All growth</SelectItem>
+              <SelectItem value='65+'>Strong (&ge;15%)</SelectItem>
+              <SelectItem value='50+'>Buy (&ge;10%)</SelectItem>
+              <SelectItem value='35+'>Hold (&ge;5%)</SelectItem>
+              <SelectItem value='<35'>Avoid (&lt;5%)</SelectItem>
+              <SelectItem value='no_score'>No prediction</SelectItem>
             </SelectContent>
           </Select>
           <Button

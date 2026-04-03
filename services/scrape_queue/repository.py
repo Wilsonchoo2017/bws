@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 
 from services.scrape_queue.models import (
     ACTIVE_STATUSES,
+    NON_SET_TASK_TYPES,
     TASK_DEPENDENCIES,
     TASK_PRIORITIES,
     ErrorCategory,
@@ -81,6 +82,16 @@ def _create_task_inner(
         [set_number, task_type.value, *active_list],
     ).fetchone()
     if existing:
+        return None
+
+    recently_completed = conn.execute(
+        "SELECT 1 FROM scrape_tasks "
+        "WHERE set_number = ? AND task_type = ? AND status = 'completed' "
+        "AND completed_at > CURRENT_TIMESTAMP - INTERVAL '24 hours' "
+        "LIMIT 1",
+        [set_number, task_type.value],
+    ).fetchone()
+    if recently_completed:
         return None
 
     task_id = uuid.uuid4().hex
@@ -157,6 +168,8 @@ def create_tasks_for_set(
     try:
         created: list[ScrapeTask] = []
         for task_type in TaskType:
+            if task_type in NON_SET_TASK_TYPES:
+                continue
             task = _create_task_inner(conn, set_number, task_type)
             if task is not None:
                 created.append(task)
@@ -468,34 +481,24 @@ def _unblock_dependents(
 # ---------------------------------------------------------------------------
 
 
-def reclaim_stale(
-    conn: DuckDBPyConnection,
-    stale_minutes: int = 30,
-) -> int:
-    """Reset running tasks with stale locks back to pending.
+def reset_running_tasks(conn: DuckDBPyConnection) -> int:
+    """Reset all running tasks to pending on startup.
 
-    Returns the number of tasks reclaimed.
+    After a crash/restart, no workers are alive so any task still
+    marked 'running' is orphaned.  Unconditionally resetting them is
+    simpler and safer than the old stale-lock heuristic.
     """
     count = conn.execute(
-        """
-        SELECT COUNT(*) FROM scrape_tasks
-        WHERE status = 'running'
-          AND locked_at < CURRENT_TIMESTAMP - to_minutes(CAST(? AS INTEGER))
-        """,
-        [stale_minutes],
+        "SELECT COUNT(*) FROM scrape_tasks WHERE status = 'running'",
     ).fetchone()[0]
 
     if count > 0:
         conn.execute(
-            """
-            UPDATE scrape_tasks
-            SET status = 'pending', locked_by = NULL, locked_at = NULL
-            WHERE status = 'running'
-              AND locked_at < CURRENT_TIMESTAMP - to_minutes(CAST(? AS INTEGER))
-            """,
-            [stale_minutes],
+            "UPDATE scrape_tasks "
+            "SET status = 'pending', locked_by = NULL, locked_at = NULL "
+            "WHERE status = 'running'",
         )
-        logger.info("Reclaimed %d stale scrape tasks", count)
+        logger.info("Reset %d running tasks on startup", count)
 
     return count
 
@@ -503,7 +506,7 @@ def reclaim_stale(
 def re_evaluate_blocked(conn: DuckDBPyConnection) -> int:
     """Re-evaluate blocked tasks whose dependencies may have completed.
 
-    Called on startup after reclaim_stale to handle the case where a
+    Called on startup after reset_running_tasks to handle the case where a
     dependency completed before a crash but the blocked task wasn't
     yet transitioned.
 

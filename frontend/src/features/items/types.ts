@@ -50,7 +50,7 @@ export interface UnifiedItem {
   bricklink_used_cents: number | null;
   bricklink_used_currency: string | null;
   bricklink_used_last_seen: string | null;
-  composite_score: number | null;
+  ml_growth_pct: number | null;
 }
 
 export interface PriceRecord {
@@ -165,7 +165,7 @@ export interface ItemSignals {
   entry_price_cents: number;
   eval_year: number;
   eval_month: number;
-  composite_score: number | null;
+  ml_growth_pct: number | null;
   demand_pressure: number | null;
   supply_velocity: number | null;
   price_trend: number | null;
@@ -201,7 +201,7 @@ export interface KellyHorizon {
 
 export interface KellySizing {
   set_number: string;
-  composite_score: number | null;
+  ml_growth_pct: number | null;
   score_bin: string;
   entry_price_cents: number;
   flip: KellyHorizon | null;

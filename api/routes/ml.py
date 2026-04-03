@@ -224,6 +224,24 @@ async def optimize_portfolio_endpoint(
     })
 
 
+@router.get("/tracking/report")
+async def tracking_report(conn: "DuckDBPyConnection" = Depends(get_db)):
+    """Get prediction tracking report (predicted vs actual)."""
+    from services.ml.prediction_tracker import get_tracking_report
+
+    return sanitize_nan(get_tracking_report(conn))
+
+
+@router.post("/tracking/snapshot")
+async def save_tracking_snapshot(conn: "DuckDBPyConnection" = Depends(get_db)):
+    """Save today's predictions for future validation."""
+    from services.ml.prediction_tracker import backfill_actuals, save_prediction_snapshot
+
+    n_saved = save_prediction_snapshot(conn)
+    n_backfilled = backfill_actuals(conn)
+    return {"saved": n_saved, "backfilled": n_backfilled}
+
+
 @router.post("/growth/retrain")
 async def retrain_growth_models(conn: "DuckDBPyConnection" = Depends(get_db)):
     """Force retrain growth models (clears cache)."""

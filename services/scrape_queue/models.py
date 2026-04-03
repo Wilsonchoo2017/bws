@@ -27,6 +27,7 @@ class TaskType(str, Enum):
     KEEPA = "keepa"
     MINIFIGURES = "minifigures"
     GOOGLE_TRENDS = "google_trends"
+    GOOGLE_TRENDS_THEME = "google_trends_theme"
 
 
 class TaskStatus(str, Enum):
@@ -195,6 +196,7 @@ TASK_PRIORITIES: dict[TaskType, int] = {
     TaskType.KEEPA: 2,
     TaskType.MINIFIGURES: 3,
     TaskType.GOOGLE_TRENDS: 4,
+    TaskType.GOOGLE_TRENDS_THEME: 4,
 }
 
 # Task types that must complete (for the same set_number) before a given type can run.
@@ -202,6 +204,12 @@ TASK_DEPENDENCIES: dict[TaskType, TaskType] = {
     TaskType.MINIFIGURES: TaskType.BRICKLINK_METADATA,
     TaskType.GOOGLE_TRENDS: TaskType.BRICKLINK_METADATA,
 }
+
+# Task types excluded from automatic per-set task creation.
+# These are managed via dedicated enqueue scripts.
+NON_SET_TASK_TYPES: frozenset[TaskType] = frozenset({
+    TaskType.GOOGLE_TRENDS_THEME,
+})
 
 # Statuses that indicate an active (non-terminal) task.
 ACTIVE_STATUSES: frozenset[TaskStatus] = frozenset({

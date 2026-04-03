@@ -32,9 +32,9 @@ from services.scrape_queue.repository import (
     force_fail_by_worker,
     force_fail_task,
     re_evaluate_blocked,
-    reclaim_stale,
     record_attempt,
     requeue_for_cooldown,
+    reset_running_tasks,
 )
 
 if TYPE_CHECKING:
@@ -111,14 +111,14 @@ async def _periodic_checkpoint() -> None:
 
 
 async def recover_scrape_queue() -> None:
-    """Crash recovery: reclaim stale tasks and re-evaluate blocked ones."""
+    """Crash recovery: reset orphaned running tasks and re-evaluate blocked ones."""
     from db.connection import get_connection
     from db.schema import init_schema
 
     conn = get_connection()
     try:
         init_schema(conn)
-        reclaimed = reclaim_stale(conn)
+        reclaimed = reset_running_tasks(conn)
         unblocked = re_evaluate_blocked(conn)
         if reclaimed or unblocked:
             logger.info(

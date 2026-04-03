@@ -299,6 +299,43 @@ def _parse_candlestick(html: str) -> tuple[tuple[str, int, int, int, int], ...]:
     return tuple(points)
 
 
+def _synthesize_candlestick_from_value_chart(
+    value_chart: tuple[tuple[str, int], ...],
+) -> tuple[tuple[str, int, int, int, int], ...]:
+    """Synthesize monthly OHLC candles from daily/weekly value chart data.
+
+    Groups value_chart points by month and computes open/high/low/close
+    for each month. This provides candlestick-equivalent data when the
+    old drawSalesChartMonth() function is not present on the page.
+
+    Each output tuple is (iso_month, low, open, close, high) in cents,
+    matching the format from _parse_candlestick.
+    """
+    if not value_chart:
+        return ()
+
+    # Group by year-month
+    monthly: dict[str, list[int]] = {}
+    for date_str, price_cents in value_chart:
+        month_key = date_str[:7]  # "YYYY-MM"
+        monthly.setdefault(month_key, []).append(price_cents)
+
+    if not monthly:
+        return ()
+
+    candles: list[tuple[str, int, int, int, int]] = []
+    for month_key in sorted(monthly):
+        prices = monthly[month_key]
+        open_price = prices[0]
+        close_price = prices[-1]
+        high_price = max(prices)
+        low_price = min(prices)
+        # Match old format: (month, low, open, close, high)
+        candles.append((month_key, low_price, open_price, close_price, high_price))
+
+    return tuple(candles)
+
+
 def _parse_distribution(html: str) -> tuple[int | None, int | None]:
     """Extract Gaussian distribution mean and stddev from drawSalesListChart().
 
@@ -683,6 +720,17 @@ def parse_brickeconomy_page(
     value_chart = _parse_value_chart(html)
     sales_trend = _parse_sales_trend(html)
     candlestick = _parse_candlestick(html)
+
+    # Fallback: synthesize candlestick from value chart when the old
+    # drawSalesChartMonth() function is absent (newer BE pages).
+    if not candlestick and value_chart:
+        candlestick = _synthesize_candlestick_from_value_chart(value_chart)
+        if candlestick:
+            logger.debug(
+                "Synthesized %d monthly candles from value chart for %s",
+                len(candlestick), set_number,
+            )
+
     dist_mean, dist_stddev = _parse_distribution(html)
 
     # Current value: prefer sidebar, then chart annotation, then meta

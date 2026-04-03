@@ -9,7 +9,6 @@ from snapshots (since BrickLink only keeps 6 months of data).
 """
 
 import logging
-from datetime import datetime
 from typing import TYPE_CHECKING
 
 import pandas as pd
@@ -25,6 +24,7 @@ from config.ml import (
     TARGET_SMOOTHING_WINDOW,
 )
 from services.ml.helpers import offset_months, set_number_to_item_id
+from services.ml.price_sources import get_price_chain, resolve_price
 from services.ml.queries import (
     load_be_snapshot_values,
     load_be_value_charts,
@@ -130,8 +130,10 @@ def _compute_returns(
     config: MLPipelineConfig,
 ) -> pd.DataFrame:
     """Compute returns from pre-loaded data (pure function)."""
-    rows: list[dict] = []
+    # Build price source chain (pluggable via PriceSource protocol)
+    sources = get_price_chain(bricklink_prices, be_value_charts, be_snapshots)
     half_window = TARGET_SMOOTHING_WINDOW // 2
+    rows: list[dict] = []
 
     for _, item in sets_df.iterrows():
         set_number = item["set_number"]
@@ -156,15 +158,11 @@ def _compute_returns(
                 retired_year, retired_month, horizon
             )
 
-            avg_price, source = get_price_at_horizon(
-                set_number=set_number,
-                item_id=item_id,
-                target_year=target_year,
-                target_month=target_month,
-                half_window=half_window,
-                bricklink_prices=bricklink_prices,
-                be_value_charts=be_value_charts,
-                be_snapshots=be_snapshots,
+            # BrickLink uses item_id, BE sources use set_number.
+            # Try BrickLink first with item_id, then BE sources with set_number.
+            avg_price, source = _resolve_price_for_set(
+                sources, set_number, item_id,
+                target_year, target_month, half_window,
             )
 
             col = f"{horizon}m"
@@ -185,6 +183,30 @@ def _compute_returns(
         return pd.DataFrame()
 
     return pd.DataFrame(rows)
+
+
+def _resolve_price_for_set(
+    sources: tuple,
+    set_number: str,
+    item_id: str,
+    target_year: int,
+    target_month: int,
+    half_window: int,
+) -> tuple[int | None, str]:
+    """Resolve price trying BrickLink (item_id) then BE sources (set_number)."""
+    # First source is BrickLink which uses item_id
+    bl_source = sources[0]
+    price = bl_source.get_price(item_id, target_year, target_month, half_window)
+    if price is not None:
+        return price, bl_source.name
+
+    # Remaining sources use set_number
+    for source in sources[1:]:
+        price = source.get_price(set_number, target_year, target_month, half_window)
+        if price is not None:
+            return price, source.name
+
+    return None, "none"
 
 
 def _parse_retired_sets(raw_df: pd.DataFrame) -> pd.DataFrame:
@@ -232,49 +254,10 @@ def _classify_outcome(
 
 
 # ---------------------------------------------------------------------------
-# Price resolution (pure -- operates on pre-loaded data)
+# Backward-compatible re-exports from price_sources package
 # ---------------------------------------------------------------------------
 
-
-def get_price_at_horizon(
-    *,
-    set_number: str,
-    item_id: str,
-    target_year: int,
-    target_month: int,
-    half_window: int,
-    bricklink_prices: pd.DataFrame,
-    be_value_charts: dict[str, list[tuple[int, int, int]]],
-    be_snapshots: pd.DataFrame,
-) -> tuple[int | None, str]:
-    """Get the average transacted price at a target year/month.
-
-    Tries sources in order:
-    1. BrickLink monthly avg_price (3-month window average)
-    2. BrickEconomy value_chart_json time series
-    3. BrickEconomy value_new_cents from snapshots
-
-    Returns (price_cents, source_name) or (None, "none").
-    """
-    price = bricklink_price_at(
-        bricklink_prices, item_id, target_year, target_month, half_window
-    )
-    if price is not None:
-        return price, "bricklink"
-
-    price = be_chart_price_at(
-        be_value_charts, set_number, target_year, target_month, half_window
-    )
-    if price is not None:
-        return price, "brickeconomy_chart"
-
-    price = be_snapshot_price_at(
-        be_snapshots, set_number, target_year, target_month, half_window
-    )
-    if price is not None:
-        return price, "brickeconomy_snapshot"
-
-    return None, "none"
+from services.ml.price_sources.bricklink import BrickLinkSource  # noqa: E402
 
 
 def bricklink_price_at(
@@ -284,90 +267,10 @@ def bricklink_price_at(
     target_month: int,
     half_window: int,
 ) -> int | None:
-    """Get avg BrickLink price in a window around target month."""
-    item_df = df[df["item_id"] == item_id]
-    if item_df.empty:
-        return None
+    """Get avg BrickLink price in a window around target month.
 
-    prices: list[int] = []
-    for offset in range(-half_window, half_window + 1):
-        y, m = offset_months(target_year, target_month, offset)
-        match = item_df[(item_df["year"] == y) & (item_df["month"] == m)]
-        if not match.empty:
-            p = match.iloc[0]["avg_price"]
-            if p and p > 0:
-                prices.append(int(p))
-
-    if prices:
-        return int(sum(prices) / len(prices))
-    return None
-
-
-def be_chart_price_at(
-    charts: dict[str, list[tuple[int, int, int]]],
-    set_number: str,
-    target_year: int,
-    target_month: int,
-    half_window: int,
-) -> int | None:
-    """Get price from BrickEconomy value chart near target month."""
-    points = charts.get(set_number)
-    if not points:
-        return None
-
-    prices: list[int] = []
-    for offset in range(-half_window, half_window + 1):
-        y, m = offset_months(target_year, target_month, offset)
-        for py, pm, price in points:
-            if py == y and pm == m:
-                prices.append(price)
-                break
-
-    if prices:
-        return int(sum(prices) / len(prices))
-
-    # If exact months not found, find nearest point within 3 months
-    target_abs = target_year * 12 + target_month
-    nearest_price = None
-    nearest_dist = 999
-    for py, pm, price in points:
-        dist = abs((py * 12 + pm) - target_abs)
-        if dist < nearest_dist and dist <= 3:
-            nearest_dist = dist
-            nearest_price = price
-
-    return nearest_price
-
-
-def be_snapshot_price_at(
-    df: pd.DataFrame,
-    set_number: str,
-    target_year: int,
-    target_month: int,
-    half_window: int,  # noqa: ARG001
-) -> int | None:
-    """Get value_new_cents from BrickEconomy snapshots near target date."""
-    item_df = df[df["set_number"] == set_number]
-    if item_df.empty:
-        return None
-
-    target_date = datetime(target_year, target_month, 15)
-    best_price = None
-    best_dist = float("inf")
-
-    for _, row in item_df.iterrows():
-        scraped = row["scraped_at"]
-        if scraped is None:
-            continue
-        if isinstance(scraped, str):
-            try:
-                scraped = datetime.fromisoformat(scraped)
-            except ValueError:
-                continue
-
-        dist_days = abs((scraped - target_date).days)
-        if dist_days < best_dist and dist_days <= 90:
-            best_dist = dist_days
-            best_price = int(row["value_new_cents"])
-
-    return best_price
+    Delegates to BrickLinkSource for backward compatibility with tests.
+    """
+    return BrickLinkSource(df).get_price(
+        item_id, target_year, target_month, half_window
+    )

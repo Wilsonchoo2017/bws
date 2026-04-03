@@ -71,6 +71,28 @@ for _logger_name in ("bws.bricklink", "bws.scrape_queue.dispatcher", "bws.scrape
 logger = logging.getLogger("bws.api")
 
 
+async def _run_daily_prediction_snapshot() -> None:
+    """Save ML prediction snapshot once per day on startup, then every 24h."""
+    await asyncio.sleep(30)  # Wait for DB to settle after startup
+    while True:
+        try:
+            from db.connection import get_connection
+            from services.ml.prediction_tracker import backfill_actuals, save_prediction_snapshot
+
+            conn = get_connection()
+            try:
+                n = save_prediction_snapshot(conn)
+                backfill_actuals(conn)
+                if n > 0:
+                    logger.info("Daily prediction snapshot: saved %d predictions", n)
+            finally:
+                conn.close()
+        except Exception:
+            logger.warning("Prediction snapshot failed", exc_info=True)
+
+        await asyncio.sleep(86400)  # 24 hours
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Start the background worker and enrichment sweep on app startup."""
@@ -95,7 +117,8 @@ async def lifespan(app: FastAPI):
     saturation_task = asyncio.create_task(run_saturation_sweep(job_manager))
     image_task = asyncio.create_task(run_image_download_sweep())
     scrape_dispatcher_task = asyncio.create_task(run_scrape_dispatcher())
-    logger.info("Background worker, enrichment/saturation/image sweeps + scrape dispatcher started")
+    prediction_task = asyncio.create_task(_run_daily_prediction_snapshot())
+    logger.info("Background worker, enrichment/saturation/image sweeps + scrape dispatcher + prediction tracker started")
     yield
     logger.info("BWS API shutting down...")
     # Persist cooldown state before tearing down workers

@@ -2,40 +2,39 @@
 
 import pytest
 
+from services.ml.helpers import offset_months, set_number_to_item_id
 from services.ml.target import (
-    _add_months,
-    _bricklink_price_at,
-    _set_number_to_item_id,
+    bricklink_price_at,
     compute_retirement_returns,
 )
 
 
-class TestAddMonths:
+class TestOffsetMonths:
     def test_add_positive(self):
-        assert _add_months(2022, 6, 12) == (2023, 6)
+        assert offset_months(2022, 6, 12) == (2023, 6)
 
     def test_add_across_year(self):
-        assert _add_months(2022, 10, 5) == (2023, 3)
+        assert offset_months(2022, 10, 5) == (2023, 3)
 
     def test_add_zero(self):
-        assert _add_months(2022, 1, 0) == (2022, 1)
+        assert offset_months(2022, 1, 0) == (2022, 1)
 
     def test_add_24(self):
-        assert _add_months(2020, 1, 24) == (2022, 1)
+        assert offset_months(2020, 1, 24) == (2022, 1)
 
     def test_add_to_december(self):
-        assert _add_months(2022, 1, 11) == (2022, 12)
+        assert offset_months(2022, 1, 11) == (2022, 12)
 
     def test_add_from_december(self):
-        assert _add_months(2022, 12, 1) == (2023, 1)
+        assert offset_months(2022, 12, 1) == (2023, 1)
 
 
 class TestSetNumberToItemId:
     def test_plain_number(self):
-        assert _set_number_to_item_id("75192") == "75192-1"
+        assert set_number_to_item_id("75192") == "75192-1"
 
     def test_already_has_suffix(self):
-        assert _set_number_to_item_id("75192-1") == "75192-1"
+        assert set_number_to_item_id("75192-1") == "75192-1"
 
 
 class TestBricklinkPriceAt:
@@ -48,7 +47,7 @@ class TestBricklinkPriceAt:
             "month": [5, 6, 7],
             "avg_price": [50000, 52000, 54000],
         })
-        price = _bricklink_price_at(df, "75192-1", 2023, 6, 1)
+        price = bricklink_price_at(df, "75192-1", 2023, 6, 1)
         # Should average months 5, 6, 7
         assert price == (50000 + 52000 + 54000) // 3
 
@@ -61,7 +60,7 @@ class TestBricklinkPriceAt:
             "month": [1],
             "avg_price": [1000],
         })
-        price = _bricklink_price_at(df, "75192-1", 2023, 6, 1)
+        price = bricklink_price_at(df, "75192-1", 2023, 6, 1)
         assert price is None
 
     def test_partial_window(self):
@@ -73,7 +72,7 @@ class TestBricklinkPriceAt:
             "month": [6],
             "avg_price": [52000],
         })
-        price = _bricklink_price_at(df, "75192-1", 2023, 6, 1)
+        price = bricklink_price_at(df, "75192-1", 2023, 6, 1)
         assert price == 52000
 
 

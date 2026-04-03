@@ -2,13 +2,22 @@
 
 Computes regression and classification metrics including
 domain-specific measures like quintile spread and Sharpe-like ratios.
+
+Returns task-specific metric types (RegressionMetrics, ClassificationMetrics,
+InversionMetrics) that have clear field semantics, with backward-compatible
+conversion to the legacy ModelMetrics via .to_model_metrics().
 """
 
 import logging
 
 import numpy as np
 
-from services.ml.types import ModelMetrics
+from services.ml.types import (
+    ClassificationMetrics,
+    InversionMetrics,
+    ModelMetrics,
+    RegressionMetrics,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -19,7 +28,22 @@ def evaluate_regression(
     model_name: str,
     horizon_months: int,
 ) -> ModelMetrics:
-    """Compute regression metrics: R-squared, quintile spread, hit rate, Sharpe-like."""
+    """Compute regression metrics: R-squared, quintile spread, hit rate, Sharpe-like.
+
+    Returns ModelMetrics for backward compatibility. Use evaluate_regression_v2()
+    for the typed RegressionMetrics.
+    """
+    metrics = evaluate_regression_typed(y_true, y_pred, model_name, horizon_months)
+    return metrics.to_model_metrics()
+
+
+def evaluate_regression_typed(
+    y_true: np.ndarray,
+    y_pred: np.ndarray,
+    model_name: str,
+    horizon_months: int,
+) -> RegressionMetrics:
+    """Compute regression metrics with proper typing."""
     from sklearn.metrics import r2_score
 
     r2 = float(r2_score(y_true, y_pred))
@@ -27,10 +51,9 @@ def evaluate_regression(
     q_spread = _compute_quintile_spread(y_true, y_pred)
     sharpe = _compute_sharpe_like(y_true, y_pred)
 
-    return ModelMetrics(
+    return RegressionMetrics(
         model_name=model_name,
         horizon_months=horizon_months,
-        task="regression",
         r_squared=r2,
         hit_rate=hit_rate,
         quintile_spread=q_spread,
@@ -44,7 +67,22 @@ def evaluate_classification(
     model_name: str,
     horizon_months: int,
 ) -> ModelMetrics:
-    """Compute classification metrics: ROC-AUC, hit rate."""
+    """Compute classification metrics: ROC-AUC, hit rate.
+
+    Returns ModelMetrics for backward compatibility. Use evaluate_classification_v2()
+    for the typed ClassificationMetrics.
+    """
+    metrics = evaluate_classification_typed(y_true, y_prob, model_name, horizon_months)
+    return metrics.to_model_metrics()
+
+
+def evaluate_classification_typed(
+    y_true: np.ndarray,
+    y_prob: np.ndarray,
+    model_name: str,
+    horizon_months: int,
+) -> ClassificationMetrics:
+    """Compute classification metrics with proper typing."""
     from sklearn.metrics import roc_auc_score
 
     try:
@@ -52,16 +90,12 @@ def evaluate_classification(
     except ValueError:
         auc = None
 
-    # Use probability as score for quintile-based metrics
-    # (treat as pseudo-regression for ranking purposes)
     hit_rate = _compute_hit_rate(y_true.astype(float), y_prob)
     q_spread = _compute_quintile_spread(y_true.astype(float), y_prob)
 
-    return ModelMetrics(
+    return ClassificationMetrics(
         model_name=model_name,
         horizon_months=horizon_months,
-        task="classification",
-        r_squared=0.0,
         roc_auc=auc,
         hit_rate=hit_rate,
         quintile_spread=q_spread,
@@ -76,22 +110,33 @@ def evaluate_inversion(
     horizon_months: int,
     avoid_threshold: float = 0.05,  # noqa: ARG001
 ) -> ModelMetrics:
-    """Compute inversion-specific metrics focused on left-tail prediction.
+    """Compute inversion-specific metrics.
+
+    Returns ModelMetrics for backward compatibility. Use evaluate_inversion_typed()
+    for the typed InversionMetrics with clear field semantics.
+    """
+    metrics = evaluate_inversion_typed(
+        y_true, y_prob, y_returns, model_name, horizon_months
+    )
+    return metrics.to_model_metrics()
+
+
+def evaluate_inversion_typed(
+    y_true: np.ndarray,
+    y_prob: np.ndarray,
+    y_returns: np.ndarray,
+    model_name: str,
+    horizon_months: int,
+) -> InversionMetrics:
+    """Compute inversion-specific metrics with proper typing.
 
     Metrics:
     - precision_avoid: When we say "avoid", how often is the set actually bad?
-    - recall_avoid: Of actual losers (return < threshold), how many did we catch?
-    - avoided_loss_pct: Average actual return of correctly flagged sets (negative = good)
+    - recall_avoid: Of actual losers, how many did we catch?
+    - avoided_loss_pct: Average actual return of correctly flagged sets
     - bottom_quintile_accuracy: Of predicted bottom quintile, what % actually underperformed?
     - false_alarm_rate: Sets we said "avoid" that actually performed well
-
-    Args:
-        y_true: Binary ground truth (1=avoid, 0=keep).
-        y_prob: Predicted probability of "avoid" class.
-        y_returns: Continuous returns for dollar-impact calculations.
-        model_name: Model identifier.
-        horizon_months: Prediction horizon.
-        avoid_threshold: Return threshold for avoid classification.
+    - net_precision: precision_avoid - false_alarm_rate
     """
     from sklearn.metrics import precision_score, recall_score, roc_auc_score
 
@@ -102,21 +147,17 @@ def evaluate_inversion(
     except ValueError:
         auc = None
 
-    # Precision/recall on the "avoid" class (label=1)
     precision_avoid = float(precision_score(y_true, y_pred, zero_division=0))
     recall_avoid = float(recall_score(y_true, y_pred, zero_division=0))
 
-    # Avoided loss: average actual return of true positives (correctly flagged)
     tp_mask = (y_pred == 1) & (y_true == 1)
     avoided_loss_pct = float(np.mean(y_returns[tp_mask])) if tp_mask.any() else 0.0
 
-    # Bottom quintile accuracy
     n = len(y_true)
     q_size = max(1, n // 5)
-    bottom_order = np.argsort(y_prob)[::-1][:q_size]  # highest avoid probability
+    bottom_order = np.argsort(y_prob)[::-1][:q_size]
     bottom_q_accuracy = float(np.mean(y_true[bottom_order])) if q_size > 0 else 0.0
 
-    # False alarm rate: predicted avoid but actually good
     fp_mask = (y_pred == 1) & (y_true == 0)
     total_predicted_avoid = int(y_pred.sum())
     false_alarm_rate = (
@@ -125,20 +166,24 @@ def evaluate_inversion(
         else 0.0
     )
 
-    # Use hit_rate for bottom quintile accuracy, quintile_spread for precision-recall gap,
-    # sharpe_like for avoided loss magnitude
-    return ModelMetrics(
+    return InversionMetrics(
         model_name=model_name,
         horizon_months=horizon_months,
-        task="inversion",
-        r_squared=avoided_loss_pct,  # repurposed: avg return of correctly flagged
         roc_auc=auc,
-        hit_rate=bottom_q_accuracy,
-        quintile_spread=precision_avoid - false_alarm_rate,  # net precision
-        sharpe_like=recall_avoid,
+        precision_avoid=precision_avoid,
+        recall_avoid=recall_avoid,
+        avoided_loss_pct=avoided_loss_pct,
+        bottom_quintile_accuracy=bottom_q_accuracy,
+        false_alarm_rate=false_alarm_rate,
+        net_precision=precision_avoid - false_alarm_rate,
         n_train=0,
         n_test=n,
     )
+
+
+# ---------------------------------------------------------------------------
+# Shared pure metric computation functions
+# ---------------------------------------------------------------------------
 
 
 def _compute_hit_rate(
@@ -176,11 +221,7 @@ def _compute_sharpe_like(
     y_true: np.ndarray,
     y_pred: np.ndarray,
 ) -> float:
-    """Sharpe-like ratio: mean / std of actual returns in top quintile.
-
-    Higher is better -- indicates the model's top picks have high
-    average returns with low variance.
-    """
+    """Sharpe-like ratio: mean / std of actual returns in top quintile."""
     n = len(y_true)
     if n < 5:
         return 0.0

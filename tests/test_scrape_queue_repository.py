@@ -17,7 +17,7 @@ from services.scrape_queue.repository import (
     get_queue_stats,
     get_tasks_for_set,
     re_evaluate_blocked,
-    reclaim_stale,
+    reset_running_tasks,
 )
 
 
@@ -317,44 +317,66 @@ class TestFailTask:
 
 
 # ---------------------------------------------------------------------------
-# reclaim_stale
+# reset_running_tasks
 # ---------------------------------------------------------------------------
 
 
-class TestReclaimStale:
-    def test_given_stale_running_task_when_reclaim_then_back_to_pending(
-        self, conn
-    ):
-        """Given a task running for longer than stale_minutes, when reclaiming,
+class TestResetRunningTasks:
+    def test_given_running_task_when_reset_then_back_to_pending(self, conn):
+        """Given a running task, when resetting on startup,
         then task is reset to pending."""
         task = create_task(conn, "75192", TaskType.BRICKLINK_METADATA)
         claim_next(conn, "worker-1", TaskType.BRICKLINK_METADATA)
 
-        # Backdate the locked_at to make it stale
-        conn.execute(
-            """UPDATE scrape_tasks
-               SET locked_at = CURRENT_TIMESTAMP - INTERVAL '60 minutes'
-               WHERE task_id = ?""",
-            [task.task_id],
-        )
-
-        reclaimed = reclaim_stale(conn, stale_minutes=30)
+        reclaimed = reset_running_tasks(conn)
 
         assert reclaimed == 1
         assert _get_task_status(conn, task.task_id) == "pending"
 
-    def test_given_fresh_running_task_when_reclaim_then_still_running(
-        self, conn
-    ):
-        """Given a task that just started running, when reclaiming,
-        then task remains running (not stale yet)."""
-        task = create_task(conn, "75192", TaskType.BRICKLINK_METADATA)
-        claim_next(conn, "worker-1", TaskType.BRICKLINK_METADATA)
+    def test_given_no_running_tasks_when_reset_then_zero(self, conn):
+        """Given no running tasks, when resetting, then zero reclaimed."""
+        create_task(conn, "75192", TaskType.BRICKLINK_METADATA)
 
-        reclaimed = reclaim_stale(conn, stale_minutes=30)
+        reclaimed = reset_running_tasks(conn)
 
         assert reclaimed == 0
-        assert _get_task_status(conn, task.task_id) == "running"
+
+
+# ---------------------------------------------------------------------------
+# 24h completed dedup
+# ---------------------------------------------------------------------------
+
+
+class TestRecentlyCompletedDedup:
+    def test_given_recently_completed_when_create_then_skipped(self, conn):
+        """Given a task completed within 24h, when creating the same task,
+        then it is skipped (returns None)."""
+        task = create_task(conn, "75192", TaskType.KEEPA)
+        claimed = claim_next(conn, "worker-1", TaskType.KEEPA)
+        complete_task(conn, claimed.task_id)
+
+        duplicate = create_task(conn, "75192", TaskType.KEEPA)
+
+        assert duplicate is None
+
+    def test_given_old_completed_when_create_then_allowed(self, conn):
+        """Given a task completed more than 24h ago, when creating the same task,
+        then it is allowed."""
+        task = create_task(conn, "75192", TaskType.KEEPA)
+        claimed = claim_next(conn, "worker-1", TaskType.KEEPA)
+        complete_task(conn, claimed.task_id)
+
+        # Backdate completed_at to 25 hours ago
+        conn.execute(
+            """UPDATE scrape_tasks
+               SET completed_at = CURRENT_TIMESTAMP - INTERVAL '25 hours'
+               WHERE task_id = ?""",
+            [claimed.task_id],
+        )
+
+        new_task = create_task(conn, "75192", TaskType.KEEPA)
+
+        assert new_task is not None
 
 
 # ---------------------------------------------------------------------------

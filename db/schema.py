@@ -351,6 +351,29 @@ CREATE TABLE IF NOT EXISTS google_trends_snapshots (
 );
 """
 
+GOOGLE_TRENDS_THEME_SNAPSHOTS_DDL = """
+CREATE TABLE IF NOT EXISTS google_trends_theme_snapshots (
+    id INTEGER PRIMARY KEY,
+    theme VARCHAR NOT NULL,
+    theme_type VARCHAR NOT NULL DEFAULT 'generic',
+    keyword_lego VARCHAR NOT NULL,
+    keyword_bare VARCHAR NOT NULL DEFAULT '',
+    search_property VARCHAR NOT NULL DEFAULT 'youtube',
+    geo VARCHAR NOT NULL DEFAULT '',
+    timeframe_start VARCHAR,
+    timeframe_end VARCHAR,
+    interest_lego_json VARCHAR,
+    interest_bare_json VARCHAR,
+    avg_lego FLOAT,
+    avg_bare FLOAT,
+    peak_lego INTEGER,
+    peak_bare INTEGER,
+    lego_share FLOAT,
+    n_weeks INTEGER,
+    scraped_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+"""
+
 KEEPA_SNAPSHOTS_DDL = """
 CREATE TABLE IF NOT EXISTS keepa_snapshots (
     id INTEGER PRIMARY KEY,
@@ -449,6 +472,21 @@ CREATE TABLE IF NOT EXISTS ml_model_runs (
 );
 """
 
+ML_PREDICTION_SNAPSHOTS_DDL = """
+CREATE TABLE IF NOT EXISTS ml_prediction_snapshots (
+    id INTEGER PRIMARY KEY DEFAULT nextval('ml_prediction_snapshots_id_seq'),
+    snapshot_date DATE NOT NULL,
+    set_number VARCHAR NOT NULL,
+    predicted_growth_pct FLOAT NOT NULL,
+    confidence VARCHAR,
+    tier INTEGER,
+    model_version VARCHAR,
+    actual_growth_pct FLOAT,
+    actual_measured_at DATE,
+    UNIQUE (snapshot_date, set_number)
+);
+"""
+
 SEQUENCES_DDL = """
 CREATE SEQUENCE IF NOT EXISTS bricklink_items_id_seq;
 CREATE SEQUENCE IF NOT EXISTS bricklink_price_history_id_seq;
@@ -472,10 +510,12 @@ CREATE SEQUENCE IF NOT EXISTS image_assets_id_seq;
 CREATE SEQUENCE IF NOT EXISTS brickeconomy_snapshots_id_seq;
 CREATE SEQUENCE IF NOT EXISTS keepa_snapshots_id_seq;
 CREATE SEQUENCE IF NOT EXISTS google_trends_snapshots_id_seq;
+CREATE SEQUENCE IF NOT EXISTS google_trends_theme_snapshots_id_seq;
 CREATE SEQUENCE IF NOT EXISTS scrape_tasks_id_seq;
 CREATE SEQUENCE IF NOT EXISTS scrape_task_attempts_id_seq;
 CREATE SEQUENCE IF NOT EXISTS ml_feature_store_id_seq;
 CREATE SEQUENCE IF NOT EXISTS ml_model_runs_id_seq;
+CREATE SEQUENCE IF NOT EXISTS ml_prediction_snapshots_id_seq;
 """
 
 # Index creation statements
@@ -586,10 +626,12 @@ ALL_DDL = [
     BRICKECONOMY_SNAPSHOTS_DDL,
     KEEPA_SNAPSHOTS_DDL,
     GOOGLE_TRENDS_SNAPSHOTS_DDL,
+    GOOGLE_TRENDS_THEME_SNAPSHOTS_DDL,
     SCRAPE_TASKS_DDL,
     SCRAPE_TASK_ATTEMPTS_DDL,
     ML_FEATURE_STORE_DDL,
     ML_MODEL_RUNS_DDL,
+    ML_PREDICTION_SNAPSHOTS_DDL,
     INDEXES_DDL,
 ]
 
@@ -734,6 +776,7 @@ _SEQUENCE_TABLE_MAP = [
     ("brickeconomy_snapshots_id_seq", "brickeconomy_snapshots"),
     ("keepa_snapshots_id_seq", "keepa_snapshots"),
     ("google_trends_snapshots_id_seq", "google_trends_snapshots"),
+    ("google_trends_theme_snapshots_id_seq", "google_trends_theme_snapshots"),
     ("scrape_tasks_id_seq", "scrape_tasks"),
     ("scrape_task_attempts_id_seq", "scrape_task_attempts"),
     ("ml_feature_store_id_seq", "ml_feature_store"),
@@ -986,6 +1029,7 @@ def get_table_stats(conn: "DuckDBPyConnection") -> dict[str, int]:
         "brickeconomy_snapshots",
         "keepa_snapshots",
         "google_trends_snapshots",
+        "google_trends_theme_snapshots",
         "scrape_tasks",
     ]
     stats = {}
