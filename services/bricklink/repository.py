@@ -363,8 +363,6 @@ def upsert_monthly_sales(
     Returns:
         Number of records upserted
     """
-    import duckdb
-
     now = datetime.now(tz=_UTC).isoformat()
     count = 0
 
@@ -379,43 +377,31 @@ def upsert_monthly_sales(
             now,
         ]
 
-        # Try UPDATE first (most common path for re-scrapes).
-        affected = conn.execute(
-            """UPDATE bricklink_monthly_sales
-               SET times_sold = ?, total_quantity = ?,
-                   min_price = ?, max_price = ?, avg_price = ?,
-                   currency = ?, scraped_at = ?
-               WHERE item_id = ? AND year = ? AND month = ? AND condition = ?""",
-            [*params, item_id, sale.year, sale.month, sale.condition.value],
-        ).fetchone()
-        rows_changed = affected[0] if affected else 0
-
-        if rows_changed == 0:
-            # New row -- retry with fresh MAX(id) on PK collision
-            # (concurrent writers can race on the same max id).
-            for _attempt in range(3):
-                try:
-                    conn.execute(
-                        """INSERT INTO bricklink_monthly_sales (
-                               id, item_id, year, month, condition, times_sold,
-                               total_quantity, min_price, max_price, avg_price,
-                               currency, scraped_at
-                           ) VALUES (
-                               (SELECT COALESCE(MAX(id), 0) + 1
-                                FROM bricklink_monthly_sales),
-                               ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
-                           )""",
-                        [
-                            item_id,
-                            sale.year,
-                            sale.month,
-                            sale.condition.value,
-                            *params,
-                        ],
-                    )
-                    break
-                except duckdb.ConstraintException:
-                    continue
+        conn.execute(
+            """INSERT INTO bricklink_monthly_sales (
+                   id, item_id, year, month, condition, times_sold,
+                   total_quantity, min_price, max_price, avg_price,
+                   currency, scraped_at
+               ) VALUES (
+                   nextval('bricklink_monthly_sales_id_seq'),
+                   ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+               )
+               ON CONFLICT (item_id, year, month, condition) DO UPDATE SET
+                   times_sold = EXCLUDED.times_sold,
+                   total_quantity = EXCLUDED.total_quantity,
+                   min_price = EXCLUDED.min_price,
+                   max_price = EXCLUDED.max_price,
+                   avg_price = EXCLUDED.avg_price,
+                   currency = EXCLUDED.currency,
+                   scraped_at = EXCLUDED.scraped_at""",
+            [
+                item_id,
+                sale.year,
+                sale.month,
+                sale.condition.value,
+                *params,
+            ],
+        )
         count += 1
 
     return count

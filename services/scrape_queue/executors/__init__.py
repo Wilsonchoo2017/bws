@@ -1,5 +1,8 @@
 """Scrape task executors -- one module per data source.
 
+Importing this package triggers ``@executor`` decorator registration
+for all executor modules, populating ``services.scrape_queue.registry.REGISTRY``.
+
 Re-exports all executor functions and cooldown utilities so that
 existing imports from ``services.scrape_queue.executors`` keep working.
 """

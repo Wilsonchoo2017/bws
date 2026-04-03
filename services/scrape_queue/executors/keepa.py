@@ -1,11 +1,16 @@
-"""Keepa executor -- browser-based, uses PersistentBrowser."""
+"""Keepa executor -- browser-based, uses PersistentBrowser.
+
+Structured as a pipeline: fetch (IO) -> validate (pure) -> persist (IO).
+"""
 
 from __future__ import annotations
 
 import logging
 from typing import TYPE_CHECKING
 
-from services.scrape_queue.models import ExecutorResult
+from services.core.result import Err, Ok, Result
+from services.scrape_queue.models import ErrorCategory, ExecutorResult, TaskType
+from services.scrape_queue.registry import executor
 
 if TYPE_CHECKING:
     from duckdb import DuckDBPyConnection
@@ -13,18 +18,91 @@ if TYPE_CHECKING:
 logger = logging.getLogger("bws.scrape_queue.executor.keepa")
 
 
+# ---------------------------------------------------------------------------
+# Pure: lookup helpers
+# ---------------------------------------------------------------------------
+
+
 def _lookup_item_title(conn: DuckDBPyConnection, set_number: str) -> str | None:
-    """Look up the item title from bricklink_items for search verification."""
+    """Look up the item title for search verification.
+
+    Checks bricklink_items first, falls back to lego_items.
+    """
     try:
         row = conn.execute(
             "SELECT title FROM bricklink_items WHERE item_id = ?",
             [set_number],
         ).fetchone()
+        if row and row[0]:
+            return row[0]
+        row = conn.execute(
+            "SELECT title FROM lego_items WHERE set_number = ?",
+            [set_number],
+        ).fetchone()
         return row[0] if row else None
     except Exception:
+        logger.warning("Failed to look up title for %s", set_number, exc_info=True)
         return None
 
 
+# ---------------------------------------------------------------------------
+# Pipeline stages
+# ---------------------------------------------------------------------------
+
+
+def _fetch(browser, set_number: str, item_title: str | None) -> Result[object, ExecutorResult]:
+    """IO boundary: run the browser scrape.  Returns Ok(result) or Err(ExecutorResult)."""
+    from services.keepa.scraper import scrape_with_page
+
+    try:
+        result = browser.run(scrape_with_page, set_number, item_title)
+    except Exception as exc:
+        browser.restart()
+        return Err(ExecutorResult.fail(str(exc), category=ErrorCategory.BROWSER_CRASH))
+    return Ok(result)
+
+
+def _validate(
+    scrape_result: object, set_number: str, browser: object,
+) -> Result[object, ExecutorResult]:
+    """Pure: check scrape result for errors and classify them."""
+    if not scrape_result.success:
+        if scrape_result.not_found:
+            return Err(ExecutorResult.skip(scrape_result.error or "Not found on Keepa"))
+        if scrape_result.mismatch:
+            return Err(ExecutorResult.fail(
+                scrape_result.error or "Keepa product mismatch",
+                category=ErrorCategory.PRODUCT_MISMATCH,
+                permanent=True,
+            ))
+        # Actual browser/page issue -- restart and retry
+        browser.restart()
+        return Err(ExecutorResult.fail(
+            scrape_result.error or "Keepa scrape failed",
+            category=ErrorCategory.BROWSER_CRASH,
+        ))
+    return Ok(scrape_result)
+
+
+def _persist(conn: DuckDBPyConnection, scrape_result: object) -> Result[None, ExecutorResult]:
+    """IO boundary: save snapshot and price records."""
+    from services.keepa.repository import record_keepa_prices, save_keepa_snapshot
+
+    try:
+        save_keepa_snapshot(conn, scrape_result.product_data)
+    except Exception:
+        logger.error("Keepa snapshot insert failed", exc_info=True)
+        return Err(ExecutorResult.fail("Failed to save Keepa snapshot", category=ErrorCategory.UNKNOWN))
+    record_keepa_prices(conn, scrape_result.product_data)
+    return Ok(None)
+
+
+# ---------------------------------------------------------------------------
+# Executor (composes the pipeline)
+# ---------------------------------------------------------------------------
+
+
+@executor(TaskType.KEEPA, concurrency=3, timeout=300, browser_profile="keepa-profile")
 def execute_keepa(
     conn: DuckDBPyConnection,
     set_number: str,
@@ -34,9 +112,7 @@ def execute_keepa(
     """Scrape Keepa for Amazon price history."""
     from config.settings import KEEPA_CONFIG
     from services.browser import BrowserConfig, get_persistent_browser
-    from services.keepa.repository import record_keepa_prices, save_keepa_snapshot
     from services.keepa.scheduler import record_keepa_failure, record_keepa_success
-    from services.keepa.scraper import scrape_with_page
 
     item_title = _lookup_item_title(conn, set_number)
 
@@ -47,27 +123,23 @@ def execute_keepa(
         window=(KEEPA_CONFIG.viewport_width, KEEPA_CONFIG.viewport_height),
     ))
 
-    try:
-        result = browser.run(scrape_with_page, set_number, item_title)
-    except Exception as exc:
-        record_keepa_failure(set_number)
-        browser.restart()
-        return ExecutorResult.fail(str(exc))
+    # Pipeline: fetch -> validate -> persist
+    result = (
+        _fetch(browser, set_number, item_title)
+        .flat_map(lambda r: _validate(r, set_number, browser))
+    )
 
-    if not result.success:
+    # Record success/failure for scheduling
+    if result.is_err():
         record_keepa_failure(set_number)
-        # Don't restart browser for "not listed" -- browser is fine
-        if result.error and "not listed" not in result.error.lower():
-            browser.restart()
-        return ExecutorResult.fail(result.error or "Keepa scrape failed")
+        return result.unwrap_or_else(lambda e: e)
 
     record_keepa_success(set_number)
-    try:
-        save_keepa_snapshot(conn, result.product_data)
-    except Exception:
-        logger.error("Keepa snapshot insert failed for %s", set_number, exc_info=True)
-        return ExecutorResult.fail("Failed to save Keepa snapshot")
-    record_keepa_prices(conn, result.product_data)
+
+    # Persist
+    persist_result = _persist(conn, result.unwrap())
+    if persist_result.is_err():
+        return persist_result.unwrap_or_else(lambda e: e)
 
     logger.info("Keepa for %s: OK", set_number)
     return ExecutorResult.ok()

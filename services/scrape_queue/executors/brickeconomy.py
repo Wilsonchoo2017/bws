@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from services.scrape_queue.models import ExecutorResult
+from services.scrape_queue.models import ErrorCategory, ExecutorResult, TaskType
+from services.scrape_queue.registry import executor
 
 if TYPE_CHECKING:
     from duckdb import DuckDBPyConnection
@@ -13,6 +15,19 @@ if TYPE_CHECKING:
 logger = logging.getLogger("bws.scrape_queue.executor.brickeconomy")
 
 
+# ---------------------------------------------------------------------------
+# Explicit context replaces ``nonlocal scrape_was_data_miss``
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class _FetchContext:
+    """Tracks state across the fetch/enrich pipeline without mutation."""
+
+    data_miss: bool = False
+
+
+@executor(TaskType.BRICKECONOMY, concurrency=2, timeout=300, browser_profile="brickeconomy-profile")
 def execute_brickeconomy(
     conn: DuckDBPyConnection,
     set_number: str,
@@ -32,7 +47,11 @@ def execute_brickeconomy(
 
     item = get_item_detail(conn, set_number)
     if not item:
-        return ExecutorResult.fail(f"Item {set_number} not found in lego_items")
+        return ExecutorResult.fail(
+            f"Item {set_number} not found in lego_items",
+            category=ErrorCategory.NOT_FOUND,
+            permanent=True,
+        )
 
     browser = get_persistent_browser(BrowserConfig(
         profile_name=f"brickeconomy-{worker_index}",
@@ -40,14 +59,25 @@ def execute_brickeconomy(
         locale=BRICKECONOMY_CONFIG.locale,
     ))
 
+    # Mutable container for fetch context -- avoids nonlocal mutation.
+    # The list holds exactly one _FetchContext that gets replaced (not mutated).
+    ctx_holder: list[_FetchContext] = [_FetchContext()]
+
     def _fetch_be(sn: str):
         from services.brickeconomy.parser import is_excluded_packaging
         from services.brickeconomy.repository import record_current_value, save_snapshot
         from services.items.repository import delete_item
 
-        scrape_result = browser.run(scrape_with_search, sn)
+        try:
+            scrape_result = browser.run(scrape_with_search, sn)
+        except TimeoutError:
+            logger.warning("BrickEconomy browser timed out for %s -- restarting browser", sn)
+            browser.restart()
+            return make_failed_result(SourceId.BRICKECONOMY, f"Browser timed out for {sn}")
 
         if not scrape_result.success:
+            if scrape_result.not_found:
+                ctx_holder[0] = _FetchContext(data_miss=True)
             return make_failed_result(SourceId.BRICKECONOMY, scrape_result.error or "Unknown error")
         if scrape_result.snapshot is None:
             return make_failed_result(SourceId.BRICKECONOMY, "No data returned")
@@ -69,8 +99,14 @@ def execute_brickeconomy(
     result, _ = enrich(set_number, item, fetchers, cb_state)
 
     if result.fields_found == 0:
+        if ctx_holder[0].data_miss:
+            logger.info("BrickEconomy for %s: not found, skipping", set_number)
+            return ExecutorResult.skip("Not found on BrickEconomy")
         browser.restart()
-        return ExecutorResult.fail("BrickEconomy returned no data (0 fields)")
+        return ExecutorResult.fail(
+            "BrickEconomy returned no data (0 fields)",
+            category=ErrorCategory.DATA_MISSING,
+        )
 
     store_enrichment_result(conn, result)
 

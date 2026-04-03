@@ -42,7 +42,8 @@ class TestShopeeWorkerRun:
                 "services.shopee.scraper.scrape_shop_page",
                 new_callable=AsyncMock,
             ) as mock_scrape,
-            patch("services.notifications.deal_notifier.check_and_notify", return_value=0),
+            patch("api.workers.shared.check_deal_signals", new_callable=AsyncMock),
+            patch("api.workers.shared.queue_enrichment_for_scraped_items"),
         ):
             mock_scrape.return_value.success = True
             mock_scrape.return_value.items = [FakeItem(), FakeItem()]

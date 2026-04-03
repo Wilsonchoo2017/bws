@@ -150,16 +150,53 @@ async def _detect_cloudflare(page: Page) -> bool:
     return False
 
 
+async def _human_mouse_move(
+    page: Page,
+    target_x: float,
+    target_y: float,
+    *,
+    start_x: float | None = None,
+    start_y: float | None = None,
+) -> None:
+    """Move mouse to target with a curved, human-like trajectory.
+
+    Generates 3-5 intermediate waypoints with slight random offsets to
+    simulate natural hand movement rather than a straight-line teleport.
+    If start position is not given, begins from an offset above the target
+    (simulating a hand approaching from a resting position).
+    """
+    sx = start_x if start_x is not None else target_x + secrets.randbelow(60) - 30
+    sy = start_y if start_y is not None else target_y - 40 - secrets.randbelow(30)
+    await page.mouse.move(sx, sy)
+
+    steps = 3 + secrets.randbelow(3)
+    for i in range(1, steps + 1):
+        frac = i / steps
+        mid_x = sx + (target_x - sx) * frac
+        mid_y = sy + (target_y - sy) * frac
+        # Add lateral jitter (larger in the middle of the arc)
+        jitter = (1 - abs(frac - 0.5) * 2) * 8
+        mid_x += secrets.randbelow(max(1, int(jitter * 2))) - jitter
+        mid_y += secrets.randbelow(max(1, int(jitter * 2))) - jitter
+        await page.mouse.move(mid_x, mid_y)
+        await human_delay(30, 80)
+    # Final precise move to target with tiny offset
+    await page.mouse.move(
+        target_x + secrets.randbelow(3) - 1,
+        target_y + secrets.randbelow(3) - 1,
+    )
+
+
 async def _try_click_turnstile(page: Page) -> bool:
     """Attempt to click the Cloudflare Turnstile checkbox.
 
-    The Turnstile widget renders inside an iframe. Locate the iframe,
-    then click the checkbox input inside it. Uses human-like mouse
-    movement to the checkbox center.
+    Uses Playwright's content_frame() to locate the actual checkbox
+    element inside the Turnstile iframe, then clicks it with human-like
+    mouse movement. Falls back to bounding-box coordinate clicking if
+    the inner frame is inaccessible (cross-origin restrictions).
 
     Returns True if a click was attempted, False if widget not found.
     """
-    # Find the Turnstile iframe
     iframe_selectors = (
         'iframe[src*="challenges.cloudflare.com"]',
         'iframe[src*="cloudflare.com/cdn-cgi/challenge"]',
@@ -174,26 +211,56 @@ async def _try_click_turnstile(page: Page) -> bool:
             if not iframe_el or not await iframe_el.is_visible():
                 continue
 
-            # Click the center of the iframe — the checkbox is typically
-            # positioned near the left side of the widget
+            # Strategy 1: Access the iframe content and click the real
+            # checkbox element for pixel-perfect accuracy
+            frame = await iframe_el.content_frame()
+            if frame:
+                try:
+                    cb = await frame.query_selector(
+                        'input[type="checkbox"], .ctp-checkbox-label, '
+                        '#challenge-stage input'
+                    )
+                    if cb:
+                        cb_box = await cb.bounding_box()
+                        if cb_box:
+                            click_x = cb_box["x"] + cb_box["width"] / 2
+                            click_y = cb_box["y"] + cb_box["height"] / 2
+                            logger.info(
+                                "Clicking Turnstile checkbox via content_frame "
+                                "at (%.0f, %.0f)", click_x, click_y,
+                            )
+                            await human_delay(400, 1000)
+                            await _human_mouse_move(page, click_x, click_y)
+                            await human_delay(50, 200)
+                            await page.mouse.click(
+                                click_x + secrets.randbelow(3) - 1,
+                                click_y + secrets.randbelow(3) - 1,
+                            )
+                            return True
+                except Exception as exc:
+                    logger.debug("content_frame checkbox lookup failed: %s", exc)
+
+            # Strategy 2: Fall back to clicking the iframe bounding box
+            # at the known checkbox position
             box = await iframe_el.bounding_box()
             if not box:
                 continue
 
-            # Checkbox is roughly at (30, center_y) inside the widget
             click_x = box["x"] + min(30, box["width"] * 0.15)
             click_y = box["y"] + box["height"] / 2
 
             logger.info(
-                "Clicking Turnstile checkbox at (%.0f, %.0f) via selector: %s",
+                "Clicking Turnstile iframe bbox at (%.0f, %.0f) via %s",
                 click_x, click_y, selector,
             )
 
-            # Human-like: move then click with slight randomness
-            await human_delay(300, 800)
-            await page.mouse.move(click_x + secrets.randbelow(5), click_y + secrets.randbelow(3))
-            await human_delay(100, 300)
-            await page.mouse.click(click_x, click_y)
+            await human_delay(400, 1000)
+            await _human_mouse_move(page, click_x, click_y)
+            await human_delay(50, 200)
+            await page.mouse.click(
+                click_x + secrets.randbelow(5) - 2,
+                click_y + secrets.randbelow(5) - 2,
+            )
             return True
         except Exception as exc:
             logger.debug("Turnstile click failed for %s: %s", selector, exc)
@@ -207,10 +274,19 @@ async def _try_click_turnstile(page: Page) -> bool:
             '#turnstile-wrapper input'
         )
         if checkbox and await checkbox.is_visible():
-            logger.info("Clicking Turnstile checkbox element directly")
-            await human_delay(300, 800)
-            await checkbox.click()
-            return True
+            cb_box = await checkbox.bounding_box()
+            if cb_box:
+                click_x = cb_box["x"] + cb_box["width"] / 2
+                click_y = cb_box["y"] + cb_box["height"] / 2
+                logger.info("Clicking Turnstile checkbox directly at (%.0f, %.0f)", click_x, click_y)
+                await human_delay(400, 1000)
+                await _human_mouse_move(page, click_x, click_y)
+                await human_delay(50, 200)
+                await page.mouse.click(
+                    click_x + secrets.randbelow(3) - 1,
+                    click_y + secrets.randbelow(3) - 1,
+                )
+                return True
     except Exception:
         pass
 
@@ -233,22 +309,32 @@ async def _wait_for_cloudflare(
     timeout = timeout_s or KEEPA_CONFIG.captcha_timeout_s
     logger.warning("Cloudflare challenge detected for query: %s", query)
 
-    # Attempt auto-click before notifying for human help
-    await human_delay(1_000, 2_000)
-    clicked = await _try_click_turnstile(page)
-    if clicked:
-        # Wait a few seconds for Turnstile to validate the click
-        await human_delay(3_000, 5_000)
-        if not await _detect_cloudflare(page):
-            logger.info("Cloudflare challenge auto-solved via checkbox click")
-            return True
-        logger.info("Auto-click did not resolve challenge, waiting for human")
+    # Try up to 3 rapid auto-click attempts before falling back to human
+    max_auto_attempts = 3
+    for attempt in range(1, max_auto_attempts + 1):
+        await human_delay(800, 1_500)
+        clicked = await _try_click_turnstile(page)
+        if clicked:
+            # Wait for Turnstile to validate the click
+            await human_delay(3_000, 5_000)
+            if not await _detect_cloudflare(page):
+                logger.info(
+                    "Cloudflare challenge auto-solved on attempt %d", attempt,
+                )
+                return True
+            logger.info(
+                "Auto-click attempt %d/%d did not resolve challenge",
+                attempt, max_auto_attempts,
+            )
+        else:
+            break  # Widget not found, no point retrying
 
+    logger.info("Auto-click exhausted, notifying for human help")
     _notify_captcha(query)
 
     elapsed = 0
     poll_interval = 3
-    click_retry_interval = 15
+    click_retry_interval = 10
     last_click_attempt = 0
     while elapsed < timeout:
         await asyncio.sleep(poll_interval)
@@ -256,7 +342,8 @@ async def _wait_for_cloudflare(
         if not await _detect_cloudflare(page):
             logger.info("Cloudflare challenge solved after %ds", elapsed)
             return True
-        # Retry clicking periodically (widget may re-render)
+        # Retry clicking periodically (widget may re-render after human
+        # interaction or page refresh)
         if elapsed - last_click_attempt >= click_retry_interval:
             last_click_attempt = elapsed
             await _try_click_turnstile(page)
@@ -423,6 +510,7 @@ async def scrape_with_page(
                 success=False,
                 set_number=set_number,
                 error=f"Not listed on Amazon (no LEGO product found for {set_number})",
+                not_found=True,
             )
 
         await human_delay(5_000, 8_000)
@@ -450,6 +538,7 @@ async def scrape_with_page(
                 success=False,
                 set_number=set_number,
                 error=f"Keepa product title mismatch: '{product_data.title}' does not contain {_bare_set_number(set_number)}",
+                mismatch=True,
             )
 
         # Sweep the chart canvas to extract historical data via tooltips
@@ -599,7 +688,7 @@ def _score_result(title: str, set_number: str) -> int:
     score = 0
 
     if _title_contains_set_number(title, set_number):
-        score += 10
+        score += 30
 
     if lower.startswith("lego"):
         score += 20
@@ -790,10 +879,29 @@ async def _click_first_result(
     on the product page that it's the right LEGO set. If a result
     turns out to be wrong (third-party accessory or different set),
     navigates back and tries the next candidate.
+
+    When the initial search yields no candidates, retries with a
+    title-based query (e.g. "lego Spider-Man's Car and Doc Ock") if
+    an item_title is available.
     """
     search_url = page.url
 
     candidates = await _get_search_candidates(page, set_number)
+    if not candidates and item_title:
+        # Retry with a title-based search -- helps for DUPLO/toddler sets
+        # where the set number alone returns irrelevant results.
+        alt_query = f"lego {item_title}"
+        alt_url = f"{KEEPA_BASE}/#!search/1-{alt_query}"
+        logger.info(
+            "No candidates for %s, retrying with title search: %s",
+            set_number, alt_query,
+        )
+        await page.goto(alt_url, wait_until="domcontentloaded")
+        await human_delay(3_000, 5_000)
+        await _wait_for_search_results(page)
+        await human_delay(1_000, 2_000)
+        search_url = page.url
+        candidates = await _get_search_candidates(page, set_number)
     if not candidates:
         logger.warning("No valid search candidates for %s", set_number)
         return False
@@ -1036,6 +1144,17 @@ async def _sweep_chart_tooltips(
                     const numSteps = Math.floor(chartWidth / step);
                     let lastText = '';
                     let i = 0;
+                    let resolved = false;
+
+                    function done() {
+                        if (resolved) return;
+                        resolved = true;
+                        resolve(results);
+                    }
+
+                    // Safety net: resolve with whatever we have after 30s
+                    // in case requestAnimationFrame stops firing.
+                    setTimeout(done, 30000);
 
                     function readTooltip() {
                         const date = document.getElementById('flotTipDate');
@@ -1054,7 +1173,8 @@ async def _sweep_chart_tooltips(
                     }
 
                     function tick() {
-                        if (i >= numSteps) { resolve(results); return; }
+                        if (resolved) return;
+                        if (i >= numSteps) { done(); return; }
                         const x = chartX + step * i;
                         const target = document.elementFromPoint(x, yMid);
                         if (target) {
@@ -1076,7 +1196,7 @@ async def _sweep_chart_tooltips(
                 }""",
                 [chart_x, chart_y_mid, chart_width, step_size],
             ),
-            timeout=120,
+            timeout=45,
         )
 
         points: list[dict[str, Any]] = []

@@ -9,7 +9,8 @@ import logging
 import threading
 from typing import TYPE_CHECKING
 
-from services.scrape_queue.models import ExecutorResult
+from services.scrape_queue.models import ErrorCategory, ExecutorResult, TaskType
+from services.scrape_queue.registry import executor
 
 if TYPE_CHECKING:
     from duckdb import DuckDBPyConnection
@@ -54,6 +55,7 @@ class _BrickLinkBanTracker:
 _bl_ban_tracker = _BrickLinkBanTracker()
 
 
+@executor(TaskType.BRICKLINK_METADATA, concurrency=2, timeout=300)
 def execute_bricklink_metadata(
     conn: DuckDBPyConnection,
     set_number: str,
@@ -76,7 +78,11 @@ def execute_bricklink_metadata(
 
     item = get_item_detail(conn, set_number)
     if not item:
-        return ExecutorResult.fail(f"Item {set_number} not found in lego_items")
+        return ExecutorResult.fail(
+            f"Item {set_number} not found in lego_items",
+            category=ErrorCategory.NOT_FOUND,
+            permanent=True,
+        )
 
     fetchers = {
         SourceId.BRICKLINK: lambda sn: fetch_from_bricklink(conn, sn),
@@ -95,7 +101,10 @@ def execute_bricklink_metadata(
             BRICKLINK_RATE_LIMITER.trip_silent_ban()
             _bl_ban_tracker.reset()
             return ExecutorResult.cooldown(BRICKLINK_RATE_LIMITER.cooldown_remaining())
-        return ExecutorResult.fail("No data returned (0 fields)")
+        return ExecutorResult.fail(
+            "No data returned (0 fields)",
+            category=ErrorCategory.DATA_MISSING,
+        )
 
     _bl_ban_tracker.reset()
     BRICKLINK_RATE_LIMITER.record_success()

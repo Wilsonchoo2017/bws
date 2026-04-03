@@ -37,6 +37,17 @@ class TaskStatus(str, Enum):
     FAILED = "failed"
 
 
+class ErrorCategory(str, Enum):
+    RATE_LIMITED = "rate_limited"
+    BROWSER_CRASH = "browser_crash"
+    DATA_MISSING = "data_missing"
+    PRODUCT_MISMATCH = "product_mismatch"
+    TIMEOUT = "timeout"
+    NOT_FOUND = "not_found"
+    NETWORK = "network"
+    UNKNOWN = "unknown"
+
+
 # ---------------------------------------------------------------------------
 # Executor result -- replaces the fragile (bool, str|None) + "cooldown:" hack
 # ---------------------------------------------------------------------------
@@ -59,14 +70,31 @@ class ExecutorResult:
     success: bool
     error: str | None = None
     cooldown_seconds: float | None = None
+    error_category: ErrorCategory | None = None
+    permanent: bool = False
 
     @staticmethod
     def ok() -> ExecutorResult:
         return ExecutorResult(success=True)
 
     @staticmethod
-    def fail(error: str) -> ExecutorResult:
-        return ExecutorResult(success=False, error=error)
+    def skip(reason: str) -> ExecutorResult:
+        """Item not available at this source -- don't retry or restart browser."""
+        return ExecutorResult(success=True, error=reason)
+
+    @staticmethod
+    def fail(
+        error: str,
+        *,
+        category: ErrorCategory = ErrorCategory.UNKNOWN,
+        permanent: bool = False,
+    ) -> ExecutorResult:
+        return ExecutorResult(
+            success=False,
+            error=error,
+            error_category=category,
+            permanent=permanent,
+        )
 
     @staticmethod
     def cooldown(seconds: float) -> ExecutorResult:

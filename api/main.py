@@ -63,7 +63,10 @@ _scrape_file_handler = RotatingFileHandler(
 _scrape_file_handler.setLevel(logging.INFO)
 _scrape_file_handler.setFormatter(logging.Formatter(_LOG_FORMAT))
 for _logger_name in ("bws.bricklink", "bws.scrape_queue.dispatcher", "bws.scrape_queue.executor"):
-    logging.getLogger(_logger_name).addHandler(_scrape_file_handler)
+    _lg = logging.getLogger(_logger_name)
+    _lg.addHandler(_scrape_file_handler)
+    _lg.addHandler(_color_handler)
+    _lg.propagate = False
 
 logger = logging.getLogger("bws.api")
 
@@ -78,6 +81,11 @@ async def lifespan(app: FastAPI):
     # Restore cooldown state from previous run (before dispatcher starts)
     from config.settings import restore_cooldowns
     restore_cooldowns()
+
+    # Register scoring providers
+    from services.scoring.growth_provider import growth_provider
+    from services.scoring.provider import register_provider
+    register_provider(growth_provider)
 
     # Crash recovery: reclaim stale scrape tasks before starting dispatcher
     await recover_scrape_queue()

@@ -55,3 +55,5 @@ class KeepaScrapeResult:
     set_number: str
     product_data: KeepaProductData | None = None
     error: str | None = None
+    not_found: bool = False
+    mismatch: bool = False

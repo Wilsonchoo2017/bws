@@ -10,6 +10,7 @@ from services.scrape_queue.models import (
     ACTIVE_STATUSES,
     TASK_DEPENDENCIES,
     TASK_PRIORITIES,
+    ErrorCategory,
     ScrapeTask,
     TaskStatus,
     TaskType,
@@ -126,6 +127,16 @@ def create_task(
         raise
 
 
+def is_polybag(set_number: str) -> bool:
+    """Return True if the set number indicates a polybag, foil pack, or blister pack.
+
+    Regular LEGO sets have 5-digit set numbers (e.g. 75335).
+    Polybags, foil packs, and blister packs use 6+ digit numbers (e.g. 892291).
+    """
+    digits = set_number.split("-")[0]
+    return len(digits) >= 6
+
+
 def create_tasks_for_set(
     conn: DuckDBPyConnection,
     set_number: str,
@@ -136,7 +147,12 @@ def create_tasks_for_set(
     Tasks with dependencies start as ``blocked``.
     Deduplicates: skips task types that already have an active task.
     Wrapped in a single transaction for atomicity.
+    Skips polybags/foil packs (6+ digit set numbers).
     """
+    if is_polybag(set_number):
+        logger.debug("Skipping polybag/foil pack: %s", set_number)
+        return []
+
     conn.execute("BEGIN TRANSACTION")
     try:
         created: list[ScrapeTask] = []
@@ -346,6 +362,38 @@ def force_fail_by_worker(
         WHERE locked_by = ? AND task_type = ? AND status = 'running'
         """,
         [error, worker_id, task_type_value],
+    )
+
+
+# ---------------------------------------------------------------------------
+# Attempt history
+# ---------------------------------------------------------------------------
+
+
+def record_attempt(
+    conn: DuckDBPyConnection,
+    task_id: str,
+    attempt_number: int,
+    *,
+    error_category: ErrorCategory | None = None,
+    error_message: str | None = None,
+    duration_seconds: float | None = None,
+) -> None:
+    """Record one attempt (success or failure) in the history table."""
+    conn.execute(
+        """
+        INSERT INTO scrape_task_attempts
+            (id, task_id, attempt_number, error_category, error_message,
+             duration_seconds, created_at)
+        VALUES (nextval('scrape_task_attempts_id_seq'), ?, ?, ?, ?, ?, now())
+        """,
+        [
+            task_id,
+            attempt_number,
+            error_category.value if error_category else None,
+            error_message,
+            duration_seconds,
+        ],
     )
 
 

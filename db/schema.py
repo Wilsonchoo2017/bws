@@ -322,6 +322,18 @@ CREATE TABLE IF NOT EXISTS scrape_tasks (
 );
 """
 
+SCRAPE_TASK_ATTEMPTS_DDL = """
+CREATE TABLE IF NOT EXISTS scrape_task_attempts (
+    id INTEGER PRIMARY KEY,
+    task_id VARCHAR NOT NULL,
+    attempt_number INTEGER NOT NULL,
+    error_category VARCHAR,
+    error_message VARCHAR,
+    duration_seconds FLOAT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+"""
+
 GOOGLE_TRENDS_SNAPSHOTS_DDL = """
 CREATE TABLE IF NOT EXISTS google_trends_snapshots (
     id INTEGER PRIMARY KEY,
@@ -461,6 +473,7 @@ CREATE SEQUENCE IF NOT EXISTS brickeconomy_snapshots_id_seq;
 CREATE SEQUENCE IF NOT EXISTS keepa_snapshots_id_seq;
 CREATE SEQUENCE IF NOT EXISTS google_trends_snapshots_id_seq;
 CREATE SEQUENCE IF NOT EXISTS scrape_tasks_id_seq;
+CREATE SEQUENCE IF NOT EXISTS scrape_task_attempts_id_seq;
 CREATE SEQUENCE IF NOT EXISTS ml_feature_store_id_seq;
 CREATE SEQUENCE IF NOT EXISTS ml_model_runs_id_seq;
 """
@@ -541,6 +554,8 @@ CREATE INDEX IF NOT EXISTS idx_scrape_tasks_status_priority
     ON scrape_tasks(status, priority, created_at);
 CREATE INDEX IF NOT EXISTS idx_scrape_tasks_set_type
     ON scrape_tasks(set_number, task_type);
+CREATE INDEX IF NOT EXISTS idx_scrape_task_attempts_task_id
+    ON scrape_task_attempts(task_id);
 CREATE INDEX IF NOT EXISTS idx_ml_feature_store_set
     ON ml_feature_store(set_number, horizon_months);
 CREATE INDEX IF NOT EXISTS idx_ml_model_runs_trained
@@ -572,6 +587,7 @@ ALL_DDL = [
     KEEPA_SNAPSHOTS_DDL,
     GOOGLE_TRENDS_SNAPSHOTS_DDL,
     SCRAPE_TASKS_DDL,
+    SCRAPE_TASK_ATTEMPTS_DDL,
     ML_FEATURE_STORE_DDL,
     ML_MODEL_RUNS_DDL,
     INDEXES_DDL,
@@ -719,6 +735,7 @@ _SEQUENCE_TABLE_MAP = [
     ("keepa_snapshots_id_seq", "keepa_snapshots"),
     ("google_trends_snapshots_id_seq", "google_trends_snapshots"),
     ("scrape_tasks_id_seq", "scrape_tasks"),
+    ("scrape_task_attempts_id_seq", "scrape_task_attempts"),
     ("ml_feature_store_id_seq", "ml_feature_store"),
     ("ml_model_runs_id_seq", "ml_model_runs"),
 ]
@@ -936,6 +953,8 @@ def drop_all_tables(conn: "DuckDBPyConnection") -> None:
     conn.execute("DROP SEQUENCE IF EXISTS keepa_snapshots_id_seq;")
     conn.execute("DROP TABLE IF EXISTS google_trends_snapshots;")
     conn.execute("DROP SEQUENCE IF EXISTS google_trends_snapshots_id_seq;")
+    conn.execute("DROP TABLE IF EXISTS scrape_task_attempts;")
+    conn.execute("DROP SEQUENCE IF EXISTS scrape_task_attempts_id_seq;")
     conn.execute("DROP TABLE IF EXISTS scrape_tasks;")
     conn.execute("DROP SEQUENCE IF EXISTS scrape_tasks_id_seq;")
     conn.execute("DROP TABLE IF EXISTS ml_feature_store;")

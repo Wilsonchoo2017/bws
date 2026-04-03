@@ -33,6 +33,7 @@ class BrickeconomyScrapeResult:
     success: bool
     snapshot: BrickeconomySnapshot | None = None
     error: str | None = None
+    not_found: bool = False
 
 
 def _notify_captcha(set_number: str) -> None:
@@ -151,17 +152,17 @@ async def _navigate_and_bypass_cf(page, url: str, set_number: str) -> bool:
     return True
 
 
-async def _resolve_set_url(page, set_number: str) -> str | None:
-    """Use BrickEconomy search bar to find the canonical set page URL.
+async def _resolve_set_url(page, set_number: str) -> list[str]:
+    """Use BrickEconomy search bar to find candidate set page URLs.
 
     Navigates to the homepage, types the set number into the search input,
-    submits the ASP.NET form, then finds the correct set link in results.
+    submits the ASP.NET form, then collects matching set links from results.
 
-    Returns the final URL after navigation, or None if not found.
+    Returns a list of candidate URLs ordered by relevance (best first).
     """
     # Navigate to homepage first
     if not await _navigate_and_bypass_cf(page, BRICKECONOMY_BASE, set_number):
-        return None
+        return []
 
     # Check that the search input exists
     has_search = await page.evaluate(
@@ -169,7 +170,7 @@ async def _resolve_set_url(page, set_number: str) -> str | None:
     )
     if not has_search:
         logger.warning("Could not find search input on BrickEconomy homepage")
-        return None
+        return []
 
     # Type the set number (just the number part, without -1 suffix)
     bare_number = set_number.split("-")[0]
@@ -201,55 +202,95 @@ async def _resolve_set_url(page, set_number: str) -> str | None:
     # Check if the search redirected directly to a set page
     if "/set/" in final_url and bare_number in final_url:
         logger.info("Search redirected to %s", final_url)
-        return final_url
+        return [final_url]
 
-    # Otherwise we're on a search results page -- find the first matching set link
-    link = await page.evaluate(
+    # Otherwise we're on a search results page -- find matching set links
+    links = await page.evaluate(
         """(bareNumber) => {
-            const links = document.querySelectorAll('a[href*="/set/"]');
-            for (const a of links) {
-                const href = a.getAttribute('href') || '';
+            const results = [];
+            const seen = new Set();
+            const allLinks = document.querySelectorAll('a[href*="/set/"]');
+
+            // First pass: exact set number matches (highest confidence)
+            for (const a of allLinks) {
+                const href = a.href || a.getAttribute('href') || '';
+                if (seen.has(href)) continue;
                 if (href.includes('/set/' + bareNumber + '-')
                     || href.includes('/set/' + bareNumber + '/')) {
-                    return a.href || href;
+                    results.push(href);
+                    seen.add(href);
                 }
             }
-            // Fallback: first /set/ link matching the number anywhere
-            for (const a of links) {
-                if ((a.href || '').includes(bareNumber)) {
-                    return a.href;
+
+            // Second pass: number appears anywhere in URL
+            for (const a of allLinks) {
+                const href = a.href || a.getAttribute('href') || '';
+                if (seen.has(href)) continue;
+                if (href.includes(bareNumber)) {
+                    results.push(href);
+                    seen.add(href);
                 }
             }
-            return null;
+
+            // Third pass: remaining /set/ links (try in order)
+            for (const a of allLinks) {
+                const href = a.href || a.getAttribute('href') || '';
+                if (seen.has(href)) continue;
+                results.push(href);
+                seen.add(href);
+                if (results.length >= 5) break;
+            }
+
+            return results;
         }""",
         bare_number,
     )
 
-    if link:
-        logger.info("Resolved %s via search results -> %s", set_number, link)
-        return link
+    if links:
+        logger.info("Found %d candidate URLs for %s: %s", len(links), set_number, links[0])
+        return links
 
     logger.warning("Could not find set URL for %s in search results", set_number)
-    return None
+    return []
 
 
 async def scrape_with_search(page, set_number: str) -> BrickeconomyScrapeResult:
-    """Resolve the set URL via search bar, then scrape the page."""
-    resolved = await _resolve_set_url(page, set_number)
-    if not resolved:
+    """Resolve the set URL via search bar, then scrape the page.
+
+    Tries multiple search results in order of relevance before giving up.
+    """
+    candidates = await _resolve_set_url(page, set_number)
+    if not candidates:
         return BrickeconomyScrapeResult(
             set_number=set_number,
             success=False,
             error=f"Could not find set on BrickEconomy: {set_number}",
+            not_found=True,
         )
 
     # If _resolve_set_url already landed us on the set page, scrape current content
     current_url = page.url
     if "/set/" in current_url:
-        return await _scrape_current_page(page, set_number)
+        result = await _scrape_current_page(page, set_number)
+        if result.success:
+            return result
+        # Page was a 404/not-found -- try remaining candidates
+        candidates = candidates[1:] if len(candidates) > 1 else []
 
-    # Otherwise navigate to the resolved URL
-    return await _scrape_page(page, resolved, set_number)
+    # Try each candidate URL until one succeeds
+    for i, url in enumerate(candidates):
+        logger.info("Trying search result %d/%d for %s: %s", i + 1, len(candidates), set_number, url)
+        result = await _scrape_page(page, url, set_number)
+        if result.success:
+            return result
+        logger.info("Result %d/%d for %s was not usable, trying next", i + 1, len(candidates), set_number)
+
+    return BrickeconomyScrapeResult(
+        set_number=set_number,
+        success=False,
+        error=f"Could not find set on BrickEconomy: {set_number}",
+        not_found=True,
+    )
 
 
 async def _scrape_current_page(page, set_number: str) -> BrickeconomyScrapeResult:
@@ -263,6 +304,7 @@ async def _scrape_current_page(page, set_number: str) -> BrickeconomyScrapeResul
             set_number=set_number,
             success=False,
             error=f"Set not found on BrickEconomy: {set_number}",
+            not_found=True,
         )
 
     snapshot = parse_brickeconomy_page(html, set_number, url=final_url)

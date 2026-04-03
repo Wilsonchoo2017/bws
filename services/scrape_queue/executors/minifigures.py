@@ -5,7 +5,8 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
-from services.scrape_queue.models import ExecutorResult
+from services.scrape_queue.models import ExecutorResult, TaskType
+from services.scrape_queue.registry import executor
 
 if TYPE_CHECKING:
     from duckdb import DuckDBPyConnection
@@ -13,6 +14,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger("bws.scrape_queue.executor.minifigures")
 
 
+@executor(TaskType.MINIFIGURES, concurrency=1, timeout=600)
 def execute_minifigures(
     conn: DuckDBPyConnection,
     set_number: str,
@@ -30,9 +32,9 @@ def execute_minifigures(
         [item_id],
     ).fetchone()
     if not bl_row:
-        return ExecutorResult.fail(
-            f"BrickLink item {item_id} not found (metadata not scraped?)"
-        )
+        # Item doesn't exist on BrickLink -- don't retry
+        logger.info("Minifigures for %s: BrickLink item %s not found, skipping", set_number, item_id)
+        return ExecutorResult.skip(f"BrickLink item {item_id} not found")
 
     mf_result = scrape_set_minifigures_sync(
         conn, item_id, save=True, scrape_prices=True,

@@ -19,6 +19,7 @@ import { BricklinkPriceChart } from './bricklink-price-chart';
 import { KeepaPanel } from './keepa-panel';
 import { MinifiguresPanel } from './minifigures-panel';
 import { ListingPanel } from './listing-panel';
+import { MLPredictionPanel } from './ml-prediction-panel';
 import { MinifigureValueChart } from './minifigure-value-chart';
 
 export interface ChartDateRange {
@@ -415,7 +416,10 @@ export function ItemDetailView({ setNumber }: ItemDetailViewProps) {
       {/* Listing helper */}
       <ListingPanel item={item} />
 
-      {/* Trading signals */}
+      {/* ML Growth Prediction */}
+      <MLPredictionPanel setNumber={setNumber} />
+
+      {/* Trading signals (legacy) */}
       <SignalsPanel setNumber={setNumber} />
 
       {/* Kelly Criterion position sizing */}

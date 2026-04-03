@@ -12,24 +12,19 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import os
-import signal
-import subprocess
+import time
 from typing import TYPE_CHECKING
 
-from services.scrape_queue.executors import (
-    execute_brickeconomy,
-    execute_bricklink_metadata,
-    execute_google_trends,
-    execute_keepa,
-    execute_minifigures,
-    get_trends_cooldown_remaining,
-)
+import services.scrape_queue.executors as _executors  # noqa: F401 -- triggers @executor registration
+from services.scrape_queue.executors import get_trends_cooldown_remaining
 from services.scrape_queue.models import (
+    ErrorCategory,
     ExecutorResult,
+    ScrapeTask,
     TaskType,
     TaskTypeConfig,
 )
+from services.scrape_queue.registry import REGISTRY
 from services.scrape_queue.repository import (
     claim_next,
     complete_task,
@@ -38,6 +33,7 @@ from services.scrape_queue.repository import (
     force_fail_task,
     re_evaluate_blocked,
     reclaim_stale,
+    record_attempt,
     requeue_for_cooldown,
 )
 
@@ -48,43 +44,13 @@ logger = logging.getLogger("bws.scrape_queue.dispatcher")
 
 
 # ---------------------------------------------------------------------------
-# Single source of truth -- one entry per task type
+# Executor registry -- populated by @executor decorators on import
 # ---------------------------------------------------------------------------
 
-TASK_TYPE_CONFIGS: dict[TaskType, TaskTypeConfig] = {
-    TaskType.BRICKLINK_METADATA: TaskTypeConfig(
-        task_type=TaskType.BRICKLINK_METADATA,
-        executor=execute_bricklink_metadata,
-        concurrency=2,
-        timeout_seconds=300,
-    ),
-    TaskType.BRICKECONOMY: TaskTypeConfig(
-        task_type=TaskType.BRICKECONOMY,
-        executor=execute_brickeconomy,
-        concurrency=2,
-        timeout_seconds=300,
-        browser_profile="brickeconomy-profile",
-    ),
-    TaskType.KEEPA: TaskTypeConfig(
-        task_type=TaskType.KEEPA,
-        executor=execute_keepa,
-        concurrency=3,
-        timeout_seconds=300,
-        browser_profile="keepa-profile",
-    ),
-    TaskType.MINIFIGURES: TaskTypeConfig(
-        task_type=TaskType.MINIFIGURES,
-        executor=execute_minifigures,
-        concurrency=1,
-        timeout_seconds=600,
-    ),
-    TaskType.GOOGLE_TRENDS: TaskTypeConfig(
-        task_type=TaskType.GOOGLE_TRENDS,
-        executor=execute_google_trends,
-        concurrency=1,
-        timeout_seconds=180,
-    ),
-}
+# REGISTRY is populated when services.scrape_queue.executors is imported
+# (each executor module uses the @executor decorator to self-register).
+# Alias for backward compatibility with code that references TASK_TYPE_CONFIGS.
+TASK_TYPE_CONFIGS = REGISTRY
 
 
 # ---------------------------------------------------------------------------
@@ -261,6 +227,18 @@ async def _worker_loop(
 # ---------------------------------------------------------------------------
 
 
+def _classify_exception(exc: Exception) -> ErrorCategory:
+    """Best-effort categorisation of unhandled executor exceptions."""
+    msg = str(exc).lower()
+    if "launch_persistent_context" in msg or "browser" in msg:
+        return ErrorCategory.BROWSER_CRASH
+    if "targetclosederror" in msg:
+        return ErrorCategory.BROWSER_CRASH
+    if "timeout" in msg or "timed out" in msg:
+        return ErrorCategory.TIMEOUT
+    return ErrorCategory.UNKNOWN
+
+
 def _claim_and_execute(
     worker_id: str,
     cfg: TaskTypeConfig,
@@ -300,14 +278,26 @@ def _claim_and_execute(
             task.attempt_count, task.max_attempts,
         )
 
+        t0 = time.monotonic()
         try:
             result = cfg.executor(conn, task.set_number, worker_index=worker_index)
         except Exception as exc:
+            duration = time.monotonic() - t0
+            category = _classify_exception(exc)
             logger.exception("[%s] %s crashed", worker_id, task.set_number)
             fail_task(conn, task.task_id, str(exc))
+            record_attempt(
+                conn,
+                task.task_id,
+                task.attempt_count,
+                error_category=category,
+                error_message=str(exc),
+                duration_seconds=duration,
+            )
             return None
 
-        return _handle_result(conn, worker_id, task, result)
+        duration = time.monotonic() - t0
+        return _handle_result(conn, worker_id, task, result, duration)
     finally:
         conn.close()
 
@@ -315,26 +305,47 @@ def _claim_and_execute(
 def _handle_result(
     conn: DuckDBPyConnection,
     worker_id: str,
-    task: object,
+    task: ScrapeTask,
     result: ExecutorResult,
+    duration: float,
 ) -> float | None:
     """Process an ExecutorResult -- no magic strings, just typed fields."""
     if result.success:
         complete_task(conn, task.task_id)
+        record_attempt(
+            conn, task.task_id, task.attempt_count,
+            duration_seconds=duration,
+        )
         logger.info("[%s] %s completed", worker_id, task.set_number)
         return None
 
     if result.is_cooldown:
         requeue_for_cooldown(conn, task.task_id)
-        logger.info(
+        record_attempt(
+            conn, task.task_id, task.attempt_count,
+            error_category=ErrorCategory.RATE_LIMITED,
+            error_message="Source in cooldown",
+            duration_seconds=duration,
+        )
+        logger.debug(
             "[%s] %s returned to queue (source cooldown, %.0fs remaining)",
             worker_id, task.set_number, result.cooldown_seconds,
         )
         return result.cooldown_seconds
 
-    # Regular failure
-    fail_task(conn, task.task_id, result.error or "Unknown error")
-    logger.warning("[%s] %s failed: %s", worker_id, task.set_number, result.error)
+    # Regular or permanent failure
+    error_msg = result.error or "Unknown error"
+    if result.permanent:
+        force_fail_task(conn, task.task_id, error_msg)
+    else:
+        fail_task(conn, task.task_id, error_msg)
+    record_attempt(
+        conn, task.task_id, task.attempt_count,
+        error_category=result.error_category,
+        error_message=error_msg,
+        duration_seconds=duration,
+    )
+    logger.warning("[%s] %s failed: %s", worker_id, task.set_number, error_msg)
     return None
 
 
@@ -354,9 +365,24 @@ def _fail_current_task(
 
     conn = get_connection()
     try:
+        # Find the task before force-failing so we can record the attempt
+        row = conn.execute(
+            "SELECT task_id, attempt_count FROM scrape_tasks "
+            "WHERE locked_by = ? AND task_type = ? AND status = 'running'",
+            [worker_id, cfg.task_type.value],
+        ).fetchone()
+
         force_fail_by_worker(
             conn, worker_id, cfg.task_type.value, "Executor timed out"
         )
+
+        if row:
+            record_attempt(
+                conn, row[0], row[1],
+                error_category=ErrorCategory.TIMEOUT,
+                error_message="Executor timed out",
+                duration_seconds=cfg.timeout_seconds,
+            )
     finally:
         conn.close()
 
@@ -368,20 +394,5 @@ def _kill_orphaned_browsers(profile: str | None) -> None:
     """Kill Camoufox/Firefox processes using the given profile directory."""
     if not profile:
         return
-
-    try:
-        proc = subprocess.run(
-            ["pgrep", "-f", profile],
-            capture_output=True, text=True, timeout=5,
-        )
-        pids = [int(p) for p in proc.stdout.strip().split() if p.isdigit()]
-        for pid in pids:
-            try:
-                os.kill(pid, signal.SIGTERM)
-                logger.warning(
-                    "Killed orphaned browser process pid=%d (%s)", pid, profile,
-                )
-            except ProcessLookupError:
-                pass
-    except Exception:
-        logger.debug("Failed to clean up orphaned browsers for %s", profile)
+    from services.browser.process_guard import kill_browser_processes_graceful
+    kill_browser_processes_graceful(profile)

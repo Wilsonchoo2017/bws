@@ -39,15 +39,21 @@ class _NoCloseConnection:
 
 @pytest.fixture
 def client(conn, monkeypatch):
-    """TestClient with get_connection monkeypatched to use in-memory DB."""
-    factory = lambda: _NoCloseConnection(conn)
-    # Patch at every call site that imports get_connection by name
-    monkeypatch.setattr("db.connection.get_connection", factory)
-    monkeypatch.setattr("api.routes.items.get_connection", factory)
-    monkeypatch.setattr("api.routes.enrichment.get_connection", factory)
+    """TestClient with get_db dependency overridden to use in-memory DB."""
+    from api.dependencies import get_db
     from api.main import app
 
-    return TestClient(app)
+    wrapped = _NoCloseConnection(conn)
+
+    def _override_get_db():
+        yield wrapped
+
+    monkeypatch.setattr("db.connection.get_connection", lambda: wrapped)
+    app.dependency_overrides[get_db] = _override_get_db
+
+    yield TestClient(app)
+
+    app.dependency_overrides.pop(get_db, None)
 
 
 # ---------------------------------------------------------------------------

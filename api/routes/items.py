@@ -98,8 +98,11 @@ async def list_items(conn: "DuckDBPyConnection" = Depends(get_db)):
 
 @router.get("/signals")
 async def list_signals(condition: str = "new", conn: "DuckDBPyConnection" = Depends(get_db)):
-    """Compute current trading signals for all items with cohort rankings."""
+    """Compute current trading signals for all items, enriched by scoring providers."""
+    from services.scoring.provider import enrich_signals
+
     signals = compute_all_signals_with_cohort(conn, condition=condition)
+    signals = enrich_signals(signals, conn)
     return {"success": True, "data": sanitize_nan(signals), "count": len(signals)}
 
 
@@ -160,6 +163,15 @@ async def get_item(set_number: str, conn: "DuckDBPyConnection" = Depends(get_db)
     if not item:
         raise HTTPException(status_code=404, detail=f"Item {set_number} not found")
     item["saturation"] = get_latest_saturation(conn, set_number)
+
+    # ML growth prediction
+    from services.scoring.provider import enrich_signals
+
+    ml_section = enrich_signals([{"set_number": set_number}], conn)[0]
+    ml_section.pop("set_number", None)
+    if ml_section:
+        item["ml_prediction"] = sanitize_nan(ml_section)
+
     return {"success": True, "data": item}
 
 
