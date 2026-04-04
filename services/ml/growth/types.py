@@ -9,6 +9,16 @@ from sklearn.preprocessing import StandardScaler
 
 
 @dataclass(frozen=True)
+class PredictionInterval:
+    """Conformal prediction interval."""
+
+    point: float
+    lower: float
+    upper: float
+    alpha: float  # e.g. 0.10 for 90% coverage
+
+
+@dataclass(frozen=True)
 class GrowthPrediction:
     """Prediction result for a single set."""
 
@@ -19,6 +29,8 @@ class GrowthPrediction:
     confidence: str  # "high", "moderate", "low"
     tier: int  # 1, 2, 3, or 4 (ensemble)
     feature_contributions: tuple[tuple[str, float], ...] = ()
+    prediction_interval: PredictionInterval | None = None
+    shap_base_value: float | None = None
 
 
 @dataclass(frozen=True)
@@ -36,6 +48,8 @@ class TrainedGrowthModel:
     model_name: str = "gbm"
     cv_r2_mean: float | None = None
     cv_r2_std: float | None = None
+    target_transformer: Any | None = None  # PowerTransformer for target
+    conformal_calibration: Any | None = None  # ConformalCalibration
 
 
 @dataclass(frozen=True)

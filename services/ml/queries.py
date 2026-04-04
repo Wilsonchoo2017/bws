@@ -353,8 +353,12 @@ def load_keepa_timelines(conn: DuckDBPyConnection) -> pd.DataFrame:
     return conn.execute("""
         SELECT set_number, amazon_price_json, buy_box_json,
                tracking_users, review_count AS kp_reviews, rating AS kp_rating
-        FROM keepa_snapshots
-        WHERE amazon_price_json IS NOT NULL
+        FROM (
+            SELECT DISTINCT ON (set_number) *
+            FROM keepa_snapshots
+            WHERE amazon_price_json IS NOT NULL
+            ORDER BY set_number, scraped_at DESC
+        )
     """).df()
 
 
@@ -428,7 +432,12 @@ def load_growth_training_data(conn: DuckDBPyConnection) -> pd.DataFrame:
             COALESCE(be.minifigs, li.minifig_count) AS minifig_count,
             be.annual_growth_pct, be.rrp_usd_cents, be.rating_value,
             be.review_count, be.pieces, be.minifigs,
-            be.rrp_gbp_cents, be.subtheme
+            be.rrp_gbp_cents, be.subtheme,
+            COALESCE(
+                li.year_retired,
+                be.year_retired,
+                TRY_CAST(LEFT(COALESCE(li.retired_date, be.retired_date), 4) AS INTEGER)
+            ) AS year_retired
         FROM lego_items li
         JOIN (
             SELECT DISTINCT ON (set_number) *

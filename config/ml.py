@@ -54,10 +54,18 @@ class MLPipelineConfig:
     # Cross-validation
     n_cv_repeats: int = 3
     # Hyperparameter tuning (Optuna)
-    tuning_trials: int = 50
+    tuning_trials: int = 75
     model_candidates: tuple[str, ...] = ("lightgbm", "gbm")
     # Only prefer LightGBM if it beats GBM by this margin
     min_improvement_for_complex: float = 0.01
+    # Loss function: "huber" (robust to outliers) or "squared_error"
+    gbm_loss: str = "huber"
+    gbm_huber_alpha: float = 0.9  # Huber transition percentile
+    # Target transformation: "none" or "yeo-johnson"
+    target_transform: str = "yeo-johnson"
+    # SHAP explanations
+    compute_shap: bool = True
+    shap_top_k: int = 5
 
 
 # Features are restricted to data available this many months before retirement.

@@ -8,15 +8,18 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
+import numpy as np
 import pandas as pd
 
-from config.ml import FEATURE_CUTOFF_MONTHS_BEFORE_RETIREMENT
+from config.ml import FEATURE_CUTOFF_MONTHS_BEFORE_RETIREMENT, MLPipelineConfig
 from services.ml.extractors import extract_all as _extract_all_plugin
 from services.ml.growth.features import engineer_intrinsic_features, engineer_keepa_features
 from services.ml.growth.training import train_growth_models
 from services.ml.growth.types import GrowthPrediction, TrainedEnsemble, TrainedGrowthModel
 from services.ml.helpers import compute_cutoff_dates
 from services.ml.queries import load_base_metadata, load_growth_candidate_sets, load_keepa_timelines
+
+_cfg = MLPipelineConfig()
 
 if TYPE_CHECKING:
     from duckdb import DuckDBPyConnection
@@ -112,6 +115,27 @@ def _predict_batch(
     X_scaled = model_obj.scaler.transform(X_batch)
     preds = model_obj.model.predict(X_scaled)
 
+    # Inverse target transform if model was trained on transformed target
+    if model_obj.target_transformer is not None:
+        preds = model_obj.target_transformer.inverse_transform(
+            preds.reshape(-1, 1)
+        ).ravel()
+
+    # Compute conformal intervals if calibration available
+    intervals: list | None = None
+    if model_obj.conformal_calibration is not None:
+        from services.ml.growth.conformal import batch_predict_with_intervals
+        intervals = batch_predict_with_intervals(preds, model_obj.conformal_calibration)
+
+    # SHAP per-prediction explanations (or fall back to global importances)
+    shap_explanations = None
+    if _cfg.compute_shap:
+        from services.ml.growth.explainer import explain_predictions
+        shap_explanations = explain_predictions(
+            model_obj.model, X_scaled, model_obj.feature_names,
+            top_k=_cfg.shap_top_k,
+        )
+
     importances = model_obj.model.feature_importances_
     top_global = tuple(sorted(
         zip(model_obj.feature_names, importances),
@@ -132,6 +156,15 @@ def _predict_batch(
         else:
             confidence = "low"
 
+        # Use SHAP contributions if available, otherwise global importances
+        if shap_explanations and i < len(shap_explanations):
+            shap_ex = shap_explanations[i]
+            contribs = shap_ex.top_positive + shap_ex.top_negative
+            base_val = shap_ex.base_value
+        else:
+            contribs = top_global
+            base_val = None
+
         predictions.append(GrowthPrediction(
             set_number=row["set_number"],
             title=str(row.get("title", "")),
@@ -139,7 +172,9 @@ def _predict_batch(
             predicted_growth_pct=round(float(preds[i]), 1),
             confidence=confidence,
             tier=model_obj.tier,
-            feature_contributions=top_global,
+            feature_contributions=contribs,
+            prediction_interval=intervals[i] if intervals else None,
+            shap_base_value=base_val,
         ))
 
     return predictions
@@ -209,6 +244,18 @@ def _predict_tier3(
     X_scaled = tier3.scaler.transform(X)
     preds = tier3.model.predict(X_scaled)
 
+    # Inverse target transform
+    if tier3.target_transformer is not None:
+        preds = tier3.target_transformer.inverse_transform(
+            preds.reshape(-1, 1)
+        ).ravel()
+
+    # Compute conformal intervals if calibration available
+    intervals: list | None = None
+    if tier3.conformal_calibration is not None:
+        from services.ml.growth.conformal import batch_predict_with_intervals
+        intervals = batch_predict_with_intervals(preds, tier3.conformal_calibration)
+
     importances = tier3.model.feature_importances_
     top_global = tuple(sorted(
         zip(tier3.feature_names, importances),
@@ -236,6 +283,7 @@ def _predict_tier3(
             confidence=confidence,
             tier=3,
             feature_contributions=top_global,
+            prediction_interval=intervals[i] if intervals else None,
         ))
 
     return predictions
@@ -251,8 +299,6 @@ def _apply_ensemble(
     via the meta-model. Sets with only one tier prediction keep their
     original value.
     """
-    import numpy as np
-
     # Group predictions by set_number
     by_set: dict[str, dict[int, GrowthPrediction]] = {}
     for p in predictions:

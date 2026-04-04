@@ -79,13 +79,13 @@ def calibrate_prediction_errors(
     for use in per-set Kelly computation.
     """
     from services.ml.growth_model import (
-        _build_model,
         _engineer_intrinsic_features,
         _engineer_keepa_features,
         _load_keepa_timelines,
         _load_training_data,
         TIER1_FEATURES,
     )
+    from services.ml.growth.model_selection import build_model
 
     df_raw = _load_training_data(conn)
     y = df_raw["annual_growth_pct"].values.astype(float)
@@ -107,7 +107,7 @@ def calibrate_prediction_errors(
     Xs = pd.DataFrame(scaler.fit_transform(X), columns=X.columns)
 
     # LOO predictions to get unbiased error estimates
-    model = _build_model()
+    model = build_model("gbm")
     y_pred_loo = cross_val_predict(model, Xs, y, cv=LeaveOneOut())
 
     residuals = y - y_pred_loo  # positive = model underpredicted

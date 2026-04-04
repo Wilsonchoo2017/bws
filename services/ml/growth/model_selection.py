@@ -77,7 +77,10 @@ def build_model(name: str, params: dict | None = None) -> Any:
         except ImportError:
             logger.warning("LightGBM not installed, falling back to GBM")
             return _build_gbm(params)
-        defaults = {"verbosity": -1, "random_state": 42, "n_jobs": 1}
+        defaults = {
+            "verbosity": -1, "random_state": 42, "n_jobs": 1,
+            "objective": "huber", "alpha": 1.0,
+        }
         return lgb.LGBMRegressor(**{**defaults, **params})
 
     return _build_gbm(params)
@@ -90,6 +93,8 @@ def _build_gbm(params: dict) -> GradientBoostingRegressor:
         "min_samples_leaf": 5,
         "learning_rate": 0.02,
         "random_state": 42,
+        "loss": "huber",
+        "alpha": 0.9,
     }
     return GradientBoostingRegressor(**{**defaults, **params})
 
@@ -107,11 +112,13 @@ def cross_validate_model(
     n_splits: int = 5,
     n_repeats: int = 3,
     random_state: int = 42,
+    target_transform: str = "none",
 ) -> CVResult:
     """Run RepeatedKFold CV with per-fold scaling (no leakage).
 
     The scaler is fit on the training fold only, then applied to the
     validation fold. This prevents information leaking from val -> train.
+    Target transform (if enabled) is also fit per-fold.
     """
     rkf = RepeatedKFold(n_splits=n_splits, n_repeats=n_repeats, random_state=random_state)
 
@@ -123,13 +130,28 @@ def cross_validate_model(
         X_tr, X_va = X[train_idx], X[val_idx]
         y_tr, y_va = y[train_idx], y[val_idx]
 
+        # Per-fold target transform (fit on train only)
+        if target_transform == "yeo-johnson":
+            from sklearn.preprocessing import PowerTransformer
+            pt = PowerTransformer(method="yeo-johnson", standardize=False)
+            y_tr_fit = pt.fit_transform(y_tr.reshape(-1, 1)).ravel()
+        else:
+            pt = None
+            y_tr_fit = y_tr
+
         scaler = StandardScaler()
         X_tr_s = scaler.fit_transform(X_tr)
         X_va_s = scaler.transform(X_va)
 
         model = model_factory()
-        model.fit(X_tr_s, y_tr)
-        y_pred = model.predict(X_va_s)
+        model.fit(X_tr_s, y_tr_fit)
+        y_pred_raw = model.predict(X_va_s)
+
+        # Inverse transform predictions back to original scale for scoring
+        if pt is not None:
+            y_pred = pt.inverse_transform(y_pred_raw.reshape(-1, 1)).ravel()
+        else:
+            y_pred = y_pred_raw
 
         ss_res = np.sum((y_va - y_pred) ** 2)
         ss_tot = np.sum((y_va - y_va.mean()) ** 2)
@@ -138,6 +160,116 @@ def cross_validate_model(
         r2_scores.append(r2)
         mae_scores.append(float(mean_absolute_error(y_va, y_pred)))
         rmse_scores.append(float(np.sqrt(mean_squared_error(y_va, y_pred))))
+
+    return CVResult(
+        r2_mean=float(np.mean(r2_scores)),
+        r2_std=float(np.std(r2_scores)),
+        r2_folds=tuple(r2_scores),
+        mae_mean=float(np.mean(mae_scores)),
+        mae_std=float(np.std(mae_scores)),
+        mae_folds=tuple(mae_scores),
+        rmse_mean=float(np.mean(rmse_scores)),
+        rmse_std=float(np.std(rmse_scores)),
+        n_folds=len(r2_scores),
+    )
+
+
+def temporal_cross_validate(
+    X: np.ndarray,
+    y: np.ndarray,
+    groups: np.ndarray,
+    model_factory: Callable[[], Any],
+    *,
+    min_train_years: int = 3,
+    target_transform: str = "none",
+) -> CVResult:
+    """Expanding-window temporal CV grouped by retirement year.
+
+    For each unique year group from min_train_years onward, trains on all
+    prior years and tests on the current year. This mirrors real deployment
+    where we always predict the next retirement cohort.
+
+    Falls back to RepeatedKFold if fewer than min_train_years + 1 unique
+    groups exist.
+    """
+    groups = np.asarray(groups, dtype=float)
+    finite_mask = ~np.isnan(groups)
+    unique_years = sorted(set(groups[finite_mask].astype(int)))
+
+    if len(unique_years) < min_train_years + 1:
+        logger.info(
+            "Temporal CV: only %d year groups (need %d+), falling back to KFold",
+            len(unique_years), min_train_years + 1,
+        )
+        return cross_validate_model(
+            X, y, model_factory,
+            n_splits=5, n_repeats=3,
+            target_transform=target_transform,
+        )
+
+    r2_scores: list[float] = []
+    mae_scores: list[float] = []
+    rmse_scores: list[float] = []
+
+    # Safe int conversion: NaN rows get sentinel -9999 and are excluded
+    groups_int = np.full(len(groups), -9999, dtype=int)
+    groups_int[finite_mask] = groups[finite_mask].astype(int)
+
+    for i in range(min_train_years, len(unique_years)):
+        test_year = unique_years[i]
+        train_years = set(unique_years[:i])
+
+        train_mask = np.isin(groups_int, list(train_years))
+        test_mask = groups_int == test_year
+
+        if test_mask.sum() < 5:
+            continue
+
+        X_tr, X_te = X[train_mask], X[test_mask]
+        y_tr, y_te = y[train_mask], y[test_mask]
+
+        # Per-fold target transform
+        if target_transform == "yeo-johnson":
+            from sklearn.preprocessing import PowerTransformer
+            pt = PowerTransformer(method="yeo-johnson", standardize=False)
+            y_tr_fit = pt.fit_transform(y_tr.reshape(-1, 1)).ravel()
+        else:
+            pt = None
+            y_tr_fit = y_tr
+
+        scaler = StandardScaler()
+        X_tr_s = scaler.fit_transform(X_tr)
+        X_te_s = scaler.transform(X_te)
+
+        model = model_factory()
+        model.fit(X_tr_s, y_tr_fit)
+        y_pred_raw = model.predict(X_te_s)
+
+        if pt is not None:
+            y_pred = pt.inverse_transform(y_pred_raw.reshape(-1, 1)).ravel()
+        else:
+            y_pred = y_pred_raw
+
+        ss_res = np.sum((y_te - y_pred) ** 2)
+        ss_tot = np.sum((y_te - y_te.mean()) ** 2)
+        r2 = float(1 - ss_res / ss_tot) if ss_tot > 0 else 0.0
+
+        r2_scores.append(r2)
+        mae_scores.append(float(mean_absolute_error(y_te, y_pred)))
+        rmse_scores.append(float(np.sqrt(mean_squared_error(y_te, y_pred))))
+
+        logger.info(
+            "  Temporal fold: train years %s -> test %d (%d sets): R2=%.3f",
+            sorted(train_years), test_year, test_mask.sum(), r2,
+        )
+
+    if not r2_scores:
+        logger.warning("Temporal CV produced no valid folds, falling back to KFold")
+        return cross_validate_model(
+            X, y, model_factory,
+            n_splits=5, n_repeats=3,
+            target_transform=target_transform,
+        )
 
     return CVResult(
         r2_mean=float(np.mean(r2_scores)),
@@ -194,6 +326,7 @@ def _get_search_space(name: str, trial: Any) -> dict:
             "reg_lambda": trial.suggest_float("reg_lambda", 1e-3, 1.0, log=True),
             "feature_fraction": trial.suggest_float("feature_fraction", 0.5, 1.0),
             "subsample": trial.suggest_float("subsample", 0.7, 1.0),
+            "alpha": trial.suggest_float("alpha", 0.5, 5.0),  # Huber delta
         }
 
     # GBM
@@ -203,6 +336,7 @@ def _get_search_space(name: str, trial: Any) -> dict:
         "min_samples_leaf": trial.suggest_int("min_samples_leaf", 3, 15),
         "learning_rate": trial.suggest_float("learning_rate", 0.01, 0.1, log=True),
         "subsample": trial.suggest_float("subsample", 0.7, 1.0),
+        "alpha": trial.suggest_float("alpha", 0.7, 0.99),  # Huber percentile
     }
 
 
@@ -214,6 +348,7 @@ def tune_model(
     n_trials: int = 50,
     n_splits: int = 5,
     n_repeats: int = 3,
+    target_transform: str = "none",
 ) -> tuple[dict, CVResult]:
     """Tune hyperparameters using Optuna Bayesian optimization.
 
@@ -234,6 +369,7 @@ def tune_model(
             lambda p=params: build_model(model_name, p),
             n_splits=n_splits,
             n_repeats=n_repeats,
+            target_transform=target_transform,
         )
         if best_cv is None or cv.r2_mean > best_cv.r2_mean:
             best_params = params
@@ -252,6 +388,7 @@ def tune_model(
         lambda: build_model(model_name, best_params),
         n_splits=n_splits,
         n_repeats=n_repeats,
+        target_transform=target_transform,
     )
 
     return best_params, CVResult(
@@ -278,6 +415,7 @@ def select_best_model(
     n_splits: int = 5,
     n_repeats: int = 3,
     min_improvement: float = 0.01,
+    target_transform: str = "none",
 ) -> tuple[str, dict, CVResult]:
     """Tune each candidate model and return the best.
 
@@ -294,6 +432,7 @@ def select_best_model(
                 n_trials=n_trials,
                 n_splits=n_splits,
                 n_repeats=n_repeats,
+                target_transform=target_transform,
             )
             logger.info("  %s: %s", name, cv.summary())
             results.append((name, params, cv))
@@ -306,6 +445,7 @@ def select_best_model(
         default_cv = cross_validate_model(
             X, y, lambda: build_model("gbm"),
             n_splits=n_splits, n_repeats=n_repeats,
+            target_transform=target_transform,
         )
         return "gbm", {}, default_cv
 
