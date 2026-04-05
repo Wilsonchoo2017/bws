@@ -24,8 +24,12 @@ _PARAM_RE = re.compile(r"\?")
 def _duck_to_pg_sql(sql: str) -> str:
     """Translate DuckDB ``?`` placeholders to psycopg2 ``%s``.
 
-    Also escapes any literal ``%`` that psycopg2 would misinterpret.
+    If the query uses ``?`` placeholders (DuckDB style), escapes literal
+    ``%`` and replaces ``?`` with ``%s``.  If no ``?`` is found, the
+    query is returned unchanged (assumed to be already PG-compatible).
     """
+    if "?" not in sql:
+        return sql
     # Escape literal % first (e.g. LIKE '%foo%')
     sql = sql.replace("%", "%%")
     # Then replace ? with %s

@@ -51,6 +51,8 @@ export interface UnifiedItem {
   bricklink_used_currency: string | null;
   bricklink_used_last_seen: string | null;
   ml_growth_pct: number | null;
+  ml_confidence: string | null;
+  ml_tier: number | null;
 }
 
 export interface PriceRecord {

@@ -134,10 +134,12 @@ async def get_growth_prediction(
 
     scores = growth_provider.score_all(conn)
     pred = scores.get(set_number)
-    if pred is None:
-        return {"error": f"No prediction available for {set_number}"}
+    if pred is not None:
+        return sanitize_nan({"set_number": set_number, **pred})
 
-    return sanitize_nan({"set_number": set_number, **pred})
+    # No prediction -- diagnose what data is missing
+    missing = _diagnose_missing_data(conn, set_number)
+    return sanitize_nan({"set_number": set_number, "error": "No prediction available", **missing})
 
 
 @router.get("/kelly")
@@ -240,6 +242,68 @@ async def save_tracking_snapshot(conn: "DuckDBPyConnection" = Depends(get_db)):
     n_saved = save_prediction_snapshot(conn)
     n_backfilled = backfill_actuals(conn)
     return {"saved": n_saved, "backfilled": n_backfilled}
+
+
+def _diagnose_missing_data(conn: "DuckDBPyConnection", set_number: str) -> dict:
+    """Check what data is missing for a set to get an ML prediction.
+
+    Returns a dict with 'missing' (list of human-readable items) and
+    'has' (dict of booleans for each data source).
+    """
+    missing: list[str] = []
+    has: dict[str, bool] = {}
+
+    # 1. Check lego_items entry
+    item_row = conn.execute(
+        "SELECT 1 FROM lego_items WHERE set_number = ?", [set_number]
+    ).fetchone()
+    has["lego_item"] = item_row is not None
+    if not has["lego_item"]:
+        missing.append("Set not found in catalog (lego_items)")
+        return {"missing": missing, "has": has}
+
+    # 2. Check BrickEconomy snapshot
+    be_row = conn.execute("""
+        SELECT rrp_usd_cents, rating_value, review_count, pieces, minifigs, subtheme
+        FROM brickeconomy_snapshots
+        WHERE set_number = ?
+        ORDER BY scraped_at DESC
+        LIMIT 1
+    """, [set_number]).fetchone()
+
+    has["brickeconomy"] = be_row is not None
+    if not has["brickeconomy"]:
+        missing.append("BrickEconomy data (needed for RRP, ratings, piece count)")
+    else:
+        rrp, rating, reviews, pieces, minifigs, subtheme = be_row
+        if not rrp or rrp <= 0:
+            missing.append("RRP price (rrp_usd_cents is missing or zero)")
+        if rating is None:
+            missing.append("Rating value (from BrickEconomy)")
+        if reviews is None:
+            missing.append("Review count (from BrickEconomy)")
+        if not pieces:
+            missing.append("Piece count")
+        has["rrp"] = bool(rrp and rrp > 0)
+        has["rating"] = rating is not None
+        has["reviews"] = reviews is not None
+        has["pieces"] = bool(pieces)
+        has["minifigs"] = minifigs is not None
+        has["subtheme"] = bool(subtheme)
+
+    # 3. Check Keepa data (Tier 2)
+    keepa_row = conn.execute("""
+        SELECT amazon_price_json
+        FROM keepa_products
+        WHERE set_number = ?
+        LIMIT 1
+    """, [set_number]).fetchone()
+
+    has["keepa"] = keepa_row is not None and keepa_row[0] is not None
+    if not has["keepa"]:
+        missing.append("Keepa Amazon price history (needed for Tier 2 prediction)")
+
+    return {"missing": missing, "has": has}
 
 
 @router.post("/growth/retrain")

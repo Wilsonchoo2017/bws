@@ -3,56 +3,63 @@
 During the migration, DuckDB remains the source of truth. Postgres
 receives shadow writes. If a Postgres write fails, it is logged and
 swallowed -- the DuckDB write stands.
+
+When DUCK_ENABLED=false, DuckDB is replaced by PgConnection and all
+reads/writes go through Postgres only.
 """
 
 import logging
 from typing import TYPE_CHECKING, Any
 
-from config.settings import PG_ENABLED
+from config.settings import DUCK_ENABLED, PG_ENABLED
 
 if TYPE_CHECKING:
     from duckdb import DuckDBPyConnection
     from sqlalchemy.orm import Session
 
+    from db.pg.pg_connection import PgConnection
+
 logger = logging.getLogger("bws.dual_writer")
 
 
 class DualWriter:
-    """Wraps a DuckDB connection and an optional Postgres session.
+    """Wraps a DuckDB (or PgConnection) and an optional Postgres ORM session.
 
     All existing code continues to work unchanged because .execute(),
-    .fetchone(), .fetchall(), and .description delegate to DuckDB.
+    .fetchone(), .fetchall(), and .description delegate to the primary
+    connection (DuckDB or PgConnection depending on DUCK_ENABLED).
 
     Repository code that adds Postgres writes can access .pg_session().
-    ML queries that need .df() can access .duck directly.
+    ML queries that need .df() can access .duck directly (which may be
+    a PgConnection when DuckDB is disabled).
     """
 
     def __init__(
         self,
-        duck: "DuckDBPyConnection",
+        duck: "DuckDBPyConnection | PgConnection",
         pg_session: "Session | None" = None,
     ) -> None:
         self.duck = duck
         self._pg = pg_session
-        self._pg_enabled = PG_ENABLED and pg_session is not None
+        self._pg_enabled = (PG_ENABLED or not DUCK_ENABLED) and pg_session is not None
 
     def execute(self, query: str, params: Any = None) -> Any:
-        """Execute a query on DuckDB (passthrough)."""
+        """Execute a query on the primary connection (passthrough)."""
         if params is None:
             return self.duck.execute(query)
         return self.duck.execute(query, params)
 
     def fetchone(self) -> Any:
-        """Fetch one row from DuckDB (passthrough)."""
+        """Fetch one row from the primary connection (passthrough)."""
         return self.duck.fetchone()
 
     def fetchall(self) -> list[Any]:
-        """Fetch all rows from DuckDB (passthrough)."""
+        """Fetch all rows from the primary connection (passthrough)."""
         return self.duck.fetchall()
 
     @property
     def description(self) -> Any:
-        """Column descriptions from DuckDB (passthrough)."""
+        """Column descriptions from the primary connection (passthrough)."""
         return self.duck.description
 
     def pg_session(self) -> "Session | None":

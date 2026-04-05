@@ -11,7 +11,7 @@ import colorlog
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from api.routes import enrichment, images, items, ml, portfolio, scrape
+from api.routes import enrichment, images, items, ml, portfolio, scrape, stats
 from api.worker import run_worker
 from services.enrichment.scheduler import run_enrichment_sweep
 from services.images.sweep import run_image_download_sweep
@@ -231,6 +231,7 @@ app.include_router(enrichment.router, prefix="/api")
 app.include_router(portfolio.router, prefix="/api")
 app.include_router(images.router, prefix="/api")
 app.include_router(ml.router, prefix="/api")
+app.include_router(stats.router, prefix="/api")
 
 
 @app.get("/api/health")

@@ -232,7 +232,9 @@ def _check_pk_integrity(path: Path) -> None:
 
 def get_memory_connection() -> "DuckDBPyConnection":
     """Get an in-memory DuckDB connection (for testing)."""
-    return duckdb.connect(":memory:")
+    import duckdb as _duckdb
+
+    return _duckdb.connect(":memory:")
 
 
 def get_dual_connection(db_path: Path | None = None) -> "DualWriter":

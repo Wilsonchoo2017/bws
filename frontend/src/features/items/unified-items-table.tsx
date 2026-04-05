@@ -155,10 +155,19 @@ const columns: ColumnDef<UnifiedItem>[] = [
         growth >= 10 ? 'text-green-600 dark:text-green-400' :
         growth >= 5 ? 'text-yellow-600 dark:text-yellow-400' :
         'text-red-500';
+      const tier = row.original.ml_tier;
+      const conf = row.original.ml_confidence;
       return (
-        <span className={`font-mono text-sm font-semibold ${color}`}>
-          +{growth.toFixed(1)}%
-        </span>
+        <div className='flex flex-col gap-0.5'>
+          <span className={`font-mono text-sm font-semibold ${color}`}>
+            +{growth.toFixed(1)}%
+          </span>
+          {tier != null && (
+            <span className='text-muted-foreground text-[10px] leading-tight'>
+              T{tier}{conf === 'high' ? ' H' : conf === 'moderate' ? ' M' : conf === 'low' ? ' L' : ''}
+            </span>
+          )}
+        </div>
       );
     },
     size: 85
@@ -336,7 +345,9 @@ export function UnifiedItemsTable() {
   const [newSetNumber, setNewSetNumber] = useState('');
   const [adding, setAdding] = useState(false);
   const [addError, setAddError] = useState<string | null>(null);
-  const [scoreFilter, setScoreFilter] = useState<'all' | '65+' | '50+' | '35+' | '<35' | 'no_score'>('all');
+  const [growthFilter, setGrowthFilter] = useState<'all' | 'strong' | 'buy' | 'hold' | 'avoid' | 'no_pred'>('all');
+  const [tierFilter, setTierFilter] = useState<'all' | '1' | '2' | '3' | '4'>('all');
+  const [confidenceFilter, setConfidenceFilter] = useState<'all' | 'high' | 'moderate' | 'low'>('all');
   const [showWatchlistOnly, setShowWatchlistOnly] = useState(false);
 
   const filteredData = useMemo(() => {
@@ -367,22 +378,29 @@ export function UnifiedItemsTable() {
     } else if (retirementFilter === 'retiring_soon') {
       result = result.filter((item) => item.retiring_soon === true && item.year_retired === null);
     }
-    if (scoreFilter === '65+') {
-      result = result.filter((item) => item.ml_growth_pct !== null && item.ml_growth_pct >= 15);
-    } else if (scoreFilter === '50+') {
-      result = result.filter((item) => item.ml_growth_pct !== null && item.ml_growth_pct >= 10);
-    } else if (scoreFilter === '35+') {
-      result = result.filter((item) => item.ml_growth_pct !== null && item.ml_growth_pct >= 5);
-    } else if (scoreFilter === '<35') {
-      result = result.filter((item) => item.ml_growth_pct !== null && item.ml_growth_pct < 5);
-    } else if (scoreFilter === 'no_score') {
-      result = result.filter((item) => item.ml_growth_pct === null);
+    if (growthFilter === 'strong') {
+      result = result.filter((item) => item.ml_growth_pct != null && item.ml_growth_pct >= 15);
+    } else if (growthFilter === 'buy') {
+      result = result.filter((item) => item.ml_growth_pct != null && item.ml_growth_pct >= 10);
+    } else if (growthFilter === 'hold') {
+      result = result.filter((item) => item.ml_growth_pct != null && item.ml_growth_pct >= 5);
+    } else if (growthFilter === 'avoid') {
+      result = result.filter((item) => item.ml_growth_pct != null && item.ml_growth_pct < 5);
+    } else if (growthFilter === 'no_pred') {
+      result = result.filter((item) => item.ml_growth_pct == null);
+    }
+    if (tierFilter !== 'all') {
+      const t = Number(tierFilter);
+      result = result.filter((item) => item.ml_tier === t);
+    }
+    if (confidenceFilter !== 'all') {
+      result = result.filter((item) => item.ml_confidence === confidenceFilter);
     }
     if (dealFilter) {
       result = dealFilter(result);
     }
     return result;
-  }, [data, searchQuery, dealFilter, hideNoRetail, retirementFilter, scoreFilter, showWatchlistOnly]);
+  }, [data, searchQuery, dealFilter, hideNoRetail, retirementFilter, growthFilter, tierFilter, confidenceFilter, showWatchlistOnly]);
 
   const minifigMissing = useMemo(
     () => filteredData.filter(i => i.minifig_count === null).map(i => i.set_number),
@@ -432,20 +450,29 @@ export function UnifiedItemsTable() {
 
       if (!itemsRes.success) return;
 
-      const growthMap = new Map<string, number>();
+      const mlMap = new Map<string, { growth: number; confidence: string | null; tier: number | null }>();
       if (signalsRes?.success && Array.isArray(signalsRes.data)) {
         for (const sig of signalsRes.data) {
           const setNum = (sig.set_number ?? sig.item_id?.replace(/-\d+$/, '')) as string | undefined;
           if (setNum && sig.ml_growth_pct != null && !Number.isNaN(sig.ml_growth_pct)) {
-            growthMap.set(setNum, sig.ml_growth_pct);
+            mlMap.set(setNum, {
+              growth: sig.ml_growth_pct,
+              confidence: sig.ml_confidence ?? null,
+              tier: sig.ml_tier ?? null,
+            });
           }
         }
       }
 
-      const merged = (itemsRes.data as UnifiedItem[]).map((item) => ({
-        ...item,
-        ml_growth_pct: growthMap.get(item.set_number) ?? null,
-      }));
+      const merged = (itemsRes.data as UnifiedItem[]).map((item) => {
+        const ml = mlMap.get(item.set_number);
+        return {
+          ...item,
+          ml_growth_pct: ml?.growth ?? null,
+          ml_confidence: ml?.confidence ?? null,
+          ml_tier: ml?.tier ?? null,
+        };
+      });
 
       setData(merged);
     } catch {
@@ -488,6 +515,8 @@ export function UnifiedItemsTable() {
         bricklink_used_currency: null,
         bricklink_used_last_seen: null,
         ml_growth_pct: null,
+        ml_confidence: null,
+        ml_tier: null,
       } as UnifiedItem));
 
       setData(liteItems);
@@ -591,7 +620,7 @@ export function UnifiedItemsTable() {
   return (
     <div className='flex flex-1 flex-col gap-3 overflow-hidden'>
       <div className='flex flex-col gap-2'>
-        {/* Row 1: Filters */}
+        {/* Row 1: General filters */}
         <div className='flex items-center gap-3'>
           <input
             type='text'
@@ -614,22 +643,6 @@ export function UnifiedItemsTable() {
               <SelectItem value='retiring_soon'>Retiring soon</SelectItem>
             </SelectContent>
           </Select>
-          <Select
-            value={scoreFilter}
-            onValueChange={(val) => setScoreFilter(val as typeof scoreFilter)}
-          >
-            <SelectTrigger className='w-[150px]'>
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value='all'>All growth</SelectItem>
-              <SelectItem value='65+'>Strong (&ge;15%)</SelectItem>
-              <SelectItem value='50+'>Buy (&ge;10%)</SelectItem>
-              <SelectItem value='35+'>Hold (&ge;5%)</SelectItem>
-              <SelectItem value='<35'>Avoid (&lt;5%)</SelectItem>
-              <SelectItem value='no_score'>No prediction</SelectItem>
-            </SelectContent>
-          </Select>
           <Button
             variant={showWatchlistOnly ? 'default' : 'outline'}
             size='default'
@@ -647,7 +660,71 @@ export function UnifiedItemsTable() {
           <PriceDealFilter onFilterChange={(fn) => setDealFilter(() => fn)} />
         </div>
 
-        {/* Row 2: Actions + Add Item */}
+        {/* Row 2: ML prediction filters */}
+        <div className='flex items-center gap-3'>
+          <span className='text-muted-foreground text-xs font-medium'>ML</span>
+          <Select
+            value={growthFilter}
+            onValueChange={(val) => setGrowthFilter(val as typeof growthFilter)}
+          >
+            <SelectTrigger className='w-[155px]'>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value='all'>All growth</SelectItem>
+              <SelectItem value='strong'>Strong Buy (&ge;15%)</SelectItem>
+              <SelectItem value='buy'>Buy (&ge;10%)</SelectItem>
+              <SelectItem value='hold'>Hold (&ge;5%)</SelectItem>
+              <SelectItem value='avoid'>Avoid (&lt;5%)</SelectItem>
+              <SelectItem value='no_pred'>No prediction</SelectItem>
+            </SelectContent>
+          </Select>
+          <Select
+            value={tierFilter}
+            onValueChange={(val) => setTierFilter(val as typeof tierFilter)}
+          >
+            <SelectTrigger className='w-[155px]'>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value='all'>All tiers</SelectItem>
+              <SelectItem value='1'>Tier 1 (Intrinsic)</SelectItem>
+              <SelectItem value='2'>Tier 2 (+ Keepa)</SelectItem>
+              <SelectItem value='3'>Tier 3 (Extractors)</SelectItem>
+              <SelectItem value='4'>Tier 4 (Ensemble)</SelectItem>
+            </SelectContent>
+          </Select>
+          <Select
+            value={confidenceFilter}
+            onValueChange={(val) => setConfidenceFilter(val as typeof confidenceFilter)}
+          >
+            <SelectTrigger className='w-[155px]'>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value='all'>All confidence</SelectItem>
+              <SelectItem value='high'>High</SelectItem>
+              <SelectItem value='moderate'>Moderate</SelectItem>
+              <SelectItem value='low'>Low</SelectItem>
+            </SelectContent>
+          </Select>
+          {(growthFilter !== 'all' || tierFilter !== 'all' || confidenceFilter !== 'all') && (
+            <Button
+              variant='ghost'
+              size='sm'
+              onClick={() => {
+                setGrowthFilter('all');
+                setTierFilter('all');
+                setConfidenceFilter('all');
+              }}
+              className='text-muted-foreground text-xs'
+            >
+              Clear ML filters
+            </Button>
+          )}
+        </div>
+
+        {/* Row 3: Actions + Add Item */}
         <div className='flex items-center gap-2'>
           <ScrapeMissingMetadataButton setNumbers={metadataMissing} />
           <EnrichMissingButton setNumbers={filteredData.map((i) => i.set_number)} />

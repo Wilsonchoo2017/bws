@@ -2,10 +2,9 @@
 
 import { useEffect, useState } from 'react';
 
-interface MLPrediction {
-  ml_growth_pct: number | null;
-  ml_confidence: string | null;
-  ml_tier: number | null;
+interface Driver {
+  feature: string;
+  impact: number;
 }
 
 interface GrowthPrediction {
@@ -13,6 +12,15 @@ interface GrowthPrediction {
   growth_pct: number;
   confidence: string;
   tier: number;
+  drivers?: Driver[];
+  shap_base?: number;
+}
+
+interface MissingDataResponse {
+  set_number: string;
+  error: string;
+  missing: string[];
+  has: Record<string, boolean>;
 }
 
 function growthColor(pct: number): string {
@@ -52,7 +60,38 @@ function confidenceBadge(confidence: string): { label: string; className: string
 }
 
 function tierLabel(tier: number): string {
-  return tier === 2 ? 'Tier 2 (Intrinsics + Keepa)' : 'Tier 1 (Intrinsics)';
+  if (tier === 4) return 'Tier 4 (Ensemble)';
+  if (tier === 3) return 'Tier 3 (Extractors)';
+  if (tier === 2) return 'Tier 2 (Intrinsics + Keepa)';
+  return 'Tier 1 (Intrinsics)';
+}
+
+const FEATURE_LABELS: Record<string, string> = {
+  theme_bayes: 'Theme identity',
+  subtheme_loo: 'Subtheme (e.g. UCS, Modular)',
+  log_rrp: 'Retail price (RRP)',
+  log_parts: 'Piece count',
+  price_per_part: 'Price per piece',
+  mfigs: 'Minifigure count',
+  minifig_density: 'Minifigures per 100 pcs',
+  price_tier: 'Price tier bracket',
+  rating_value: 'Collector rating',
+  review_count: 'Number of reviews',
+  theme_size: 'Theme popularity (# sets)',
+  is_licensed: 'Licensed theme (Star Wars, etc.)',
+  usd_gbp_ratio: 'Regional pricing ratio',
+  sub_size: 'Subtheme size',
+  kp_below_rrp_pct: 'Time below RRP on Amazon',
+  kp_avg_discount: 'Average Amazon discount',
+  kp_max_discount: 'Deepest Amazon discount',
+  kp_price_trend: 'Amazon price trend',
+  kp_price_cv: 'Amazon price volatility',
+  kp_months_stock: 'Months in stock on Amazon',
+  kp_bb_premium: 'Buy box premium at OOS',
+};
+
+function featureLabel(feature: string): string {
+  return FEATURE_LABELS[feature] ?? feature.replace(/_/g, ' ');
 }
 
 interface MLPredictionPanelProps {
@@ -61,6 +100,7 @@ interface MLPredictionPanelProps {
 
 export function MLPredictionPanel({ setNumber }: MLPredictionPanelProps) {
   const [prediction, setPrediction] = useState<GrowthPrediction | null>(null);
+  const [missingData, setMissingData] = useState<MissingDataResponse | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -69,6 +109,8 @@ export function MLPredictionPanel({ setNumber }: MLPredictionPanelProps) {
       .then((json) => {
         if (json.growth_pct != null) {
           setPrediction(json);
+        } else if (json.missing) {
+          setMissingData(json);
         }
       })
       .catch(() => {})
@@ -88,15 +130,20 @@ export function MLPredictionPanel({ setNumber }: MLPredictionPanelProps) {
     return (
       <div className="rounded-lg border border-border p-4">
         <h2 className="text-lg font-semibold">ML Growth Prediction</h2>
-        <p className="mt-2 text-sm text-muted-foreground">
-          No ML prediction available for this set.
-        </p>
+        {missingData && missingData.missing.length > 0 ? (
+          <MissingDataInfo data={missingData} />
+        ) : (
+          <p className="mt-2 text-sm text-muted-foreground">
+            No ML prediction available for this set.
+          </p>
+        )}
       </div>
     );
   }
 
-  const { growth_pct, confidence, tier } = prediction;
+  const { growth_pct, confidence, tier, drivers, shap_base } = prediction;
   const badge = confidenceBadge(confidence);
+  const hasShap = shap_base != null;
 
   return (
     <div className="rounded-lg border border-border p-4">
@@ -151,6 +198,66 @@ export function MLPredictionPanel({ setNumber }: MLPredictionPanelProps) {
         </div>
       </div>
 
+      {/* Key drivers */}
+      {drivers && drivers.length > 0 && (
+        <div className="mt-4">
+          <h3 className="text-sm font-medium text-muted-foreground">
+            {hasShap ? 'Key Drivers (SHAP)' : 'Top Feature Importances'}
+          </h3>
+          <div className="mt-2 space-y-1.5">
+            {drivers.map((d) => {
+              const maxImpact = Math.max(...drivers.map((x) => Math.abs(x.impact)));
+              const barWidth = maxImpact > 0 ? (Math.abs(d.impact) / maxImpact) * 100 : 0;
+              const isPositive = d.impact >= 0;
+              return (
+                <div key={d.feature} className="flex items-center gap-2 text-sm">
+                  <span className="w-44 shrink-0 truncate text-muted-foreground" title={d.feature}>
+                    {featureLabel(d.feature)}
+                  </span>
+                  <div className="flex h-4 flex-1 items-center">
+                    {hasShap ? (
+                      /* SHAP: directional bar from center */
+                      <div className="relative h-3 w-full">
+                        <div className="absolute top-0 left-1/2 h-full w-px bg-border" />
+                        {isPositive ? (
+                          <div
+                            className="absolute top-0 left-1/2 h-full rounded-r bg-emerald-500/70"
+                            style={{ width: `${barWidth / 2}%` }}
+                          />
+                        ) : (
+                          <div
+                            className="absolute top-0 h-full rounded-l bg-red-400/70"
+                            style={{ width: `${barWidth / 2}%`, right: '50%' }}
+                          />
+                        )}
+                      </div>
+                    ) : (
+                      /* Global importance: simple bar */
+                      <div className="h-3 w-full rounded bg-muted">
+                        <div
+                          className="h-full rounded bg-blue-500/60"
+                          style={{ width: `${barWidth}%` }}
+                        />
+                      </div>
+                    )}
+                  </div>
+                  <span className="w-14 shrink-0 text-right tabular-nums text-xs text-muted-foreground">
+                    {hasShap
+                      ? `${isPositive ? '+' : ''}${d.impact.toFixed(2)}`
+                      : `${(d.impact * 100).toFixed(0)}%`}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+          <p className="mt-1.5 text-xs text-muted-foreground">
+            {hasShap
+              ? 'SHAP values show how each feature pushed the prediction above or below the baseline.'
+              : 'Global feature importances show which features the model relies on most across all sets.'}
+          </p>
+        </div>
+      )}
+
       {/* Growth scale */}
       <div className="mt-4">
         <div className="flex justify-between text-xs text-muted-foreground">
@@ -179,6 +286,64 @@ export function MLPredictionPanel({ setNumber }: MLPredictionPanelProps) {
           />
         </div>
       </div>
+
+      {/* Tier upgrade hint for Tier 1 predictions */}
+      {tier === 1 && (
+        <p className="mt-3 text-xs text-muted-foreground">
+          Tier 1 only (intrinsic features). Add Keepa Amazon price history to unlock Tier 2 for higher confidence.
+        </p>
+      )}
+    </div>
+  );
+}
+
+
+function MissingDataInfo({ data }: { data: MissingDataResponse }) {
+  const { missing, has } = data;
+
+  const sources: { key: string; label: string; present: boolean }[] = [
+    { key: 'lego_item', label: 'Catalog entry', present: has.lego_item ?? false },
+    { key: 'brickeconomy', label: 'BrickEconomy snapshot', present: has.brickeconomy ?? false },
+    { key: 'rrp', label: 'RRP price', present: has.rrp ?? false },
+    { key: 'pieces', label: 'Piece count', present: has.pieces ?? false },
+    { key: 'rating', label: 'Rating', present: has.rating ?? false },
+    { key: 'reviews', label: 'Review count', present: has.reviews ?? false },
+    { key: 'keepa', label: 'Keepa Amazon data', present: has.keepa ?? false },
+  ];
+
+  // Only show sources that are relevant (skip sub-fields if parent is missing)
+  const visible = has.brickeconomy === false
+    ? sources.filter((s) => s.key === 'lego_item' || s.key === 'brickeconomy' || s.key === 'keepa')
+    : sources;
+
+  return (
+    <div className="mt-3 space-y-3">
+      <p className="text-sm text-muted-foreground">
+        Cannot generate a prediction. The following data is needed:
+      </p>
+
+      <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-sm sm:grid-cols-3">
+        {visible.map((s) => (
+          <div key={s.key} className="flex items-center gap-1.5">
+            {s.present ? (
+              <span className="inline-block h-2 w-2 rounded-full bg-emerald-500" />
+            ) : (
+              <span className="inline-block h-2 w-2 rounded-full bg-red-400" />
+            )}
+            <span className={s.present ? 'text-muted-foreground' : 'text-foreground font-medium'}>
+              {s.label}
+            </span>
+          </div>
+        ))}
+      </div>
+
+      {missing.length > 0 && (
+        <ul className="list-inside list-disc space-y-0.5 text-xs text-muted-foreground">
+          {missing.map((m) => (
+            <li key={m}>{m}</li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }

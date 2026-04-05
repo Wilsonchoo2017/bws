@@ -55,12 +55,13 @@ class GrowthScoringProvider:
             if p.prediction_interval:
                 entry["interval_lower"] = p.prediction_interval.lower
                 entry["interval_upper"] = p.prediction_interval.upper
-            if p.shap_base_value is not None:
-                entry["shap_base"] = p.shap_base_value
+            if p.feature_contributions:
                 entry["drivers"] = [
-                    {"feature": f, "impact": v}
+                    {"feature": f, "impact": round(float(v), 4)}
                     for f, v in p.feature_contributions[:5]
                 ]
+            if p.shap_base_value is not None:
+                entry["shap_base"] = p.shap_base_value
             result[p.set_number] = entry
 
         return result
