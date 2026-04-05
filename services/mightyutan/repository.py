@@ -6,6 +6,11 @@ Pure functions for CRUD operations on Mighty Utan data in DuckDB.
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 
+from db.pg.writes import (
+    _get_pg,
+    pg_insert_mightyutan_price_history,
+    pg_upsert_mightyutan_product,
+)
 from db.queries import get_next_id
 from services.items.repository import get_or_create_item, record_price
 from services.items.set_number import extract_set_number
@@ -70,6 +75,26 @@ def upsert_product(conn: "DuckDBPyConnection", product: MightyUtanProduct) -> in
             ],
         )
         product_id = existing[0]
+
+        # Dual-write to Postgres
+        pg = _get_pg(conn)
+        if pg is not None:
+            pg_upsert_mightyutan_product(
+                pg,
+                sku=product.sku,
+                name=product.name,
+                price_myr=product.price_myr,
+                original_price_myr=product.original_price_myr,
+                url=product.url,
+                image_url=product.image_url,
+                available=product.available,
+                quantity=product.quantity,
+                total_sold=product.total_sold,
+                rating=product.rating,
+                rating_count=product.rating_count,
+                last_scraped_at=now,
+                updated_at=now,
+            )
     else:
         product_id = get_next_id(conn, "mightyutan_products_id_seq")
         conn.execute(
@@ -99,6 +124,27 @@ def upsert_product(conn: "DuckDBPyConnection", product: MightyUtanProduct) -> in
                 now,
             ],
         )
+
+        # Dual-write to Postgres
+        pg = _get_pg(conn)
+        if pg is not None:
+            pg_upsert_mightyutan_product(
+                pg,
+                sku=product.sku,
+                name=product.name,
+                price_myr=product.price_myr,
+                original_price_myr=product.original_price_myr,
+                url=product.url,
+                image_url=product.image_url,
+                available=product.available,
+                quantity=product.quantity,
+                total_sold=product.total_sold,
+                rating=product.rating,
+                rating_count=product.rating_count,
+                last_scraped_at=now,
+                created_at=now,
+                updated_at=now,
+            )
 
     _create_price_history(conn, product.sku, product.price_myr, product.available)
 
@@ -147,6 +193,17 @@ def _create_price_history(
         """,
         [history_id, sku, price_myr, available, now],
     )
+
+    # Dual-write to Postgres
+    pg = _get_pg(conn)
+    if pg is not None:
+        pg_insert_mightyutan_price_history(
+            pg,
+            sku=sku,
+            price_myr=price_myr,
+            available=available,
+            scraped_at=now,
+        )
 
     return history_id
 

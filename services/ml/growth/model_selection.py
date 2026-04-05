@@ -7,6 +7,7 @@ Supports GradientBoostingRegressor and LightGBM as candidates.
 from __future__ import annotations
 
 import logging
+import warnings
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
@@ -144,8 +145,10 @@ def cross_validate_model(
         X_va_s = scaler.transform(X_va)
 
         model = model_factory()
-        model.fit(X_tr_s, y_tr_fit)
-        y_pred_raw = model.predict(X_va_s)
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore", message="X does not have valid feature names")
+            model.fit(X_tr_s, y_tr_fit)
+            y_pred_raw = model.predict(X_va_s)
 
         # Inverse transform predictions back to original scale for scoring
         if pt is not None:
@@ -242,8 +245,10 @@ def temporal_cross_validate(
         X_te_s = scaler.transform(X_te)
 
         model = model_factory()
-        model.fit(X_tr_s, y_tr_fit)
-        y_pred_raw = model.predict(X_te_s)
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore", message="X does not have valid feature names")
+            model.fit(X_tr_s, y_tr_fit)
+            y_pred_raw = model.predict(X_te_s)
 
         if pt is not None:
             y_pred = pt.inverse_transform(y_pred_raw.reshape(-1, 1)).ravel()

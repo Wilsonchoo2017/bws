@@ -7,6 +7,15 @@ import json
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 
+from db.pg.writes import (
+    _get_pg,
+    pg_insert_bricklink_price_history,
+    pg_insert_minifig_price_history,
+    pg_upsert_bricklink_item,
+    pg_upsert_bricklink_monthly_sales,
+    pg_upsert_minifigure,
+    pg_upsert_set_minifigure,
+)
 from db.queries import get_next_id, parse_timestamp
 from services.items.repository import get_or_create_item, record_price
 from bws_types.models import (
@@ -202,6 +211,26 @@ def upsert_item(conn: "DuckDBPyConnection", data: BricklinkData) -> int:
                 data.item_id,
             ],
         )
+
+        # Dual-write to Postgres
+        pg = _get_pg(conn)
+        if pg is not None:
+            pg_upsert_bricklink_item(
+                pg,
+                item_id=data.item_id,
+                title=data.title,
+                weight=data.weight,
+                year_released=data.year_released,
+                image_url=data.image_url,
+                parts_count=data.parts_count,
+                theme=data.theme,
+                minifig_count=data.minifig_count,
+                dimensions=data.dimensions,
+                has_instructions=data.has_instructions,
+                last_scraped_at=now,
+                updated_at=now,
+            )
+
         return existing.id
 
     # Insert new item
@@ -239,6 +268,30 @@ def upsert_item(conn: "DuckDBPyConnection", data: BricklinkData) -> int:
             now,
         ],
     )
+
+    # Dual-write to Postgres
+    pg = _get_pg(conn)
+    if pg is not None:
+        pg_upsert_bricklink_item(
+            pg,
+            item_id=data.item_id,
+            item_type=data.item_type,
+            title=data.title,
+            weight=data.weight,
+            year_released=data.year_released,
+            image_url=data.image_url,
+            parts_count=data.parts_count,
+            theme=data.theme,
+            minifig_count=data.minifig_count,
+            dimensions=data.dimensions,
+            has_instructions=data.has_instructions,
+            watch_status="active",
+            scrape_interval_days=scrape_interval,
+            last_scraped_at=now,
+            next_scrape_at=next_scrape,
+            created_at=now,
+            updated_at=now,
+        )
 
     # Write to unified lego_items table
     set_number = data.item_id.split("-")[0]  # "75192-1" -> "75192"
@@ -329,6 +382,19 @@ def create_price_history(
         ],
     )
 
+    # Dual-write to Postgres
+    pg = _get_pg(conn)
+    if pg is not None:
+        pg_insert_bricklink_price_history(
+            pg,
+            item_id=item_id,
+            six_month_new=_pricing_box_to_json(data.six_month_new),
+            six_month_used=_pricing_box_to_json(data.six_month_used),
+            current_new=_pricing_box_to_json(data.current_new),
+            current_used=_pricing_box_to_json(data.current_used),
+            scraped_at=now,
+        )
+
     # Write to unified price_records table
     set_number = item_id.split("-")[0]
     for box, condition in [
@@ -377,31 +443,55 @@ def upsert_monthly_sales(
             now,
         ]
 
-        conn.execute(
-            """INSERT INTO bricklink_monthly_sales (
-                   id, item_id, year, month, condition, times_sold,
-                   total_quantity, min_price, max_price, avg_price,
-                   currency, scraped_at
-               ) VALUES (
-                   nextval('bricklink_monthly_sales_id_seq'),
-                   ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
-               )
-               ON CONFLICT (item_id, year, month, condition) DO UPDATE SET
-                   times_sold = EXCLUDED.times_sold,
-                   total_quantity = EXCLUDED.total_quantity,
-                   min_price = EXCLUDED.min_price,
-                   max_price = EXCLUDED.max_price,
-                   avg_price = EXCLUDED.avg_price,
-                   currency = EXCLUDED.currency,
-                   scraped_at = EXCLUDED.scraped_at""",
-            [
-                item_id,
-                sale.year,
-                sale.month,
-                sale.condition.value,
-                *params,
-            ],
-        )
+        # Check-then-insert/update to avoid two failure modes:
+        #  1. nextval producing a duplicate PK after WAL recovery
+        #  2. Unqualified sequence name not resolving across schemas
+        exists = conn.execute(
+            "SELECT id FROM bricklink_monthly_sales "
+            "WHERE item_id = ? AND year = ? AND month = ? AND condition = ?",
+            [item_id, sale.year, sale.month, sale.condition.value],
+        ).fetchone()
+
+        if exists:
+            conn.execute(
+                """UPDATE bricklink_monthly_sales SET
+                       times_sold = ?, total_quantity = ?,
+                       min_price = ?, max_price = ?, avg_price = ?,
+                       currency = ?, scraped_at = ?
+                   WHERE id = ?""",
+                [*params, exists[0]],
+            )
+        else:
+            conn.execute(
+                """INSERT INTO bricklink_monthly_sales (
+                       id, item_id, year, month, condition, times_sold,
+                       total_quantity, min_price, max_price, avg_price,
+                       currency, scraped_at
+                   ) VALUES (
+                       nextval('bricklink_monthly_sales_id_seq'),
+                       ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+                   )""",
+                [item_id, sale.year, sale.month, sale.condition.value, *params],
+            )
+
+        # Dual-write to Postgres
+        pg = _get_pg(conn)
+        if pg is not None:
+            pg_upsert_bricklink_monthly_sales(
+                pg,
+                item_id=item_id,
+                year=sale.year,
+                month=sale.month,
+                condition=sale.condition.value,
+                times_sold=sale.times_sold,
+                total_quantity=sale.total_quantity,
+                min_price=sale.min_price.amount if sale.min_price else None,
+                max_price=sale.max_price.amount if sale.max_price else None,
+                avg_price=sale.avg_price.amount if sale.avg_price else None,
+                currency=sale.currency,
+                scraped_at=now,
+            )
+
         count += 1
 
     return count
@@ -561,6 +651,20 @@ def upsert_minifigure(
             """,
             [data.name, data.image_url, data.year_released, now, now, data.minifig_id],
         )
+
+        # Dual-write to Postgres
+        pg = _get_pg(conn)
+        if pg is not None:
+            pg_upsert_minifigure(
+                pg,
+                minifig_id=data.minifig_id,
+                name=data.name,
+                image_url=data.image_url,
+                year_released=data.year_released,
+                last_scraped_at=now,
+                updated_at=now,
+            )
+
         return existing[0]
 
     minifig_db_id = get_next_id(conn, "minifigures_id_seq")
@@ -573,6 +677,21 @@ def upsert_minifigure(
         [minifig_db_id, data.minifig_id, data.name, data.image_url,
          data.year_released, now, now, now],
     )
+
+    # Dual-write to Postgres
+    pg = _get_pg(conn)
+    if pg is not None:
+        pg_upsert_minifigure(
+            pg,
+            minifig_id=data.minifig_id,
+            name=data.name,
+            image_url=data.image_url,
+            year_released=data.year_released,
+            last_scraped_at=now,
+            created_at=now,
+            updated_at=now,
+        )
+
     return minifig_db_id
 
 
@@ -618,6 +737,17 @@ def upsert_set_minifigures(
                 """,
                 [sm_id, set_item_id, mf.minifig_id, mf.quantity, now],
             )
+
+        # Dual-write to Postgres
+        pg = _get_pg(conn)
+        if pg is not None:
+            pg_upsert_set_minifigure(
+                pg,
+                set_item_id=set_item_id,
+                minifig_id=mf.minifig_id,
+                quantity=mf.quantity,
+            )
+
         count += 1
 
     return count
@@ -658,6 +788,20 @@ def create_minifig_price_history(
             now,
         ],
     )
+
+    # Dual-write to Postgres
+    pg = _get_pg(conn)
+    if pg is not None:
+        pg_insert_minifig_price_history(
+            pg,
+            minifig_id=minifig_id,
+            six_month_new=_pricing_box_to_json(data.six_month_new),
+            six_month_used=_pricing_box_to_json(data.six_month_used),
+            current_new=_pricing_box_to_json(data.current_new),
+            current_used=_pricing_box_to_json(data.current_used),
+            scraped_at=now,
+        )
+
     return history_id
 
 
@@ -849,4 +993,15 @@ def update_watch_status(
         """,
         [status.value, now, item_id],
     )
+
+    # Dual-write to Postgres
+    pg = _get_pg(conn)
+    if pg is not None:
+        pg_upsert_bricklink_item(
+            pg,
+            item_id=item_id,
+            watch_status=status.value,
+            updated_at=now,
+        )
+
     return result.rowcount > 0 if hasattr(result, "rowcount") else True

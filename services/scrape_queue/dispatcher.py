@@ -195,6 +195,8 @@ async def _worker_loop(
                             "[%s] Cooldown active after timeout, sleeping %.0fs",
                             worker_id, remaining,
                         )
+                        from services.notifications.scraper_alerts import alert_source_cooldown
+                        alert_source_cooldown("google_trends", remaining)
                         try:
                             await asyncio.sleep(remaining)
                         except asyncio.CancelledError:
@@ -208,6 +210,8 @@ async def _worker_loop(
         if isinstance(result, float) and result > 0:
             # Source in cooldown -- sleep until available
             logger.info("[%s] Source in cooldown, sleeping %.0fs", worker_id, result)
+            from services.notifications.scraper_alerts import alert_source_cooldown
+            alert_source_cooldown(cfg.task_type.value, result)
             try:
                 await asyncio.sleep(result)
             except asyncio.CancelledError:

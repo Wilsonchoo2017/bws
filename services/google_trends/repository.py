@@ -4,6 +4,7 @@ import json
 import logging
 from typing import TYPE_CHECKING
 
+from db.pg.writes import _get_pg, pg_insert_gtrends_snapshot
 from services.google_trends.types import TrendsData, TrendsDataPoint
 
 if TYPE_CHECKING:
@@ -51,6 +52,24 @@ def save_trends_snapshot(
             data.scraped_at,
         ],
     )
+
+    # Dual-write to Postgres
+    pg = _get_pg(conn)
+    if pg is not None:
+        pg_insert_gtrends_snapshot(
+            pg,
+            set_number=data.set_number,
+            keyword=data.keyword,
+            search_property=data.search_property,
+            geo=data.geo,
+            timeframe_start=data.timeframe_start,
+            timeframe_end=data.timeframe_end,
+            interest_json=_interest_to_json(data.interest_over_time),
+            peak_value=data.peak_value,
+            peak_date=data.peak_date,
+            average_value=data.average_value,
+            scraped_at=data.scraped_at,
+        )
 
     logger.info(
         "Saved Google Trends snapshot id=%d for %s (%d points)",

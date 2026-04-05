@@ -43,6 +43,9 @@ Thumbs.db
 # Logs
 logs/
 
+# ML model artifacts
+models/
+
 # Database
 *.duckdb
 *.duckdb.wal

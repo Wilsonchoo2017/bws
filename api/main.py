@@ -15,15 +15,14 @@ from api.routes import enrichment, images, items, ml, portfolio, scrape
 from api.worker import run_worker
 from services.enrichment.scheduler import run_enrichment_sweep
 from services.images.sweep import run_image_download_sweep
+from services.keepa.scheduler import run_keepa_sweep
 from services.scrape_queue.dispatcher import recover_scrape_queue, run_scrape_dispatcher, shutdown_scrape_dispatcher
 from services.shopee.saturation_scheduler import run_saturation_sweep
 
 _LOG_DIR = Path(__file__).resolve().parent.parent / "logs"
-_LOG_DIR.mkdir(exist_ok=True)
-
 _LOG_FORMAT = "%(asctime)s [%(name)s] %(levelname)s: %(message)s"
 
-# Colored console handler
+# Colored console handler (safe at import time -- console only)
 _color_handler = colorlog.StreamHandler()
 _color_handler.setFormatter(colorlog.ColoredFormatter(
     "%(asctime)s %(log_color)s[%(name)s] %(levelname)s%(reset)s: %(message)s",
@@ -42,51 +41,86 @@ logging.basicConfig(
     handlers=[_color_handler],
 )
 
-# Persist logs to rotating file (10 MB per file, keep 5 backups)
-_file_handler = RotatingFileHandler(
-    _LOG_DIR / "bws.log",
-    maxBytes=10 * 1024 * 1024,
-    backupCount=5,
-    encoding="utf-8",
-)
-_file_handler.setLevel(logging.WARNING)
-_file_handler.setFormatter(logging.Formatter(_LOG_FORMAT))
-logging.getLogger().addHandler(_file_handler)
-
-# Bricklink and scrape-queue logs at INFO level to file (track success/failure)
-_scrape_file_handler = RotatingFileHandler(
-    _LOG_DIR / "bws.log",
-    maxBytes=10 * 1024 * 1024,
-    backupCount=5,
-    encoding="utf-8",
-)
-_scrape_file_handler.setLevel(logging.INFO)
-_scrape_file_handler.setFormatter(logging.Formatter(_LOG_FORMAT))
-for _logger_name in ("bws.bricklink", "bws.scrape_queue.dispatcher", "bws.scrape_queue.executor"):
-    _lg = logging.getLogger(_logger_name)
-    _lg.addHandler(_scrape_file_handler)
-    _lg.addHandler(_color_handler)
-    _lg.propagate = False
-
 logger = logging.getLogger("bws.api")
+
+_file_logging_configured = False
+
+
+def _setup_file_logging() -> None:
+    """Attach file handlers for production logging.
+
+    Called once during app lifespan startup so that ``import api.main``
+    in tests never writes to the production log file.
+    """
+    global _file_logging_configured
+    if _file_logging_configured:
+        return
+    _file_logging_configured = True
+
+    _LOG_DIR.mkdir(exist_ok=True)
+
+    # Persist logs to rotating file (10 MB per file, keep 5 backups)
+    file_handler = RotatingFileHandler(
+        _LOG_DIR / "bws.log",
+        maxBytes=10 * 1024 * 1024,
+        backupCount=5,
+        encoding="utf-8",
+    )
+    file_handler.setLevel(logging.WARNING)
+    file_handler.setFormatter(logging.Formatter(_LOG_FORMAT))
+    logging.getLogger().addHandler(file_handler)
+
+    # Bricklink and scrape-queue logs at INFO level to file (track success/failure)
+    scrape_file_handler = RotatingFileHandler(
+        _LOG_DIR / "bws.log",
+        maxBytes=10 * 1024 * 1024,
+        backupCount=5,
+        encoding="utf-8",
+    )
+    scrape_file_handler.setLevel(logging.INFO)
+    scrape_file_handler.setFormatter(logging.Formatter(_LOG_FORMAT))
+    for logger_name in ("bws.bricklink", "bws.scrape_queue.dispatcher", "bws.scrape_queue.executor"):
+        lg = logging.getLogger(logger_name)
+        lg.addHandler(scrape_file_handler)
+        lg.addHandler(_color_handler)
+        lg.propagate = False
+
+
+def _sync_warm_growth_models() -> None:
+    """Load or train growth models (CPU-heavy) -- runs in background thread."""
+    from db.connection import get_connection
+    from services.scoring.growth_provider import growth_provider
+
+    conn = get_connection()
+    try:
+        growth_provider.warm_cache(conn)
+    finally:
+        conn.close()
+
+
+def _sync_prediction_snapshot() -> int | None:
+    """Run prediction snapshot (CPU-heavy) -- called from executor."""
+    from db.connection import get_connection
+    from services.ml.prediction_tracker import backfill_actuals, save_prediction_snapshot
+
+    conn = get_connection()
+    try:
+        n = save_prediction_snapshot(conn)
+        backfill_actuals(conn)
+        return n
+    finally:
+        conn.close()
 
 
 async def _run_daily_prediction_snapshot() -> None:
     """Save ML prediction snapshot once per day on startup, then every 24h."""
     await asyncio.sleep(30)  # Wait for DB to settle after startup
+    loop = asyncio.get_running_loop()
     while True:
         try:
-            from db.connection import get_connection
-            from services.ml.prediction_tracker import backfill_actuals, save_prediction_snapshot
-
-            conn = get_connection()
-            try:
-                n = save_prediction_snapshot(conn)
-                backfill_actuals(conn)
-                if n > 0:
-                    logger.info("Daily prediction snapshot: saved %d predictions", n)
-            finally:
-                conn.close()
+            n = await loop.run_in_executor(None, _sync_prediction_snapshot)
+            if n and n > 0:
+                logger.info("Daily prediction snapshot: saved %d predictions", n)
         except Exception:
             logger.warning("Prediction snapshot failed", exc_info=True)
 
@@ -96,6 +130,8 @@ async def _run_daily_prediction_snapshot() -> None:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Start the background worker and enrichment sweep on app startup."""
+    _setup_file_logging()
+
     from api.jobs import job_manager
 
     logger.info("Starting BWS API...")
@@ -118,7 +154,20 @@ async def lifespan(app: FastAPI):
     image_task = asyncio.create_task(run_image_download_sweep())
     scrape_dispatcher_task = asyncio.create_task(run_scrape_dispatcher())
     prediction_task = asyncio.create_task(_run_daily_prediction_snapshot())
-    logger.info("Background worker, enrichment/saturation/image sweeps + scrape dispatcher + prediction tracker started")
+    keepa_task = asyncio.create_task(run_keepa_sweep(job_manager))
+
+    # Eagerly warm growth models in a background thread so scraping isn't
+    # blocked when the first score_all() call arrives.
+    async def _warm_models() -> None:
+        try:
+            await asyncio.to_thread(_sync_warm_growth_models)
+            logger.info("Growth model cache warmed")
+        except Exception:
+            logger.warning("Growth model warmup failed (will retry on first use)", exc_info=True)
+
+    asyncio.create_task(_warm_models())
+
+    logger.info("Background worker, enrichment/saturation/image/keepa sweeps + scrape dispatcher + prediction tracker started")
     yield
     logger.info("BWS API shutting down...")
     # Persist cooldown state before tearing down workers
@@ -128,7 +177,7 @@ async def lifespan(app: FastAPI):
     except Exception:
         logger.warning("Failed to save cooldown state", exc_info=True)
     # Everything inside _shutdown has a hard 10s ceiling
-    all_tasks = [worker_task, sweep_task, saturation_task, image_task, scrape_dispatcher_task]
+    all_tasks = [worker_task, sweep_task, saturation_task, image_task, scrape_dispatcher_task, keepa_task]
     try:
         await asyncio.wait_for(_shutdown(all_tasks), timeout=10)
     except (asyncio.TimeoutError, asyncio.CancelledError):

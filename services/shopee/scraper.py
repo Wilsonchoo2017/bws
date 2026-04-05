@@ -123,7 +123,10 @@ async def search_shopee(
             await human_delay(min_ms=2_000, max_ms=4_000)
 
             # Wait for results to load
-            await page.wait_for_load_state("networkidle")
+            try:
+                await page.wait_for_load_state("domcontentloaded", timeout=15_000)
+            except Exception:
+                pass
             await dismiss_popups(page)
 
             # Parse product cards
@@ -169,7 +172,7 @@ async def scrape_shop_page(
             setup_dialog_handler(page)
 
             # Navigate directly to the target URL
-            await page.goto(url, wait_until="networkidle")
+            await page.goto(url, wait_until="domcontentloaded", timeout=30_000)
             await human_delay(min_ms=2_000, max_ms=4_000)
             await dismiss_popups_loop(page, interval_ms=2_000, max_rounds=5)
             await select_english(page)
@@ -185,7 +188,7 @@ async def scrape_shop_page(
                             error="Login failed or timed out",
                         )
                     # After login, go to the actual target
-                    await page.goto(url, wait_until="networkidle")
+                    await page.goto(url, wait_until="domcontentloaded", timeout=30_000)
                     await human_delay(min_ms=2_000, max_ms=3_000)
                     await dismiss_popups_loop(page, interval_ms=2_000, max_rounds=3)
 
@@ -404,7 +407,10 @@ async def _click_next_page(page) -> bool:
     await page.evaluate("el => el.removeAttribute('data-bws-next')", el)
     await random_click_element(el)
     await human_delay(min_ms=2_000, max_ms=4_000)
-    await page.wait_for_load_state("networkidle")
+    try:
+        await page.wait_for_load_state("domcontentloaded", timeout=15_000)
+    except Exception:
+        pass  # Page may already be loaded
     await page.evaluate("window.scrollTo(0, 0)")
     await human_delay(min_ms=500, max_ms=1_000)
     return True

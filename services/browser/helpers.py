@@ -48,6 +48,21 @@ async def human_delay(
     min_ms: int = 800,
     max_ms: int = 2500,
 ) -> None:
-    """Random delay to simulate human timing."""
-    delay_s = (min_ms + secrets.randbelow(max_ms - min_ms + 1)) / 1000.0
-    await asyncio.sleep(delay_s)
+    """Random delay to simulate human timing.
+
+    Uses a weighted distribution that clusters delays toward the lower
+    end of the range (more natural than uniform) with occasional longer
+    pauses. ~10% chance of an extra "distraction" delay.
+    """
+    spread = max_ms - min_ms
+    # Take the minimum of two random samples to skew toward the lower end
+    # (humans are usually quick with occasional slower moments)
+    r1 = secrets.randbelow(spread + 1)
+    r2 = secrets.randbelow(spread + 1)
+    base_ms = min_ms + min(r1, r2)
+
+    # ~10% chance of a longer "distraction" pause (checking phone, etc.)
+    if secrets.randbelow(100) < 10:
+        base_ms += secrets.randbelow(spread // 2 + 1)
+
+    await asyncio.sleep(base_ms / 1000.0)

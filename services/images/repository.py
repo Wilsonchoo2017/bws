@@ -4,6 +4,13 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from db.pg.writes import (
+    _get_pg,
+    pg_mark_image_downloaded,
+    pg_mark_image_failed,
+    pg_upsert_image_asset,
+)
+
 if TYPE_CHECKING:
     from duckdb import DuckDBPyConnection
 
@@ -66,6 +73,17 @@ def upsert_asset(
         [asset_type, item_id, source_url, local_path],
     )
 
+    # Dual-write to Postgres
+    pg = _get_pg(conn)
+    if pg is not None:
+        pg_upsert_image_asset(
+            pg,
+            asset_type=asset_type,
+            item_id=item_id,
+            source_url=source_url,
+            local_path=local_path,
+        )
+
 
 def mark_downloaded(
     conn: "DuckDBPyConnection",
@@ -88,6 +106,19 @@ def mark_downloaded(
         [file_size_bytes, content_type, asset_type, item_id],
     )
 
+    # Dual-write to Postgres
+    pg = _get_pg(conn)
+    if pg is not None:
+        pg_mark_image_downloaded(
+            pg,
+            asset_type=asset_type,
+            item_id=item_id,
+            status="downloaded",
+            file_size_bytes=file_size_bytes,
+            content_type=content_type,
+            error=None,
+        )
+
 
 def mark_failed(
     conn: "DuckDBPyConnection",
@@ -106,6 +137,17 @@ def mark_failed(
         """,
         [error, asset_type, item_id],
     )
+
+    # Dual-write to Postgres
+    pg = _get_pg(conn)
+    if pg is not None:
+        pg_mark_image_failed(
+            pg,
+            asset_type=asset_type,
+            item_id=item_id,
+            status="failed",
+            error=error,
+        )
 
 
 def get_download_stats(conn: "DuckDBPyConnection") -> dict:

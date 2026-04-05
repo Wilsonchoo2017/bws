@@ -142,6 +142,25 @@ def alert_cloudflare_blocked(
     ))
 
 
+def alert_source_cooldown(source: str, cooldown_seconds: float) -> None:
+    """Alert when any scrape-queue source enters cooldown."""
+    key = f"source_cooldown:{source}"
+    if not _should_send(key):
+        return
+
+    minutes = cooldown_seconds / 60
+    send_notification(NtfyMessage(
+        title=f"{source}: Cooldown ({minutes:.0f}m)",
+        message=(
+            f"{source} entered cooldown.\n"
+            f"Sleeping for {minutes:.0f} min before retrying."
+        ),
+        priority=3,  # default
+        tags=("hourglass",),
+        topic=NTFY_TOPIC_ALERTS,
+    ))
+
+
 def alert_keepa_cooldown(
     set_number: str,
     failure_count: int,

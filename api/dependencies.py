@@ -3,7 +3,9 @@
 import threading
 from typing import TYPE_CHECKING, Generator
 
+from config.settings import PG_ENABLED
 from db.connection import get_connection
+from db.pg.dual_writer import DualWriter
 from db.schema import init_schema
 
 if TYPE_CHECKING:
@@ -15,7 +17,7 @@ _schema_lock = threading.Lock()
 
 def _ensure_schema(conn: "DuckDBPyConnection") -> None:
     """Run init_schema exactly once per process."""
-    global _schema_initialized
+    global _schema_initialized  # noqa: PLW0603
     if _schema_initialized:
         return
     with _schema_lock:
@@ -25,11 +27,26 @@ def _ensure_schema(conn: "DuckDBPyConnection") -> None:
         _schema_initialized = True
 
 
-def get_db() -> Generator["DuckDBPyConnection", None, None]:
-    """Yield an initialized DuckDB connection, closing it on exit."""
-    conn = get_connection()
+def get_db() -> Generator[DualWriter, None, None]:
+    """Yield a DualWriter wrapping DuckDB + optional Postgres session."""
+    duck = get_connection()
+    _ensure_schema(duck)
+
+    pg_session = None
+    if PG_ENABLED:
+        from db.pg.engine import get_session_factory
+
+        pg_session = get_session_factory()()
+
+    dw = DualWriter(duck, pg_session)
     try:
-        _ensure_schema(conn)
-        yield conn
+        yield dw
     finally:
-        conn.close()
+        if pg_session is not None:
+            try:
+                pg_session.commit()
+            except Exception:
+                pg_session.rollback()
+            finally:
+                pg_session.close()
+        duck.close()

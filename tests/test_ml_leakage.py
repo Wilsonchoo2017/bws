@@ -57,21 +57,21 @@ class TestCircularFeatureExclusion:
         assert len(value_features) >= 4, f"Too few value features flagged: {value_features}"
 
     def test_tier3_excludes_circular(self):
-        """Verify _train_tier3 exclude_cols includes CIRCULAR_FEATURES."""
+        """Verify _prepare_tier3_features excludes CIRCULAR_FEATURES."""
         import inspect
-        from services.ml.growth.training import _train_tier3
+        from services.ml.growth.training import _prepare_tier3_features
 
-        source = inspect.getsource(_train_tier3)
+        source = inspect.getsource(_prepare_tier3_features)
         assert "CIRCULAR_FEATURES" in source, (
-            "_train_tier3 must reference CIRCULAR_FEATURES to exclude them"
+            "_prepare_tier3_features must reference CIRCULAR_FEATURES to exclude them"
         )
 
     def test_no_circular_in_tier3_feature_names(self):
         """If we can train Tier 3, verify no circular features appear."""
         # This is a structural test -- checks the exclude_cols pattern
-        from services.ml.growth.training import _train_tier3
+        from services.ml.growth.training import _prepare_tier3_features
 
-        source = __import__("inspect").getsource(_train_tier3)
+        source = __import__("inspect").getsource(_prepare_tier3_features)
         assert "| CIRCULAR_FEATURES" in source or "CIRCULAR_FEATURES" in source
 
 
@@ -233,13 +233,13 @@ class TestOOSValidation:
     """Ensure training reports honest out-of-sample metrics."""
 
     def test_tier3_reports_cv_metrics(self):
-        """_train_tier3 must report cross-validated metrics (not just train R2)."""
+        """Tier model training must use cross-validated metrics (not just train R2)."""
         import inspect
-        from services.ml.growth.training import _train_tier3
+        from services.ml.growth.training import _build_tier_model
 
-        source = inspect.getsource(_train_tier3)
-        assert "cv_r2" in source or "cv3" in source or "_select_and_train" in source, (
-            "_train_tier3 must compute cross-validated R2 via _select_and_train or directly"
+        source = inspect.getsource(_build_tier_model)
+        assert "_select_and_train" in source, (
+            "_build_tier_model must use _select_and_train for cross-validated training"
         )
 
     def test_ensemble_uses_cross_validation(self):

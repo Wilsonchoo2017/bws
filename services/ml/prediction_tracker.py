@@ -16,6 +16,8 @@ from typing import TYPE_CHECKING
 
 import pandas as pd
 
+from db.pg.writes import _get_pg, pg_backfill_ml_actuals, pg_insert_ml_prediction_snapshot
+
 if TYPE_CHECKING:
     from duckdb import DuckDBPyConnection
 
@@ -54,6 +56,20 @@ def save_prediction_snapshot(conn: DuckDBPyConnection) -> int:
                 [today, pred.set_number, pred.predicted_growth_pct,
                  pred.confidence, pred.tier, model_version],
             )
+
+            # Dual-write to Postgres
+            pg = _get_pg(conn)
+            if pg is not None:
+                pg_insert_ml_prediction_snapshot(
+                    pg,
+                    snapshot_date=today,
+                    set_number=pred.set_number,
+                    predicted_growth_pct=pred.predicted_growth_pct,
+                    confidence=pred.confidence,
+                    tier=pred.tier,
+                    model_version=model_version,
+                )
+
             saved += 1
         except Exception:
             logger.debug("Skipped %s (already exists or error)", pred.set_number)
@@ -79,6 +95,24 @@ def backfill_actuals(conn: DuckDBPyConnection) -> int:
           AND ps.actual_growth_pct IS NULL
           AND be.annual_growth_pct IS NOT NULL
     """).fetchone()
+
+    # Dual-write to Postgres: backfill each row that now has actuals
+    pg = _get_pg(conn)
+    if pg is not None:
+        rows_with_actuals = conn.execute("""
+            SELECT snapshot_date, set_number, actual_growth_pct, actual_measured_at
+            FROM ml_prediction_snapshots
+            WHERE actual_growth_pct IS NOT NULL
+              AND actual_measured_at = CURRENT_DATE
+        """).fetchall()
+        for row in rows_with_actuals:
+            pg_backfill_ml_actuals(
+                pg,
+                snapshot_date=row[0],
+                set_number=row[1],
+                actual_growth_pct=row[2],
+                actual_measured_at=row[3],
+            )
 
     # DuckDB doesn't return update count easily, query instead
     n = conn.execute("""

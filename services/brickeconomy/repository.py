@@ -4,6 +4,7 @@ import json
 import logging
 from typing import TYPE_CHECKING
 
+from db.pg.writes import _get_pg, pg_insert_be_snapshot
 from services.brickeconomy.parser import BrickeconomySnapshot
 
 if TYPE_CHECKING:
@@ -106,6 +107,57 @@ def save_snapshot(conn: "DuckDBPyConnection", snapshot: BrickeconomySnapshot) ->
             json.dumps([list(row) for row in snapshot.candlestick]),
         ],
     )
+
+    # Dual-write to Postgres
+    pg = _get_pg(conn)
+    if pg is not None:
+        pg_insert_be_snapshot(
+            pg,
+            set_number=snapshot.set_number,
+            scraped_at=snapshot.scraped_at,
+            title=snapshot.title,
+            theme=snapshot.theme,
+            subtheme=snapshot.subtheme,
+            year_released=snapshot.year_released,
+            year_retired=snapshot.year_retired,
+            release_date=snapshot.release_date,
+            retired_date=snapshot.retired_date,
+            pieces=snapshot.pieces,
+            minifigs=snapshot.minifigs,
+            minifig_value_cents=snapshot.minifig_value_cents,
+            exclusive_minifigs=snapshot.exclusive_minifigs,
+            availability=snapshot.availability,
+            retiring_soon=snapshot.retiring_soon,
+            image_url=snapshot.image_url,
+            brickeconomy_url=snapshot.brickeconomy_url,
+            upc=snapshot.upc,
+            ean=snapshot.ean,
+            designer=snapshot.designer,
+            rrp_usd_cents=snapshot.rrp_usd_cents,
+            rrp_gbp_cents=snapshot.rrp_gbp_cents,
+            rrp_eur_cents=snapshot.rrp_eur_cents,
+            rrp_cad_cents=snapshot.rrp_cad_cents,
+            rrp_aud_cents=snapshot.rrp_aud_cents,
+            value_new_cents=snapshot.value_new_cents,
+            value_used_cents=snapshot.value_used_cents,
+            used_value_low_cents=snapshot.used_value_low_cents,
+            used_value_high_cents=snapshot.used_value_high_cents,
+            annual_growth_pct=snapshot.annual_growth_pct,
+            total_growth_pct=snapshot.total_growth_pct,
+            rolling_growth_pct=snapshot.rolling_growth_pct,
+            growth_90d_pct=snapshot.growth_90d_pct,
+            rating_value=snapshot.rating_value,
+            review_count=snapshot.review_count,
+            theme_rank=snapshot.theme_rank,
+            subtheme_avg_growth_pct=snapshot.subtheme_avg_growth_pct,
+            future_estimate_cents=snapshot.future_estimate_cents,
+            future_estimate_date=snapshot.future_estimate_date,
+            distribution_mean_cents=snapshot.distribution_mean_cents,
+            distribution_stddev_cents=snapshot.distribution_stddev_cents,
+            value_chart_json=[list(row) for row in snapshot.value_chart],
+            sales_trend_json=[list(row) for row in snapshot.sales_trend],
+            candlestick_json=[list(row) for row in snapshot.candlestick],
+        )
 
     logger.info(
         "Saved BrickEconomy snapshot id=%d for %s", row_id, snapshot.set_number

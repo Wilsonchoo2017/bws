@@ -6,14 +6,26 @@ Rate limiting, user agents, and other scraper configuration.
 
 import asyncio
 import logging
+import os
 import secrets
 import time
 from dataclasses import dataclass
 from pathlib import Path
 
+from dotenv import load_dotenv
+
+load_dotenv()
+
 
 # Database path (isolated from MoonBridge)
 BWS_DB_PATH = Path.home() / ".bws" / "bws.duckdb"
+
+# PostgreSQL configuration
+POSTGRES_URL = os.environ.get(
+    "BWS_POSTGRES_URL",
+    "postgresql+psycopg2://bws:bws@localhost:5432/bws",
+)
+PG_ENABLED = os.environ.get("BWS_PG_ENABLED", "false").lower() == "true"
 
 # Local image storage
 BWS_IMAGES_PATH = Path.home() / ".bws" / "images"
@@ -235,6 +247,7 @@ class HourlyRateLimiter:
     def __init__(self, max_per_hour: int, source_name: str = "BrickLink") -> None:
         self._max_per_hour = max_per_hour
         self._source_name = source_name
+        self._logger = logging.getLogger(f"bws.ratelimit.{source_name.lower()}")
         self._timestamps: list[float] = []
         self._lock: asyncio.Lock | None = None
         self._blocked_until: float = 0.0
@@ -271,7 +284,7 @@ class HourlyRateLimiter:
         self._consecutive_failures += 1
         self._was_blocked = True
         self._scraping_since = 0.0
-        logging.getLogger("bws.bricklink").warning(
+        self._logger.warning(
             "Quota exceeded (level %d) — pausing %s requests for %.0f min",
             self._escalation_level, self._source_name, cooldown / 60,
         )
@@ -287,7 +300,7 @@ class HourlyRateLimiter:
         self._consecutive_failures += 1
         self._was_blocked = True
         self._scraping_since = 0.0
-        logging.getLogger("bws.bricklink").warning(
+        self._logger.warning(
             "403 Forbidden / IP banned (level %d) — pausing %s requests for %.0f min",
             self._escalation_level, self._source_name, cooldown / 60,
         )
@@ -303,7 +316,7 @@ class HourlyRateLimiter:
         self._consecutive_failures += 1
         self._was_blocked = True
         self._scraping_since = 0.0
-        logging.getLogger("bws.bricklink").warning(
+        self._logger.warning(
             "Silent ban detected (consecutive 0-field responses, level %d) "
             "— pausing %s requests for %.0f min",
             self._escalation_level, self._source_name, cooldown / 60,
@@ -374,7 +387,7 @@ class HourlyRateLimiter:
         elapsed = now - self._scraping_since
         if elapsed >= self.MAX_CONTINUOUS_SCRAPE_SECONDS:
             self._scraping_since = 0.0  # will reset on next acquire
-            logging.getLogger("bws.bricklink").warning(
+            self._logger.warning(
                 "Continuous scraping for %.0f min — resting for %.0f min",
                 elapsed / 60, self.REST_PERIOD_SECONDS / 60,
             )
@@ -394,23 +407,33 @@ class HourlyRateLimiter:
             # Wait out quota cooldown if active
             if now < self._blocked_until:
                 wait = self._blocked_until - now
-                logging.getLogger("bws.bricklink").info(
-                    "BrickLink cooldown: %.0f min remaining", wait / 60,
+                self._logger.info(
+                    "%s cooldown active: sleeping %.0f min", self._source_name, wait / 60,
                 )
                 await asyncio.sleep(wait)
                 now = time.monotonic()
+                self._logger.info("%s cooldown finished, resuming", self._source_name)
 
             # Enforce mandatory rest after sustained scraping
             rest = self._check_rest_period(now)
             if rest > 0:
+                self._logger.info(
+                    "%s mandatory rest: sleeping %.0f min", self._source_name, rest / 60,
+                )
                 await asyncio.sleep(rest)
                 now = time.monotonic()
+                self._logger.info("%s rest finished, resuming", self._source_name)
 
             self._prune(now)
 
             if len(self._timestamps) >= self._max_per_hour:
                 wait = self._timestamps[0] - (now - 3600.0)
                 if wait > 0:
+                    self._logger.info(
+                        "%s hourly quota full (%d/%d): sleeping %.0f s",
+                        self._source_name, len(self._timestamps),
+                        self._max_per_hour, wait,
+                    )
                     await asyncio.sleep(wait)
                     now = time.monotonic()
                     self._prune(now)

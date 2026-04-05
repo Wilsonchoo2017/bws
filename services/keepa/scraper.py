@@ -8,6 +8,7 @@ Cloudflare challenge or login CAPTCHA requires human intervention.
 
 import asyncio
 import dataclasses
+import json
 import logging
 import re
 import secrets
@@ -30,6 +31,9 @@ from services.notifications.scraper_alerts import alert_cloudflare_blocked
 logger = logging.getLogger("bws.keepa.scraper")
 
 KEEPA_BASE = "https://keepa.com"
+
+# Debug diagnostics directory for Cloudflare challenge analysis
+CF_DEBUG_DIR = Path.home() / ".bws" / "cf-debug"
 
 # Cloudflare challenge indicators
 CF_CHALLENGE_TITLES: tuple[str, ...] = (
@@ -107,6 +111,211 @@ def _notify_captcha(query: str) -> None:
     )
 
 
+async def _capture_cf_diagnostics(
+    page: Page,
+    label: str,
+    *,
+    query: str = "",
+    click_coords: tuple[float, float] | None = None,
+    strategy: str = "",
+    attempt: int = 0,
+    extra: dict[str, Any] | None = None,
+) -> Path | None:
+    """Capture a full diagnostic snapshot of Cloudflare challenge state.
+
+    Saves a screenshot, page metadata, iframe attributes, visible text,
+    and click coordinates to CF_DEBUG_DIR as a timestamped bundle.
+    Returns the directory path of the snapshot, or None on failure.
+    """
+    try:
+        ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S_%f")
+        snap_dir = CF_DEBUG_DIR / f"{ts}_{label}"
+        snap_dir.mkdir(parents=True, exist_ok=True)
+
+        # Screenshot
+        screenshot_path = snap_dir / "page.png"
+        await page.screenshot(path=str(screenshot_path), full_page=False)
+
+        # Collect page state
+        title = ""
+        url = ""
+        try:
+            title = await page.title()
+            url = page.url
+        except Exception:
+            pass
+
+        # Collect all iframe attributes for analysis
+        iframe_info: list[dict[str, Any]] = []
+        try:
+            iframes = await page.query_selector_all("iframe")
+            for iframe in iframes:
+                attrs: dict[str, Any] = {}
+                for attr in ("src", "title", "id", "class", "name", "width", "height"):
+                    val = await iframe.get_attribute(attr)
+                    if val:
+                        attrs[attr] = val
+                box = await iframe.bounding_box()
+                if box:
+                    attrs["bounding_box"] = box
+                attrs["visible"] = await iframe.is_visible()
+                iframe_info.append(attrs)
+        except Exception as exc:
+            iframe_info.append({"error": str(exc)})
+
+        # Visible text snippet (first 2000 chars)
+        body_text = ""
+        try:
+            body_text = await page.evaluate(
+                "() => document.body.innerText.substring(0, 2000)"
+            )
+        except Exception:
+            pass
+
+        # Check which CF selectors matched
+        matched_selectors: list[str] = []
+        for selector in CF_WIDGET_SELECTORS:
+            try:
+                el = await page.query_selector(selector)
+                if el and await el.is_visible():
+                    matched_selectors.append(selector)
+            except Exception:
+                pass
+
+        # Turnstile iframe content (if accessible)
+        turnstile_inner: dict[str, Any] = {}
+        try:
+            for sel in ('iframe[src*="challenges.cloudflare.com"]',
+                        'iframe[src*="turnstile"]'):
+                iframe_el = await page.query_selector(sel)
+                if not iframe_el:
+                    continue
+                frame = await iframe_el.content_frame()
+                if frame:
+                    try:
+                        inner_html = await frame.evaluate(
+                            "() => document.body.innerHTML.substring(0, 3000)"
+                        )
+                        turnstile_inner["selector"] = sel
+                        turnstile_inner["inner_html"] = inner_html
+                        # Check checkbox state
+                        cb = await frame.query_selector(
+                            'input[type="checkbox"]'
+                        )
+                        if cb:
+                            turnstile_inner["checkbox_checked"] = (
+                                await cb.is_checked()
+                            )
+                            turnstile_inner["checkbox_visible"] = (
+                                await cb.is_visible()
+                            )
+                            cb_box = await cb.bounding_box()
+                            if cb_box:
+                                turnstile_inner["checkbox_box"] = cb_box
+                    except Exception as exc:
+                        turnstile_inner["inner_error"] = str(exc)
+                    break
+        except Exception as exc:
+            turnstile_inner["error"] = str(exc)
+
+        # Dump the anti-bot modal DOM structure to identify clickable
+        # elements (Turnstile container, checkboxes, data-sitekey, etc.)
+        antibot_dom: dict[str, Any] = {}
+        try:
+            antibot_dom = await page.evaluate("""() => {
+                const result = {};
+                // Find elements with data-sitekey (Turnstile container)
+                const sitekey = document.querySelector('[data-sitekey]');
+                if (sitekey) {
+                    const r = sitekey.getBoundingClientRect();
+                    result.sitekey = {
+                        tag: sitekey.tagName,
+                        id: sitekey.id,
+                        className: sitekey.className,
+                        sitekey: sitekey.getAttribute('data-sitekey'),
+                        rect: {x: r.x, y: r.y, w: r.width, h: r.height},
+                        outerHTML: sitekey.outerHTML.substring(0, 500),
+                    };
+                }
+                // Find cf-turnstile containers
+                const cft = document.querySelector('.cf-turnstile, #cf-turnstile');
+                if (cft) {
+                    const r = cft.getBoundingClientRect();
+                    result.cf_turnstile = {
+                        tag: cft.tagName,
+                        id: cft.id,
+                        className: cft.className,
+                        rect: {x: r.x, y: r.y, w: r.width, h: r.height},
+                    };
+                }
+                // Find all visible checkboxes
+                const cbs = document.querySelectorAll('input[type="checkbox"]');
+                result.checkboxes = Array.from(cbs).map(cb => {
+                    const r = cb.getBoundingClientRect();
+                    return {
+                        id: cb.id, name: cb.name, checked: cb.checked,
+                        visible: r.width > 0 && r.height > 0,
+                        rect: {x: r.x, y: r.y, w: r.width, h: r.height},
+                    };
+                });
+                // Find "Verify" text element
+                const walker = document.createTreeWalker(
+                    document.body, NodeFilter.SHOW_TEXT
+                );
+                while (walker.nextNode()) {
+                    if (walker.currentNode.textContent.includes('Verify')) {
+                        const el = walker.currentNode.parentElement;
+                        if (el) {
+                            const r = el.getBoundingClientRect();
+                            result.verify_text = {
+                                tag: el.tagName, className: el.className,
+                                text: el.textContent.substring(0, 100),
+                                rect: {x: r.x, y: r.y, w: r.width, h: r.height},
+                            };
+                        }
+                        break;
+                    }
+                }
+                return result;
+            }""")
+        except Exception as exc:
+            antibot_dom = {"error": str(exc)}
+
+        record = {
+            "timestamp": ts,
+            "label": label,
+            "query": query,
+            "attempt": attempt,
+            "strategy": strategy,
+            "click_coords": (
+                {"x": click_coords[0], "y": click_coords[1]}
+                if click_coords else None
+            ),
+            "page_url": url,
+            "page_title": title,
+            "matched_cf_selectors": matched_selectors,
+            "iframes": iframe_info,
+            "turnstile_inner": turnstile_inner or None,
+            "antibot_dom": antibot_dom,
+            "body_text_snippet": body_text[:500],
+            "extra": extra or {},
+        }
+
+        record_path = snap_dir / "diagnostics.json"
+        record_path.write_text(
+            json.dumps(record, indent=2, default=str), encoding="utf-8"
+        )
+
+        logger.info(
+            "CF diagnostics captured: %s (%s)", label, snap_dir,
+        )
+        return snap_dir
+
+    except Exception as exc:
+        logger.warning("Failed to capture CF diagnostics: %s", exc)
+        return None
+
+
 async def _detect_cloudflare(page: Page) -> bool:
     """Check if the current page is a Cloudflare challenge.
 
@@ -160,43 +369,373 @@ async def _human_mouse_move(
 ) -> None:
     """Move mouse to target with a curved, human-like trajectory.
 
-    Generates 3-5 intermediate waypoints with slight random offsets to
-    simulate natural hand movement rather than a straight-line teleport.
-    If start position is not given, begins from an offset above the target
-    (simulating a hand approaching from a resting position).
+    Simulates natural hand movement with:
+    - Bezier-like curve (random control point offset for arc)
+    - Variable speed (slower at start/end, faster in middle)
+    - Lateral jitter that peaks mid-path
+    - Occasional micro-pause (humans hesitate)
+    - Slight overshoot + correction on ~30% of movements
     """
-    sx = start_x if start_x is not None else target_x + secrets.randbelow(60) - 30
-    sy = start_y if start_y is not None else target_y - 40 - secrets.randbelow(30)
+    sx = start_x if start_x is not None else target_x + secrets.randbelow(100) - 50
+    sy = start_y if start_y is not None else target_y - 50 - secrets.randbelow(60)
     await page.mouse.move(sx, sy)
+    await human_delay(50, 150)
 
-    steps = 3 + secrets.randbelow(3)
+    # Random control point for bezier-like curve
+    ctrl_x = (sx + target_x) / 2 + secrets.randbelow(40) - 20
+    ctrl_y = (sy + target_y) / 2 + secrets.randbelow(30) - 15
+
+    steps = 5 + secrets.randbelow(6)  # 5-10 steps
     for i in range(1, steps + 1):
-        frac = i / steps
-        mid_x = sx + (target_x - sx) * frac
-        mid_y = sy + (target_y - sy) * frac
-        # Add lateral jitter (larger in the middle of the arc)
-        jitter = (1 - abs(frac - 0.5) * 2) * 8
-        mid_x += secrets.randbelow(max(1, int(jitter * 2))) - jitter
-        mid_y += secrets.randbelow(max(1, int(jitter * 2))) - jitter
+        t = i / steps
+        # Quadratic bezier: B(t) = (1-t)^2*P0 + 2*(1-t)*t*P1 + t^2*P2
+        inv_t = 1 - t
+        mid_x = inv_t * inv_t * sx + 2 * inv_t * t * ctrl_x + t * t * target_x
+        mid_y = inv_t * inv_t * sy + 2 * inv_t * t * ctrl_y + t * t * target_y
+
+        # Jitter: peaks in the middle of the path
+        jitter = (1 - abs(t - 0.5) * 2) * 6
+        mid_x += secrets.randbelow(max(1, int(jitter * 2 + 1))) - jitter
+        mid_y += secrets.randbelow(max(1, int(jitter * 2 + 1))) - jitter
+
         await page.mouse.move(mid_x, mid_y)
-        await human_delay(30, 80)
-    # Final precise move to target with tiny offset
+
+        # Variable speed: slower at start/end, faster in middle
+        if t < 0.2 or t > 0.8:
+            await human_delay(40, 120)
+        else:
+            await human_delay(15, 50)
+
+        # Occasional micro-pause (human hesitation, ~15% chance)
+        if secrets.randbelow(100) < 15:
+            await human_delay(80, 250)
+
+    # ~30% chance of slight overshoot then correction
+    if secrets.randbelow(100) < 30:
+        overshoot_x = target_x + secrets.randbelow(8) - 2
+        overshoot_y = target_y + secrets.randbelow(6) - 1
+        await page.mouse.move(overshoot_x, overshoot_y)
+        await human_delay(60, 180)
+
+    # Final settle on target with tiny offset
     await page.mouse.move(
         target_x + secrets.randbelow(3) - 1,
         target_y + secrets.randbelow(3) - 1,
     )
 
 
-async def _try_click_turnstile(page: Page) -> bool:
-    """Attempt to click the Cloudflare Turnstile checkbox.
+async def _idle_behavior(page: Page) -> None:
+    """Occasional random mouse movement and micro-scroll between actions.
 
-    Uses Playwright's content_frame() to locate the actual checkbox
-    element inside the Turnstile iframe, then clicks it with human-like
-    mouse movement. Falls back to bounding-box coordinate clicking if
-    the inner frame is inaccessible (cross-origin restrictions).
-
-    Returns True if a click was attempted, False if widget not found.
+    Called between major page interactions to break up the mechanical
+    pattern of navigate -> wait -> click -> wait -> click. Humans
+    fidget, glance at different parts of the page, scroll idly.
+    Only does something ~50% of the time to keep it unpredictable.
     """
+    if secrets.randbelow(100) >= 50:
+        return
+
+    viewport = page.viewport_size or {"width": 1366, "height": 768}
+    vw, vh = viewport["width"], viewport["height"]
+
+    # Random mouse drift
+    await page.mouse.move(
+        secrets.randbelow(int(vw * 0.8)) + int(vw * 0.1),
+        secrets.randbelow(int(vh * 0.6)) + int(vh * 0.15),
+    )
+    await human_delay(200, 600)
+
+    # Micro-scroll (~30% within this path)
+    if secrets.randbelow(100) < 30:
+        await page.mouse.wheel(0, secrets.randbelow(80) - 40)
+        await human_delay(150, 400)
+
+
+async def _pre_click_wander(page: Page) -> None:
+    """Simulate natural human behavior before clicking the checkbox.
+
+    When a human sees an anti-bot dialog, they don't immediately click
+    the checkbox. They read it, maybe move the mouse around, perhaps
+    scroll slightly. This adds that natural pre-click behavior.
+    """
+    viewport = page.viewport_size or {"width": 1366, "height": 768}
+    vw, vh = viewport["width"], viewport["height"]
+
+    # Move mouse to a random "reading" position near center of page
+    await page.mouse.move(
+        vw * 0.3 + secrets.randbelow(int(vw * 0.4)),
+        vh * 0.3 + secrets.randbelow(int(vh * 0.3)),
+    )
+    await human_delay(500, 1500)
+
+    # Maybe do a small scroll (human habit), ~40% chance
+    if secrets.randbelow(100) < 40:
+        scroll_y = secrets.randbelow(60) - 30
+        await page.mouse.wheel(0, scroll_y)
+        await human_delay(300, 800)
+
+    # 1-2 additional random mouse movements (reading/scanning)
+    wander_count = 1 + secrets.randbelow(2)
+    for _ in range(wander_count):
+        await page.mouse.move(
+            vw * 0.2 + secrets.randbelow(int(vw * 0.6)),
+            vh * 0.2 + secrets.randbelow(int(vh * 0.5)),
+        )
+        await human_delay(200, 700)
+
+
+async def _try_click_keepa_antibot(
+    page: Page,
+    *,
+    query: str = "",
+    attempt: int = 0,
+) -> bool:
+    """Click the checkbox in Keepa's custom anti-bot modal.
+
+    Keepa renders a Cloudflare Turnstile widget inline inside a custom
+    modal dialog (not in an iframe). The widget uses a shadow DOM, so
+    standard query_selector cannot reach the checkbox input. Instead we
+    locate the Turnstile container element (identified by data-sitekey,
+    cf-turnstile class, or nearby "Verify you are human" text) and
+    click at the known checkbox offset within it.
+
+    Returns True if a click was attempted, False if the modal/widget
+    was not found.
+    """
+    # On first attempt, wander the mouse naturally before targeting
+    # the checkbox (humans read the dialog first)
+    if attempt <= 1:
+        await _pre_click_wander(page)
+
+    # Strategy 1: Find the Turnstile container by common attributes.
+    # Cloudflare Turnstile managed mode creates a <div> with
+    # data-sitekey or class cf-turnstile containing a shadow root.
+    turnstile_selectors = (
+        "[data-sitekey]",
+        ".cf-turnstile",
+        "#cf-turnstile",
+        "#turnstile-wrapper",
+        'div[class*="turnstile"]',
+    )
+
+    for selector in turnstile_selectors:
+        try:
+            el = await page.query_selector(selector)
+            if not el or not await el.is_visible():
+                continue
+
+            box = await el.bounding_box()
+            if not box:
+                continue
+
+            # The checkbox is at the left side of the Turnstile widget,
+            # vertically centered. Standard Turnstile widget is ~300x65.
+            click_x = box["x"] + min(28, box["width"] * 0.09)
+            click_y = box["y"] + box["height"] / 2
+
+            logger.info(
+                "Clicking Keepa anti-bot via Turnstile container '%s' "
+                "at (%.0f, %.0f), box=%s",
+                selector, click_x, click_y, box,
+            )
+
+            await _capture_cf_diagnostics(
+                page, "pre_click",
+                query=query,
+                click_coords=(click_x, click_y),
+                strategy=f"turnstile_container:{selector}",
+                attempt=attempt,
+                extra={"widget_box": box},
+            )
+            await human_delay(400, 1000)
+            await _human_mouse_move(page, click_x, click_y)
+            await human_delay(50, 200)
+            await page.mouse.click(
+                click_x + secrets.randbelow(5) - 2,
+                click_y + secrets.randbelow(3) - 1,
+            )
+            await human_delay(1_500, 2_500)
+            await _capture_cf_diagnostics(
+                page, "post_click",
+                query=query,
+                click_coords=(click_x, click_y),
+                strategy=f"turnstile_container:{selector}",
+                attempt=attempt,
+            )
+            return True
+        except Exception as exc:
+            logger.debug("Turnstile container click failed for %s: %s", selector, exc)
+            continue
+
+    # Strategy 2: Reach into the Turnstile shadow DOM to find the
+    # actual checkbox element and its bounding box.
+    try:
+        shadow_cb_box = await page.evaluate("""() => {
+            // Turnstile renders inside a shadow root on a container div.
+            // Walk all elements looking for shadow roots that contain
+            // an input[type="checkbox"] or a clickable label.
+            const containers = document.querySelectorAll(
+                '[data-sitekey], .cf-turnstile, #cf-turnstile, '
+                + '#turnstile-wrapper, div[class*="turnstile"]'
+            );
+            for (const c of containers) {
+                if (c.shadowRoot) {
+                    const cb = c.shadowRoot.querySelector(
+                        'input[type="checkbox"], .ctp-checkbox-label, '
+                        + 'label, [role="checkbox"]'
+                    );
+                    if (cb) {
+                        const r = cb.getBoundingClientRect();
+                        if (r.width > 0 && r.height > 0)
+                            return {x: r.x, y: r.y, w: r.width, h: r.height};
+                    }
+                }
+            }
+            // Fallback: walk ALL shadow roots on the page
+            const all = document.querySelectorAll('*');
+            for (const el of all) {
+                if (el.shadowRoot) {
+                    const cb = el.shadowRoot.querySelector(
+                        'input[type="checkbox"], [role="checkbox"]'
+                    );
+                    if (cb) {
+                        const r = cb.getBoundingClientRect();
+                        if (r.width > 0 && r.height > 0)
+                            return {x: r.x, y: r.y, w: r.width, h: r.height};
+                    }
+                }
+            }
+            return null;
+        }""")
+        if shadow_cb_box:
+            click_x = shadow_cb_box["x"] + shadow_cb_box["w"] / 2
+            click_y = shadow_cb_box["y"] + shadow_cb_box["h"] / 2
+            logger.info(
+                "Clicking Keepa anti-bot via shadow DOM checkbox "
+                "at (%.0f, %.0f), box=%s", click_x, click_y, shadow_cb_box,
+            )
+            await _capture_cf_diagnostics(
+                page, "pre_click",
+                query=query,
+                click_coords=(click_x, click_y),
+                strategy="shadow_dom_checkbox",
+                attempt=attempt,
+                extra={"shadow_cb_box": shadow_cb_box},
+            )
+            await human_delay(400, 1000)
+            await _human_mouse_move(page, click_x, click_y)
+            await human_delay(50, 200)
+            await page.mouse.click(
+                click_x + secrets.randbelow(3) - 1,
+                click_y + secrets.randbelow(3) - 1,
+            )
+            await human_delay(1_500, 2_500)
+            await _capture_cf_diagnostics(
+                page, "post_click",
+                query=query,
+                click_coords=(click_x, click_y),
+                strategy="shadow_dom_checkbox",
+                attempt=attempt,
+            )
+            return True
+    except Exception as exc:
+        logger.debug("Shadow DOM checkbox strategy failed: %s", exc)
+
+    # Strategy 3: Locate via "Verify you are human" text and click
+    # to its left where the checkbox is rendered.
+    try:
+        verify_el = page.get_by_text("Verify you are human", exact=False)
+        if await verify_el.count() > 0:
+            verify_box = await verify_el.first.bounding_box()
+            if verify_box:
+                # Checkbox is to the left of the text, same vertical center
+                click_x = verify_box["x"] - 20
+                click_y = verify_box["y"] + verify_box["height"] / 2
+
+                logger.info(
+                    "Clicking Keepa anti-bot via 'Verify you are human' text "
+                    "offset at (%.0f, %.0f), text_box=%s",
+                    click_x, click_y, verify_box,
+                )
+
+                await _capture_cf_diagnostics(
+                    page, "pre_click",
+                    query=query,
+                    click_coords=(click_x, click_y),
+                    strategy="verify_text_offset",
+                    attempt=attempt,
+                    extra={"text_box": verify_box},
+                )
+                await human_delay(400, 1000)
+                await _human_mouse_move(page, click_x, click_y)
+                await human_delay(50, 200)
+                await page.mouse.click(
+                    click_x + secrets.randbelow(5) - 2,
+                    click_y + secrets.randbelow(3) - 1,
+                )
+                await human_delay(1_500, 2_500)
+                await _capture_cf_diagnostics(
+                    page, "post_click",
+                    query=query,
+                    click_coords=(click_x, click_y),
+                    strategy="verify_text_offset",
+                    attempt=attempt,
+                )
+                return True
+    except Exception as exc:
+        logger.debug("Verify-text strategy failed: %s", exc)
+
+    # Strategy 4: Find the anti-bot modal dialog and click at the
+    # known checkbox position within it. The modal is a centered
+    # white dialog ~300px wide with the checkbox near top-left.
+    try:
+        # Look for the modal by its heading text
+        antibot_heading = page.get_by_text("Anti-bot check", exact=False)
+        if await antibot_heading.count() > 0:
+            heading_box = await antibot_heading.first.bounding_box()
+            if heading_box:
+                # From screenshot analysis:
+                # - Heading top: ~287, height: ~20, bottom: ~307
+                # - Bordered widget box starts ~325 (18px gap)
+                # - Checkbox center: ~355 (48px below heading bottom)
+                # Offset from heading_y: height + 48 = ~68
+                click_x = heading_box["x"] + 18
+                click_y = heading_box["y"] + heading_box["height"] + 48
+
+                logger.info(
+                    "Clicking Keepa anti-bot via heading offset "
+                    "at (%.0f, %.0f), heading_box=%s",
+                    click_x, click_y, heading_box,
+                )
+
+                await _capture_cf_diagnostics(
+                    page, "pre_click",
+                    query=query,
+                    click_coords=(click_x, click_y),
+                    strategy="heading_offset",
+                    attempt=attempt,
+                    extra={"heading_box": heading_box},
+                )
+                await human_delay(400, 1000)
+                await _human_mouse_move(page, click_x, click_y)
+                await human_delay(50, 200)
+                await page.mouse.click(
+                    click_x + secrets.randbelow(5) - 2,
+                    click_y + secrets.randbelow(3) - 1,
+                )
+                await human_delay(1_500, 2_500)
+                await _capture_cf_diagnostics(
+                    page, "post_click",
+                    query=query,
+                    click_coords=(click_x, click_y),
+                    strategy="heading_offset",
+                    attempt=attempt,
+                )
+                return True
+    except Exception as exc:
+        logger.debug("Heading-offset strategy failed: %s", exc)
+
+    # Strategy 5 (legacy): Try iframe-based Turnstile (full-page CF)
     iframe_selectors = (
         'iframe[src*="challenges.cloudflare.com"]',
         'iframe[src*="cloudflare.com/cdn-cgi/challenge"]',
@@ -211,8 +750,6 @@ async def _try_click_turnstile(page: Page) -> bool:
             if not iframe_el or not await iframe_el.is_visible():
                 continue
 
-            # Strategy 1: Access the iframe content and click the real
-            # checkbox element for pixel-perfect accuracy
             frame = await iframe_el.content_frame()
             if frame:
                 try:
@@ -238,22 +775,17 @@ async def _try_click_turnstile(page: Page) -> bool:
                             )
                             return True
                 except Exception as exc:
-                    logger.debug("content_frame checkbox lookup failed: %s", exc)
+                    logger.debug("content_frame checkbox failed: %s", exc)
 
-            # Strategy 2: Fall back to clicking the iframe bounding box
-            # at the known checkbox position
             box = await iframe_el.bounding_box()
             if not box:
                 continue
 
             click_x = box["x"] + min(30, box["width"] * 0.15)
             click_y = box["y"] + box["height"] / 2
-
             logger.info(
-                "Clicking Turnstile iframe bbox at (%.0f, %.0f) via %s",
-                click_x, click_y, selector,
+                "Clicking Turnstile iframe bbox at (%.0f, %.0f)", click_x, click_y,
             )
-
             await human_delay(400, 1000)
             await _human_mouse_move(page, click_x, click_y)
             await human_delay(50, 200)
@@ -263,33 +795,15 @@ async def _try_click_turnstile(page: Page) -> bool:
             )
             return True
         except Exception as exc:
-            logger.debug("Turnstile click failed for %s: %s", selector, exc)
+            logger.debug("Turnstile iframe click failed for %s: %s", selector, exc)
             continue
 
-    # Fallback: try clicking inside the anti-bot dialog directly
-    # (some implementations render the checkbox outside an iframe)
-    try:
-        checkbox = await page.query_selector(
-            'input[type="checkbox"], .cf-turnstile input, '
-            '#turnstile-wrapper input'
-        )
-        if checkbox and await checkbox.is_visible():
-            cb_box = await checkbox.bounding_box()
-            if cb_box:
-                click_x = cb_box["x"] + cb_box["width"] / 2
-                click_y = cb_box["y"] + cb_box["height"] / 2
-                logger.info("Clicking Turnstile checkbox directly at (%.0f, %.0f)", click_x, click_y)
-                await human_delay(400, 1000)
-                await _human_mouse_move(page, click_x, click_y)
-                await human_delay(50, 200)
-                await page.mouse.click(
-                    click_x + secrets.randbelow(3) - 1,
-                    click_y + secrets.randbelow(3) - 1,
-                )
-                return True
-    except Exception:
-        pass
-
+    # No widget found at all
+    await _capture_cf_diagnostics(
+        page, "no_widget_found",
+        query=query,
+        attempt=attempt,
+    )
     return False
 
 
@@ -309,11 +823,18 @@ async def _wait_for_cloudflare(
     timeout = timeout_s or KEEPA_CONFIG.captcha_timeout_s
     logger.warning("Cloudflare challenge detected for query: %s", query)
 
+    # Capture initial challenge state
+    await _capture_cf_diagnostics(
+        page, "challenge_detected", query=query,
+    )
+
     # Try up to 3 rapid auto-click attempts before falling back to human
     max_auto_attempts = 3
     for attempt in range(1, max_auto_attempts + 1):
         await human_delay(800, 1_500)
-        clicked = await _try_click_turnstile(page)
+        clicked = await _try_click_keepa_antibot(
+            page, query=query, attempt=attempt,
+        )
         if clicked:
             # Wait for Turnstile to validate the click
             await human_delay(3_000, 5_000)
@@ -321,10 +842,18 @@ async def _wait_for_cloudflare(
                 logger.info(
                     "Cloudflare challenge auto-solved on attempt %d", attempt,
                 )
+                await _capture_cf_diagnostics(
+                    page, "challenge_auto_solved",
+                    query=query, attempt=attempt,
+                )
                 return True
             logger.info(
                 "Auto-click attempt %d/%d did not resolve challenge",
                 attempt, max_auto_attempts,
+            )
+            await _capture_cf_diagnostics(
+                page, "click_did_not_resolve",
+                query=query, attempt=attempt,
             )
         else:
             break  # Widget not found, no point retrying
@@ -336,18 +865,32 @@ async def _wait_for_cloudflare(
     poll_interval = 3
     click_retry_interval = 10
     last_click_attempt = 0
+    retry_count = 0
     while elapsed < timeout:
         await asyncio.sleep(poll_interval)
         elapsed += poll_interval
         if not await _detect_cloudflare(page):
             logger.info("Cloudflare challenge solved after %ds", elapsed)
+            await _capture_cf_diagnostics(
+                page, "challenge_human_solved",
+                query=query,
+                extra={"elapsed_s": elapsed},
+            )
             return True
         # Retry clicking periodically (widget may re-render after human
         # interaction or page refresh)
         if elapsed - last_click_attempt >= click_retry_interval:
             last_click_attempt = elapsed
-            await _try_click_turnstile(page)
+            retry_count += 1
+            await _try_click_keepa_antibot(
+                page, query=query, attempt=max_auto_attempts + retry_count,
+            )
 
+    await _capture_cf_diagnostics(
+        page, "challenge_timeout",
+        query=query,
+        extra={"timeout_s": timeout},
+    )
     logger.error(
         "Cloudflare challenge timeout after %ds for query: %s",
         timeout, query,
@@ -433,7 +976,7 @@ async def scrape_with_page(
         search_url = f"{KEEPA_BASE}/#!search/1-{set_number}%20lego"
         logger.info("Navigating to search: %s", search_url)
         await page.goto(search_url, wait_until="domcontentloaded")
-        await human_delay(3_000, 5_000)
+        await human_delay(2_500, 6_000)
 
         # Handle Cloudflare challenge
         if await _detect_cloudflare(page):
@@ -447,7 +990,7 @@ async def scrape_with_page(
                 )
             # Retry search URL after Cloudflare
             await page.goto(search_url, wait_until="domcontentloaded")
-            await human_delay(3_000, 5_000)
+            await human_delay(2_500, 6_000)
 
         # Check login state, log in if needed
         if not await is_logged_in(page):
@@ -460,7 +1003,7 @@ async def scrape_with_page(
                 )
             # Navigate back to search after login
             await page.goto(search_url, wait_until="domcontentloaded")
-            await human_delay(3_000, 5_000)
+            await human_delay(2_500, 6_000)
 
         # Handle Cloudflare after login redirect
         if await _detect_cloudflare(page):
@@ -472,7 +1015,7 @@ async def scrape_with_page(
                     set_number=set_number,
                     error="Cloudflare challenge not solved within timeout",
                 )
-            await human_delay(3_000, 5_000)
+            await human_delay(2_500, 6_000)
 
         # Wait for search results
         result_found = await _wait_for_search_results(page)
@@ -484,7 +1027,7 @@ async def scrape_with_page(
                 solved = await _wait_for_cloudflare(page, set_number)
                 if solved:
                     await page.goto(search_url, wait_until="domcontentloaded")
-                    await human_delay(3_000, 5_000)
+                    await human_delay(2_500, 6_000)
                     result_found = await _wait_for_search_results(page)
 
             if not result_found:
@@ -501,7 +1044,8 @@ async def scrape_with_page(
                     error="Search results did not load within timeout",
                 )
 
-        await human_delay(1_000, 2_000)
+        await human_delay(800, 2_500)
+        await _idle_behavior(page)
 
         # Click first matching result (verifies it's a LEGO product)
         clicked = await _click_first_result(page, set_number, item_title)
@@ -513,15 +1057,17 @@ async def scrape_with_page(
                 not_found=True,
             )
 
-        await human_delay(5_000, 8_000)
+        await human_delay(4_000, 9_000)
+        await _idle_behavior(page)
 
         # Enable all chart legend series before sweeping
         await _enable_all_legend_series(page)
-        await human_delay(2_000, 3_000)
+        await human_delay(1_500, 4_000)
 
         # Click "All" date range to load full history
         await click_all_date_range(page)
-        await human_delay(4_000, 6_000)
+        await human_delay(3_000, 7_000)
+        await _idle_behavior(page)
 
         # Extract product data from the DOM statistics tables
         product_data = await extract_product_data(page, set_number)

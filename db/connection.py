@@ -12,11 +12,13 @@ from typing import TYPE_CHECKING
 
 import duckdb
 
-from config.settings import BWS_DB_PATH
+from config.settings import BWS_DB_PATH, PG_ENABLED
 
 
 if TYPE_CHECKING:
     from duckdb import DuckDBPyConnection
+
+    from db.pg.dual_writer import DualWriter
 
 logger = logging.getLogger("bws.db")
 
@@ -208,3 +210,22 @@ def _check_pk_integrity(path: Path) -> None:
 def get_memory_connection() -> "DuckDBPyConnection":
     """Get an in-memory DuckDB connection (for testing)."""
     return duckdb.connect(":memory:")
+
+
+def get_dual_connection(db_path: Path | None = None) -> "DualWriter":
+    """Get a DualWriter wrapping DuckDB + optional Postgres session.
+
+    Use this in background tasks instead of get_connection() to enable
+    dual-write during migration.
+    """
+    from db.pg.dual_writer import DualWriter
+
+    duck = get_connection(db_path)
+    pg_session = None
+
+    if PG_ENABLED:
+        from db.pg.engine import get_session_factory
+
+        pg_session = get_session_factory()()
+
+    return DualWriter(duck, pg_session)

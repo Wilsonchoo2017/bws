@@ -5,7 +5,7 @@ import pytest
 from db.connection import get_memory_connection
 from db.schema import init_schema
 from services.items.repository import get_or_create_item
-from services.scrape_queue.models import TaskStatus, TaskType
+from services.scrape_queue.models import NON_SET_TASK_TYPES, TaskStatus, TaskType
 from services.scrape_queue.repository import (
     claim_next,
     complete_task,
@@ -107,12 +107,13 @@ class TestCreateTasksForSet:
         self, conn
     ):
         """Given a set_number, when creating all tasks, then one task per
-        TaskType is created."""
+        per-set TaskType is created (NON_SET_TASK_TYPES are skipped)."""
         tasks = create_tasks_for_set(conn, "75192")
 
+        expected_types = set(TaskType) - NON_SET_TASK_TYPES
         created_types = {t.task_type for t in tasks}
-        assert created_types == set(TaskType)
-        assert len(tasks) == len(TaskType)
+        assert created_types == expected_types
+        assert len(tasks) == len(expected_types)
 
     def test_given_partial_existing_when_create_tasks_for_set_then_only_missing_created(
         self, conn
@@ -124,8 +125,9 @@ class TestCreateTasksForSet:
         tasks = create_tasks_for_set(conn, "75192")
 
         created_types = {t.task_type for t in tasks}
+        expected_types = set(TaskType) - NON_SET_TASK_TYPES
         assert TaskType.BRICKLINK_METADATA not in created_types
-        assert len(tasks) == len(TaskType) - 1
+        assert len(tasks) == len(expected_types) - 1
 
 
 # ---------------------------------------------------------------------------

@@ -7,6 +7,7 @@ ScoringProvider. Models are trained on first call and cached.
 from __future__ import annotations
 
 import logging
+import threading
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -16,6 +17,7 @@ logger = logging.getLogger(__name__)
 
 # Module-level cache for trained models
 _cache: dict = {}
+_cache_lock = threading.Lock()
 
 
 class GrowthScoringProvider:
@@ -66,7 +68,7 @@ class GrowthScoringProvider:
     def retrain(self, conn: DuckDBPyConnection) -> dict:
         """Force retrain and return model stats."""
         _cache.clear()
-        tier1, tier2, _, _, tier3, ensemble = self._get_models(conn)
+        tier1, tier2, _, _, tier3, ensemble = self._get_models(conn, force_train=True)
         result = {
             "tier1_n_train": tier1.n_train,
             "tier1_r2": round(tier1.train_r2, 3),
@@ -84,18 +86,34 @@ class GrowthScoringProvider:
             result["ensemble_r2"] = round(ensemble.oos_r2, 3)
         return result
 
-    def _get_models(self, conn: DuckDBPyConnection) -> tuple:
-        if not _cache:
-            from services.ml.growth_model import train_growth_models
+    def warm_cache(self, conn: DuckDBPyConnection) -> None:
+        """Eagerly load or train models so first score_all() is instant."""
+        self._get_models(conn)
 
-            tier1, tier2, ts, ss, tier3, ensemble = train_growth_models(conn)
-            _cache["tier1"] = tier1
-            _cache["tier2"] = tier2
-            _cache["tier3"] = tier3
-            _cache["ensemble"] = ensemble
-            _cache["theme_stats"] = ts
-            _cache["subtheme_stats"] = ss
-            logger.info("Growth models trained and cached (tiers 1/2/3 + ensemble)")
+    def _get_models(self, conn: DuckDBPyConnection, *, force_train: bool = False) -> tuple:
+        if not _cache:
+            with _cache_lock:
+                if not _cache:  # double-check after acquiring lock
+                    from services.ml.growth.persistence import load_growth_models, save_growth_models
+                    from services.ml.growth_model import train_growth_models
+
+                    # Try loading pre-trained models from disk first
+                    loaded = None if force_train else load_growth_models()
+
+                    if loaded is not None:
+                        tier1, tier2, ts, ss, tier3, ensemble = loaded
+                        logger.info("Growth models loaded from disk (skipped training)")
+                    else:
+                        tier1, tier2, ts, ss, tier3, ensemble = train_growth_models(conn)
+                        save_growth_models(tier1, tier2, ts, ss, tier3, ensemble)
+                        logger.info("Growth models trained and saved to disk")
+
+                    _cache["tier1"] = tier1
+                    _cache["tier2"] = tier2
+                    _cache["tier3"] = tier3
+                    _cache["ensemble"] = ensemble
+                    _cache["theme_stats"] = ts
+                    _cache["subtheme_stats"] = ss
 
         return (
             _cache["tier1"],

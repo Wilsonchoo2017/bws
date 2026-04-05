@@ -204,13 +204,17 @@ def train_growth_models(
 ) -> tuple[TrainedGrowthModel, TrainedGrowthModel | None, dict, dict, TrainedGrowthModel | None, TrainedEnsemble | None]:
     """Train Tier 1, 2, 3, and ensemble growth models.
 
-    Tiers are trained in parallel using threads (GBM releases the GIL).
+    Tiers are trained in parallel using separate processes (avoids GIL contention).
     Feature engineering is sequential (uses DB), model tuning is parallel.
 
     Returns:
         (tier1, tier2_or_none, theme_stats, subtheme_stats, tier3_or_none, ensemble_or_none)
     """
-    from concurrent.futures import ThreadPoolExecutor, Future
+    import multiprocessing
+    from concurrent.futures import ProcessPoolExecutor, Future
+
+    # Use 'spawn' to avoid fork-safety issues on macOS (threads + fork = deadlocks)
+    mp_ctx = multiprocessing.get_context("spawn")
 
     # -- Phase 1: Load data (sequential, uses DB connection) --
     df_raw = load_growth_training_data(conn)
@@ -268,7 +272,7 @@ def train_growth_models(
     # -- Phase 3: Model tuning (PARALLEL -- the expensive part) --
     logger.info("Starting parallel tier training...")
 
-    with ThreadPoolExecutor(max_workers=3, thread_name_prefix="tier") as pool:
+    with ProcessPoolExecutor(max_workers=3, mp_context=mp_ctx) as pool:
         # Submit Tier 1
         fut_t1: Future = pool.submit(
             _build_tier_model, 1, X1, y, tier1_features, fill1, groups=groups,
