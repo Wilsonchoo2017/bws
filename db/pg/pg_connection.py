@@ -21,13 +21,18 @@ logger = logging.getLogger("bws.pg.connection")
 _PARAM_RE = re.compile(r"\?")
 
 
-def _duck_to_pg_sql(sql: str) -> str:
-    """Translate DuckDB ``?`` placeholders to psycopg2 ``%s``.
+_TRY_CAST_RE = re.compile(r"TRY_CAST\(", re.IGNORECASE)
 
-    If the query uses ``?`` placeholders (DuckDB style), escapes literal
-    ``%`` and replaces ``?`` with ``%s``.  If no ``?`` is found, the
-    query is returned unchanged (assumed to be already PG-compatible).
+
+def _duck_to_pg_sql(sql: str) -> str:
+    """Translate DuckDB SQL to psycopg2-compatible Postgres SQL.
+
+    Translations:
+    - ``?`` placeholders -> ``%s``
+    - ``TRY_CAST(`` -> ``CAST(`` (Postgres has no TRY_CAST; callers
+      should ensure data is clean or wrap in a CASE expression)
     """
+    sql = _TRY_CAST_RE.sub("CAST(", sql)
     if "?" not in sql:
         return sql
     # Escape literal % first (e.g. LIKE '%foo%')

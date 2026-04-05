@@ -790,9 +790,12 @@ def _sync_sequences(conn: "DuckDBPyConnection") -> None:
     Prevents primary key collisions when sequences fall behind
     existing data (e.g., after restores or manual inserts).
 
-    Uses DROP+CREATE to guarantee the sequence starts at the correct
-    value, regardless of how far behind or ahead it drifted.
+    DuckDB: uses DROP+CREATE to guarantee the correct start value.
+    Postgres: uses ALTER SEQUENCE ... RESTART WITH (sequences are owned
+    by columns via SERIAL/IDENTITY so DROP would fail).
     """
+    from config.settings import DUCK_ENABLED
+
     for seq_name, table_name in _SEQUENCE_TABLE_MAP:
         try:
             row = conn.execute(
@@ -801,10 +804,15 @@ def _sync_sequences(conn: "DuckDBPyConnection") -> None:
             max_id = row[0] if row else 0
             start = max_id + 1 if max_id > 0 else 1
 
-            conn.execute(f"DROP SEQUENCE IF EXISTS {seq_name}")  # noqa: S608
-            conn.execute(
-                f"CREATE SEQUENCE {seq_name} START WITH {start}"  # noqa: S608
-            )
+            if DUCK_ENABLED:
+                conn.execute(f"DROP SEQUENCE IF EXISTS {seq_name}")  # noqa: S608
+                conn.execute(
+                    f"CREATE SEQUENCE {seq_name} START WITH {start}"  # noqa: S608
+                )
+            else:
+                conn.execute(
+                    f"ALTER SEQUENCE {seq_name} RESTART WITH {start}"  # noqa: S608
+                )
         except Exception:  # noqa: BLE001
             # Table or sequence may not exist yet on first init
             logger.debug("Sequence sync skipped for %s: table not ready", seq_name)

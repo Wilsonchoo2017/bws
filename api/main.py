@@ -185,10 +185,11 @@ async def lifespan(app: FastAPI):
         for task in all_tasks:
             task.cancel()
     # Always checkpoint, no matter what happened above
+    from config.settings import DUCK_ENABLED
     from db.connection import get_connection
     conn = get_connection()
     try:
-        conn.execute("FORCE CHECKPOINT")
+        conn.execute("FORCE CHECKPOINT" if DUCK_ENABLED else "CHECKPOINT")
         logger.info("Shutdown checkpoint completed -- WAL flushed")
     except Exception:
         logger.warning("Shutdown checkpoint FAILED -- WAL data may be at risk", exc_info=True)

@@ -78,9 +78,10 @@ def checkpoint_database() -> None:
     """
     from db.connection import get_connection
 
+    from config.settings import DUCK_ENABLED
     conn = get_connection()
     try:
-        conn.execute("FORCE CHECKPOINT")
+        conn.execute("FORCE CHECKPOINT" if DUCK_ENABLED else "CHECKPOINT")
         logger.debug("Database checkpoint completed")
     except Exception:
         logger.debug("Database checkpoint skipped", exc_info=True)

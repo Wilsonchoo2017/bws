@@ -17,13 +17,13 @@ _SOURCES = [
     ("bricklink", "bricklink_items", "item_id", "last_scraped_at"),
     ("brickeconomy", "brickeconomy_snapshots", "set_number", "scraped_at"),
     ("keepa", "keepa_snapshots", "set_number", "scraped_at"),
-    ("shopee", "shopee_products", "set_number", "scraped_at"),
+    ("shopee", "shopee_products", "source_url", "scraped_at"),
     ("mightyutan", "mightyutan_products", "sku", "last_scraped_at"),
     ("toysrus", "toysrus_products", "sku", "last_scraped_at"),
     ("google_trends", "google_trends_snapshots", "set_number", "scraped_at"),
-    ("minifigures", "set_minifigures", "set_number", None),
-    ("images", "image_assets", "set_number", "scraped_at"),
-    ("ml_predictions", "ml_prediction_snapshots", "set_number", "predicted_at"),
+    ("minifigures", "set_minifigures", "set_item_id", "scraped_at"),
+    ("images", "image_assets", "item_id", "downloaded_at"),
+    ("ml_predictions", "ml_prediction_snapshots", "set_number", "snapshot_date"),
 ]
 
 
