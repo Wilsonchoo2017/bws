@@ -26,6 +26,7 @@ POSTGRES_URL = os.environ.get(
     "postgresql+psycopg2://bws:bws@localhost:5432/bws",
 )
 PG_ENABLED = os.environ.get("BWS_PG_ENABLED", "false").lower() == "true"
+DUCK_ENABLED = os.environ.get("BWS_DUCK_ENABLED", "true").lower() == "true"
 
 # Local image storage
 BWS_IMAGES_PATH = Path.home() / ".bws" / "images"

@@ -1,6 +1,7 @@
-"""DuckDB connection management for BWS.
+"""Database connection management for BWS.
 
-Provides functions for creating and managing DuckDB connections.
+Provides functions for creating and managing DuckDB and Postgres connections.
+When DUCK_ENABLED=false, all reads and writes go through Postgres only.
 """
 
 import logging
@@ -10,15 +11,17 @@ import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-import duckdb
+from config.settings import BWS_DB_PATH, DUCK_ENABLED, PG_ENABLED
 
-from config.settings import BWS_DB_PATH, PG_ENABLED
 
+if DUCK_ENABLED:
+    import duckdb
 
 if TYPE_CHECKING:
     from duckdb import DuckDBPyConnection
 
     from db.pg.dual_writer import DualWriter
+    from db.pg.pg_connection import PgConnection
 
 logger = logging.getLogger("bws.db")
 
@@ -89,19 +92,24 @@ def _handle_wal_recovery(path: Path) -> bool:
     return True
 
 
-def get_connection(db_path: Path | None = None) -> "DuckDBPyConnection":
-    """Get a DuckDB connection.
+def get_connection(db_path: Path | None = None) -> "DuckDBPyConnection | PgConnection":
+    """Get a database connection.
 
-    On first call per process, checks for stale WAL files from ungraceful
-    shutdowns and removes them to prevent corruption. If a WAL was found,
-    tables are rebuilt to repair any corrupted PK indexes.
+    When DUCK_ENABLED=true (default): returns a DuckDB connection with
+    WAL recovery and PK integrity checks on first call.
+
+    When DUCK_ENABLED=false: returns a PgConnection wrapper that
+    provides the same API over Postgres.
 
     Args:
-        db_path: Path to database file (default: BWS_DB_PATH)
+        db_path: Path to database file (default: BWS_DB_PATH, ignored when PG-only)
 
     Returns:
-        DuckDB connection
+        DuckDB connection or PgConnection wrapper
     """
+    if not DUCK_ENABLED:
+        return _get_pg_connection()
+
     global _wal_recovered  # noqa: PLW0603
     path = db_path or BWS_DB_PATH
     ensure_db_directory()
@@ -124,6 +132,21 @@ def get_connection(db_path: Path | None = None) -> "DuckDBPyConnection":
         _rebuild_all_tables(conn)
 
     return conn
+
+
+def _get_pg_connection() -> "PgConnection":
+    """Create a raw psycopg2 connection wrapped in PgConnection."""
+    import psycopg2
+
+    from config.settings import POSTGRES_URL
+    from db.pg.pg_connection import PgConnection
+
+    # Parse SQLAlchemy URL to psycopg2 DSN
+    # "postgresql+psycopg2://user:pass@host:port/db" -> psycopg2 connect params
+    url = POSTGRES_URL.replace("postgresql+psycopg2://", "postgresql://")
+    raw_conn = psycopg2.connect(url)
+    raw_conn.autocommit = True
+    return PgConnection(raw_conn)
 
 
 # Tracks whether PK integrity has been verified this process
@@ -217,8 +240,18 @@ def get_dual_connection(db_path: Path | None = None) -> "DualWriter":
 
     Use this in background tasks instead of get_connection() to enable
     dual-write during migration.
+
+    When DUCK_ENABLED=false, returns a DualWriter backed by PgConnection
+    (no DuckDB involved).
     """
     from db.pg.dual_writer import DualWriter
+
+    if not DUCK_ENABLED:
+        pg_conn = _get_pg_connection()
+        from db.pg.engine import get_session_factory
+
+        pg_session = get_session_factory()()
+        return DualWriter(pg_conn, pg_session)
 
     duck = get_connection(db_path)
     pg_session = None
