@@ -142,9 +142,15 @@ def create_task(
 ) -> ScrapeTask | None:
     """Create a single scrape task, deduplicating against active tasks.
 
-    Returns None if an active task already exists for (set_number, task_type).
+    Returns None if the item is non-trackable or an active task already exists.
     Wraps in a transaction to prevent TOCTOU races.
     """
+    from services.items.repository import is_trackable_set
+
+    if not is_trackable_set(set_number):
+        logger.debug("Skipping non-trackable item: %s", set_number)
+        return None
+
     conn.execute("BEGIN TRANSACTION")
     try:
         result = _create_task_inner(conn, set_number, task_type)
@@ -175,10 +181,12 @@ def create_tasks_for_set(
     Tasks with dependencies start as ``blocked``.
     Deduplicates: skips task types that already have an active task.
     Wrapped in a single transaction for atomicity.
-    Skips polybags/foil packs (6+ digit set numbers).
+    Skips non-trackable items (polybags, non-numeric set numbers, non-retail themes).
     """
-    if is_polybag(set_number):
-        logger.debug("Skipping polybag/foil pack: %s", set_number)
+    from services.items.repository import is_trackable_set
+
+    if not is_trackable_set(set_number):
+        logger.debug("Skipping non-trackable item: %s", set_number)
         return []
 
     conn.execute("BEGIN TRANSACTION")

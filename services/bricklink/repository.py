@@ -297,6 +297,7 @@ def upsert_item(conn: Any, data: BricklinkData) -> int:
         conn,
         set_number,
         title=data.title,
+        theme=data.theme,
         year_released=data.year_released,
         image_url=data.image_url,
         minifig_count=data.minifig_count,

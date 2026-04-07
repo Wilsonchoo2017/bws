@@ -45,6 +45,9 @@ def mightyutan_product_to_dict(product: Any) -> dict:
         "shop_name": "Mighty Utan Malaysia",
         "product_url": product.url,
         "image_url": product.image_url,
+        "available": product.available,
+        "original_price_myr": product.original_price_myr,
+        "is_special_price": product.is_special_price,
     }
 
 
@@ -64,12 +67,17 @@ def catalog_item_to_dict(item: Any) -> dict:
 def extract_set_numbers_from_catalog(items: list[Any]) -> list[str]:
     """Extract LEGO set numbers from BrickLink catalog items.
 
-    Filters to type 'S' items and strips the variant suffix (e.g. '75192-1' -> '75192').
+    Filters to type 'S' items, strips the variant suffix (e.g. '75192-1' -> '75192'),
+    and excludes non-trackable items (non-numeric set numbers, polybags).
     """
+    from services.items.repository import is_trackable_set
+
     return [
-        item.item_id.rsplit("-", 1)[0]
+        sn
         for item in items
         if item.item_type == "S" and "-" in item.item_id
+        for sn in [item.item_id.rsplit("-", 1)[0]]
+        if is_trackable_set(sn)
     ]
 
 

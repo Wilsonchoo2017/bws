@@ -11,7 +11,7 @@ import colorlog
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from api.routes import enrichment, images, items, ml, portfolio, scrape, stats
+from api.routes import enrichment, images, items, ml, portfolio, scrape, settings, stats
 from api.worker import run_worker
 from services.enrichment.scheduler import run_enrichment_sweep, run_priority_rescrape_sweep
 from services.images.sweep import run_image_download_sweep
@@ -158,6 +158,10 @@ async def lifespan(app: FastAPI):
     from config.settings import restore_cooldowns
     restore_cooldowns()
 
+    # Load runtime settings (applies saved overrides to live objects)
+    from config.runtime_settings import runtime_settings
+    runtime_settings.load()
+
     # Register scoring providers
     from services.scoring.growth_provider import growth_provider
     from services.scoring.provider import register_provider
@@ -241,6 +245,7 @@ app.include_router(portfolio.router, prefix="/api")
 app.include_router(images.router, prefix="/api")
 app.include_router(ml.router, prefix="/api")
 app.include_router(stats.router, prefix="/api")
+app.include_router(settings.router, prefix="/api")
 
 
 @app.get("/api/health")

@@ -96,6 +96,9 @@ class FakeMightyutanProduct:
     rating: float = 4.8
     url: str = "https://mightyutan.com.my/product/60400"
     image_url: str = "https://img.example.com/60400.jpg"
+    available: bool = True
+    original_price_myr: str | None = None
+    is_special_price: bool = False
 
 
 class TestMightyutanProductToDict:
@@ -114,6 +117,34 @@ class TestMightyutanProductToDict:
         result = mightyutan_product_to_dict(FakeMightyutanProduct())
 
         assert result["price_display"] == "RM 49.9"
+
+    def test_given_sold_out_product_when_transformed_then_available_false(self):
+        """Given a sold-out product, when transformed, then available is False."""
+        product = FakeMightyutanProduct(available=False)
+        result = mightyutan_product_to_dict(product)
+
+        assert result["available"] is False
+
+    def test_given_discounted_product_when_transformed_then_original_price_present(self):
+        """Given a discounted product, when transformed, then original_price_myr and is_special_price present."""
+        product = FakeMightyutanProduct(
+            price_myr=35.9,
+            original_price_myr="44.9",
+            is_special_price=True,
+        )
+        result = mightyutan_product_to_dict(product)
+
+        assert result["price_display"] == "RM 35.9"
+        assert result["original_price_myr"] == "44.9"
+        assert result["is_special_price"] is True
+
+    def test_given_regular_product_when_transformed_then_no_discount_fields(self):
+        """Given a non-discounted product, when transformed, then original_price_myr is None."""
+        result = mightyutan_product_to_dict(FakeMightyutanProduct())
+
+        assert result["available"] is True
+        assert result["original_price_myr"] is None
+        assert result["is_special_price"] is False
 
 
 # -- BrickLink catalog transforms --------------------------------------------

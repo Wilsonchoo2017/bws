@@ -1,5 +1,7 @@
 """Unified LEGO items repository -- master catalog + price records."""
 
+import logging
+import re
 from typing import Any
 
 from db.pg.writes import (
@@ -10,6 +12,48 @@ from db.pg.writes import (
     pg_update_buy_rating,
     pg_upsert_lego_item,
 )
+
+logger = logging.getLogger("bws.items.repository")
+
+# Set numbers must be numeric, optionally with a dash suffix (e.g. "75192" or "75192-1").
+_VALID_SET_NUMBER_RE = re.compile(r"^\d+(-\d+)?$")
+
+# Themes that are not retail products -- no Amazon/Keepa listing, no RRP.
+NON_RETAIL_THEMES: frozenset[str] = frozenset({
+    "Collectible Minifigures",
+    "Minifigure Series",
+    "Promotional",
+    "LEGO Brand",
+    "FIRST LEGO League",
+    "Educational & Dacta",
+    "Educational and Dacta",
+    "Education",
+    "Miscellaneous",
+    "Test",
+    "School Supplies",
+    "Value Packs",
+    "LEGO Exclusive",
+    "LEGO Originals",
+    "xtra",
+    "FORMA",
+})
+
+
+def is_trackable_set(set_number: str, theme: str | None = None) -> bool:
+    """Return True if the set is a retail product worth tracking.
+
+    Rejects:
+    - Non-numeric set numbers (col24, FNIK, BMU01, etc.)
+    - Sets in non-retail themes (promos, CMFs, educational, etc.)
+    - Polybags / foil packs (6+ digit numbers)
+    """
+    if not _VALID_SET_NUMBER_RE.match(set_number):
+        return False
+    if is_polybag(set_number):
+        return False
+    if theme and theme in NON_RETAIL_THEMES:
+        return False
+    return True
 
 
 def item_exists(conn: Any, set_number: str) -> bool:
@@ -62,7 +106,8 @@ def get_or_create_item(
     for new inserts only -- existing image_urls are never overwritten by fallback.
     Skips polybags/foil packs (6+ digit set numbers).
     """
-    if is_polybag(set_number):
+    if not is_trackable_set(set_number, theme):
+        logger.debug("Skipping non-trackable item: %s (theme=%s)", set_number, theme)
         return
     # For INSERT: use BrickLink fallback when no image provided.
     # For UPDATE: only pass caller's original value so COALESCE preserves existing.
@@ -217,22 +262,29 @@ def get_all_items(conn: Any) -> list[dict]:
             FROM brickeconomy_snapshots
         ),
         best_shopee AS (
-            SELECT set_number, price_cents, currency, url, shop_name, recorded_at,
+            SELECT pr.set_number, pr.price_cents, pr.currency, pr.url, pr.shop_name, pr.recorded_at,
                    ROW_NUMBER() OVER (
-                       PARTITION BY set_number
-                       ORDER BY price_cents ASC, recorded_at DESC
+                       PARTITION BY pr.set_number
+                       ORDER BY pr.price_cents ASC, pr.recorded_at DESC
                    ) AS rn
-            FROM price_records WHERE source = 'shopee'
+            FROM price_records pr
+            INNER JOIN shopee_products sp ON sp.product_url = pr.url
+                AND (sp.is_sold_out = FALSE OR sp.is_sold_out IS NULL)
+            WHERE pr.source = 'shopee'
         ),
         latest_toysrus AS (
-            SELECT set_number, price_cents, currency, url, recorded_at,
-                   ROW_NUMBER() OVER (PARTITION BY set_number ORDER BY recorded_at DESC) AS rn
-            FROM price_records WHERE source = 'toysrus'
+            SELECT pr.set_number, pr.price_cents, pr.currency, pr.url, pr.recorded_at,
+                   ROW_NUMBER() OVER (PARTITION BY pr.set_number ORDER BY pr.recorded_at DESC) AS rn
+            FROM price_records pr
+            INNER JOIN toysrus_products tp ON tp.url = pr.url AND tp.available = TRUE
+            WHERE pr.source = 'toysrus'
         ),
         latest_mightyutan AS (
-            SELECT set_number, price_cents, currency, url, recorded_at,
-                   ROW_NUMBER() OVER (PARTITION BY set_number ORDER BY recorded_at DESC) AS rn
-            FROM price_records WHERE source = 'mightyutan'
+            SELECT pr.set_number, pr.price_cents, pr.currency, pr.url, pr.recorded_at,
+                   ROW_NUMBER() OVER (PARTITION BY pr.set_number ORDER BY pr.recorded_at DESC) AS rn
+            FROM price_records pr
+            INNER JOIN mightyutan_products mp ON mp.url = pr.url AND mp.available = TRUE
+            WHERE pr.source = 'mightyutan'
         ),
         latest_bricklink_new AS (
             SELECT set_number, price_cents, currency, recorded_at,
@@ -445,6 +497,30 @@ def delete_item(conn: Any, set_number: str) -> bool:
         pg_delete_item(pg, set_number)
 
     return True
+
+
+def purge_non_trackable_items(conn: Any) -> list[str]:
+    """Delete all non-trackable items (non-numeric set numbers, non-retail themes).
+
+    Returns list of deleted set numbers.
+    """
+    rows = conn.execute(
+        "SELECT set_number, theme FROM lego_items"
+    ).fetchall()
+
+    deleted = []
+    for set_number, theme in rows:
+        if not is_trackable_set(set_number, theme):
+            delete_item(conn, set_number)
+            deleted.append(set_number)
+
+    if deleted:
+        logger.info(
+            "Purged %d non-trackable items: %s",
+            len(deleted),
+            ", ".join(deleted[:20]),
+        )
+    return deleted
 
 
 def toggle_watchlist(conn: Any, set_number: str) -> bool | None:

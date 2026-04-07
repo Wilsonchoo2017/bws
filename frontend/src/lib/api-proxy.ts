@@ -99,6 +99,34 @@ export function proxyPost(backendPath: string, opts: PostProxyOptions = {}) {
   };
 }
 
+export function proxyPut(backendPath: string, opts: ProxyOptions = {}) {
+  const { errorMessage = 'Request failed' } = opts;
+
+  return async function PUT(
+    request: NextRequest,
+    context?: RouteContext
+  ) {
+    try {
+      const path =
+        backendPath.includes('{') && context
+          ? await resolvePath(backendPath, context.params)
+          : backendPath;
+      const body = JSON.stringify(await request.json());
+      const res = await fetch(`${API_BASE}${path}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body,
+      });
+      const data = await res.json();
+
+      if (!res.ok) return notOkJson(data, res.status, errorMessage);
+      return NextResponse.json(data);
+    } catch (error) {
+      return errorJson(error, errorMessage);
+    }
+  };
+}
+
 export function proxyDelete(backendPath: string, opts: ProxyOptions = {}) {
   const { errorMessage = 'Request failed' } = opts;
 

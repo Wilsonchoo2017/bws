@@ -5,14 +5,16 @@ import { Button } from '@/components/ui/button';
 import { WorkersPanel } from './workers-panel';
 import { CoveragePanel } from './coverage-panel';
 import { CooldownsPanel } from './cooldowns-panel';
+import { SettingsPanel } from './settings-panel';
 import type { QueueStats, WorkerJob } from './types';
 
-type Tab = 'workers' | 'cooldowns' | 'coverage';
+type Tab = 'workers' | 'cooldowns' | 'coverage' | 'settings';
 
 const TABS: ReadonlyArray<{ readonly id: Tab; readonly label: string }> = [
   { id: 'workers', label: 'Workers' },
   { id: 'cooldowns', label: 'Cooldowns' },
   { id: 'coverage', label: 'Coverage' },
+  { id: 'settings', label: 'Settings' },
 ];
 
 export function OperationsDashboard() {
@@ -170,6 +172,7 @@ export function OperationsDashboard() {
       )}
       {tab === 'cooldowns' && <CooldownsPanel />}
       {tab === 'coverage' && <CoveragePanel />}
+      {tab === 'settings' && <SettingsPanel />}
     </div>
   );
 }

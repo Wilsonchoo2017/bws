@@ -28,29 +28,37 @@ _failure_tracker: dict[str, tuple[int, datetime]] = {}
 
 
 def _get_items_without_keepa(limit: int = 5) -> list[str]:
-    """Find set numbers that have no Keepa snapshot."""
+    """Find set numbers that have no Keepa snapshot.
+
+    Excludes non-trackable items (non-retail themes, non-numeric set numbers).
+    """
     from db.connection import get_connection
     from db.schema import init_schema
+    from services.items.repository import NON_RETAIL_THEMES, is_trackable_set
 
     conn = get_connection()
     try:
         init_schema(conn)
 
+        # Exclude non-retail themes in SQL for efficiency
+        placeholders = ", ".join(["?"] * len(NON_RETAIL_THEMES))
         rows = conn.execute(
-            """
+            f"""
             SELECT li.set_number
             FROM lego_items li
             WHERE NOT EXISTS (
                 SELECT 1 FROM keepa_snapshots ks
                 WHERE ks.set_number = li.set_number
             )
+            AND (li.theme IS NULL OR li.theme NOT IN ({placeholders}))
             ORDER BY li.created_at DESC
             LIMIT ?
             """,
-            [limit],
+            [*NON_RETAIL_THEMES, limit],
         ).fetchall()
 
-        return [row[0] for row in rows]
+        # Also filter non-numeric set numbers in Python
+        return [row[0] for row in rows if is_trackable_set(row[0])]
     finally:
         conn.close()
 
