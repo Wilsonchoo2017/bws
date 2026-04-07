@@ -17,12 +17,8 @@ the dispatcher.
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING
 
 from services.scrape_queue.models import Executor, TaskType, TaskTypeConfig
-
-if TYPE_CHECKING:
-    pass
 
 logger = logging.getLogger("bws.scrape_queue.registry")
 

@@ -1,7 +1,7 @@
 """Persist and load trained growth models to/from disk.
 
-Saves the full model bundle (tier1, tier2, tier3, ensemble, theme/subtheme
-stats) as a single joblib file so the server can skip retraining on restart.
+Saves the full model bundle (tier1, tier2, classifier, ensemble,
+theme/subtheme stats) as a single joblib file.
 """
 
 from __future__ import annotations
@@ -27,13 +27,10 @@ def save_growth_models(
     tier2: Any | None,
     theme_stats: dict,
     subtheme_stats: dict,
-    tier3: Any | None,
+    classifier: Any | None,
     ensemble: Any | None,
 ) -> Path:
-    """Serialize the full growth model bundle to disk.
-
-    Returns the path to the saved artifact.
-    """
+    """Serialize the full growth model bundle to disk."""
     import joblib
 
     _MODELS_DIR.mkdir(parents=True, exist_ok=True)
@@ -44,9 +41,10 @@ def save_growth_models(
         "tier2": tier2,
         "theme_stats": theme_stats,
         "subtheme_stats": subtheme_stats,
-        "tier3": tier3,
+        "classifier": classifier,
         "ensemble": ensemble,
         "saved_at": datetime.now(timezone.utc).isoformat(),
+        "version": 2,  # v2 = hurdle model
     }
     joblib.dump(bundle, path, compress=3)
     logger.info("Growth models saved to %s", path)
@@ -54,23 +52,18 @@ def save_growth_models(
 
 
 def load_growth_models(
-    max_age_hours: float = 168,  # 7 days default
+    max_age_hours: float = 168,
 ) -> tuple[Any, Any | None, dict, dict, Any | None, Any | None] | None:
-    """Load growth models from disk if they exist and are fresh enough.
+    """Load growth models from disk.
 
-    Args:
-        max_age_hours: Maximum age in hours before the cached model is
-            considered stale and None is returned (triggering retrain).
-
-    Returns:
-        (tier1, tier2, theme_stats, subtheme_stats, tier3, ensemble) or
-        None if no valid artifact exists.
+    Returns (tier1, tier2, theme_stats, subtheme_stats, classifier, ensemble)
+    or None if no valid artifact exists.
     """
     import joblib
 
     path = _artifact_path()
     if not path.exists():
-        logger.info("No saved growth models found at %s", path)
+        logger.info("No saved growth models at %s", path)
         return None
 
     try:
@@ -88,19 +81,26 @@ def load_growth_models(
         age_hours = (now - saved_dt).total_seconds() / 3600
         if age_hours > max_age_hours:
             logger.info(
-                "Saved growth models are %.1f hours old (max %.0f), will retrain",
+                "Growth models are %.1f hours old (max %.0f), need retrain",
                 age_hours, max_age_hours,
             )
             return None
-        logger.info("Loaded growth models from disk (%.1f hours old)", age_hours)
+        logger.info("Loaded growth models (%.1f hours old)", age_hours)
     else:
         logger.info("Loaded growth models from disk")
+
+    # v2 (hurdle): classifier field. v1: tier3 field (legacy).
+    classifier = bundle.get("classifier")
+    if classifier is None:
+        # Legacy v1 bundle — classifier not available
+        classifier = bundle.get("tier3")  # won't be a classifier, but avoids KeyError
+        classifier = None  # force None for v1
 
     return (
         bundle["tier1"],
         bundle.get("tier2"),
         bundle["theme_stats"],
         bundle["subtheme_stats"],
-        bundle.get("tier3"),
+        classifier,
         bundle.get("ensemble"),
     )

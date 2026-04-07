@@ -6,7 +6,7 @@ with confidence assessment and neighbor-bin fallback.
 
 import logging
 from dataclasses import dataclass, replace
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 import pandas as pd
 
@@ -23,8 +23,6 @@ from config.kelly import (
 )
 from services.backtesting.kelly import KellyParams
 
-if TYPE_CHECKING:
-    from duckdb import DuckDBPyConnection
 
 logger = logging.getLogger(__name__)
 
@@ -237,7 +235,7 @@ def size_position(
 
 
 def compute_position_sizing(
-    conn: "DuckDBPyConnection",
+    conn: Any,
     set_number: str,
     budget_cents: int | None = None,
     condition: str = "new",

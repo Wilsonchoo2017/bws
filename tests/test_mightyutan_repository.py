@@ -5,7 +5,8 @@ integration, and sold-out handling.
 """
 
 import pytest
-import duckdb
+
+from db.connection import get_connection
 
 from services.mightyutan.parser import MightyUtanProduct
 from services.mightyutan.repository import (
@@ -22,8 +23,8 @@ from services.mightyutan.repository import (
 
 @pytest.fixture()
 def conn():
-    """In-memory DuckDB connection with schema initialized."""
-    db = duckdb.connect(":memory:")
+    """Connection with schema initialized."""
+    db = get_connection()
     db.execute("CREATE SEQUENCE IF NOT EXISTS mightyutan_products_id_seq")
     db.execute("CREATE SEQUENCE IF NOT EXISTS mightyutan_price_history_id_seq")
     db.execute("CREATE SEQUENCE IF NOT EXISTS lego_items_id_seq")
@@ -93,7 +94,6 @@ def conn():
         )
     """)
     yield db
-    db.close()
 
 
 def _make_product(

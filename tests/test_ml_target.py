@@ -79,12 +79,10 @@ class TestBricklinkPriceAt:
 class TestComputeRetirementReturns:
     def test_empty_db(self, tmp_path):
         """Should return empty DataFrame when no retired sets exist."""
-        import duckdb
-
+        from db.connection import get_connection
         from db.schema import init_schema
 
-        db_path = str(tmp_path / "test.duckdb")
-        conn = duckdb.connect(db_path)
+        conn = get_connection()
         init_schema(conn)
 
         result = compute_retirement_returns(conn)
@@ -93,12 +91,10 @@ class TestComputeRetirementReturns:
 
     def test_with_data(self, tmp_path):
         """Should compute returns when data exists."""
-        import duckdb
-
+        from db.connection import get_connection
         from db.schema import init_schema
 
-        db_path = str(tmp_path / "test.duckdb")
-        conn = duckdb.connect(db_path)
+        conn = get_connection()
         init_schema(conn)
 
         # Insert a retired set

@@ -6,7 +6,6 @@ retiring soon or recently retired.
 
 import logging
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 import numpy as np
 import pandas as pd
@@ -14,15 +13,14 @@ import pandas as pd
 from services.ml.feature_extractors import extract_all_features
 from services.ml.training import load_model
 from services.ml.types import PredictionResult, TrainedModel
+from typing import Any
 
-if TYPE_CHECKING:
-    from duckdb import DuckDBPyConnection
 
 logger = logging.getLogger(__name__)
 
 
 def predict_current_sets(
-    conn: "DuckDBPyConnection",
+    conn: Any,
     model_path: str | None = None,
     model_dir: str = "models",
 ) -> list[PredictionResult]:
@@ -126,7 +124,7 @@ def predict_current_sets(
 
 
 def predict_single_set(
-    conn: "DuckDBPyConnection",
+    conn: Any,
     set_number: str,
     model_path: str | None = None,
     model_dir: str = "models",
@@ -169,7 +167,7 @@ def predict_single_set(
 # ---------------------------------------------------------------------------
 
 
-def _find_candidate_sets(conn: "DuckDBPyConnection") -> pd.DataFrame:
+def _find_candidate_sets(conn: Any) -> pd.DataFrame:
     """Find sets eligible for prediction (retiring soon or recently retired)."""
     query = """
         SELECT set_number, title, theme, year_retired, retiring_soon

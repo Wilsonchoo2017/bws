@@ -8,16 +8,14 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import TYPE_CHECKING
 
 import numpy as np
 import pandas as pd
 
 from services.ml.helpers import safe_float
 from services.ml.types import FeatureMeta
+from typing import Any
 
-if TYPE_CHECKING:
-    from duckdb import DuckDBPyConnection
 
 logger = logging.getLogger(__name__)
 
@@ -47,7 +45,7 @@ class MinifigExtractor:
 
     def extract(
         self,
-        conn: DuckDBPyConnection,
+        conn: Any,
         base: pd.DataFrame,
     ) -> pd.DataFrame:
         """Load minifig data and compute set-level features."""

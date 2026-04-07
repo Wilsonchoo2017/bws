@@ -1,8 +1,7 @@
-"""PostgreSQL connection wrapper with DuckDB-compatible API.
+"""PostgreSQL connection wrapper.
 
-When DUCK_ENABLED=false, this adapter lets all existing repository code
-(which uses conn.execute(sql, params).fetchall() / .df()) work against
-Postgres without changes.
+This adapter lets all repository code (which uses
+conn.execute(sql, params).fetchall() / .df()) work against Postgres.
 
 Key translations:
 - ``?`` placeholders -> ``%s`` (psycopg2 format)
@@ -25,7 +24,7 @@ _TRY_CAST_RE = re.compile(r"TRY_CAST\(", re.IGNORECASE)
 
 
 def _duck_to_pg_sql(sql: str) -> str:
-    """Translate DuckDB SQL to psycopg2-compatible Postgres SQL.
+    """Translate SQL placeholders from ? to %s format.
 
     Translations:
     - ``?`` placeholders -> ``%s``
@@ -43,7 +42,7 @@ def _duck_to_pg_sql(sql: str) -> str:
 
 
 class PgCursorResult:
-    """Wraps a psycopg2 cursor to provide DuckDB-style .fetchone()/.fetchall()/.df()."""
+    """Wraps a psycopg2 cursor to provide .fetchone()/.fetchall()/.df() helpers."""
 
     def __init__(self, cursor: Any) -> None:
         self._cursor = cursor
@@ -58,8 +57,12 @@ class PgCursorResult:
     def description(self) -> Any:
         return self._cursor.description
 
+    @property
+    def rowcount(self) -> int:
+        return self._cursor.rowcount
+
     def df(self) -> Any:
-        """Return query result as a pandas DataFrame (DuckDB .df() compat)."""
+        """Return query result as a pandas DataFrame."""
         import pandas as pd
 
         rows = self._cursor.fetchall()
@@ -70,7 +73,7 @@ class PgCursorResult:
 
 
 class PgConnection:
-    """DuckDB-compatible connection wrapper over a raw psycopg2 connection.
+    """Connection wrapper over a raw psycopg2 connection.
 
     Provides execute/fetchone/fetchall/description/df so that repository
     code works unchanged.
@@ -88,7 +91,7 @@ class PgConnection:
             if params is None:
                 cursor.execute(pg_sql)
             else:
-                # DuckDB accepts list; psycopg2 accepts tuple
+                # psycopg2 accepts tuple for params
                 cursor.execute(pg_sql, tuple(params))
         except Exception:
             logger.error("PG execute failed: %s", pg_sql[:200], exc_info=True)

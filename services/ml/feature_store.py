@@ -1,4 +1,4 @@
-"""Feature store: materialize and cache features in DuckDB.
+"""Feature store: materialize and cache features in database.
 
 Combines target computation + feature extraction into a single table
 for efficient training and evaluation. Features are stored as a JSON
@@ -7,7 +7,6 @@ blob so adding/removing features doesn't require schema migrations.
 
 import json
 import logging
-from typing import TYPE_CHECKING
 
 import pandas as pd
 
@@ -17,15 +16,14 @@ from services.ml.feature_registry import get_enabled_names
 from services.ml.helpers import offset_months
 from services.ml.queries import load_base_metadata
 from services.ml.target import compute_retirement_returns
+from typing import Any
 
-if TYPE_CHECKING:
-    from duckdb import DuckDBPyConnection
 
 logger = logging.getLogger(__name__)
 
 
 def materialize_features(
-    conn: "DuckDBPyConnection",
+    conn: Any,
     config: MLPipelineConfig | None = None,
     force_refresh: bool = False,
 ) -> pd.DataFrame:
@@ -73,7 +71,7 @@ def materialize_features(
     merged = targets_df.merge(features_df, on="set_number", how="inner")
     logger.info("Merged dataset: %d sets", len(merged))
 
-    # 4. Write to DuckDB (one row per set per horizon)
+    # 4. Write to database (one row per set per horizon)
     feature_cols = get_enabled_names()
     available_feature_cols = [c for c in feature_cols if c in merged.columns]
     _write_to_store(conn, merged, available_feature_cols, config)
@@ -83,10 +81,10 @@ def materialize_features(
 
 
 def load_feature_store(
-    conn: "DuckDBPyConnection",
+    conn: Any,
     horizon_months: int = 12,
 ) -> pd.DataFrame:
-    """Load materialized features from DuckDB.
+    """Load materialized features from database.
 
     Returns DataFrame ready for training: one row per set,
     columns = feature columns + target_return + target_profitable.
@@ -126,7 +124,7 @@ def load_feature_store(
     return pd.DataFrame(feature_rows)
 
 
-def get_store_stats(conn: "DuckDBPyConnection") -> dict[str, int]:
+def get_store_stats(conn: Any) -> dict[str, int]:
     """Get summary statistics of the feature store."""
     try:
         total = conn.execute(
@@ -146,7 +144,7 @@ def get_store_stats(conn: "DuckDBPyConnection") -> dict[str, int]:
 
 
 def _extract_features_with_cutoff(
-    conn: "DuckDBPyConnection",
+    conn: Any,
     set_numbers: list[str],
 ) -> pd.DataFrame:
     """Build base metadata with cutoff dates and run all extractors."""
@@ -178,7 +176,7 @@ def _extract_features_with_cutoff(
 
 
 def _write_to_store(
-    conn: "DuckDBPyConnection",
+    conn: Any,
     merged: pd.DataFrame,
     feature_cols: list[str],
     config: MLPipelineConfig,

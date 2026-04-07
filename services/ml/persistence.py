@@ -8,12 +8,10 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 from services.ml.types import ModelMetrics, TrainedModel
+from typing import Any
 
-if TYPE_CHECKING:
-    from duckdb import DuckDBPyConnection
 
 logger = logging.getLogger(__name__)
 
@@ -63,7 +61,7 @@ def load_model(filepath: str) -> TrainedModel:
 
 
 def record_model_run(
-    conn: DuckDBPyConnection,
+    conn: Any,
     model: TrainedModel,
     artifact_path: str | None = None,
 ) -> None:

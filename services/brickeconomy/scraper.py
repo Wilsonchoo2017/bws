@@ -24,6 +24,16 @@ _CF_CHALLENGE_TITLES = (
     "checking your browser",
 )
 
+# DOM selectors that indicate a Cloudflare challenge page
+_CF_CHALLENGE_SELECTORS = (
+    "#challenge-running",
+    "#challenge-stage",
+    "#cf-challenge-running",
+    ".cf-browser-verification",
+    "#turnstile-wrapper",
+    "#challenge-form",
+)
+
 
 @dataclass(frozen=True)
 class BrickeconomyScrapeResult:
@@ -52,10 +62,24 @@ def _notify_captcha(set_number: str) -> None:
 
 
 async def _detect_cloudflare(page) -> bool:
-    """Check if the current page is a Cloudflare challenge."""
+    """Check if the current page is a Cloudflare challenge.
+
+    Uses both title-based and DOM-based detection to catch silent
+    CF blocks that don't set the usual challenge titles.
+    """
     try:
         title = await page.title()
-        return any(cf in title.lower() for cf in _CF_CHALLENGE_TITLES)
+        if any(cf in title.lower() for cf in _CF_CHALLENGE_TITLES):
+            return True
+        # DOM-based detection for JS challenges / Turnstile
+        cf_found = await page.evaluate(
+            """() => {
+                const selectors = %s;
+                return selectors.some(s => document.querySelector(s) !== null);
+            }"""
+            % str(list(_CF_CHALLENGE_SELECTORS))
+        )
+        return cf_found
     except Exception:
         return False
 
@@ -134,18 +158,26 @@ async def _navigate_and_bypass_cf(page, url: str, set_number: str) -> bool:
     await BRICKECONOMY_RATE_LIMITER.acquire()
 
     logger.info("Navigating to %s", url)
-    await page.goto(url, wait_until="domcontentloaded")
+    try:
+        await page.goto(url, wait_until="domcontentloaded", timeout=15_000)
+    except Exception:
+        logger.warning("Navigation timeout (15s) for %s", url)
+        return False
     await human_delay(2_000, 4_000)
 
     if await _detect_cloudflare(page):
         solved = await _wait_for_cloudflare(page, set_number)
         if not solved:
             return False
-        await page.goto(url, wait_until="domcontentloaded")
+        try:
+            await page.goto(url, wait_until="domcontentloaded", timeout=15_000)
+        except Exception:
+            logger.warning("Navigation timeout (15s) after CF solve for %s", url)
+            return False
         await human_delay(2_000, 4_000)
 
     try:
-        await page.wait_for_load_state("networkidle", timeout=30_000)
+        await page.wait_for_load_state("networkidle", timeout=10_000)
     except Exception:
         logger.debug("networkidle timeout on %s, continuing anyway", url)
     await human_delay(1_000, 2_000)
@@ -164,12 +196,17 @@ async def _resolve_set_url(page, set_number: str) -> list[str]:
     if not await _navigate_and_bypass_cf(page, BRICKECONOMY_BASE, set_number):
         return []
 
-    # Check that the search input exists
+    # Canary check: if the search input is missing, the page didn't
+    # load properly (likely a silent Cloudflare block).
     has_search = await page.evaluate(
         "!!document.getElementById('txtSearchHeader')"
     )
     if not has_search:
-        logger.warning("Could not find search input on BrickEconomy homepage")
+        # Double-check for CF elements we might have missed
+        if await _detect_cloudflare(page):
+            logger.warning("Silent Cloudflare block detected on homepage for %s", set_number)
+        else:
+            logger.warning("Homepage loaded but search input missing for %s -- possible layout change or block", set_number)
         return []
 
     # Type the set number (just the number part, without -1 suffix)
@@ -177,7 +214,7 @@ async def _resolve_set_url(page, set_number: str) -> list[str]:
 
     # Set value and submit via JS to bypass any overlays blocking clicks.
     # ASP.NET form postback causes full page navigation.
-    async with page.expect_navigation(wait_until="domcontentloaded", timeout=30_000):
+    async with page.expect_navigation(wait_until="domcontentloaded", timeout=15_000):
         await page.evaluate(
             """(value) => {
                 const input = document.getElementById('txtSearchHeader');
@@ -192,7 +229,7 @@ async def _resolve_set_url(page, set_number: str) -> list[str]:
 
     await human_delay(2_000, 4_000)
     try:
-        await page.wait_for_load_state("networkidle", timeout=30_000)
+        await page.wait_for_load_state("networkidle", timeout=10_000)
     except Exception:
         logger.debug("networkidle timeout on search results, continuing")
     await human_delay(1_000, 2_000)

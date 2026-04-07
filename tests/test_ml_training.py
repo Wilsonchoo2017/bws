@@ -94,12 +94,10 @@ class TestEvaluation:
 class TestTrainingSplit:
     def test_chronological_sorting(self, tmp_path):
         """Verify training uses chronological split."""
-        import duckdb
-
+        from db.connection import get_connection
         from db.schema import init_schema
 
-        db_path = str(tmp_path / "test.duckdb")
-        conn = duckdb.connect(db_path)
+        conn = get_connection()
         init_schema(conn)
 
         # Insert sets with different retirement years

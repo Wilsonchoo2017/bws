@@ -4,13 +4,11 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
 
 from services.scrape_queue.models import ErrorCategory, ExecutorResult, TaskType
 from services.scrape_queue.registry import executor
+from typing import Any
 
-if TYPE_CHECKING:
-    from duckdb import DuckDBPyConnection
 
 logger = logging.getLogger("bws.scrape_queue.executor.brickeconomy")
 
@@ -27,9 +25,9 @@ class _FetchContext:
     data_miss: bool = False
 
 
-@executor(TaskType.BRICKECONOMY, concurrency=2, timeout=300, browser_profile="brickeconomy-profile")
+@executor(TaskType.BRICKECONOMY, concurrency=5, timeout=300, browser_profile="brickeconomy-profile")
 def execute_brickeconomy(
-    conn: DuckDBPyConnection,
+    conn: Any,
     set_number: str,
     *,
     worker_index: int = 0,
@@ -71,9 +69,13 @@ def execute_brickeconomy(
         try:
             scrape_result = browser.run(scrape_with_search, sn)
         except TimeoutError:
-            logger.warning("BrickEconomy browser timed out for %s -- restarting browser", sn)
+            logger.warning("BrickEconomy browser timed out for %s (90s) -- restarting browser", sn)
             browser.restart()
             return make_failed_result(SourceId.BRICKECONOMY, f"Browser timed out for {sn}")
+        except Exception as exc:
+            logger.warning("BrickEconomy unexpected error for %s: %s", sn, exc)
+            browser.restart()
+            return make_failed_result(SourceId.BRICKECONOMY, f"Browser error for {sn}: {exc}")
 
         if not scrape_result.success:
             if scrape_result.not_found:
@@ -105,7 +107,7 @@ def execute_brickeconomy(
         browser.restart()
         return ExecutorResult.fail(
             "BrickEconomy returned no data (0 fields)",
-            category=ErrorCategory.DATA_MISSING,
+            category=ErrorCategory.BROWSER_CRASH,
         )
 
     store_enrichment_result(conn, result)

@@ -1,13 +1,10 @@
 """Post-scrape deal notification -- checks signals and notifies on strong deals."""
 
 import logging
-from typing import TYPE_CHECKING
+from typing import Any
 
 from services.backtesting.screener import compute_all_signals
 from services.notifications.ntfy import NtfyMessage, send_notification
-
-if TYPE_CHECKING:
-    from duckdb import DuckDBPyConnection
 
 logger = logging.getLogger("bws.notifications.deals")
 
@@ -18,7 +15,7 @@ STRONG_SIGNAL_THRESHOLD = 80
 _notified: set[tuple[str, int, int]] = set()
 
 
-def check_and_notify(conn: "DuckDBPyConnection") -> int:
+def check_and_notify(conn: Any) -> int:
     """Compute signals for all items and send Ntfy alerts for strong deals.
 
     Returns the number of new notifications sent.

@@ -34,7 +34,7 @@ class KeepaWorker:
 
 
 def _create_keepa_task(set_number: str) -> dict:
-    """Create a persistent Keepa scrape task in the DuckDB queue."""
+    """Create a persistent Keepa scrape task in the database queue."""
     from db.connection import get_connection
     from db.schema import init_schema
     from services.scrape_queue.models import TaskType

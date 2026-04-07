@@ -73,7 +73,7 @@ const COHORT_LABELS: Record<string, { label: string; desc: string }> = {
   piece_group: { label: 'Piece Group', desc: 'vs similar complexity' },
 };
 
-function CohortSection({
+export function CohortSection({
   cohorts,
 }: {
   cohorts: Record<string, CohortRank>;

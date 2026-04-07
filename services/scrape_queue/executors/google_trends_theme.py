@@ -12,7 +12,6 @@ from __future__ import annotations
 import json
 import logging
 from datetime import datetime, timezone
-from typing import TYPE_CHECKING
 
 from config.ml import LICENSED_THEMES
 from services.scrape_queue.executors.google_trends import (
@@ -20,9 +19,8 @@ from services.scrape_queue.executors.google_trends import (
 )
 from services.scrape_queue.models import ExecutorResult, TaskType
 from services.scrape_queue.registry import executor
+from typing import Any
 
-if TYPE_CHECKING:
-    from duckdb import DuckDBPyConnection
 
 logger = logging.getLogger("bws.scrape_queue.executor.google_trends_theme")
 
@@ -46,7 +44,7 @@ def _classify_theme(theme: str) -> str:
 
 
 def _check_freshness(
-    conn: DuckDBPyConnection, theme: str,
+    conn: Any, theme: str,
 ) -> bool:
     """Return True if we need fresh data."""
     from datetime import timedelta
@@ -135,7 +133,7 @@ def _fetch_theme_gt(
     }
 
 
-def _persist(conn: DuckDBPyConnection, theme: str, theme_type: str, data: dict) -> None:
+def _persist(conn: Any, theme: str, theme_type: str, data: dict) -> None:
     """Save theme GT snapshot to the database."""
     today = datetime.now(tz=timezone.utc).strftime("%Y-%m-%d")
     row_id = conn.execute(
@@ -181,7 +179,7 @@ def _persist(conn: DuckDBPyConnection, theme: str, theme_type: str, data: dict) 
 
 @executor(TaskType.GOOGLE_TRENDS_THEME, concurrency=1, timeout=180)
 def execute_google_trends_theme(
-    conn: DuckDBPyConnection,
+    conn: Any,
     set_number: str,
     *,
     worker_index: int = 0,

@@ -23,15 +23,120 @@ from services.ml.encodings import (
 logger = logging.getLogger(__name__)
 
 TIER1_FEATURES: tuple[str, ...] = (
+    # Core set attributes
     "log_rrp", "log_parts", "price_per_part", "mfigs", "minifig_density",
-    "price_tier", "rating_value", "review_count", "theme_bayes",
-    "theme_size", "is_licensed", "usd_gbp_ratio", "subtheme_loo", "sub_size",
+    "price_tier", "is_licensed", "usd_gbp_ratio", "usd_vs_mean", "currency_cv",
+    # Rating & reviews (NEW)
+    "rating_value", "log_reviews", "rating_x_reviews",
+    # Distribution & value signals (NEW)
+    "dist_cv", "has_designer", "mfig_value_to_rrp",
+    # Theme/subtheme encodings
+    "theme_bayes", "theme_size", "theme_growth_std",
+    "subtheme_loo", "sub_size",
+    # Cohort review rankings (non-leaky: reviews available at prediction time)
+    "review_rank_in_year", "review_rank_in_quarter",
+    "review_rank_in_price_tier", "review_rank_in_pieces_tier",
+    "review_rank_in_theme", "review_rank_in_retire_year",
+    # Feature interactions
+    "theme_x_price", "licensed_x_parts", "rating_x_price",
+)
+
+# Growth rankings are computed for analysis only (leaky -- derived from target).
+# Stored separately so they can be used in research notebooks but NOT in training.
+GROWTH_RANK_FEATURES: tuple[str, ...] = (
+    "growth_rank_in_year", "growth_rank_in_quarter",
+    "growth_rank_in_price_tier", "growth_rank_in_pieces_tier",
+    "growth_rank_in_theme", "growth_rank_in_retire_year",
 )
 
 TIER2_FEATURES: tuple[str, ...] = TIER1_FEATURES + (
     "kp_below_rrp_pct", "kp_avg_discount", "kp_max_discount",
     "kp_price_trend", "kp_price_cv", "kp_months_stock", "kp_bb_premium",
 )
+
+
+def _add_cohort_rankings(
+    df: pd.DataFrame,
+    training_target: pd.Series | None = None,
+) -> pd.DataFrame:
+    """Add within-cohort percentile rankings for reviews and growth.
+
+    Cohorts:
+    - Release year: sets released in the same year
+    - Release quarter: same year + quarter (3-month bucket)
+    - Price tier: same price bracket
+    - Theme: same theme
+    - Retirement year: sets retiring in the same year
+
+    Rankings are percentile ranks (0-1) within each cohort.
+    Growth rankings use LOO (exclude self) during training to avoid leakage.
+    Review rankings are non-leaky (available at prediction time).
+    """
+    result = df.copy()
+
+    yr_released = pd.to_numeric(result.get("year_released"), errors="coerce")
+    yr_retired = pd.to_numeric(result.get("year_retired"), errors="coerce")
+    reviews = pd.to_numeric(result.get("review_count"), errors="coerce")
+    rrp = pd.to_numeric(result.get("rrp_usd_cents"), errors="coerce") / 100
+
+    # Build cohort group columns
+    release_date = pd.to_datetime(result.get("release_date"), errors="coerce")
+    quarter = release_date.dt.quarter.fillna(1).astype(int)
+
+    parts = pd.to_numeric(result.get("parts_count"), errors="coerce")
+
+    cohort_groups = {
+        "year": yr_released,
+        "quarter": yr_released.astype(str) + "Q" + quarter.astype(str),
+        "price_tier": pd.cut(
+            rrp, bins=[0, 15, 30, 50, 80, 120, 200, 500, 9999],
+            labels=range(1, 9),
+        ).astype(str),
+        "pieces_tier": pd.qcut(
+            parts, q=8, duplicates="drop",
+        ).astype(str),
+        "theme": result.get("theme", pd.Series(dtype=str)),
+        "retire_year": yr_retired,
+    }
+
+    for cohort_name, group_col in cohort_groups.items():
+        # Review rank (non-leaky)
+        result[f"review_rank_in_{cohort_name}"] = result.groupby(group_col)["review_count"].rank(
+            pct=True, method="average", na_option="bottom"
+        )
+
+        # Growth rank (LOO during training to prevent leakage)
+        if training_target is not None:
+            result[f"growth_rank_in_{cohort_name}"] = _loo_rank(
+                training_target.values, group_col,
+            )
+        else:
+            result[f"growth_rank_in_{cohort_name}"] = np.nan
+
+    return result
+
+
+def _loo_rank(
+    target: np.ndarray,
+    group_col: pd.Series,
+) -> pd.Series:
+    """Compute leave-one-out percentile rank within each group.
+
+    For each row, rank its target value among all OTHER rows in the same group.
+    Returns percentile rank (0-1).
+    """
+    ranks = pd.Series(np.nan, index=group_col.index, dtype=float)
+
+    for group_val, idx in group_col.groupby(group_col).groups.items():
+        if pd.isna(group_val) or len(idx) < 2:
+            continue
+        group_targets = target[idx]
+        for i, pos in enumerate(idx):
+            others = np.delete(group_targets, i)
+            rank = (others < group_targets[i]).sum() / len(others)
+            ranks.iloc[pos] = rank
+
+    return ranks
 
 
 def engineer_intrinsic_features(
@@ -85,24 +190,63 @@ def engineer_intrinsic_features(
     gbp = result["rrp_gbp_cents"].fillna(0) if "rrp_gbp_cents" in result.columns else 0
     result["usd_gbp_ratio"] = np.where(gbp > 0, rrp_raw / gbp, np.nan)
 
+    # Multi-currency pricing features
+    price_cols = {
+        "usd": rrp_raw,
+        "gbp_usd": pd.to_numeric(result.get("rrp_gbp_cents"), errors="coerce").fillna(0) * 1.27,
+        "eur_usd": pd.to_numeric(result.get("rrp_eur_cents"), errors="coerce").fillna(0) * 1.08,
+        "cad_usd": pd.to_numeric(result.get("rrp_cad_cents"), errors="coerce").fillna(0) * 0.74,
+        "aud_usd": pd.to_numeric(result.get("rrp_aud_cents"), errors="coerce").fillna(0) * 0.66,
+    }
+    prices_df = pd.DataFrame(price_cols, index=result.index).replace(0, np.nan)
+    prices_mean = prices_df.mean(axis=1)
+    result["usd_vs_mean"] = np.where(prices_mean > 0, rrp_raw / prices_mean, np.nan)
+    result["currency_cv"] = prices_df.std(axis=1) / prices_mean
+
+    # New features: rating, reviews, distribution, designer
+    rating = pd.to_numeric(result.get("rating_value"), errors="coerce")
+    reviews = pd.to_numeric(result.get("review_count"), errors="coerce")
+    result["log_reviews"] = np.log1p(reviews)
+    result["rating_x_reviews"] = rating * result["log_reviews"]
+
+    dist_mean = pd.to_numeric(result.get("distribution_mean_cents"), errors="coerce")
+    dist_std = pd.to_numeric(result.get("distribution_stddev_cents"), errors="coerce")
+    result["dist_cv"] = np.where(dist_mean > 0, dist_std / dist_mean, np.nan)
+
+    mfig_val = pd.to_numeric(result.get("minifig_value_cents"), errors="coerce") / 100
+    result["mfig_value_to_rrp"] = np.where(
+        rrp_raw > 0, mfig_val / (rrp_raw / 100), np.nan
+    )
+    result["has_designer"] = result.get("designer", pd.Series(dtype=str)).notna().astype(int)
+
+    # Cohort ranking features
+    result = _add_cohort_rankings(result, training_target)
+
     # Theme encoding using encodings module
     if training_target is not None and theme_stats is None:
         raw_stats = compute_group_stats(result, "theme", training_target)
+        # Compute per-theme growth std for theme_growth_std feature
+        theme_std_map = training_target.groupby(result["theme"]).std().to_dict()
         theme_stats = {
             "global_mean": raw_stats["global_mean"],
             "alpha": 20,
             "themes": raw_stats["groups"],
+            "theme_std": theme_std_map,
         }
         result["theme_bayes"] = loo_bayesian_encode(
             result["theme"], training_target, raw_stats, alpha=20
         )
         result["theme_size"] = group_size_encode(result["theme"], raw_stats, default=1)
+        result["theme_growth_std"] = result["theme"].map(theme_std_map).fillna(0)
     elif theme_stats is not None:
         adapted_stats = {"global_mean": theme_stats["global_mean"], "groups": theme_stats["themes"]}
         result["theme_bayes"] = group_mean_encode(
             result["theme"], adapted_stats, alpha=theme_stats.get("alpha", 20)
         )
         result["theme_size"] = group_size_encode(result["theme"], adapted_stats, default=1)
+        result["theme_growth_std"] = result["theme"].map(
+            theme_stats.get("theme_std", {})
+        ).fillna(0)
 
     # Subtheme encoding
     if training_target is not None and subtheme_stats is None:
@@ -124,6 +268,14 @@ def engineer_intrinsic_features(
             result["subtheme"], adapted_sub, alpha=0
         )
         result["sub_size"] = group_size_encode(result["subtheme"], adapted_sub)
+
+    # Feature interactions (computed after theme encoding so theme_bayes exists)
+    if "theme_bayes" in result.columns:
+        result["theme_x_price"] = result["theme_bayes"] * result["log_rrp"]
+        result["licensed_x_parts"] = result["is_licensed"] * result["log_parts"]
+        result["rating_x_price"] = pd.to_numeric(
+            result.get("rating_value"), errors="coerce"
+        ) * result["log_rrp"]
 
     return result, theme_stats, subtheme_stats
 

@@ -13,7 +13,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from api.routes import enrichment, images, items, ml, portfolio, scrape, stats
 from api.worker import run_worker
-from services.enrichment.scheduler import run_enrichment_sweep
+from services.enrichment.scheduler import run_enrichment_sweep, run_priority_rescrape_sweep
 from services.images.sweep import run_image_download_sweep
 from services.keepa.scheduler import run_keepa_sweep
 from services.scrape_queue.dispatcher import recover_scrape_queue, run_scrape_dispatcher, shutdown_scrape_dispatcher
@@ -87,15 +87,33 @@ def _setup_file_logging() -> None:
 
 
 def _sync_warm_growth_models() -> None:
-    """Load or train growth models (CPU-heavy) -- runs in background thread."""
-    from db.connection import get_connection
+    """Load models and pre-compute predictions -- runs in background thread."""
     from services.scoring.growth_provider import growth_provider
 
-    conn = get_connection()
+    growth_provider.warm_cache()
+
+    # Pre-warm signals cache so first /items load is fast
     try:
-        growth_provider.warm_cache(conn)
-    finally:
-        conn.close()
+        from db.connection import get_connection
+        from services.backtesting.screener import compute_all_signals_with_cohort
+        from services.scoring.provider import enrich_signals
+        from api.routes.items import _signals_cache, _SIGNALS_TTL
+        import time
+
+        conn = get_connection()
+        try:
+            signals = compute_all_signals_with_cohort(conn, condition="new")
+            signals = enrich_signals(signals, conn)
+            from api.serialization import sanitize_nan
+            _signals_cache["new"] = {
+                "data": sanitize_nan(signals),
+                "expires": time.time() + _SIGNALS_TTL,
+            }
+            logger.info("Signals cache warmed (%d items)", len(signals))
+        finally:
+            conn.close()
+    except Exception:
+        logger.warning("Signals cache warmup failed", exc_info=True)
 
 
 def _sync_prediction_snapshot() -> int | None:
@@ -155,6 +173,7 @@ async def lifespan(app: FastAPI):
     scrape_dispatcher_task = asyncio.create_task(run_scrape_dispatcher())
     prediction_task = asyncio.create_task(_run_daily_prediction_snapshot())
     keepa_task = asyncio.create_task(run_keepa_sweep(job_manager))
+    rescrape_task = asyncio.create_task(run_priority_rescrape_sweep())
 
     # Eagerly warm growth models in a background thread so scraping isn't
     # blocked when the first score_all() call arrives.
@@ -177,24 +196,13 @@ async def lifespan(app: FastAPI):
     except Exception:
         logger.warning("Failed to save cooldown state", exc_info=True)
     # Everything inside _shutdown has a hard 10s ceiling
-    all_tasks = [worker_task, sweep_task, saturation_task, image_task, scrape_dispatcher_task, keepa_task]
+    all_tasks = [worker_task, sweep_task, saturation_task, image_task, scrape_dispatcher_task, keepa_task, rescrape_task, prediction_task]
     try:
         await asyncio.wait_for(_shutdown(all_tasks), timeout=10)
     except (asyncio.TimeoutError, asyncio.CancelledError):
         logger.warning("Shutdown timed out -- force-cancelling all tasks")
         for task in all_tasks:
             task.cancel()
-    # Always checkpoint, no matter what happened above
-    from config.settings import DUCK_ENABLED
-    from db.connection import get_connection
-    conn = get_connection()
-    try:
-        conn.execute("FORCE CHECKPOINT" if DUCK_ENABLED else "CHECKPOINT")
-        logger.info("Shutdown checkpoint completed -- WAL flushed")
-    except Exception:
-        logger.warning("Shutdown checkpoint FAILED -- WAL data may be at risk", exc_info=True)
-    finally:
-        conn.close()
     logger.info("BWS API shut down")
 
 

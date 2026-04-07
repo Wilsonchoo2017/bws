@@ -9,16 +9,14 @@ post-retirement appreciation.
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING
 
 import numpy as np
 import pandas as pd
 
 from services.ml.helpers import offset_months, safe_float, set_number_to_item_id
 from services.ml.types import FeatureMeta
+from typing import Any
 
-if TYPE_CHECKING:
-    from duckdb import DuckDBPyConnection
 
 logger = logging.getLogger(__name__)
 
@@ -54,7 +52,7 @@ class BrickLinkExtractor:
 
     def extract(
         self,
-        conn: DuckDBPyConnection,
+        conn: Any,
         base: pd.DataFrame,
     ) -> pd.DataFrame:
         """Load BrickLink monthly sales and extract features."""
@@ -66,7 +64,7 @@ class BrickLinkExtractor:
         return _compute_bricklink_features(bl_df, rrp_map, base)
 
 
-def _load_bricklink_data(conn: DuckDBPyConnection) -> pd.DataFrame:
+def _load_bricklink_data(conn: Any) -> pd.DataFrame:
     """Load BrickLink monthly sales (new condition)."""
     return conn.execute("""
         SELECT
@@ -80,7 +78,7 @@ def _load_bricklink_data(conn: DuckDBPyConnection) -> pd.DataFrame:
     """).df()
 
 
-def _load_rrp_map(conn: DuckDBPyConnection) -> dict[str, float]:
+def _load_rrp_map(conn: Any) -> dict[str, float]:
     """Load latest RRP USD cents per set."""
     df = conn.execute("""
         SELECT set_number, rrp_usd_cents

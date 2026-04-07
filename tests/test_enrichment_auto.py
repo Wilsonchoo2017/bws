@@ -3,10 +3,10 @@
 from contextlib import contextmanager
 from unittest.mock import MagicMock, patch
 
-import duckdb
 import pytest
 
 from api.jobs import JobManager
+from db.connection import get_connection
 from db.schema import init_schema
 from services.enrichment.auto import (
     queue_enrichment_batch,
@@ -22,15 +22,14 @@ def manager():
 
 @pytest.fixture
 def mem_conn():
-    """In-memory DuckDB connection with schema initialised."""
-    conn = duckdb.connect(":memory:")
+    """Connection with schema initialised."""
+    conn = get_connection()
     init_schema(conn)
     yield conn
-    conn.close()
 
 
 class _NoCloseProxy:
-    """Wraps a DuckDB connection but suppresses close()."""
+    """Wraps a connection but suppresses close()."""
 
     def __init__(self, conn):
         self._conn = conn

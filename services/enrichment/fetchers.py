@@ -8,7 +8,6 @@ Each fetcher:
 
 import logging
 from datetime import datetime, timedelta, timezone
-from typing import TYPE_CHECKING
 
 from services.enrichment.source_adapter import (
     adapt_brickeconomy,
@@ -16,9 +15,8 @@ from services.enrichment.source_adapter import (
     make_failed_result,
 )
 from services.enrichment.types import SourceId, SourceResult
+from typing import Any
 
-if TYPE_CHECKING:
-    from duckdb import DuckDBPyConnection
 
 logger = logging.getLogger("bws.enrichment.fetchers")
 
@@ -27,7 +25,7 @@ _DEFAULT_FRESHNESS = timedelta(hours=24)
 
 
 def fetch_from_bricklink(
-    conn: "DuckDBPyConnection",
+    conn: Any,
     set_number: str,
     *,
     freshness: timedelta = _DEFAULT_FRESHNESS,
@@ -108,7 +106,7 @@ def fetch_from_bricklink(
 
 
 def fetch_from_brickeconomy(
-    conn: "DuckDBPyConnection",
+    conn: Any,
     set_number: str,
     *,
     freshness: timedelta = _DEFAULT_FRESHNESS,

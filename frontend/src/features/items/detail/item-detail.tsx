@@ -1,6 +1,6 @@
 'use client';
 
-import { ChevronDownIcon, ExternalLinkIcon } from 'lucide-react';
+import { ArrowDownIcon, ArrowUpIcon, ChevronDownIcon, ExternalLinkIcon } from 'lucide-react';
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import {
@@ -13,13 +13,13 @@ import {
 import type { BuyRating, ItemDetail, PriceRecord } from '../types';
 import { formatPrice, getLatestPriceBySource } from '../types';
 import { KellyPanel } from '../kelly-panel';
-import { SignalsPanel } from '../signals-table';
+import { InvestmentPanel } from './investment-panel';
 import { BrickeconomyPanel } from './brickeconomy-panel';
 import { BricklinkPriceChart } from './bricklink-price-chart';
+import { CohortPanel } from './cohort-panel';
 import { KeepaPanel } from './keepa-panel';
 import { MinifiguresPanel } from './minifigures-panel';
 import { ListingPanel } from './listing-panel';
-import { MLPredictionPanel } from './ml-prediction-panel';
 import { MinifigureValueChart } from './minifigure-value-chart';
 
 export interface ChartDateRange {
@@ -83,6 +83,58 @@ const SOURCE_COLORS: Record<string, string> = {
     'bg-gray-100 text-gray-800 dark:bg-gray-900/30 dark:text-gray-300',
 };
 
+type PriceSortKey = 'source' | 'price' | 'seller' | 'date';
+type SortDir = 'asc' | 'desc';
+interface SortEntry { key: PriceSortKey; dir: SortDir }
+
+const PRICE_SORT_EXTRACTORS: Record<PriceSortKey, (r: PriceRecord) => string | number> = {
+  source: (r) => (SOURCE_LABELS[r.source] ?? r.source).toLowerCase(),
+  price: (r) => r.price_cents,
+  seller: (r) => (r.shop_name ?? '').toLowerCase(),
+  date: (r) => r.recorded_at,
+};
+
+function multiSort(records: readonly PriceRecord[], sorts: readonly SortEntry[]): PriceRecord[] {
+  if (sorts.length === 0) return [...records].reverse();
+  return [...records].sort((a, b) => {
+    for (const { key, dir } of sorts) {
+      const extract = PRICE_SORT_EXTRACTORS[key];
+      const va = extract(a);
+      const vb = extract(b);
+      const cmp = va < vb ? -1 : va > vb ? 1 : 0;
+      if (cmp !== 0) return dir === 'asc' ? cmp : -cmp;
+    }
+    return 0;
+  });
+}
+
+function toggleSort(sorts: readonly SortEntry[], key: PriceSortKey, multi: boolean): SortEntry[] {
+  const existing = sorts.find((s) => s.key === key);
+  if (existing) {
+    if (existing.dir === 'asc') {
+      return sorts.map((s) => (s.key === key ? { ...s, dir: 'desc' as const } : s));
+    }
+    // Already desc -> remove this sort
+    return sorts.filter((s) => s.key !== key);
+  }
+  const entry: SortEntry = { key, dir: 'asc' };
+  return multi ? [...sorts, entry] : [entry];
+}
+
+function SortIndicator({ sorts, sortKey }: { sorts: readonly SortEntry[]; sortKey: PriceSortKey }) {
+  const idx = sorts.findIndex((s) => s.key === sortKey);
+  if (idx === -1) return null;
+  const { dir } = sorts[idx];
+  return (
+    <span className='ml-1 inline-flex items-center gap-0.5'>
+      {dir === 'asc' ? <ArrowUpIcon className='size-3' /> : <ArrowDownIcon className='size-3' />}
+      {sorts.length > 1 && (
+        <span className='text-[10px] opacity-60'>{idx + 1}</span>
+      )}
+    </span>
+  );
+}
+
 interface ItemDetailViewProps {
   setNumber: string;
 }
@@ -95,6 +147,8 @@ export function ItemDetailView({ setNumber }: ItemDetailViewProps) {
   const [error, setError] = useState<string | null>(null);
   const [enrichStatus, setEnrichStatus] = useState<EnrichStatus>('idle');
   const [enrichMessage, setEnrichMessage] = useState<string | null>(null);
+
+  const [priceSorts, setPriceSorts] = useState<SortEntry[]>([{ key: 'date', dir: 'desc' }]);
 
   // Shared date range across all charts
   const [chartRanges, setChartRanges] = useState<Record<string, ChartDateRange>>({});
@@ -416,13 +470,11 @@ export function ItemDetailView({ setNumber }: ItemDetailViewProps) {
       {/* Listing helper */}
       <ListingPanel item={item} />
 
-      {/* ML Growth Prediction */}
-      <MLPredictionPanel setNumber={setNumber} />
+      {/* Investment analysis: buy signal, returns, discount scenarios */}
+      <InvestmentPanel setNumber={setNumber} />
 
-      {/* Trading signals (legacy) */}
-      <SignalsPanel setNumber={setNumber} />
-
-      {/* Kelly Criterion position sizing */}
+      {/* Cohort rankings & position sizing */}
+      <CohortPanel setNumber={setNumber} />
       <KellyPanel setNumber={setNumber} />
 
       {/* Minifigures */}
@@ -468,15 +520,27 @@ export function ItemDetailView({ setNumber }: ItemDetailViewProps) {
             <table className='w-full text-sm'>
               <thead className='bg-muted/50 sticky top-0'>
                 <tr>
-                  <th className='px-3 py-2 text-left font-medium'>Source</th>
-                  <th className='px-3 py-2 text-right font-medium'>Price</th>
-                  <th className='px-3 py-2 text-left font-medium'>Listing</th>
-                  <th className='px-3 py-2 text-left font-medium'>Seller</th>
-                  <th className='px-3 py-2 text-left font-medium'>Date</th>
+                  {([
+                    { key: 'source' as const, label: 'Source', align: 'text-left' },
+                    { key: 'price' as const, label: 'Price', align: 'text-right' },
+                    { key: null, label: 'Listing', align: 'text-left' },
+                    { key: 'seller' as const, label: 'Seller', align: 'text-left' },
+                    { key: 'date' as const, label: 'Date', align: 'text-left' },
+                  ] as const).map(({ key, label, align }) => (
+                    <th
+                      key={label}
+                      className={`px-3 py-2 font-medium ${align} ${key ? 'cursor-pointer select-none hover:bg-muted/80' : ''}`}
+                      onClick={key ? (e) => setPriceSorts((prev) => toggleSort(prev, key, e.shiftKey)) : undefined}
+                      title={key ? 'Click to sort, Shift+click for multi-sort' : undefined}
+                    >
+                      {label}
+                      {key && <SortIndicator sorts={priceSorts} sortKey={key} />}
+                    </th>
+                  ))}
                 </tr>
               </thead>
               <tbody>
-                {[...item.prices].reverse().map((record, i) => (
+                {multiSort(item.prices, priceSorts).map((record, i) => (
                   <tr key={i} className='border-border border-t'>
                     <td className='px-3 py-2'>
                       <span

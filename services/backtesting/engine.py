@@ -4,7 +4,6 @@ Iterates chronologically through items, computes signals at each month,
 simulates trades, and measures actual returns at various horizons.
 """
 
-from typing import TYPE_CHECKING
 
 import pandas as pd
 
@@ -16,19 +15,17 @@ from services.backtesting.signal_registry import (
 from services.backtesting.signals import _extract_avg_price
 from services.backtesting.types import BacktestConfig, SignalSnapshot, TradeResult
 from services.backtesting.utils import safe_get, safe_get_int
-
-if TYPE_CHECKING:
-    from duckdb import DuckDBPyConnection
+from typing import Any
 
 
 def run_backtest(
-    conn: "DuckDBPyConnection",
+    conn: Any,
     config: BacktestConfig | None = None,
 ) -> list[TradeResult]:
     """Run walk-forward backtest across all items with sufficient history.
 
     Args:
-        conn: DuckDB connection
+        conn: Database connection
         config: Backtest configuration (defaults to BacktestConfig())
 
     Returns:

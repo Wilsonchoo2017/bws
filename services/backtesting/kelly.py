@@ -8,7 +8,6 @@ import logging
 import threading
 import time
 from dataclasses import dataclass, replace
-from typing import TYPE_CHECKING
 
 import pandas as pd
 
@@ -25,9 +24,8 @@ from config.kelly import (
 )
 from services.backtesting.analysis import trades_to_dataframe
 from services.backtesting.types import SIGNAL_NAMES, TradeResult
+from typing import Any
 
-if TYPE_CHECKING:
-    from duckdb import DuckDBPyConnection
 
 logger = logging.getLogger(__name__)
 
@@ -173,7 +171,7 @@ def compute_kelly_table(
     return table
 
 
-def get_kelly_table(conn: "DuckDBPyConnection") -> dict[str, dict[str, KellyParams]]:
+def get_kelly_table(conn: Any) -> dict[str, dict[str, KellyParams]]:
     """Get or compute the cached Kelly table."""
     global _kelly_cache, _kelly_cache_time
 

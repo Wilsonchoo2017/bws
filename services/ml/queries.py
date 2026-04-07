@@ -1,6 +1,6 @@
 """Data access layer for the ML pipeline.
 
-All database queries live here. Functions accept a DuckDB connection and
+All database queries live here. Functions accept a database connection and
 return DataFrames or dicts. No business logic -- just data retrieval.
 
 This eliminates the duplicated "latest snapshot per set" pattern that
@@ -12,12 +12,11 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import TYPE_CHECKING
+
+from typing import Any
 
 import pandas as pd
 
-if TYPE_CHECKING:
-    from duckdb import DuckDBPyConnection
 
 logger = logging.getLogger(__name__)
 
@@ -28,7 +27,7 @@ logger = logging.getLogger(__name__)
 
 
 def load_base_metadata(
-    conn: DuckDBPyConnection,
+    conn: Any,
     set_numbers: list[str] | None = None,
 ) -> pd.DataFrame:
     """Load core set metadata needed for feature extraction.
@@ -70,7 +69,7 @@ def load_base_metadata(
     return conn.execute(query).df()
 
 
-def load_retired_sets(conn: DuckDBPyConnection) -> pd.DataFrame:
+def load_retired_sets(conn: Any) -> pd.DataFrame:
     """Load retired sets with RRP in USD cents.
 
     Returns DataFrame with: set_number, year_retired, retired_date, rrp_usd_cents.
@@ -98,7 +97,7 @@ def load_retired_sets(conn: DuckDBPyConnection) -> pd.DataFrame:
 
 
 def load_year_retired(
-    conn: DuckDBPyConnection,
+    conn: Any,
     set_numbers: list[str],
 ) -> pd.DataFrame:
     """Load year_retired for a list of sets (used for chronological sorting)."""
@@ -119,7 +118,7 @@ def load_year_retired(
 
 
 def load_latest_be_snapshots(
-    conn: DuckDBPyConnection,
+    conn: Any,
 ) -> pd.DataFrame:
     """Load the most recent BrickEconomy snapshot per set.
 
@@ -155,7 +154,7 @@ def load_latest_be_snapshots(
 
 
 def load_be_cutoff_snapshots(
-    conn: DuckDBPyConnection,
+    conn: Any,
     sets_with_cutoff: pd.DataFrame,
 ) -> pd.DataFrame:
     """Load latest BrickEconomy snapshot before each set's cutoff date.
@@ -204,7 +203,7 @@ def load_be_cutoff_snapshots(
     return combined
 
 
-def load_rrp_map(conn: DuckDBPyConnection) -> dict[str, float]:
+def load_rrp_map(conn: Any) -> dict[str, float]:
     """Load latest RRP USD cents per set as a dict.
 
     Returns:
@@ -225,7 +224,7 @@ def load_rrp_map(conn: DuckDBPyConnection) -> dict[str, float]:
 
 
 def load_be_value_charts(
-    conn: DuckDBPyConnection,
+    conn: Any,
 ) -> dict[str, list[tuple[int, int, int]]]:
     """Load BrickEconomy value_chart_json parsed into (year, month, cents).
 
@@ -275,7 +274,7 @@ def load_be_value_charts(
     return result
 
 
-def load_be_snapshot_values(conn: DuckDBPyConnection) -> pd.DataFrame:
+def load_be_snapshot_values(conn: Any) -> pd.DataFrame:
     """Load BrickEconomy snapshot value_new_cents over time.
 
     Returns DataFrame with: set_number, scraped_at, value_new_cents.
@@ -296,7 +295,7 @@ def load_be_snapshot_values(conn: DuckDBPyConnection) -> pd.DataFrame:
 # ---------------------------------------------------------------------------
 
 
-def load_bricklink_monthly_prices(conn: DuckDBPyConnection) -> pd.DataFrame:
+def load_bricklink_monthly_prices(conn: Any) -> pd.DataFrame:
     """Load BrickLink monthly sales with avg_price in USD cents.
 
     Returns DataFrame with: item_id, year, month, avg_price.
@@ -320,7 +319,7 @@ def load_bricklink_monthly_prices(conn: DuckDBPyConnection) -> pd.DataFrame:
 # ---------------------------------------------------------------------------
 
 
-def load_latest_keepa_snapshots(conn: DuckDBPyConnection) -> pd.DataFrame:
+def load_latest_keepa_snapshots(conn: Any) -> pd.DataFrame:
     """Load the most recent Keepa snapshot per set.
 
     Returns DataFrame with: set_number, current_amazon_cents, lowest_ever_cents,
@@ -344,7 +343,7 @@ def load_latest_keepa_snapshots(conn: DuckDBPyConnection) -> pd.DataFrame:
     """).df()
 
 
-def load_keepa_timelines(conn: DuckDBPyConnection) -> pd.DataFrame:
+def load_keepa_timelines(conn: Any) -> pd.DataFrame:
     """Load Keepa historical price timeline data.
 
     Returns DataFrame with: set_number, amazon_price_json, buy_box_json,
@@ -367,7 +366,7 @@ def load_keepa_timelines(conn: DuckDBPyConnection) -> pd.DataFrame:
 # ---------------------------------------------------------------------------
 
 
-def load_latest_gtrends_snapshots(conn: DuckDBPyConnection) -> pd.DataFrame:
+def load_latest_gtrends_snapshots(conn: Any) -> pd.DataFrame:
     """Load the most recent Google Trends snapshot per set.
 
     Returns DataFrame with: set_number, peak_value, average_value.
@@ -391,7 +390,7 @@ def load_latest_gtrends_snapshots(conn: DuckDBPyConnection) -> pd.DataFrame:
 # ---------------------------------------------------------------------------
 
 
-def load_latest_shopee_snapshots(conn: DuckDBPyConnection) -> pd.DataFrame:
+def load_latest_shopee_snapshots(conn: Any) -> pd.DataFrame:
     """Load the most recent Shopee saturation data per set.
 
     Returns DataFrame with: set_number, listings_count, unique_sellers,
@@ -418,7 +417,7 @@ def load_latest_shopee_snapshots(conn: DuckDBPyConnection) -> pd.DataFrame:
 # ---------------------------------------------------------------------------
 
 
-def load_growth_training_data(conn: DuckDBPyConnection) -> pd.DataFrame:
+def load_growth_training_data(conn: Any) -> pd.DataFrame:
     """Load all sets with BrickEconomy growth data for growth model training.
 
     Uses the latest BE snapshot per set to avoid duplicate rows.
@@ -432,12 +431,18 @@ def load_growth_training_data(conn: DuckDBPyConnection) -> pd.DataFrame:
             COALESCE(be.minifigs, li.minifig_count) AS minifig_count,
             be.annual_growth_pct, be.rrp_usd_cents, be.rating_value,
             be.review_count, be.pieces, be.minifigs,
-            be.rrp_gbp_cents, be.subtheme,
+            be.rrp_gbp_cents, be.rrp_eur_cents, be.rrp_cad_cents, be.rrp_aud_cents,
+            be.subtheme,
+            be.distribution_mean_cents, be.distribution_stddev_cents,
+            be.minifig_value_cents, be.exclusive_minifigs,
+            be.designer,
+            COALESCE(li.year_released, be.year_released) AS year_released,
             COALESCE(
                 li.year_retired,
                 be.year_retired,
                 TRY_CAST(LEFT(COALESCE(li.retired_date, be.retired_date), 4) AS INTEGER)
-            ) AS year_retired
+            ) AS year_retired,
+            COALESCE(li.release_date, be.release_date) AS release_date
         FROM lego_items li
         JOIN (
             SELECT DISTINCT ON (set_number) *
@@ -449,7 +454,7 @@ def load_growth_training_data(conn: DuckDBPyConnection) -> pd.DataFrame:
     """).df()
 
 
-def load_growth_candidate_sets(conn: DuckDBPyConnection) -> pd.DataFrame:
+def load_growth_candidate_sets(conn: Any) -> pd.DataFrame:
     """Load sets eligible for growth prediction.
 
     Uses the latest BE snapshot per set to avoid duplicate rows.
@@ -463,7 +468,12 @@ def load_growth_candidate_sets(conn: DuckDBPyConnection) -> pd.DataFrame:
             COALESCE(be.minifigs, li.minifig_count) AS minifig_count,
             COALESCE(li.retiring_soon, be.retiring_soon) AS retiring_soon,
             be.rrp_usd_cents, be.rating_value, be.review_count,
-            be.pieces, be.minifigs, be.rrp_gbp_cents, be.subtheme
+            be.pieces, be.minifigs, be.rrp_gbp_cents, be.subtheme,
+            be.distribution_mean_cents, be.distribution_stddev_cents,
+            be.minifig_value_cents, be.exclusive_minifigs,
+            be.designer,
+            COALESCE(li.year_released, be.year_released) AS year_released,
+            COALESCE(li.release_date, be.release_date) AS release_date
         FROM lego_items li
         JOIN (
             SELECT DISTINCT ON (set_number) *

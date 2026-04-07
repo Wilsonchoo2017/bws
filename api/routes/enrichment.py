@@ -1,16 +1,14 @@
 """Enrichment API routes."""
 
 import logging
-from typing import TYPE_CHECKING
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from api.dependencies import get_db
 from services.enrichment.repository import get_items_needing_enrichment
+from typing import Any
 
-if TYPE_CHECKING:
-    from duckdb import DuckDBPyConnection
 
 logger = logging.getLogger("bws.enrichment.routes")
 
@@ -58,7 +56,7 @@ _SOURCE_TO_TASK_TYPE = {
 @router.post("/enrich", response_model=ScrapeTasksResponse)
 async def enrich_item(
     request: EnrichRequest,
-    conn: "DuckDBPyConnection" = Depends(get_db),
+    conn: Any = Depends(get_db),
 ) -> ScrapeTasksResponse:
     """Create scrape tasks for a single LEGO set."""
     if request.source and request.source not in VALID_SOURCES:
@@ -95,7 +93,7 @@ async def enrich_item(
 
 @router.post("/enrich-missing", response_model=EnrichBatchResponse)
 async def enrich_missing(
-    conn: "DuckDBPyConnection" = Depends(get_db),
+    conn: Any = Depends(get_db),
     request: EnrichBatchRequest | None = None,
 ) -> EnrichBatchResponse:
     """Create scrape tasks for items with missing metadata.
@@ -148,7 +146,7 @@ async def enrich_missing(
 
 @router.post("/scrape-missing-minifigs", response_model=EnrichBatchResponse)
 async def scrape_missing_minifigs(
-    conn: "DuckDBPyConnection" = Depends(get_db),
+    conn: Any = Depends(get_db),
     request: EnrichBatchRequest | None = None,
 ) -> EnrichBatchResponse:
     """Create scrape tasks for items with unknown minifig_count (NULL).
@@ -182,7 +180,7 @@ async def scrape_missing_minifigs(
 
 @router.post("/enrich-missing-dimensions", response_model=EnrichBatchResponse)
 async def enrich_missing_dimensions(
-    conn: "DuckDBPyConnection" = Depends(get_db),
+    conn: Any = Depends(get_db),
     request: EnrichBatchRequest | None = None,
 ) -> EnrichBatchResponse:
     """Create scrape tasks for items with missing dimensions (NULL)."""
@@ -212,7 +210,7 @@ async def enrich_missing_dimensions(
 @router.get("/needs-enrichment", response_model=NeedsEnrichmentResponse)
 async def list_needs_enrichment(
     limit: int = Query(default=50, ge=1, le=500),
-    conn: "DuckDBPyConnection" = Depends(get_db),
+    conn: Any = Depends(get_db),
 ) -> NeedsEnrichmentResponse:
     """List items that have missing metadata fields."""
     items = get_items_needing_enrichment(conn, limit=limit)
@@ -220,7 +218,7 @@ async def list_needs_enrichment(
 
 
 @router.get("/scrape-tasks/{set_number}")
-async def get_scrape_tasks(set_number: str, conn: "DuckDBPyConnection" = Depends(get_db)) -> dict:
+async def get_scrape_tasks(set_number: str, conn: Any = Depends(get_db)) -> dict:
     """Get scrape task progress for a specific set."""
     from services.scrape_queue.repository import get_tasks_for_set
 
@@ -245,7 +243,7 @@ async def get_scrape_tasks(set_number: str, conn: "DuckDBPyConnection" = Depends
 
 
 @router.get("/scrape-queue-stats")
-async def scrape_queue_stats(conn: "DuckDBPyConnection" = Depends(get_db)) -> dict:
+async def scrape_queue_stats(conn: Any = Depends(get_db)) -> dict:
     """Get overall scrape queue statistics."""
     from services.scrape_queue.repository import get_queue_stats
 

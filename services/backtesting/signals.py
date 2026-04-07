@@ -65,8 +65,11 @@ def compute_supply_velocity(
         return None
 
     # Filter to snapshots before or at month T
-    cutoff = pd.Timestamp(year=year, month=month, day=28)
-    item_snaps = item_snaps[item_snaps["scraped_at"] <= cutoff]
+    cutoff = pd.Timestamp(year=year, month=month, day=28, tz="UTC")
+    scraped_at = item_snaps["scraped_at"]
+    if hasattr(scraped_at.dt, "tz") and scraped_at.dt.tz is None:
+        scraped_at = scraped_at.dt.tz_localize("UTC")
+    item_snaps = item_snaps[scraped_at <= cutoff]
     if len(item_snaps) < 2:
         return None
 
@@ -228,8 +231,11 @@ def compute_stock_level(
     if item_snaps.empty:
         return None
 
-    cutoff = pd.Timestamp(year=year, month=month, day=28)
-    item_snaps = item_snaps[item_snaps["scraped_at"] <= cutoff]
+    cutoff = pd.Timestamp(year=year, month=month, day=28, tz="UTC")
+    scraped_at = item_snaps["scraped_at"]
+    if hasattr(scraped_at.dt, "tz") and scraped_at.dt.tz is None:
+        scraped_at = scraped_at.dt.tz_localize("UTC")
+    item_snaps = item_snaps[scraped_at <= cutoff]
     if item_snaps.empty:
         return None
 
@@ -569,8 +575,11 @@ def _get_latest_snapshot(
     item_snaps = snapshots[snapshots["item_id"] == item_id]
     if item_snaps.empty:
         return None
-    cutoff = pd.Timestamp(year=year, month=month, day=28)
-    item_snaps = item_snaps[item_snaps["scraped_at"] <= cutoff]
+    cutoff = pd.Timestamp(year=year, month=month, day=28, tz="UTC")
+    scraped_at = item_snaps["scraped_at"]
+    if hasattr(scraped_at.dt, "tz") and scraped_at.dt.tz is None:
+        scraped_at = scraped_at.dt.tz_localize("UTC")
+    item_snaps = item_snaps[scraped_at <= cutoff]
     if item_snaps.empty:
         return None
     return item_snaps.sort_values("scraped_at").iloc[-1]
@@ -817,8 +826,11 @@ def compute_new_used_spread(
     if item_snaps.empty:
         return None
 
-    cutoff = pd.Timestamp(year=year, month=month, day=28)
-    item_snaps = item_snaps[item_snaps["scraped_at"] <= cutoff]
+    cutoff = pd.Timestamp(year=year, month=month, day=28, tz="UTC")
+    scraped_at = item_snaps["scraped_at"]
+    if hasattr(scraped_at.dt, "tz") and scraped_at.dt.tz is None:
+        scraped_at = scraped_at.dt.tz_localize("UTC")
+    item_snaps = item_snaps[scraped_at <= cutoff]
     if item_snaps.empty:
         return None
 

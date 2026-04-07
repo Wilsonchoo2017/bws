@@ -1,15 +1,118 @@
 """Data coverage statistics API route."""
 
+import time
 from typing import TYPE_CHECKING
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 
 from api.dependencies import get_db
+from config.settings import _domain_registry
 
 if TYPE_CHECKING:
     from db.pg.dual_writer import DualWriter
 
 router = APIRouter(prefix="/stats", tags=["stats"])
+
+
+# ---------------------------------------------------------------------------
+# Source-to-domain mapping for cooldown lookups
+# ---------------------------------------------------------------------------
+
+_SOURCE_DOMAIN_MAP: dict[str, str] = {
+    "bricklink": "bricklink.com",
+    "brickeconomy": "brickeconomy.com",
+    "keepa": "keepa.com",
+    "google_trends": "__google_trends__",  # special: not a domain limiter
+}
+
+
+@router.get("/cooldowns")
+async def get_cooldowns() -> dict:
+    """Return cooldown status for all registered domain rate limiters."""
+    sources: list[dict] = []
+
+    for source_key, domain in _SOURCE_DOMAIN_MAP.items():
+        if domain == "__google_trends__":
+            # Google Trends uses its own cooldown mechanism
+            try:
+                from services.scrape_queue.executors import (
+                    get_trends_cooldown_remaining,
+                )
+
+                remaining = get_trends_cooldown_remaining()
+                sources.append({
+                    "source": source_key,
+                    "source_name": "Google Trends",
+                    "is_blocked": remaining > 0,
+                    "cooldown_remaining_s": round(remaining, 0),
+                    "escalation_level": 0,
+                    "consecutive_failures": 0,
+                    "max_per_hour": None,
+                    "requests_this_hour": None,
+                })
+            except ImportError:
+                pass
+            continue
+
+        limiter = _domain_registry.get(domain)
+        if limiter is None:
+            continue
+
+        remaining = limiter.cooldown_remaining()
+        sources.append({
+            "source": source_key,
+            "source_name": limiter._source_name,
+            "is_blocked": limiter.is_blocked(),
+            "cooldown_remaining_s": round(remaining, 0),
+            "escalation_level": limiter._escalation_level,
+            "consecutive_failures": limiter._consecutive_failures,
+            "max_per_hour": limiter._max_per_hour,
+            "requests_this_hour": len([
+                ts for ts in limiter._timestamps
+                if ts > time.monotonic() - 3600.0
+            ]),
+        })
+
+    return {"success": True, "data": sources}
+
+
+@router.post("/cooldowns/{source}/reset")
+async def reset_cooldown(source: str) -> dict:
+    """Reset cooldown for a specific source."""
+    if source not in _SOURCE_DOMAIN_MAP:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Unknown source: {source}",
+        )
+
+    domain = _SOURCE_DOMAIN_MAP[source]
+
+    if domain == "__google_trends__":
+        try:
+            from services.scrape_queue.executors.google_trends import (
+                _trends_cooldown,
+            )
+
+            _trends_cooldown.clear()
+            return {"success": True, "message": f"Cooldown reset for Google Trends"}
+        except ImportError:
+            raise HTTPException(status_code=500, detail="Google Trends module not available")
+
+    limiter = _domain_registry.get(domain)
+    if limiter is None:
+        raise HTTPException(status_code=404, detail=f"No rate limiter for {source}")
+
+    limiter._blocked_until = 0.0
+    limiter._escalation_level = 0
+    limiter._consecutive_failures = 0
+    limiter._was_blocked = False
+
+    # Persist the reset to disk
+    from config.settings import save_cooldowns
+
+    save_cooldowns()
+
+    return {"success": True, "message": f"Cooldown reset for {limiter._source_name}"}
 
 
 # Each source: (label, table, set_number column, optional date column)

@@ -9,13 +9,11 @@ import asyncio
 import logging
 import re
 from collections import deque
-from typing import TYPE_CHECKING, Union
+from typing import Any, Union
 from urllib.parse import quote
 
 from playwright.async_api import Browser, BrowserContext, Page
 
-if TYPE_CHECKING:
-    from duckdb import DuckDBPyConnection
 
 from config.settings import (
     SATURATION_CONFIG,
@@ -160,7 +158,7 @@ async def _search_single_item(
 
 async def run_saturation_batch(
     items: list[dict],
-    conn: "DuckDBPyConnection | None" = None,
+    conn: Any | None = None,
 ) -> SaturationBatchResult:
     """Search Shopee for multiple LEGO sets and compute saturation scores.
 
@@ -170,7 +168,7 @@ async def run_saturation_batch(
 
     Args:
         items: List of dicts with keys: set_number, title, rrp_cents
-        conn: Optional DuckDB connection for saving results. If None,
+        conn: Optional database connection for saving results. If None,
               opens and closes its own connection per save.
 
     Returns:
@@ -315,7 +313,7 @@ async def run_saturation_batch(
 
 def _save_snapshot(
     snapshot: SaturationSnapshot,
-    conn: "DuckDBPyConnection | None" = None,
+    conn: Any | None = None,
 ) -> None:
     """Persist a saturation snapshot to the database."""
     from services.shopee.saturation_repository import save_saturation_snapshot

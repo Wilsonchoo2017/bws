@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 import asyncio
 import logging
 from collections.abc import Callable
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 import httpx
 
@@ -25,8 +26,6 @@ from services.images.repository import (
     mark_failed,
 )
 
-if TYPE_CHECKING:
-    from duckdb import DuckDBPyConnection
 
 logger = logging.getLogger("bws.images")
 
@@ -93,7 +92,7 @@ async def download_single(
 
 
 async def download_batch(
-    conn: "DuckDBPyConnection",
+    conn: Any,
     *,
     batch_size: int = 50,
     on_progress: Callable[[int, int], None] | None = None,

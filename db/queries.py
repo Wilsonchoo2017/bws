@@ -1,23 +1,11 @@
 """Common database query functions for BWS."""
 
 from datetime import datetime, timedelta, timezone
-from typing import TYPE_CHECKING
+from typing import Any
 
 
-if TYPE_CHECKING:
-    from duckdb import DuckDBPyConnection
-
-
-def get_next_id(conn: "DuckDBPyConnection", sequence_name: str) -> int:
-    """Get the next ID from a sequence.
-
-    Args:
-        conn: DuckDB connection
-        sequence_name: Name of the sequence
-
-    Returns:
-        Next ID value
-    """
+def get_next_id(conn: Any, sequence_name: str) -> int:
+    """Get the next ID from a sequence."""
     result = conn.execute(f"SELECT nextval('{sequence_name}')").fetchone()
     if result is None:
         msg = f"Failed to get next ID from sequence {sequence_name}"
@@ -26,31 +14,24 @@ def get_next_id(conn: "DuckDBPyConnection", sequence_name: str) -> int:
 
 
 def format_timestamp(dt: datetime | None) -> str | None:
-    """Format a datetime for DuckDB.
-
-    Args:
-        dt: Datetime to format, or None
-
-    Returns:
-        ISO format string or None
-    """
+    """Format a datetime as ISO string."""
     return dt.isoformat() if dt else None
 
 
-def row_to_dict(conn: "DuckDBPyConnection", row: tuple) -> dict:
-    """Convert a single DuckDB row to a dict using cursor column names."""
+def row_to_dict(conn: Any, row: tuple) -> dict:
+    """Convert a single row to a dict using cursor column names."""
     columns = [desc[0] for desc in conn.description]
     return dict(zip(columns, row))
 
 
-def rows_to_dicts(conn: "DuckDBPyConnection", rows: list[tuple]) -> list[dict]:
-    """Convert multiple DuckDB rows to a list of dicts."""
+def rows_to_dicts(conn: Any, rows: list[tuple]) -> list[dict]:
+    """Convert multiple rows to a list of dicts."""
     columns = [desc[0] for desc in conn.description]
     return [dict(zip(columns, row)) for row in rows]
 
 
 def get_latest_row(
-    conn: "DuckDBPyConnection",
+    conn: Any,
     table: str,
     *,
     key_column: str = "set_number",
@@ -92,14 +73,7 @@ def is_fresh(
 
 
 def parse_timestamp(value: str | datetime | None) -> datetime | None:
-    """Parse a timestamp from DuckDB.
-
-    Args:
-        value: Timestamp string or datetime, or None
-
-    Returns:
-        Datetime or None
-    """
+    """Parse a timestamp string or datetime to a timezone-aware datetime."""
     if value is None:
         return None
     if isinstance(value, datetime):

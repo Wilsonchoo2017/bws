@@ -1,15 +1,13 @@
 """ML prediction API routes."""
 
 import logging
-from typing import TYPE_CHECKING
 
 from fastapi import APIRouter, Depends, Query
 
 from api.dependencies import get_db
 from api.serialization import sanitize_nan
+from typing import Any
 
-if TYPE_CHECKING:
-    from duckdb import DuckDBPyConnection
 
 router = APIRouter(prefix="/ml", tags=["ml"])
 logger = logging.getLogger(__name__)
@@ -18,7 +16,7 @@ logger = logging.getLogger(__name__)
 @router.get("/predictions")
 async def list_predictions(
     horizon: int = Query(12, description="Horizon in months (12, 24, 36)"),
-    conn: "DuckDBPyConnection" = Depends(get_db),
+    conn: Any = Depends(get_db),
 ):
     """Get ML predictions for sets approaching retirement."""
     from services.ml.prediction import predict_current_sets
@@ -44,7 +42,7 @@ async def list_predictions(
 async def get_set_prediction(
     set_number: str,
     horizon: int = Query(12, description="Horizon in months"),
-    conn: "DuckDBPyConnection" = Depends(get_db),
+    conn: Any = Depends(get_db),
 ):
     """Get ML prediction for a single set."""
     from services.ml.prediction import predict_single_set
@@ -66,7 +64,7 @@ async def get_set_prediction(
 
 
 @router.get("/model-info")
-async def get_model_info(conn: "DuckDBPyConnection" = Depends(get_db)):
+async def get_model_info(conn: Any = Depends(get_db)):
     """Get info about trained models."""
     runs = conn.execute("""
         SELECT model_name, horizon_months, task, r_squared, roc_auc,
@@ -86,7 +84,7 @@ async def get_model_info(conn: "DuckDBPyConnection" = Depends(get_db)):
 
 
 @router.get("/feature-store/stats")
-async def get_feature_store_stats(conn: "DuckDBPyConnection" = Depends(get_db)):
+async def get_feature_store_stats(conn: Any = Depends(get_db)):
     """Get feature store statistics."""
     from services.ml.feature_store import get_store_stats
 
@@ -101,7 +99,7 @@ async def get_feature_store_stats(conn: "DuckDBPyConnection" = Depends(get_db)):
 @router.get("/growth/predictions")
 async def list_growth_predictions(
     only_retiring: bool = Query(False, description="Only show retiring-soon sets"),
-    conn: "DuckDBPyConnection" = Depends(get_db),
+    conn: Any = Depends(get_db),
 ):
     """Get growth predictions for all sets (tiered model from research)."""
     from services.scoring.growth_provider import growth_provider
@@ -127,7 +125,7 @@ async def list_growth_predictions(
 @router.get("/growth/predictions/{set_number}")
 async def get_growth_prediction(
     set_number: str,
-    conn: "DuckDBPyConnection" = Depends(get_db),
+    conn: Any = Depends(get_db),
 ):
     """Get growth prediction for a single set."""
     from services.scoring.growth_provider import growth_provider
@@ -147,7 +145,7 @@ async def ml_kelly_sizing(
     budget: int | None = Query(None, description="Budget in cents (e.g. 500000 = MYR 5000)"),
     max_positions: int | None = Query(None, description="Max number of positions (e.g. 10)"),
     only_retiring: bool = Query(False, description="Only retiring-soon sets"),
-    conn: "DuckDBPyConnection" = Depends(get_db),
+    conn: Any = Depends(get_db),
 ):
     """ML-optimized Kelly Criterion position sizing."""
     from services.ml.kelly_optimizer import compute_ml_kelly_sizing
@@ -181,53 +179,159 @@ async def ml_kelly_sizing(
 
 @router.get("/portfolio")
 async def optimize_portfolio_endpoint(
-    budget: float = Query(1000, description="Budget in USD"),
+    budget: float = Query(3000, description="Budget in MYR (default 3000)"),
     risk: str = Query("balanced", description="Risk profile: aggressive, balanced, conservative"),
     max_units: int = Query(3, description="Max units per set"),
-    conn: "DuckDBPyConnection" = Depends(get_db),
+    conn: Any = Depends(get_db),
 ):
-    """Optimize a LEGO investment portfolio using Mean-Variance model."""
+    """Optimize a LEGO investment portfolio.
+
+    Returns holdings with MYR values, expected returns, drawdown risk,
+    and write-off exposure. Think of it like a stock portfolio.
+    """
     from services.ml.portfolio_optimizer import optimize_portfolio
 
     result = optimize_portfolio(
         conn,
-        budget_usd=budget,
+        budget_myr=budget,
         risk_profile=risk,
         max_units_per_set=max_units,
     )
 
     return sanitize_nan({
-        "budget_usd": result.budget_usd,
-        "risk_profile": result.risk_profile,
-        "total_cost_usd": result.total_cost_usd,
-        "expected_return_pct": result.expected_return_pct,
-        "portfolio_std_pct": result.portfolio_std_pct,
-        "sharpe_ratio": result.sharpe_ratio,
-        "var_95_pct": result.var_95_pct,
-        "n_sets": result.n_sets,
-        "n_units": result.n_units,
-        "n_themes": result.n_themes,
-        "max_theme_concentration_pct": result.max_theme_pct,
+        "summary": {
+            "budget_myr": result.budget_myr,
+            "invested_myr": result.total_cost_myr,
+            "expected_profit_myr": result.expected_profit_myr,
+            "expected_return_pct": result.expected_return_pct,
+            "expected_12m_value_myr": result.expected_12m_value_myr,
+            "expected_24m_value_myr": result.expected_24m_value_myr,
+        },
+        "risk": {
+            "risk_profile": result.risk_profile,
+            "portfolio_volatility_pct": result.portfolio_std_pct,
+            "sharpe_ratio": result.sharpe_ratio,
+            "worst_case_return_pct": result.var_95_pct,
+            "max_drawdown_pct": result.max_drawdown_pct,
+            "writeoff_exposure_myr": result.writeoff_exposure_myr,
+        },
+        "composition": {
+            "n_sets": result.n_sets,
+            "n_units": result.n_units,
+            "n_themes": result.n_themes,
+            "max_theme_concentration_pct": result.max_theme_pct,
+        },
         "holdings": [
             {
                 "set_number": h.set_number,
                 "title": h.title,
                 "theme": h.theme,
                 "units": h.units,
-                "price_usd": h.price_usd,
-                "total_cost_usd": h.total_cost_usd,
-                "predicted_growth_pct": h.predicted_growth_pct,
-                "expected_profit_usd": h.expected_profit_usd,
-                "confidence": h.confidence,
-                "ml_tier": h.ml_tier,
+                "buy_price_myr": h.price_myr,
+                "total_cost_myr": h.total_cost_myr,
+                "expected_return_pct": h.predicted_growth_pct,
+                "expected_profit_myr": h.expected_profit_myr,
+                "expected_value_myr": h.expected_value_myr,
+                "win_probability": h.win_probability,
+                "worst_case_return_pct": h.worst_case_pct,
             }
             for h in result.holdings
         ],
     })
 
 
+@router.get("/buy-signal/{set_number}")
+async def buy_signal(
+    set_number: str,
+    price: float | None = Query(None, description="Your buy price in MYR (omit for RRP)"),
+    discount: float = Query(0, description="Discount off RRP in percent (0-50)"),
+    conn: Any = Depends(get_db),
+):
+    """Should you buy this set at this price?
+
+    Returns buy/pass signal based on predicted growth vs your entry price.
+    Shows effective return, break-even price, and discount scenarios.
+    """
+    from services.ml.buy_signal import compute_buy_signal, compute_discount_scenarios
+    from services.scoring.growth_provider import growth_provider
+
+    scores = growth_provider.score_all(conn)
+    pred = scores.get(set_number)
+    if pred is None:
+        return {"error": f"No prediction for set {set_number}"}
+
+    growth_pct = pred["growth_pct"]
+    title = pred.get("title", set_number)
+    theme = pred.get("theme", "")
+
+    # Get RRP
+    rrp_row = conn.execute(
+        f"SELECT rrp_usd_cents FROM brickeconomy_snapshots "
+        f"WHERE set_number = '{set_number}' AND rrp_usd_cents > 0 "
+        f"ORDER BY scraped_at DESC LIMIT 1"
+    ).fetchone()
+    if rrp_row is None:
+        return {"error": f"No RRP data for set {set_number}"}
+
+    rrp_usd_cents = int(rrp_row[0])
+
+    signal = compute_buy_signal(
+        set_number=set_number,
+        title=title,
+        theme=theme,
+        rrp_usd_cents=rrp_usd_cents,
+        predicted_growth_pct=growth_pct,
+        buy_price_myr=price,
+        discount_pct=discount,
+    )
+
+    scenarios = compute_discount_scenarios(
+        set_number=set_number,
+        title=title,
+        theme=theme,
+        rrp_usd_cents=rrp_usd_cents,
+        predicted_growth_pct=growth_pct,
+    )
+
+    response = {
+        "signal": signal.signal,
+        "reason": signal.signal_reason,
+        "set_number": signal.set_number,
+        "title": signal.title,
+        "theme": signal.theme,
+        "rrp_myr": signal.rrp_myr,
+        "your_price_myr": signal.buy_price_myr,
+        "discount_pct": signal.discount_pct,
+        "predicted_growth_from_rrp_pct": signal.predicted_growth_from_rrp_pct,
+        "effective_return_12m_pct": signal.effective_return_12m_pct,
+        "effective_return_24m_pct": signal.effective_return_24m_pct,
+        "expected_profit_12m_myr": signal.effective_profit_12m_myr,
+        "expected_profit_24m_myr": signal.effective_profit_24m_myr,
+        "expected_value_12m_myr": signal.expected_value_12m_myr,
+        "expected_value_24m_myr": signal.expected_value_24m_myr,
+        "max_buy_price_myr": signal.max_buy_price_myr,
+        "min_discount_needed_pct": signal.break_even_discount_pct,
+        "discount_scenarios": [
+            {
+                "discount_pct": s.discount_pct,
+                "buy_price_myr": s.buy_price_myr,
+                "effective_return_12m_pct": s.effective_return_12m_pct,
+                "profit_12m_myr": s.effective_profit_12m_myr,
+                "signal": s.signal,
+            }
+            for s in scenarios
+        ],
+    }
+
+    # Include avoid probability if classifier is available
+    if "avoid_probability" in pred:
+        response["avoid_probability"] = pred["avoid_probability"]
+
+    return sanitize_nan(response)
+
+
 @router.get("/tracking/report")
-async def tracking_report(conn: "DuckDBPyConnection" = Depends(get_db)):
+async def tracking_report(conn: Any = Depends(get_db)):
     """Get prediction tracking report (predicted vs actual)."""
     from services.ml.prediction_tracker import get_tracking_report
 
@@ -235,7 +339,7 @@ async def tracking_report(conn: "DuckDBPyConnection" = Depends(get_db)):
 
 
 @router.post("/tracking/snapshot")
-async def save_tracking_snapshot(conn: "DuckDBPyConnection" = Depends(get_db)):
+async def save_tracking_snapshot(conn: Any = Depends(get_db)):
     """Save today's predictions for future validation."""
     from services.ml.prediction_tracker import backfill_actuals, save_prediction_snapshot
 
@@ -244,7 +348,7 @@ async def save_tracking_snapshot(conn: "DuckDBPyConnection" = Depends(get_db)):
     return {"saved": n_saved, "backfilled": n_backfilled}
 
 
-def _diagnose_missing_data(conn: "DuckDBPyConnection", set_number: str) -> dict:
+def _diagnose_missing_data(conn: Any, set_number: str) -> dict:
     """Check what data is missing for a set to get an ML prediction.
 
     Returns a dict with 'missing' (list of human-readable items) and
@@ -307,9 +411,9 @@ def _diagnose_missing_data(conn: "DuckDBPyConnection", set_number: str) -> dict:
 
 
 @router.post("/growth/retrain")
-async def retrain_growth_models(conn: "DuckDBPyConnection" = Depends(get_db)):
+async def retrain_growth_models():
     """Force retrain growth models (clears cache)."""
     from services.scoring.growth_provider import growth_provider
 
-    stats = growth_provider.retrain(conn)
+    stats = growth_provider.retrain()
     return {"status": "retrained", **stats}

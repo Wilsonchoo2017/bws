@@ -7,7 +7,6 @@ data-loading boundary.
 
 import logging
 from datetime import datetime, timezone
-from typing import TYPE_CHECKING
 
 import numpy as np
 import pandas as pd
@@ -25,9 +24,8 @@ from services.ml.persistence import load_model, record_model_run, save_model
 from services.ml.pipelines import build_pipelines
 from services.ml.queries import load_year_retired
 from services.ml.types import ModelMetrics, TrainedModel
+from typing import Any
 
-if TYPE_CHECKING:
-    from duckdb import DuckDBPyConnection
 
 logger = logging.getLogger(__name__)
 
@@ -41,7 +39,7 @@ __all__ = [
 
 
 def train_pipeline(
-    conn: "DuckDBPyConnection",
+    conn: Any,
     horizon_months: int = 12,
     task: str = "regression",
     config: MLPipelineConfig | None = None,
@@ -165,7 +163,7 @@ def _prepare_training_data(
 
 
 def _time_series_split(
-    conn: "DuckDBPyConnection",
+    conn: Any,
     df: pd.DataFrame,
     config: MLPipelineConfig,
 ) -> tuple[pd.DataFrame | None, pd.DataFrame | None]:
@@ -187,7 +185,7 @@ def _time_series_split(
 
 
 def _sort_chronologically(
-    conn: "DuckDBPyConnection",
+    conn: Any,
     df: pd.DataFrame,
 ) -> pd.DataFrame:
     """Sort DataFrame by set retirement year for time-series splitting."""

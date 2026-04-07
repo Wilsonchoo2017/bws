@@ -13,14 +13,12 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
 
 import numpy as np
 import pandas as pd
 from scipy.optimize import Bounds, LinearConstraint, milp
+from typing import Any
 
-if TYPE_CHECKING:
-    from duckdb import DuckDBPyConnection
 
 logger = logging.getLogger(__name__)
 
@@ -28,6 +26,16 @@ logger = logging.getLogger(__name__)
 WITHIN_THEME_CORR: float = 0.194
 CROSS_THEME_CORR: float = 0.05
 PREDICTION_STD: float = 5.67  # From LOO calibration
+
+
+# Currency conversion (approximate, for display)
+MYR_PER_USD: float = 4.50
+
+# Drawdown / write-off parameters from historical data
+# Based on observed growth distribution: min=0.7%, so near-zero downside
+# But in practice sets CAN lose value temporarily or permanently
+WRITEOFF_PROBABILITY: float = 0.02  # ~2% chance a set never recovers (damaged, lost, etc.)
+MAX_DRAWDOWN_PCT: float = 15.0  # Worst observed temporary drawdown before recovery
 
 
 @dataclass(frozen=True)
@@ -42,8 +50,16 @@ class PortfolioItem:
     total_cost_usd: float
     predicted_growth_pct: float
     expected_profit_usd: float
-    confidence: str
-    ml_tier: int
+    # MYR equivalents
+    price_myr: float = 0.0
+    total_cost_myr: float = 0.0
+    expected_profit_myr: float = 0.0
+    expected_value_myr: float = 0.0
+    # Risk
+    win_probability: float = 0.0
+    worst_case_pct: float = 0.0  # 5th percentile return
+    confidence: str = ""
+    ml_tier: int = 1
 
 
 @dataclass(frozen=True)
@@ -51,17 +67,31 @@ class PortfolioResult:
     """Complete optimized portfolio with metrics."""
 
     holdings: tuple[PortfolioItem, ...]
+    # USD
     total_cost_usd: float
     budget_usd: float
     expected_return_pct: float
+    expected_profit_usd: float
+    # MYR
+    total_cost_myr: float
+    budget_myr: float
+    expected_profit_myr: float
+    expected_value_myr: float
+    # Risk metrics
     portfolio_std_pct: float
     sharpe_ratio: float
-    var_95_pct: float
+    var_95_pct: float  # Value at Risk: 95% confidence worst return
+    max_drawdown_pct: float  # Worst expected temporary loss
+    writeoff_exposure_myr: float  # Expected loss from total write-offs
+    # Composition
     n_sets: int
     n_units: int
     n_themes: int
     max_theme_pct: float
     risk_profile: str
+    # Holding period projections
+    expected_12m_value_myr: float = 0.0
+    expected_24m_value_myr: float = 0.0
 
 
 def _estimate_covariance(
@@ -121,31 +151,48 @@ def _solve_knapsack(
 
 
 def optimize_portfolio(
-    conn: DuckDBPyConnection,
-    budget_usd: float = 1000.0,
+    conn: Any,
+    budget_myr: float = 3000.0,
     risk_profile: str = "balanced",
     max_units_per_set: int = 3,
 ) -> PortfolioResult:
     """Build an optimized LEGO investment portfolio.
 
     Args:
-        conn: DuckDB connection
-        budget_usd: Total budget in USD
+        conn: Database connection
+        budget_myr: Total budget in MYR (default 3000)
         risk_profile: "aggressive" (0.1), "balanced" (0.5), or "conservative" (1.0)
         max_units_per_set: Maximum copies of any single set
 
     Returns:
-        PortfolioResult with optimized holdings and metrics.
+        PortfolioResult with optimized holdings, MYR values, and risk metrics.
     """
+    budget_usd = budget_myr / MYR_PER_USD
+    from db.pg.engine import get_engine
     from services.ml.growth_model import predict_growth, train_growth_models
+    from services.ml.pg_queries import (
+        load_growth_candidate_sets,
+        load_growth_training_data,
+        load_keepa_timelines,
+    )
 
     risk_lambda = {"aggressive": 0.1, "balanced": 0.5, "conservative": 1.0}.get(
         risk_profile, 0.5
     )
 
-    # Get ML predictions
-    tier1, tier2, ts, ss, tier3, ensemble = train_growth_models(conn)
-    predictions = predict_growth(conn, tier1, tier2, ts, ss, tier3=tier3, ensemble=ensemble)
+    # Load data from PG and train
+    engine = get_engine()
+    df_raw = load_growth_training_data(engine)
+    keepa_df = load_keepa_timelines(engine)
+    candidates = load_growth_candidate_sets(engine)
+
+    tier1, tier2, ts, ss, tier3, ensemble = train_growth_models(
+        df_raw=df_raw, keepa_df=keepa_df,
+    )
+    predictions = predict_growth(
+        candidates, keepa_df, tier1, tier2, ts, ss,
+        classifier=tier3, ensemble=ensemble,
+    )
 
     if not predictions:
         return PortfolioResult(
@@ -228,32 +275,52 @@ def optimize_portfolio(
         if allocations[i] <= 0:
             continue
         units = int(allocations[i])
-        cost = units * prices[i]
-        profit = cost * returns[i] / 100
+        cost_usd = units * prices[i]
+        profit_usd = cost_usd * returns[i] / 100
+        cost_myr = cost_usd * MYR_PER_USD
+        profit_myr = profit_usd * MYR_PER_USD
+
+        # Per-set worst case (5th percentile from prediction std)
+        set_std = float(np.sqrt(variances[i]))
+        worst_case = returns[i] - 1.645 * set_std
+
+        # Win probability (return > 0%)
+        win_prob = 1.0 - float(
+            np.clip(0.5 * (1 + np.erf(-returns[i] / (set_std * np.sqrt(2)))), 0, 1)
+        ) if set_std > 0 else (1.0 if returns[i] > 0 else 0.0)
+
         holdings.append(PortfolioItem(
             set_number=df.iloc[i]["set_number"],
             title=df.iloc[i]["title"],
             theme=df.iloc[i]["theme"],
             units=units,
             price_usd=round(prices[i], 2),
-            total_cost_usd=round(cost, 2),
+            total_cost_usd=round(cost_usd, 2),
             predicted_growth_pct=round(returns[i], 1),
-            expected_profit_usd=round(profit, 2),
+            expected_profit_usd=round(profit_usd, 2),
+            price_myr=round(prices[i] * MYR_PER_USD, 2),
+            total_cost_myr=round(cost_myr, 2),
+            expected_profit_myr=round(profit_myr, 2),
+            expected_value_myr=round(cost_myr + profit_myr, 2),
+            win_probability=round(win_prob, 3),
+            worst_case_pct=round(worst_case, 1),
             confidence=df.iloc[i]["confidence"],
             ml_tier=int(df.iloc[i]["ml_tier"]),
         ))
 
-    holdings.sort(key=lambda h: h.expected_profit_usd, reverse=True)
+    holdings.sort(key=lambda h: h.expected_profit_myr, reverse=True)
 
     # Portfolio metrics
-    total_cost = sum(h.total_cost_usd for h in holdings)
-    total_profit = sum(h.expected_profit_usd for h in holdings)
-    port_return = total_profit / total_cost * 100 if total_cost > 0 else 0
+    total_cost_usd = sum(h.total_cost_usd for h in holdings)
+    total_profit_usd = sum(h.expected_profit_usd for h in holdings)
+    total_cost_myr = total_cost_usd * MYR_PER_USD
+    total_profit_myr = total_profit_usd * MYR_PER_USD
+    port_return = total_profit_usd / total_cost_usd * 100 if total_cost_usd > 0 else 0
 
     # Portfolio variance
     alloc_idx = [i for i in range(n) if allocations[i] > 0]
-    if alloc_idx and total_cost > 0:
-        weights = np.array([allocations[i] * prices[i] / total_cost for i in alloc_idx])
+    if alloc_idx and total_cost_usd > 0:
+        weights = np.array([allocations[i] * prices[i] / total_cost_usd for i in alloc_idx])
         sub_cov = cov[np.ix_(alloc_idx, alloc_idx)]
         port_var = float(weights @ sub_cov @ weights)
         port_std = float(np.sqrt(port_var))
@@ -263,23 +330,47 @@ def optimize_portfolio(
     sharpe = port_return / port_std if port_std > 0 else 0
     var_95 = port_return - 1.645 * port_std
 
+    # Drawdown: worst expected temporary loss before recovery
+    max_drawdown = min(MAX_DRAWDOWN_PCT, port_std * 2.0)
+
+    # Write-off exposure: expected loss from sets that never recover
+    # Each set has WRITEOFF_PROBABILITY chance of total loss
+    n_total_units = sum(h.units for h in holdings)
+    expected_writeoffs = WRITEOFF_PROBABILITY * n_total_units
+    writeoff_exposure_myr = expected_writeoffs * (total_cost_myr / max(n_total_units, 1))
+
+    # Theme concentration
     n_themes = len({h.theme for h in holdings})
-    theme_costs = {}
+    theme_costs: dict[str, float] = {}
     for h in holdings:
         theme_costs[h.theme] = theme_costs.get(h.theme, 0) + h.total_cost_usd
-    max_theme_pct = max(theme_costs.values()) / total_cost * 100 if total_cost > 0 and theme_costs else 0
+    max_theme_pct = max(theme_costs.values()) / total_cost_usd * 100 if total_cost_usd > 0 and theme_costs else 0
+
+    # Multi-year projections (compound the annual growth)
+    expected_12m_myr = total_cost_myr * (1 + port_return / 100)
+    # 24m: assume similar growth rate compounds (conservative: use 80% of 12m rate)
+    expected_24m_myr = total_cost_myr * (1 + port_return * 0.8 / 100) ** 2
 
     return PortfolioResult(
         holdings=tuple(holdings),
-        total_cost_usd=round(total_cost, 2),
-        budget_usd=budget_usd,
+        total_cost_usd=round(total_cost_usd, 2),
+        budget_usd=round(budget_usd, 2),
         expected_return_pct=round(port_return, 1),
+        expected_profit_usd=round(total_profit_usd, 2),
+        total_cost_myr=round(total_cost_myr, 2),
+        budget_myr=round(budget_myr, 2),
+        expected_profit_myr=round(total_profit_myr, 2),
+        expected_value_myr=round(total_cost_myr + total_profit_myr, 2),
         portfolio_std_pct=round(port_std, 1),
         sharpe_ratio=round(sharpe, 2),
         var_95_pct=round(var_95, 1),
+        max_drawdown_pct=round(max_drawdown, 1),
+        writeoff_exposure_myr=round(writeoff_exposure_myr, 2),
         n_sets=len(holdings),
-        n_units=sum(h.units for h in holdings),
+        n_units=n_total_units,
         n_themes=n_themes,
         max_theme_pct=round(max_theme_pct, 1),
         risk_profile=risk_profile,
+        expected_12m_value_myr=round(expected_12m_myr, 2),
+        expected_24m_value_myr=round(expected_24m_myr, 2),
     )

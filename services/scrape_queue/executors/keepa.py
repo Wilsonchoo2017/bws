@@ -6,14 +6,12 @@ Structured as a pipeline: fetch (IO) -> validate (pure) -> persist (IO).
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING
 
 from services.core.result import Err, Ok, Result
 from services.scrape_queue.models import ErrorCategory, ExecutorResult, TaskType
 from services.scrape_queue.registry import executor
+from typing import Any
 
-if TYPE_CHECKING:
-    from duckdb import DuckDBPyConnection
 
 logger = logging.getLogger("bws.scrape_queue.executor.keepa")
 
@@ -23,7 +21,7 @@ logger = logging.getLogger("bws.scrape_queue.executor.keepa")
 # ---------------------------------------------------------------------------
 
 
-def _lookup_item_title(conn: DuckDBPyConnection, set_number: str) -> str | None:
+def _lookup_item_title(conn: Any, set_number: str) -> str | None:
     """Look up the item title for search verification.
 
     Checks bricklink_items first, falls back to lego_items.
@@ -84,7 +82,7 @@ def _validate(
     return Ok(scrape_result)
 
 
-def _persist(conn: DuckDBPyConnection, scrape_result: object) -> Result[None, ExecutorResult]:
+def _persist(conn: Any, scrape_result: object) -> Result[None, ExecutorResult]:
     """IO boundary: save snapshot and price records."""
     from services.keepa.repository import record_keepa_prices, save_keepa_snapshot
 
@@ -102,9 +100,9 @@ def _persist(conn: DuckDBPyConnection, scrape_result: object) -> Result[None, Ex
 # ---------------------------------------------------------------------------
 
 
-@executor(TaskType.KEEPA, concurrency=3, timeout=300, browser_profile="keepa-profile")
+@executor(TaskType.KEEPA, concurrency=5, timeout=300, browser_profile="keepa-profile")
 def execute_keepa(
-    conn: DuckDBPyConnection,
+    conn: Any,
     set_number: str,
     *,
     worker_index: int = 0,

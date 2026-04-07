@@ -4,9 +4,9 @@ Covers: parser availability detection, scraper pagination,
 repository availability gate, and end-to-end data flow.
 """
 
-import duckdb
 import pytest
 
+from db.connection import get_connection
 from db.schema import init_schema
 from services.items.repository import get_all_items
 from services.items.set_number import extract_set_number
@@ -16,11 +16,10 @@ from services.toysrus.repository import upsert_product, upsert_products
 
 @pytest.fixture
 def conn():
-    """In-memory DuckDB connection with schema initialized."""
-    connection = duckdb.connect(":memory:")
+    """Connection with schema initialized."""
+    connection = get_connection()
     init_schema(connection)
     yield connection
-    connection.close()
 
 
 def _make_product(

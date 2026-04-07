@@ -9,7 +9,6 @@ from snapshots (since BrickLink only keeps 6 months of data).
 """
 
 import logging
-from typing import TYPE_CHECKING
 
 import pandas as pd
 
@@ -32,14 +31,12 @@ from services.ml.queries import (
     load_retired_sets,
 )
 
-if TYPE_CHECKING:
-    from duckdb import DuckDBPyConnection
 
 logger = logging.getLogger(__name__)
 
 
 def compute_retirement_returns(
-    conn: "DuckDBPyConnection",
+    conn: Any,
     config: MLPipelineConfig | None = None,
 ) -> pd.DataFrame:
     """Compute post-retirement returns for all retired sets.
@@ -258,6 +255,7 @@ def _classify_outcome(
 # ---------------------------------------------------------------------------
 
 from services.ml.price_sources.bricklink import BrickLinkSource  # noqa: E402
+from typing import Any
 
 
 def bricklink_price_at(

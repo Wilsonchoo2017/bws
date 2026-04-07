@@ -6,9 +6,9 @@ across all read paths: items list, portfolio holdings, transactions, and metadat
 
 from datetime import datetime
 
-import duckdb
 import pytest
 
+from db.connection import get_connection
 from db.schema import init_schema
 from services.items.repository import get_all_items, get_or_create_item, record_price
 from services.portfolio.repository import (
@@ -27,11 +27,10 @@ def _expected_image_url(set_number: str) -> str:
 
 @pytest.fixture()
 def conn():
-    """In-memory DuckDB connection with schema initialized."""
-    c = duckdb.connect(":memory:")
+    """Connection with schema initialized."""
+    c = get_connection()
     init_schema(c)
     yield c
-    c.close()
 
 
 @pytest.fixture()

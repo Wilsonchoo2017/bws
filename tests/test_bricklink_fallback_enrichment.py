@@ -7,7 +7,7 @@ fetcher cache, repository persistence, schema migration, and E2E flow.
 import pytest
 
 from bws_types.models import BricklinkData
-from db.connection import get_memory_connection
+from db.connection import get_connection
 from db.schema import init_schema
 from services.enrichment.circuit_breaker import CircuitBreakerState, SourceState
 from services.enrichment.config import (
@@ -211,14 +211,14 @@ class TestFetcherCachePath:
 
     Tests the cache-reconstruction logic directly by building BricklinkData
     from a DB row and adapting it, matching what fetch_from_bricklink does
-    on a cache hit. We avoid calling the full fetcher because DuckDB returns
+    on a cache hit. We avoid calling the full fetcher because the DB returns
     timezone-naive datetimes that trigger a silent exception in the
     cache path, causing a fallback to HTTP.
     """
 
     @pytest.fixture
     def conn(self):
-        c = get_memory_connection()
+        c = get_connection()
         init_schema(c)
         return c
 
@@ -297,7 +297,7 @@ class TestRepositoryUpsert:
 
     @pytest.fixture
     def conn(self):
-        c = get_memory_connection()
+        c = get_connection()
         init_schema(c)
         return c
 
@@ -379,7 +379,7 @@ class TestSchemaMigration:
     def test_migration_adds_columns(self):
         """#37: Given existing table without parts_count/theme.
         When migration runs. Then columns added, existing data preserved."""
-        conn = get_memory_connection()
+        conn = get_connection()
         # Create old schema without new columns
         conn.execute("""
             CREATE TABLE bricklink_items (
@@ -428,7 +428,7 @@ class TestSchemaMigration:
     def test_migration_idempotent(self):
         """#38: Given table already has parts_count and theme.
         When migration runs again. Then no error."""
-        conn = get_memory_connection()
+        conn = get_connection()
         init_schema(conn)
 
         from db.schema import _migrate_bricklink_items
@@ -439,7 +439,7 @@ class TestSchemaMigration:
     def test_fresh_database_has_columns(self):
         """#39: Given fresh database. When init_schema runs.
         Then bricklink_items has parts_count and theme."""
-        conn = get_memory_connection()
+        conn = get_connection()
         init_schema(conn)
 
         cols = {

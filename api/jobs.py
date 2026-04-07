@@ -1,4 +1,4 @@
-"""Job management -- in-memory queue backed by DuckDB for persistence."""
+"""Job management -- in-memory queue backed by database for persistence."""
 
 
 import asyncio

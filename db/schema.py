@@ -1,15 +1,10 @@
-"""DuckDB schema definitions for BWS.
+"""Database schema definitions for BWS.
 
 Contains DDL for creating all required tables.
 """
 
 import logging
-from pathlib import Path
-from typing import TYPE_CHECKING
-
-
-if TYPE_CHECKING:
-    from duckdb import DuckDBPyConnection
+from typing import Any
 
 logger = logging.getLogger("bws.schema")
 
@@ -636,7 +631,7 @@ ALL_DDL = [
 ]
 
 
-def _migrate_bricklink_items(conn: "DuckDBPyConnection") -> None:
+def _migrate_bricklink_items(conn: Any) -> None:
     """Add parts_count and theme columns to bricklink_items."""
     existing = {
         row[0]
@@ -657,7 +652,7 @@ def _migrate_bricklink_items(conn: "DuckDBPyConnection") -> None:
         conn.execute("ALTER TABLE bricklink_items ADD COLUMN has_instructions BOOLEAN")
 
 
-def _migrate_lego_items(conn: "DuckDBPyConnection") -> None:
+def _migrate_lego_items(conn: Any) -> None:
     """Add columns introduced after initial table creation."""
     existing = {
         row[0]
@@ -673,8 +668,6 @@ def _migrate_lego_items(conn: "DuckDBPyConnection") -> None:
             "ALTER TABLE lego_items ADD COLUMN rrp_currency VARCHAR DEFAULT 'MYR'"
         )
     if "retiring_soon" not in existing:
-        # DuckDB cannot ALTER a table with dependent indexes
-        conn.execute("DROP INDEX IF EXISTS idx_lego_items_set_number")
         conn.execute(
             "ALTER TABLE lego_items ADD COLUMN retiring_soon BOOLEAN DEFAULT FALSE"
         )
@@ -702,7 +695,7 @@ def _migrate_lego_items(conn: "DuckDBPyConnection") -> None:
         conn.execute("ALTER TABLE lego_items ADD COLUMN retired_date VARCHAR")
 
 
-def _migrate_brickeconomy_snapshots(conn: "DuckDBPyConnection") -> None:
+def _migrate_brickeconomy_snapshots(conn: Any) -> None:
     """Add missing columns to brickeconomy_snapshots."""
     existing = {
         row[0]
@@ -738,7 +731,7 @@ def _migrate_brickeconomy_snapshots(conn: "DuckDBPyConnection") -> None:
             )
 
 
-def _migrate_shopee_products(conn: "DuckDBPyConnection") -> None:
+def _migrate_shopee_products(conn: Any) -> None:
     """Add is_sold_out column to shopee_products."""
     existing = {
         row[0]
@@ -784,18 +777,12 @@ _SEQUENCE_TABLE_MAP = [
 ]
 
 
-def _sync_sequences(conn: "DuckDBPyConnection") -> None:
+def _sync_sequences(conn: Any) -> None:
     """Sync all sequences to max(id) + 1 of their tables.
 
     Prevents primary key collisions when sequences fall behind
     existing data (e.g., after restores or manual inserts).
-
-    DuckDB: uses DROP+CREATE to guarantee the correct start value.
-    Postgres: uses ALTER SEQUENCE ... RESTART WITH (sequences are owned
-    by columns via SERIAL/IDENTITY so DROP would fail).
     """
-    from config.settings import DUCK_ENABLED
-
     for seq_name, table_name in _SEQUENCE_TABLE_MAP:
         try:
             row = conn.execute(
@@ -804,159 +791,18 @@ def _sync_sequences(conn: "DuckDBPyConnection") -> None:
             max_id = row[0] if row else 0
             start = max_id + 1 if max_id > 0 else 1
 
-            if DUCK_ENABLED:
-                conn.execute(f"DROP SEQUENCE IF EXISTS {seq_name}")  # noqa: S608
-                conn.execute(
-                    f"CREATE SEQUENCE {seq_name} START WITH {start}"  # noqa: S608
-                )
-            else:
-                conn.execute(
-                    f"ALTER SEQUENCE {seq_name} RESTART WITH {start}"  # noqa: S608
-                )
+            conn.execute(
+                f"ALTER SEQUENCE {seq_name} RESTART WITH {start}"  # noqa: S608
+            )
         except Exception:  # noqa: BLE001
             # Table or sequence may not exist yet on first init
             logger.debug("Sequence sync skipped for %s: table not ready", seq_name)
 
 
-def _rebuild_all_tables(conn: "DuckDBPyConnection") -> None:
-    """Rebuild all non-empty tables to repair PK index corruption.
-
-    DuckDB fatal crashes (e.g., ungraceful server stop mid-write) can
-    corrupt the ART index backing PRIMARY KEYs, causing subsequent
-    UPDATEs to fail with uncatchable FATAL 'duplicate key' errors.
-
-    These errors call abort() and cannot be caught by Python try/except,
-    so we must rebuild proactively when corruption is suspected.
-    """
-    tables = conn.execute(
-        "SELECT table_name FROM information_schema.tables "
-        "WHERE table_schema = 'main' AND table_type = 'BASE TABLE'"
-    ).fetchall()
-
-    for (table_name,) in tables:
-        try:
-            count = conn.execute(
-                f"SELECT COUNT(*) FROM {table_name}"  # noqa: S608
-            ).fetchone()
-            if not count or count[0] == 0:
-                continue
-            _rebuild_table(conn, table_name)
-        except Exception:  # noqa: BLE001
-            logger.exception("Failed to rebuild %s", table_name)
-
-
-def _rebuild_table(conn: "DuckDBPyConnection", table_name: str) -> None:
-    """Rebuild a table by copying data, dropping, and recreating.
-
-    Preserves all data. Drops and recreates all indexes.
-    Uses explicit column names to handle tables where migrations
-    added columns in a different order than the DDL.
-    """
-    tmp = f"{table_name}_rebuild"
-    conn.execute(
-        f"CREATE TABLE {tmp} AS SELECT * FROM {table_name}"  # noqa: S608
-    )
-
-    # Get column names from the backup (source of truth for data)
-    backup_cols = [
-        row[0]
-        for row in conn.execute(
-            "SELECT column_name FROM information_schema.columns "
-            f"WHERE table_name = '{tmp}' ORDER BY ordinal_position"  # noqa: S608
-        ).fetchall()
-    ]
-
-    # Drop all indexes on this table
-    indexes = conn.execute(
-        "SELECT index_name FROM duckdb_indexes() "
-        f"WHERE table_name = '{table_name}'"  # noqa: S608
-    ).fetchall()
-    for (idx_name,) in indexes:
-        conn.execute(f"DROP INDEX IF EXISTS {idx_name}")
-
-    conn.execute(f"DROP TABLE {table_name}")
-
-    # Find the DDL for this table and recreate it
-    table_ddl_map = {
-        "bricklink_items": BRICKLINK_ITEMS_DDL,
-        "bricklink_price_history": BRICKLINK_PRICE_HISTORY_DDL,
-        "bricklink_monthly_sales": BRICKLINK_MONTHLY_SALES_DDL,
-        "product_analysis": PRODUCT_ANALYSIS_DDL,
-        "minifigures": MINIFIGURES_DDL,
-        "set_minifigures": SET_MINIFIGURES_DDL,
-        "minifig_price_history": MINIFIG_PRICE_HISTORY_DDL,
-        "shopee_products": SHOPEE_PRODUCTS_DDL,
-        "shopee_saturation": SHOPEE_SATURATION_DDL,
-        "shopee_scrape_history": SHOPEE_SCRAPE_HISTORY_DDL,
-        "mightyutan_products": MIGHTYUTAN_PRODUCTS_DDL,
-        "mightyutan_price_history": MIGHTYUTAN_PRICE_HISTORY_DDL,
-        "toysrus_products": TOYSRUS_PRODUCTS_DDL,
-        "toysrus_price_history": TOYSRUS_PRICE_HISTORY_DDL,
-        "lego_items": LEGO_ITEMS_DDL,
-        "price_records": PRICE_RECORDS_DDL,
-        "portfolio_transactions": PORTFOLIO_TRANSACTIONS_DDL,
-        "portfolio_snapshots": PORTFOLIO_SNAPSHOTS_DDL,
-        "image_assets": IMAGE_ASSETS_DDL,
-        "brickeconomy_snapshots": BRICKECONOMY_SNAPSHOTS_DDL,
-        "keepa_snapshots": KEEPA_SNAPSHOTS_DDL,
-        "google_trends_snapshots": GOOGLE_TRENDS_SNAPSHOTS_DDL,
-        "scrape_tasks": SCRAPE_TASKS_DDL,
-        "ml_feature_store": ML_FEATURE_STORE_DDL,
-        "ml_model_runs": ML_MODEL_RUNS_DDL,
-    }
-
-    ddl = table_ddl_map.get(table_name)
-    if ddl:
-        conn.execute(ddl)
-    else:
-        conn.execute(
-            f"CREATE TABLE {table_name} AS "  # noqa: S608
-            f"SELECT * FROM {tmp} WHERE 1=0"
-        )
-
-    # Run migrations to add any columns not in the DDL
-    if table_name == "bricklink_items":
-        _migrate_bricklink_items(conn)
-    if table_name == "lego_items":
-        _migrate_lego_items(conn)
-    if table_name == "brickeconomy_snapshots":
-        _migrate_brickeconomy_snapshots(conn)
-    if table_name == "shopee_products":
-        _migrate_shopee_products(conn)
-
-    # Get new table columns to find the intersection
-    new_cols = {
-        row[0]
-        for row in conn.execute(
-            "SELECT column_name FROM information_schema.columns "
-            f"WHERE table_name = '{table_name}'"  # noqa: S608
-        ).fetchall()
-    }
-
-    # Only copy columns that exist in both source and target
-    shared_cols = [c for c in backup_cols if c in new_cols]
-    cols_str = ", ".join(shared_cols)
-
-    conn.execute(
-        f"INSERT INTO {table_name} ({cols_str}) "  # noqa: S608
-        f"SELECT {cols_str} FROM {tmp}"
-    )
-    conn.execute(f"DROP TABLE {tmp}")
-
-    # Recreate indexes via the INDEXES_DDL (idempotent)
-    for stmt in INDEXES_DDL.strip().split(";"):
-        stmt = stmt.strip()
-        if stmt and table_name in stmt:
-            conn.execute(stmt)
-
-
-def init_schema(conn: "DuckDBPyConnection") -> None:
+def init_schema(conn: Any) -> None:
     """Initialize the database schema.
 
     Creates all tables and indexes if they don't exist.
-
-    Args:
-        conn: DuckDB connection
     """
     for ddl in ALL_DDL:
         conn.execute(ddl)
@@ -965,19 +811,10 @@ def init_schema(conn: "DuckDBPyConnection") -> None:
     _migrate_brickeconomy_snapshots(conn)
     _migrate_shopee_products(conn)
     _sync_sequences(conn)
-    # Flush WAL to reduce corruption risk on ungraceful shutdown
-    try:
-        conn.execute("CHECKPOINT")
-    except Exception:  # noqa: BLE001
-        pass
 
 
-def drop_all_tables(conn: "DuckDBPyConnection") -> None:
-    """Drop all tables (for testing/reset).
-
-    Args:
-        conn: DuckDB connection
-    """
+def drop_all_tables(conn: Any) -> None:
+    """Drop all tables (for testing/reset)."""
     conn.execute("DROP TABLE IF EXISTS product_analysis;")
     conn.execute("DROP TABLE IF EXISTS bricklink_monthly_sales;")
     conn.execute("DROP TABLE IF EXISTS bricklink_price_history;")
@@ -1014,15 +851,8 @@ def drop_all_tables(conn: "DuckDBPyConnection") -> None:
     conn.execute("DROP SEQUENCE IF EXISTS ml_model_runs_id_seq;")
 
 
-def get_table_stats(conn: "DuckDBPyConnection") -> dict[str, int]:
-    """Get row counts for all tables.
-
-    Args:
-        conn: DuckDB connection
-
-    Returns:
-        Dict mapping table name to row count
-    """
+def get_table_stats(conn: Any) -> dict[str, int]:
+    """Get row counts for all tables."""
     tables = [
         "bricklink_items",
         "bricklink_price_history",

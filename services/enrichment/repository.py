@@ -1,6 +1,5 @@
 """Repository functions for enrichment -- find items needing enrichment, store results."""
 
-from typing import TYPE_CHECKING
 
 from services.enrichment.types import (
     EnrichmentResult,
@@ -8,24 +7,25 @@ from services.enrichment.types import (
     MetadataField,
 )
 from services.items.repository import get_or_create_item
-
-if TYPE_CHECKING:
-    from duckdb import DuckDBPyConnection
+from typing import Any
 
 
 def get_items_needing_enrichment(
-    conn: "DuckDBPyConnection",
+    conn: Any,
     limit: int = 50,
 ) -> list[dict]:
-    """Find lego_items rows with any NULL metadata fields, missing BrickEconomy, or missing Google Trends.
+    """Find lego_items rows missing any core data source or metadata.
+
+    An item needs enrichment when ANY of the following is true:
+    - Missing metadata fields (title, theme, year_released, etc.)
+    - No BrickEconomy snapshot (or missing release_date in snapshot)
+    - No Keepa snapshot
+    - No BrickLink metadata snapshot
+    - No Google Trends snapshot (when title + year_released are known)
 
     Excludes retiring_soon from the NULL check -- retirement status is
     not actively sought during enrichment.  Items enriched within the
     last 90 days are also skipped.
-
-    Items are also included when they have no BrickEconomy snapshot
-    (mandatory data source) or no Google Trends snapshot (for items
-    that already have basic metadata: title + year_released).
 
     Returns items ordered by most recently created first (newest items
     get enriched first).
@@ -51,6 +51,14 @@ def get_items_needing_enrichment(
                 SELECT 1 FROM brickeconomy_snapshots bs
                 WHERE bs.set_number = li.set_number
                   AND bs.release_date IS NOT NULL
+            )
+            OR NOT EXISTS (
+                SELECT 1 FROM keepa_snapshots ks
+                WHERE ks.set_number = li.set_number
+            )
+            OR NOT EXISTS (
+                SELECT 1 FROM bricklink_items bl
+                WHERE bl.item_id = li.set_number
             )
             OR (
                 li.title IS NOT NULL
@@ -83,7 +91,7 @@ def get_items_needing_enrichment(
 
 
 def store_enrichment_result(
-    conn: "DuckDBPyConnection",
+    conn: Any,
     result: EnrichmentResult,
 ) -> None:
     """Write enrichment results back to lego_items via COALESCE upsert.

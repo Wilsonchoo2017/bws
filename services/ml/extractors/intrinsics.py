@@ -6,7 +6,6 @@ shelf_life, licensed theme, piece bucket).
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
 
 import pandas as pd
 
@@ -14,9 +13,7 @@ from config.ml import LICENSED_THEMES
 from services.backtesting.cohort import PIECE_GROUPS
 from services.ml.helpers import ordinal_bucket
 from services.ml.types import FeatureMeta
-
-if TYPE_CHECKING:
-    from duckdb import DuckDBPyConnection
+from typing import Any
 
 
 class IntrinsicsExtractor:
@@ -38,7 +35,7 @@ class IntrinsicsExtractor:
 
     def extract(
         self,
-        conn: DuckDBPyConnection,  # noqa: ARG002
+        conn: Any,  # noqa: ARG002
         base: pd.DataFrame,
     ) -> pd.DataFrame:
         """Extract intrinsic features from base metadata (pure -- no DB access)."""

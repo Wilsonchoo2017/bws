@@ -1,11 +1,10 @@
 """ToysRUs repository functions for database operations.
 
-Pure functions for CRUD operations on ToysRUs data in DuckDB.
+Pure functions for CRUD operations on ToysRUs data in the database.
 """
 
 
 from datetime import datetime, timezone
-from typing import TYPE_CHECKING
 
 from db.pg.writes import (
     _get_pg,
@@ -17,16 +16,14 @@ from services.items.repository import get_or_create_item, record_price
 from services.items.set_number import extract_set_number
 from services.pricing import parse_myr_cents as _parse_myr_cents
 from services.toysrus.parser import ToysRUsProduct
+from typing import Any
 
-
-if TYPE_CHECKING:
-    from duckdb import DuckDBPyConnection
 
 
 _UTC = timezone.utc
 
 
-def upsert_product(conn: "DuckDBPyConnection", product: ToysRUsProduct) -> int:
+def upsert_product(conn: Any, product: ToysRUsProduct) -> int:
     """Insert or update a ToysRUs product.
 
     Also creates a price history record for tracking price changes.
@@ -73,7 +70,7 @@ def upsert_product(conn: "DuckDBPyConnection", product: ToysRUsProduct) -> int:
         )
         product_id = existing[0]
 
-        # Dual-write to Postgres
+        # Write to Postgres
         pg = _get_pg(conn)
         if pg is not None:
             pg_upsert_toysrus_product(
@@ -116,7 +113,7 @@ def upsert_product(conn: "DuckDBPyConnection", product: ToysRUsProduct) -> int:
             ],
         )
 
-        # Dual-write to Postgres
+        # Write to Postgres
         pg = _get_pg(conn)
         if pg is not None:
             pg_upsert_toysrus_product(
@@ -169,7 +166,7 @@ def upsert_product(conn: "DuckDBPyConnection", product: ToysRUsProduct) -> int:
 
 
 def _create_price_history(
-    conn: "DuckDBPyConnection",
+    conn: Any,
     sku: str,
     price_myr: str,
     available: bool,
@@ -186,7 +183,7 @@ def _create_price_history(
         [history_id, sku, price_myr, available, now],
     )
 
-    # Dual-write to Postgres
+    # Write to Postgres
     pg = _get_pg(conn)
     if pg is not None:
         pg_insert_toysrus_price_history(
@@ -201,7 +198,7 @@ def _create_price_history(
 
 
 def upsert_products(
-    conn: "DuckDBPyConnection",
+    conn: Any,
     products: tuple[ToysRUsProduct, ...],
 ) -> int:
     """Bulk upsert products.
@@ -217,7 +214,7 @@ def upsert_products(
 
 
 def get_all_products(
-    conn: "DuckDBPyConnection",
+    conn: Any,
     available_only: bool = False,
 ) -> list[dict]:
     """Get all ToysRUs products.

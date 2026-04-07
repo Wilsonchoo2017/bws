@@ -1,4 +1,4 @@
-"""Shared serialization helpers for DuckDB persistence."""
+"""Shared serialization helpers for database persistence."""
 
 import json
 from typing import Protocol, runtime_checkable

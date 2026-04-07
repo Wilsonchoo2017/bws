@@ -4,7 +4,8 @@ from api.workers.brickeconomy import BrickeconomyWorker
 from api.workers.bricklink_catalog import BricklinkCatalogWorker
 from api.workers.carousell import CarousellWorker
 from api.workers.enrichment import EnrichmentWorker
-from api.workers.google_trends import GoogleTrendsWorker
+# GoogleTrendsWorker disabled -- GT confirmed as non-signal (Exp 16, 19b)
+# from api.workers.google_trends import GoogleTrendsWorker
 from api.workers.keepa import KeepaWorker
 
 from api.workers.mightyutan import MightyutanWorker
@@ -24,6 +25,5 @@ WORKER_REGISTRY = {
         CarousellWorker(),
         BrickeconomyWorker(),
         KeepaWorker(),
-        GoogleTrendsWorker(),
     ]
 }

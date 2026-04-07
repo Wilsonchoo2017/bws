@@ -1,14 +1,12 @@
-"""DuckDB persistence for Keepa snapshots."""
+"""Persistence for Keepa snapshots."""
 
 import json
 import logging
-from typing import TYPE_CHECKING
 
 from db.pg.writes import _get_pg, pg_insert_keepa_snapshot
 from services.keepa.types import KeepaProductData
+from typing import Any
 
-if TYPE_CHECKING:
-    from duckdb import DuckDBPyConnection
 
 logger = logging.getLogger("bws.keepa.repository")
 
@@ -21,7 +19,7 @@ def _series_to_json(points: tuple) -> str:
 
 
 def save_keepa_snapshot(
-    conn: "DuckDBPyConnection", data: KeepaProductData
+    conn: Any, data: KeepaProductData
 ) -> int:
     """Insert a Keepa snapshot row and return the new row ID."""
     row_id = conn.execute(
@@ -89,7 +87,7 @@ def save_keepa_snapshot(
         )
         raise
 
-    # Dual-write to Postgres
+    # Write to Postgres
     pg = _get_pg(conn)
     if pg is not None:
         pg_insert_keepa_snapshot(
@@ -126,7 +124,7 @@ def save_keepa_snapshot(
 
 
 def record_keepa_prices(
-    conn: "DuckDBPyConnection", data: KeepaProductData
+    conn: Any, data: KeepaProductData
 ) -> None:
     """Write current Keepa prices to the unified price_records table."""
     from services.items.repository import record_price
@@ -166,7 +164,7 @@ def record_keepa_prices(
 
 
 def get_latest_keepa_snapshot(
-    conn: "DuckDBPyConnection", set_number: str
+    conn: Any, set_number: str
 ) -> dict | None:
     """Get the most recent Keepa snapshot for a set."""
     from db.queries import get_latest_row

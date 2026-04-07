@@ -8,7 +8,6 @@ to extract product data from the Next.js RSC payload.
 import asyncio
 import logging
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
 
 import httpx
 
@@ -16,10 +15,8 @@ from config.settings import get_random_delay
 from services.http import get_browser_headers
 from services.mightyutan.parser import MightyUtanProduct, parse_page
 from services.mightyutan.repository import upsert_products
+from typing import Any
 
-
-if TYPE_CHECKING:
-    from duckdb import DuckDBPyConnection
 
 
 logger = logging.getLogger(__name__)
@@ -56,7 +53,7 @@ async def _fetch_page(client: httpx.AsyncClient, page: int) -> str:
 
 
 async def scrape_all_lego(
-    conn: "DuckDBPyConnection | None" = None,
+    conn: Any | None = None,
 ) -> ScrapeResult:
     """Scrape all LEGO products from Mighty Utan Malaysia.
 
@@ -64,7 +61,7 @@ async def scrape_all_lego(
     from the embedded Next.js RSC payload on each page.
 
     Args:
-        conn: DuckDB connection. If provided, saves products to DB.
+        conn: Database connection. If provided, saves products to DB.
     """
     all_products: list[MightyUtanProduct] = []
     pages_fetched = 0
@@ -148,7 +145,7 @@ async def scrape_all_lego(
 
 
 def scrape_all_lego_sync(
-    conn: "DuckDBPyConnection | None" = None,
+    conn: Any | None = None,
 ) -> ScrapeResult:
     """Synchronous wrapper for scrape_all_lego."""
     return asyncio.run(scrape_all_lego(conn=conn))

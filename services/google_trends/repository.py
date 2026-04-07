@@ -1,14 +1,12 @@
-"""DuckDB persistence for Google Trends snapshots."""
+"""Persistence for Google Trends snapshots."""
 
 import json
 import logging
-from typing import TYPE_CHECKING
 
 from db.pg.writes import _get_pg, pg_insert_gtrends_snapshot
 from services.google_trends.types import TrendsData, TrendsDataPoint
+from typing import Any
 
-if TYPE_CHECKING:
-    from duckdb import DuckDBPyConnection
 
 logger = logging.getLogger("bws.google_trends.repository")
 
@@ -21,7 +19,7 @@ def _interest_to_json(points: tuple[TrendsDataPoint, ...]) -> str:
 
 
 def save_trends_snapshot(
-    conn: "DuckDBPyConnection", data: TrendsData
+    conn: Any, data: TrendsData
 ) -> int:
     """Insert a Google Trends snapshot row and return the new row ID."""
     row_id = conn.execute(
@@ -53,7 +51,7 @@ def save_trends_snapshot(
         ],
     )
 
-    # Dual-write to Postgres
+    # Write to Postgres
     pg = _get_pg(conn)
     if pg is not None:
         pg_insert_gtrends_snapshot(
@@ -81,7 +79,7 @@ def save_trends_snapshot(
 
 
 def get_latest_trends_snapshot(
-    conn: "DuckDBPyConnection", set_number: str
+    conn: Any, set_number: str
 ) -> dict | None:
     """Get the most recent Google Trends snapshot for a set."""
     from db.queries import get_latest_row

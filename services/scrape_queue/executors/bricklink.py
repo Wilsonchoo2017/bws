@@ -7,13 +7,11 @@ from __future__ import annotations
 
 import logging
 import threading
-from typing import TYPE_CHECKING
 
 from services.scrape_queue.models import ErrorCategory, ExecutorResult, TaskType
 from services.scrape_queue.registry import executor
+from typing import Any
 
-if TYPE_CHECKING:
-    from duckdb import DuckDBPyConnection
 
 logger = logging.getLogger("bws.scrape_queue.executor.bricklink")
 
@@ -57,7 +55,7 @@ _bl_ban_tracker = _BrickLinkBanTracker()
 
 @executor(TaskType.BRICKLINK_METADATA, concurrency=2, timeout=300)
 def execute_bricklink_metadata(
-    conn: DuckDBPyConnection,
+    conn: Any,
     set_number: str,
     *,
     worker_index: int = 0,
@@ -91,6 +89,17 @@ def execute_bricklink_metadata(
     cb_state = CircuitBreakerState()
     result, _ = enrich(set_number, item, fetchers, cb_state)
 
+    # Distinguish "already complete" (no fields to enrich, no sources called)
+    # from "scrape returned nothing" (sources were called but found 0 fields).
+    no_sources_called = len(result.sources_called) == 0
+    no_fields_to_enrich = len(result.field_results) == 0
+
+    if result.fields_found == 0 and no_sources_called and no_fields_to_enrich:
+        # Item already has all metadata -- not a ban signal
+        logger.info("BrickLink metadata for %s: already complete, nothing to enrich", set_number)
+        _bl_ban_tracker.reset()
+        return ExecutorResult.skip("Already enriched")
+
     if result.fields_found == 0:
         if _bl_ban_tracker.record_zero():
             logger.warning(
@@ -102,7 +111,7 @@ def execute_bricklink_metadata(
             _bl_ban_tracker.reset()
             return ExecutorResult.cooldown(BRICKLINK_RATE_LIMITER.cooldown_remaining())
         return ExecutorResult.fail(
-            "No data returned (0 fields)",
+            "No data returned (0 fields, sources_called=%s)" % list(result.sources_called),
             category=ErrorCategory.DATA_MISSING,
         )
 

@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import logging
 import uuid
-from typing import TYPE_CHECKING
+
+from typing import Any
 
 from services.scrape_queue.models import (
     ACTIVE_STATUSES,
@@ -17,8 +18,6 @@ from services.scrape_queue.models import (
     TaskType,
 )
 
-if TYPE_CHECKING:
-    from duckdb import DuckDBPyConnection
 
 logger = logging.getLogger("bws.scrape_queue")
 
@@ -26,6 +25,23 @@ logger = logging.getLogger("bws.scrape_queue")
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+
+def _get_rowcount(result: object) -> int:
+    """Extract affected row count from a connection result."""
+    # PgCursorResult wraps a psycopg2 cursor
+    cursor = getattr(result, "_cursor", None)
+    if cursor is not None and hasattr(cursor, "rowcount"):
+        return cursor.rowcount
+
+    # Fallback: result set with (Count,) for DML statements
+    try:
+        row = result.fetchone()
+        if row is not None:
+            return row[0]
+    except Exception:
+        pass
+    return -1
 
 
 def _row_to_task(row: tuple, columns: list[str]) -> ScrapeTask:
@@ -56,6 +72,7 @@ _TASK_COLUMNS = [
 ]
 
 _COLUMNS_SQL = ", ".join(_TASK_COLUMNS)
+_COLUMNS_SQL_PREFIXED = ", ".join(f"st.{c}" for c in _TASK_COLUMNS)
 
 
 # ---------------------------------------------------------------------------
@@ -64,7 +81,7 @@ _COLUMNS_SQL = ", ".join(_TASK_COLUMNS)
 
 
 def _create_task_inner(
-    conn: DuckDBPyConnection,
+    conn: Any,
     set_number: str,
     task_type: TaskType,
 ) -> ScrapeTask | None:
@@ -119,7 +136,7 @@ def _create_task_inner(
 
 
 def create_task(
-    conn: DuckDBPyConnection,
+    conn: Any,
     set_number: str,
     task_type: TaskType,
 ) -> ScrapeTask | None:
@@ -149,7 +166,7 @@ def is_polybag(set_number: str) -> bool:
 
 
 def create_tasks_for_set(
-    conn: DuckDBPyConnection,
+    conn: Any,
     set_number: str,
 ) -> list[ScrapeTask]:
     """Create the full set of scrape tasks for a LEGO set.
@@ -195,7 +212,7 @@ def create_tasks_for_set(
 
 
 def claim_next(
-    conn: DuckDBPyConnection,
+    conn: Any,
     worker_id: str,
     task_type: TaskType | None = None,
 ) -> ScrapeTask | None:
@@ -213,15 +230,16 @@ def claim_next(
     type_filter = ""
     params: list = []
     if task_type is not None:
-        type_filter = "AND task_type = ? "
+        type_filter = "AND st.task_type = ? "
         params = [task_type.value]
 
     conn.execute("BEGIN TRANSACTION")
     try:
         row = conn.execute(
-            f"SELECT {_COLUMNS_SQL} FROM scrape_tasks "  # noqa: S608
-            f"WHERE status = 'pending' {type_filter}"
-            "ORDER BY created_at ASC "
+            f"SELECT {_COLUMNS_SQL_PREFIXED} FROM scrape_tasks st "  # noqa: S608
+            "LEFT JOIN lego_items li ON st.set_number = li.set_number "
+            f"WHERE st.status = 'pending' {type_filter}"
+            "ORDER BY COALESCE(li.year_released, 0) DESC, st.created_at ASC "
             "LIMIT 1",
             params,
         ).fetchone()
@@ -230,7 +248,7 @@ def claim_next(
             return None
 
         task = _row_to_task(row, _TASK_COLUMNS)
-        conn.execute(
+        result = conn.execute(
             """
             UPDATE scrape_tasks
             SET status = 'running',
@@ -242,6 +260,17 @@ def claim_next(
             """,
             [worker_id, task.task_id],
         )
+
+        # Check if we actually claimed the row -- another worker may
+        # have grabbed it between our SELECT and UPDATE.
+        rows_affected = _get_rowcount(result)
+        if rows_affected == 0:
+            conn.execute("ROLLBACK")
+            logger.debug(
+                "Task %s already claimed by another worker", task.task_id,
+            )
+            return None
+
         conn.execute("COMMIT")
     except Exception:
         conn.execute("ROLLBACK")
@@ -255,7 +284,7 @@ def claim_next(
 
 
 def complete_task(
-    conn: DuckDBPyConnection,
+    conn: Any,
     task_id: str,
 ) -> None:
     """Mark a task as completed and unblock dependents.
@@ -286,7 +315,7 @@ def complete_task(
 
 
 def fail_task(
-    conn: DuckDBPyConnection,
+    conn: Any,
     task_id: str,
     error: str,
 ) -> None:
@@ -322,7 +351,7 @@ def fail_task(
 
 
 def force_fail_task(
-    conn: DuckDBPyConnection,
+    conn: Any,
     task_id: str,
     error: str,
 ) -> None:
@@ -339,7 +368,7 @@ def force_fail_task(
 
 
 def requeue_for_cooldown(
-    conn: DuckDBPyConnection,
+    conn: Any,
     task_id: str,
 ) -> None:
     """Return a task to pending without burning an attempt.
@@ -357,7 +386,7 @@ def requeue_for_cooldown(
 
 
 def force_fail_by_worker(
-    conn: DuckDBPyConnection,
+    conn: Any,
     worker_id: str,
     task_type_value: str,
     error: str,
@@ -384,7 +413,7 @@ def force_fail_by_worker(
 
 
 def record_attempt(
-    conn: DuckDBPyConnection,
+    conn: Any,
     task_id: str,
     attempt_number: int,
     *,
@@ -416,7 +445,7 @@ def record_attempt(
 
 
 def _unblock_dependents(
-    conn: DuckDBPyConnection,
+    conn: Any,
     set_number: str,
     completed_type: str,
 ) -> None:
@@ -481,7 +510,7 @@ def _unblock_dependents(
 # ---------------------------------------------------------------------------
 
 
-def reset_running_tasks(conn: DuckDBPyConnection) -> int:
+def reset_running_tasks(conn: Any) -> int:
     """Reset all running tasks to pending on startup.
 
     After a crash/restart, no workers are alive so any task still
@@ -493,17 +522,25 @@ def reset_running_tasks(conn: DuckDBPyConnection) -> int:
     ).fetchone()[0]
 
     if count > 0:
+        # Only re-queue tasks that still have retries remaining
         conn.execute(
             "UPDATE scrape_tasks "
             "SET status = 'pending', locked_by = NULL, locked_at = NULL "
-            "WHERE status = 'running'",
+            "WHERE status = 'running' AND attempt_count < max_attempts",
+        )
+        # Fail tasks that have exhausted their retries
+        conn.execute(
+            "UPDATE scrape_tasks "
+            "SET status = 'failed', error = 'Exhausted retries (crash recovery)', "
+            "    completed_at = now(), locked_by = NULL, locked_at = NULL "
+            "WHERE status = 'running' AND attempt_count >= max_attempts",
         )
         logger.info("Reset %d running tasks on startup", count)
 
     return count
 
 
-def re_evaluate_blocked(conn: DuckDBPyConnection) -> int:
+def re_evaluate_blocked(conn: Any) -> int:
     """Re-evaluate blocked tasks whose dependencies may have completed.
 
     Called on startup after reset_running_tasks to handle the case where a
@@ -550,7 +587,7 @@ def re_evaluate_blocked(conn: DuckDBPyConnection) -> int:
 
 
 def get_tasks_for_set(
-    conn: DuckDBPyConnection,
+    conn: Any,
     set_number: str,
 ) -> list[ScrapeTask]:
     """Get all scrape tasks for a given set_number."""
@@ -562,7 +599,7 @@ def get_tasks_for_set(
     return [_row_to_task(row, _TASK_COLUMNS) for row in rows]
 
 
-def get_queue_stats(conn: DuckDBPyConnection) -> dict[str, int]:
+def get_queue_stats(conn: Any) -> dict[str, int]:
     """Get counts of tasks by status."""
     rows = conn.execute(
         "SELECT status, COUNT(*) FROM scrape_tasks GROUP BY status",
@@ -570,7 +607,7 @@ def get_queue_stats(conn: DuckDBPyConnection) -> dict[str, int]:
     return {status: count for status, count in rows}
 
 
-def has_pending_bricklink_tasks(conn: DuckDBPyConnection) -> bool:
+def has_pending_bricklink_tasks(conn: Any) -> bool:
     """Check if there are pending or in-progress BrickLink metadata tasks."""
     row = conn.execute(
         """SELECT COUNT(*) FROM scrape_tasks
@@ -578,3 +615,81 @@ def has_pending_bricklink_tasks(conn: DuckDBPyConnection) -> bool:
              AND status IN ('pending', 'in_progress')""",
     ).fetchone()
     return bool(row and row[0] > 0)
+
+
+def get_priority_rescrape_candidates(
+    conn: Any,
+    task_type: TaskType,
+    *,
+    stale_days: int = 30,
+) -> list[str]:
+    """Find set_numbers needing a rescrape for the given task type.
+
+    Returns sets where ALL of these are true:
+    - The set is retiring soon, retired within the last 6 months, or in the portfolio
+    - No task of ``task_type`` completed within ``stale_days``
+    - No active (pending/running/blocked) task of ``task_type`` exists
+
+    Returns a deduplicated list of set_numbers.
+    """
+    stale_days = int(stale_days)
+    task_type_value = task_type.value
+    active_list = [s.value for s in ACTIVE_STATUSES]
+    active_placeholders = ", ".join("?" for _ in active_list)
+
+    sql = f"""
+        WITH priority_sets AS (
+            -- Retiring soon
+            SELECT li.set_number
+            FROM lego_items li
+            WHERE li.retiring_soon = TRUE
+
+            UNION
+
+            -- Retired within last 6 months (use retired_date when parseable)
+            SELECT li.set_number
+            FROM lego_items li
+            WHERE li.retired_date IS NOT NULL
+              AND li.retired_date ~ '^\\d{{4}}-\\d{{2}}'
+              AND CAST(li.retired_date AS DATE) >= CURRENT_DATE - INTERVAL '6 months'
+
+            UNION
+
+            -- Retired within last 6 months (fallback: year_retired)
+            SELECT li.set_number
+            FROM lego_items li
+            WHERE li.retired_date IS NULL
+              AND li.year_retired IS NOT NULL
+              AND li.year_retired >= EXTRACT(YEAR FROM CURRENT_DATE - INTERVAL '6 months')
+
+            UNION
+
+            -- Portfolio holdings
+            SELECT pt.set_number
+            FROM portfolio_transactions pt
+            GROUP BY pt.set_number
+            HAVING SUM(CASE WHEN pt.txn_type = 'BUY' THEN pt.quantity ELSE -pt.quantity END) > 0
+        ),
+        last_scrape AS (
+            SELECT set_number, MAX(completed_at) AS last_completed
+            FROM scrape_tasks
+            WHERE task_type = ?
+              AND status = 'completed'
+            GROUP BY set_number
+        )
+        SELECT ps.set_number
+        FROM priority_sets ps
+        LEFT JOIN last_scrape ls ON ls.set_number = ps.set_number
+        WHERE (ls.last_completed IS NULL
+               OR ls.last_completed < CURRENT_TIMESTAMP - INTERVAL '{stale_days} days')
+          AND NOT EXISTS (
+              SELECT 1 FROM scrape_tasks st
+              WHERE st.set_number = ps.set_number
+                AND st.task_type = ?
+                AND st.status IN ({active_placeholders})
+          )
+        ORDER BY ps.set_number
+    """  # noqa: S608
+
+    rows = conn.execute(sql, [task_type_value, task_type_value, *active_list]).fetchall()
+    return [row[0] for row in rows]

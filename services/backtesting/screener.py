@@ -6,7 +6,6 @@ computes signals at the latest available month — providing a real-time
 """
 
 import logging
-from typing import TYPE_CHECKING
 
 import pandas as pd
 
@@ -23,9 +22,8 @@ from services.backtesting.signal_registry import (
 )
 from services.backtesting.signals import _extract_avg_price
 from services.backtesting.utils import safe_get, safe_get_bool, safe_get_int
+from typing import Any
 
-if TYPE_CHECKING:
-    from duckdb import DuckDBPyConnection
 
 logger = logging.getLogger(__name__)
 
@@ -132,7 +130,7 @@ def _compute_item_signals(
 
 
 def compute_item_signals(
-    conn: "DuckDBPyConnection",
+    conn: Any,
     set_number: str,
     condition: str = "new",
     signal_weights: dict[str, float] | None = None,
@@ -181,7 +179,7 @@ def compute_item_signals(
 
 
 def compute_all_signals(
-    conn: "DuckDBPyConnection",
+    conn: Any,
     condition: str = "new",
     signal_weights: dict[str, float] | None = None,
 ) -> list[dict]:
@@ -227,7 +225,7 @@ def compute_all_signals(
 
 
 def compute_all_signals_with_cohort(
-    conn: "DuckDBPyConnection",
+    conn: Any,
     condition: str = "new",
     signal_weights: dict[str, float] | None = None,
 ) -> list[dict]:

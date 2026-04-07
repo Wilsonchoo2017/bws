@@ -19,14 +19,12 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
 
 import numpy as np
 import pandas as pd
 from sklearn.model_selection import LeaveOneOut, cross_val_predict
+from typing import Any
 
-if TYPE_CHECKING:
-    from duckdb import DuckDBPyConnection
 
 logger = logging.getLogger(__name__)
 
@@ -71,7 +69,7 @@ class MLKellyCalibration:
 
 
 def calibrate_prediction_errors(
-    conn: DuckDBPyConnection,
+    conn: Any,
 ) -> tuple[MLKellyCalibration, dict, dict, object, object]:
     """Compute prediction error distribution using LOO cross-validation.
 
@@ -188,23 +186,36 @@ def compute_per_set_kelly(
 
 
 def compute_ml_kelly_sizing(
-    conn: DuckDBPyConnection,
+    conn: Any,
     budget_cents: int | None = None,
     *,
     only_retiring: bool = False,
     max_positions: int | None = None,
 ) -> list[MLKellyResult]:
     """Full ML Kelly pipeline: predict growth, calibrate errors, compute per-set sizing."""
+    from db.pg.engine import get_engine
     from services.ml.growth_model import predict_growth, train_growth_models
+    from services.ml.pg_queries import (
+        load_growth_candidate_sets,
+        load_growth_training_data,
+        load_keepa_timelines,
+    )
+
+    # Load data from PG
+    engine = get_engine()
+    df_raw = load_growth_training_data(engine)
+    keepa_df = load_keepa_timelines(engine)
+    candidates = load_growth_candidate_sets(engine)
 
     # Train models
-    tier1, tier2, theme_stats, subtheme_stats, tier3, ensemble = train_growth_models(conn)
+    tier1, tier2, theme_stats, subtheme_stats, tier3, ensemble = train_growth_models(
+        df_raw=df_raw, keepa_df=keepa_df,
+    )
 
     # Get predictions
     predictions = predict_growth(
-        conn, tier1, tier2, theme_stats, subtheme_stats,
-        only_retiring=only_retiring,
-        tier3=tier3,
+        candidates, keepa_df, tier1, tier2, theme_stats, subtheme_stats,
+        classifier=tier3,
         ensemble=ensemble,
     )
 

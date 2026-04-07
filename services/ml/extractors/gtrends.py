@@ -5,16 +5,13 @@ Extracts peak and average search interest values.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
 
 import pandas as pd
 
 from services.ml.helpers import safe_float
 from services.ml.queries import load_latest_gtrends_snapshots
 from services.ml.types import FeatureMeta
-
-if TYPE_CHECKING:
-    from duckdb import DuckDBPyConnection
+from typing import Any
 
 
 class GoogleTrendsExtractor:
@@ -33,7 +30,7 @@ class GoogleTrendsExtractor:
 
     def extract(
         self,
-        conn: DuckDBPyConnection,
+        conn: Any,
         base: pd.DataFrame,  # noqa: ARG002
     ) -> pd.DataFrame:
         """Load and extract Google Trends features."""

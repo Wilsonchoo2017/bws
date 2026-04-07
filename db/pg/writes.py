@@ -1,8 +1,7 @@
-"""Postgres write helpers for dual-write repositories.
+"""Postgres write helpers for repository code.
 
 Each function takes a SQLAlchemy Session and writes to Postgres.
-These are called from repository functions when PG is enabled.
-Failures are logged and swallowed -- DuckDB remains source of truth.
+Failures are logged and swallowed to avoid breaking the caller.
 """
 
 import logging

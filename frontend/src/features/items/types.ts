@@ -23,6 +23,8 @@ export interface UnifiedItem {
   year_released: number | null;
   year_retired: number | null;
   retiring_soon: boolean | null;
+  retired_date: string | null;
+  availability: string | null;
   watchlist: boolean;
   image_url: string | null;
   rrp_cents: number | null;
@@ -53,6 +55,10 @@ export interface UnifiedItem {
   ml_growth_pct: number | null;
   ml_confidence: string | null;
   ml_tier: number | null;
+  ml_avoid_probability: number | null;
+  ml_raw_growth_pct: number | null;
+  ml_kelly_fraction: number | null;
+  ml_win_probability: number | null;
 }
 
 export interface PriceRecord {

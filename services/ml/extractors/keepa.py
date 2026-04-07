@@ -6,16 +6,13 @@ and tracking user features from Keepa snapshots.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
 
 import pandas as pd
 
 from services.ml.helpers import safe_float
 from services.ml.queries import load_latest_keepa_snapshots, load_rrp_map
 from services.ml.types import FeatureMeta
-
-if TYPE_CHECKING:
-    from duckdb import DuckDBPyConnection
+from typing import Any
 
 
 class KeepaExtractor:
@@ -37,7 +34,7 @@ class KeepaExtractor:
 
     def extract(
         self,
-        conn: DuckDBPyConnection,
+        conn: Any,
         base: pd.DataFrame,  # noqa: ARG002
     ) -> pd.DataFrame:
         """Load Keepa snapshots and RRP map, then extract features."""

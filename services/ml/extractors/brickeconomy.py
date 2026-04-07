@@ -6,7 +6,6 @@ stats from BrickEconomy snapshots (respecting the retirement cutoff).
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
 
 import pandas as pd
 
@@ -14,9 +13,7 @@ from services.backtesting.cohort import PRICE_TIERS
 from services.ml.helpers import ordinal_bucket, parse_rating_string, safe_float
 from services.ml.queries import load_be_cutoff_snapshots, load_latest_be_snapshots
 from services.ml.types import FeatureMeta
-
-if TYPE_CHECKING:
-    from duckdb import DuckDBPyConnection
+from typing import Any
 
 
 class BrickEconomyExtractor:
@@ -47,7 +44,7 @@ class BrickEconomyExtractor:
 
     def extract(
         self,
-        conn: DuckDBPyConnection,
+        conn: Any,
         base: pd.DataFrame,
     ) -> pd.DataFrame:
         """Load snapshots (with cutoff filtering) and extract features."""

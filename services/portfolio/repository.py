@@ -3,16 +3,13 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import TYPE_CHECKING
 
 from db.pg.writes import _get_pg, pg_delete_portfolio_transaction, pg_insert_portfolio_transaction
-
-if TYPE_CHECKING:
-    from duckdb import DuckDBPyConnection
+from typing import Any
 
 
 def create_transaction(
-    conn: "DuckDBPyConnection",
+    conn: Any,
     set_number: str,
     txn_type: str,
     quantity: int,
@@ -55,7 +52,7 @@ def create_transaction(
         [set_number, txn_type, quantity, price_cents, currency, condition, txn_date, notes],
     ).fetchone()
 
-    # Dual-write to Postgres
+    # Write to Postgres
     pg = _get_pg(conn)
     if pg is not None:
         pg_insert_portfolio_transaction(
@@ -74,7 +71,7 @@ def create_transaction(
 
 
 def list_transactions(
-    conn: "DuckDBPyConnection",
+    conn: Any,
     *,
     set_number: str | None = None,
     limit: int = 100,
@@ -117,7 +114,7 @@ def list_transactions(
     return [dict(zip(columns, row)) for row in rows]
 
 
-def get_transaction(conn: "DuckDBPyConnection", txn_id: int) -> dict | None:
+def get_transaction(conn: Any, txn_id: int) -> dict | None:
     """Get a single transaction by ID."""
     row = conn.execute(
         """
@@ -148,14 +145,14 @@ def get_transaction(conn: "DuckDBPyConnection", txn_id: int) -> dict | None:
     return dict(zip(columns, row))
 
 
-def delete_transaction(conn: "DuckDBPyConnection", txn_id: int) -> bool:
+def delete_transaction(conn: Any, txn_id: int) -> bool:
     """Delete a transaction. Returns True if a row was deleted."""
     row = conn.execute(
         "DELETE FROM portfolio_transactions WHERE id = ? RETURNING id", [txn_id]
     ).fetchone()
 
     if row is not None:
-        # Dual-write to Postgres
+        # Write to Postgres
         pg = _get_pg(conn)
         if pg is not None:
             pg_delete_portfolio_transaction(pg, txn_id)
@@ -163,7 +160,7 @@ def delete_transaction(conn: "DuckDBPyConnection", txn_id: int) -> bool:
     return row is not None
 
 
-def get_holdings(conn: "DuckDBPyConnection") -> list[dict]:
+def get_holdings(conn: Any) -> list[dict]:
     """Compute current holdings from transactions, with market values.
 
     Holdings are derived by aggregating BUY - SELL quantities.
@@ -227,7 +224,7 @@ def get_holdings(conn: "DuckDBPyConnection") -> list[dict]:
 
 
 def get_holding_detail(
-    conn: "DuckDBPyConnection", set_number: str
+    conn: Any, set_number: str
 ) -> dict | None:
     """Get holding detail for a single set with all its transactions."""
     txns = list_transactions(conn, set_number=set_number, limit=1000)
@@ -280,7 +277,7 @@ def get_holding_detail(
     }
 
 
-def get_portfolio_summary(conn: "DuckDBPyConnection") -> dict:
+def get_portfolio_summary(conn: Any) -> dict:
     """Compute portfolio-wide totals."""
     holdings = get_holdings(conn)
 
@@ -312,7 +309,7 @@ def get_portfolio_summary(conn: "DuckDBPyConnection") -> dict:
 
 
 def _held_quantity(
-    conn: "DuckDBPyConnection", set_number: str, condition: str
+    conn: Any, set_number: str, condition: str
 ) -> int:
     """Current held quantity for a (set_number, condition) pair."""
     row = conn.execute(
@@ -380,7 +377,7 @@ def _fifo_realized_pl(txns: list[tuple]) -> int:
     return realized
 
 
-def _total_realized_pl(conn: "DuckDBPyConnection") -> int:
+def _total_realized_pl(conn: Any) -> int:
     """Compute total realized P&L across all positions."""
     txn_rows = conn.execute(
         """
@@ -399,12 +396,9 @@ def _total_realized_pl(conn: "DuckDBPyConnection") -> int:
 
 
 def _latest_prices(
-    conn: "DuckDBPyConnection", set_numbers: list[str]
+    conn: Any, set_numbers: list[str]
 ) -> dict[str, int]:
-    """Get latest market price per set from price_records.
-
-    Priority: shopee > toysrus > mightyutan > bricklink_new.
-    """
+    """Get latest BrickLink new market price per set from price_records."""
     if not set_numbers:
         return {}
 
@@ -412,21 +406,14 @@ def _latest_prices(
     rows = conn.execute(
         f"""
         WITH ranked AS (
-            SELECT set_number, source, price_cents,
+            SELECT set_number, price_cents,
                    ROW_NUMBER() OVER (
                        PARTITION BY set_number
-                       ORDER BY
-                           CASE source
-                               WHEN 'shopee' THEN 1
-                               WHEN 'toysrus' THEN 2
-                               WHEN 'mightyutan' THEN 3
-                               WHEN 'bricklink_new' THEN 4
-                               ELSE 5
-                           END,
-                           recorded_at DESC
+                       ORDER BY recorded_at DESC
                    ) AS rn
             FROM price_records
             WHERE set_number IN ({placeholders})
+              AND source = 'bricklink_new'
         )
         SELECT set_number, price_cents FROM ranked WHERE rn = 1
         """,  # noqa: S608
@@ -436,7 +423,7 @@ def _latest_prices(
 
 
 def _item_metadata(
-    conn: "DuckDBPyConnection", set_numbers: list[str]
+    conn: Any, set_numbers: list[str]
 ) -> dict[str, dict]:
     """Get title, image_url, theme for a list of set numbers."""
     if not set_numbers:

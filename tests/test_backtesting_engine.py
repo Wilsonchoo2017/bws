@@ -1,11 +1,14 @@
 """Integration tests for the backtesting engine.
 
-Uses a small in-memory DuckDB with known data to verify the engine
+Uses a small test DB with known data to verify the engine
 produces correct trades with no look-ahead bias.
 """
 
-import duckdb
+from typing import Any
+
 import pytest
+
+from db.connection import get_connection
 
 from services.backtesting.analysis import trades_to_dataframe
 from services.backtesting.engine import run_backtest
@@ -13,9 +16,9 @@ from services.backtesting.types import BacktestConfig
 
 
 @pytest.fixture()
-def backtest_db() -> duckdb.DuckDBPyConnection:
-    """Create an in-memory DuckDB with known test data."""
-    conn = duckdb.connect(":memory:")
+def backtest_db() -> Any:
+    """Create a test DB connection with known test data."""
+    conn = get_connection()
 
     conn.execute("""
         CREATE TABLE bricklink_monthly_sales (
@@ -141,25 +144,25 @@ def backtest_db() -> duckdb.DuckDBPyConnection:
 
 
 class TestEngineIntegration:
-    def test_generates_trades(self, backtest_db: duckdb.DuckDBPyConnection) -> None:
+    def test_generates_trades(self, backtest_db: Any) -> None:
         config = BacktestConfig(min_history_months=3)
         trades = run_backtest(backtest_db, config)
         assert len(trades) > 0
 
-    def test_correct_item_count(self, backtest_db: duckdb.DuckDBPyConnection) -> None:
+    def test_correct_item_count(self, backtest_db: Any) -> None:
         config = BacktestConfig(min_history_months=3)
         trades = run_backtest(backtest_db, config)
         item_ids = {t.item_id for t in trades}
         assert "75192-1" in item_ids
         assert "10280-1" in item_ids
 
-    def test_entry_price_is_positive(self, backtest_db: duckdb.DuckDBPyConnection) -> None:
+    def test_entry_price_is_positive(self, backtest_db: Any) -> None:
         config = BacktestConfig(min_history_months=3)
         trades = run_backtest(backtest_db, config)
         for trade in trades:
             assert trade.entry_price_cents > 0
 
-    def test_flip_returns_available(self, backtest_db: duckdb.DuckDBPyConnection) -> None:
+    def test_flip_returns_available(self, backtest_db: Any) -> None:
         config = BacktestConfig(min_history_months=3)
         trades = run_backtest(backtest_db, config)
         has_flip = any(
@@ -169,7 +172,7 @@ class TestEngineIntegration:
         assert has_flip
 
     def test_no_hold_returns_with_short_data(
-        self, backtest_db: duckdb.DuckDBPyConnection
+        self, backtest_db: Any
     ) -> None:
         """With only 8 months of data, hold_12m should always be None."""
         config = BacktestConfig(min_history_months=3)
@@ -177,7 +180,7 @@ class TestEngineIntegration:
         for trade in trades:
             assert trade.returns.get("hold_12m") is None
 
-    def test_signals_populated(self, backtest_db: duckdb.DuckDBPyConnection) -> None:
+    def test_signals_populated(self, backtest_db: Any) -> None:
         config = BacktestConfig(min_history_months=3)
         trades = run_backtest(backtest_db, config)
         for trade in trades:
@@ -189,7 +192,7 @@ class TestNoLookAheadBias:
     """Verify that signals only use data available at evaluation time."""
 
     def test_early_trade_ignores_later_prices(
-        self, backtest_db: duckdb.DuckDBPyConnection
+        self, backtest_db: Any
     ) -> None:
         config = BacktestConfig(min_history_months=3)
         trades = run_backtest(backtest_db, config)
@@ -205,7 +208,7 @@ class TestNoLookAheadBias:
         assert earliest.entry_price_cents == 58000
 
     def test_returns_use_future_prices(
-        self, backtest_db: duckdb.DuckDBPyConnection
+        self, backtest_db: Any
     ) -> None:
         config = BacktestConfig(min_history_months=3)
         trades = run_backtest(backtest_db, config)
@@ -223,7 +226,7 @@ class TestNoLookAheadBias:
 
 class TestTradesToDataframe:
     def test_converts_to_dataframe(
-        self, backtest_db: duckdb.DuckDBPyConnection
+        self, backtest_db: Any
     ) -> None:
         config = BacktestConfig(min_history_months=3)
         trades = run_backtest(backtest_db, config)

@@ -1,6 +1,6 @@
-"""Keepa sweep -- ensures all portfolio items have at least one Keepa snapshot.
+"""Keepa sweep -- ensures all items have at least one Keepa snapshot.
 
-Runs periodically, finds portfolio holdings without Keepa data,
+Runs periodically, finds items without Keepa data,
 and queues scrape jobs for them.  Tracks failed attempts so the
 same items are not retried endlessly.
 """
@@ -14,7 +14,7 @@ from api.jobs import JobManager
 logger = logging.getLogger("bws.keepa.scheduler")
 
 DEFAULT_INTERVAL_MINUTES = 60
-DEFAULT_BATCH_SIZE = 5
+DEFAULT_BATCH_SIZE = 1000
 
 # Max consecutive failures before a set number is skipped for 24 hours.
 _MAX_FAILURES = 3
@@ -27,8 +27,8 @@ _FAILURE_COOLDOWN_S = 24 * 3600
 _failure_tracker: dict[str, tuple[int, datetime]] = {}
 
 
-def _get_portfolio_items_without_keepa(limit: int = 5) -> list[str]:
-    """Find portfolio set numbers that have no Keepa snapshot."""
+def _get_items_without_keepa(limit: int = 5) -> list[str]:
+    """Find set numbers that have no Keepa snapshot."""
     from db.connection import get_connection
     from db.schema import init_schema
 
@@ -38,12 +38,13 @@ def _get_portfolio_items_without_keepa(limit: int = 5) -> list[str]:
 
         rows = conn.execute(
             """
-            SELECT DISTINCT pt.set_number
-            FROM portfolio_transactions pt
-            WHERE pt.set_number NOT IN (
-                SELECT DISTINCT set_number FROM keepa_snapshots
+            SELECT li.set_number
+            FROM lego_items li
+            WHERE NOT EXISTS (
+                SELECT 1 FROM keepa_snapshots ks
+                WHERE ks.set_number = li.set_number
             )
-            ORDER BY pt.set_number
+            ORDER BY li.created_at DESC
             LIMIT ?
             """,
             [limit],
@@ -141,11 +142,11 @@ async def run_keepa_sweep(
     interval_minutes: int = DEFAULT_INTERVAL_MINUTES,
     batch_size: int = DEFAULT_BATCH_SIZE,
 ) -> None:
-    """Run periodic Keepa sweep for portfolio items.
+    """Run periodic Keepa sweep for all items.
 
     Infinite loop that:
     1. Waits for `interval_minutes`
-    2. Finds portfolio items without Keepa data
+    2. Finds items without Keepa data
     3. Queues Keepa scrape jobs (deduplicated, with failure tracking)
     """
     logger.info(
@@ -164,16 +165,16 @@ async def run_keepa_sweep(
             await asyncio.sleep(interval_minutes * 60)
 
         try:
-            missing = _get_portfolio_items_without_keepa(limit=batch_size)
+            missing = _get_items_without_keepa(limit=batch_size)
 
             if not missing:
-                logger.debug("Keepa sweep: all portfolio items have Keepa data")
+                logger.debug("Keepa sweep: all items have Keepa data")
                 continue
 
             queued = queue_keepa_batch(manager, missing)
             if queued > 0:
                 logger.info(
-                    "Keepa sweep: %d portfolio items missing Keepa data, "
+                    "Keepa sweep: %d items missing Keepa data, "
                     "queued %d jobs (sets: %s)",
                     len(missing),
                     queued,

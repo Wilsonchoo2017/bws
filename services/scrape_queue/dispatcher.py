@@ -38,7 +38,7 @@ from services.scrape_queue.repository import (
 )
 
 if TYPE_CHECKING:
-    from duckdb import DuckDBPyConnection
+    from db.pg.pg_connection import PgConnection
 
 logger = logging.getLogger("bws.scrape_queue.dispatcher")
 
@@ -71,17 +71,16 @@ def shutdown_scrape_dispatcher() -> None:
 
 
 def checkpoint_database() -> None:
-    """Flush the WAL to the main DB file.
+    """Run a Postgres CHECKPOINT to flush WAL.
 
-    Called during shutdown and periodically to minimize data loss
-    if the process is killed ungracefully.
+    Called periodically to minimize data loss if the process
+    is killed ungracefully.
     """
     from db.connection import get_connection
 
-    from config.settings import DUCK_ENABLED
     conn = get_connection()
     try:
-        conn.execute("FORCE CHECKPOINT" if DUCK_ENABLED else "CHECKPOINT")
+        conn.execute("CHECKPOINT")
         logger.debug("Database checkpoint completed")
     except Exception:
         logger.debug("Database checkpoint skipped", exc_info=True)
@@ -308,7 +307,7 @@ def _claim_and_execute(
 
 
 def _handle_result(
-    conn: DuckDBPyConnection,
+    conn: "PgConnection",
     worker_id: str,
     task: ScrapeTask,
     result: ExecutorResult,

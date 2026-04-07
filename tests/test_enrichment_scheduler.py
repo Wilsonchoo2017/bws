@@ -5,14 +5,14 @@ from unittest.mock import patch
 import pytest
 
 from api.jobs import JobManager
-from db.connection import get_memory_connection
+from db.connection import get_connection
 from db.schema import init_schema
 from services.items.repository import get_or_create_item, record_price
 
 
 @pytest.fixture
 def conn():
-    c = get_memory_connection()
+    c = get_connection()
     init_schema(c)
     return c
 
@@ -23,7 +23,7 @@ def manager():
 
 
 class _NoCloseProxy:
-    """Wraps a DuckDB connection but suppresses close()."""
+    """Wraps a connection but suppresses close()."""
 
     def __init__(self, conn):
         self._conn = conn
@@ -151,11 +151,9 @@ class TestPostScrapeEnrichment:
         """Given extracted set numbers from scrape.
         When batch queuing enrichment.
         Then scrape tasks created for each unique set."""
-        import duckdb
-
         from services.enrichment.auto import queue_enrichment_batch
 
-        mem_conn = duckdb.connect(":memory:")
+        mem_conn = get_connection()
         init_schema(mem_conn)
 
         proxy = _NoCloseProxy(mem_conn)
@@ -168,5 +166,3 @@ class TestPostScrapeEnrichment:
                 queued = queue_enrichment_batch(manager, set_numbers)
 
             assert queued == 2
-        finally:
-            mem_conn.close()

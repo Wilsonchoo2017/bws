@@ -2,7 +2,7 @@
 
 import pytest
 
-from db.connection import get_memory_connection
+from db.connection import get_connection
 from db.schema import init_schema
 from services.items.repository import get_or_create_item
 from services.scrape_queue.models import NON_SET_TASK_TYPES, TaskStatus, TaskType
@@ -23,8 +23,8 @@ from services.scrape_queue.repository import (
 
 @pytest.fixture
 def conn():
-    """In-memory DuckDB with schema initialized."""
-    c = get_memory_connection()
+    """Test DB connection with schema initialized."""
+    c = get_connection()
     init_schema(c)
     yield c
     c.close()

@@ -12,28 +12,42 @@ from __future__ import annotations
 
 import logging
 from datetime import date
-from typing import TYPE_CHECKING
 
 import pandas as pd
 
 from db.pg.writes import _get_pg, pg_backfill_ml_actuals, pg_insert_ml_prediction_snapshot
+from typing import Any
 
-if TYPE_CHECKING:
-    from duckdb import DuckDBPyConnection
 
 logger = logging.getLogger(__name__)
 
 
-def save_prediction_snapshot(conn: DuckDBPyConnection) -> int:
+def save_prediction_snapshot(conn: Any) -> int:
     """Save today's ML predictions to the tracking table.
 
     Skips sets that already have a snapshot for today (idempotent).
     Returns the number of new predictions saved.
     """
+    from db.pg.engine import get_engine
     from services.ml.growth_model import predict_growth, train_growth_models
+    from services.ml.pg_queries import (
+        load_growth_candidate_sets,
+        load_growth_training_data,
+        load_keepa_timelines,
+    )
 
-    tier1, tier2, ts, ss, tier3, ensemble = train_growth_models(conn)
-    predictions = predict_growth(conn, tier1, tier2, ts, ss, tier3=tier3, ensemble=ensemble)
+    engine = get_engine()
+    df_raw = load_growth_training_data(engine)
+    keepa_df = load_keepa_timelines(engine)
+    candidates = load_growth_candidate_sets(engine)
+
+    tier1, tier2, ts, ss, tier3, ensemble = train_growth_models(
+        df_raw=df_raw, keepa_df=keepa_df,
+    )
+    predictions = predict_growth(
+        candidates, keepa_df, tier1, tier2, ts, ss,
+        classifier=tier3, ensemble=ensemble,
+    )
 
     if not predictions:
         logger.warning("No predictions to save")
@@ -57,7 +71,7 @@ def save_prediction_snapshot(conn: DuckDBPyConnection) -> int:
                  pred.confidence, pred.tier, model_version],
             )
 
-            # Dual-write to Postgres
+            # Write to Postgres
             pg = _get_pg(conn)
             if pg is not None:
                 pg_insert_ml_prediction_snapshot(
@@ -78,7 +92,7 @@ def save_prediction_snapshot(conn: DuckDBPyConnection) -> int:
     return saved
 
 
-def backfill_actuals(conn: DuckDBPyConnection) -> int:
+def backfill_actuals(conn: Any) -> int:
     """Update prediction snapshots with actual growth data where available.
 
     Compares predicted_growth_pct vs actual BE annual_growth_pct
@@ -86,7 +100,7 @@ def backfill_actuals(conn: DuckDBPyConnection) -> int:
 
     Returns number of records updated.
     """
-    updated = conn.execute("""
+    result = conn.execute("""
         UPDATE ml_prediction_snapshots ps
         SET actual_growth_pct = be.annual_growth_pct,
             actual_measured_at = CURRENT_DATE
@@ -94,9 +108,10 @@ def backfill_actuals(conn: DuckDBPyConnection) -> int:
         WHERE ps.set_number = be.set_number
           AND ps.actual_growth_pct IS NULL
           AND be.annual_growth_pct IS NOT NULL
-    """).fetchone()
+    """)
+    updated = getattr(result, 'rowcount', 0) or 0
 
-    # Dual-write to Postgres: backfill each row that now has actuals
+    # Write to Postgres: backfill each row that now has actuals
     pg = _get_pg(conn)
     if pg is not None:
         rows_with_actuals = conn.execute("""
@@ -114,7 +129,7 @@ def backfill_actuals(conn: DuckDBPyConnection) -> int:
                 actual_measured_at=row[3],
             )
 
-    # DuckDB doesn't return update count easily, query instead
+    # database doesn't return update count easily, query instead
     n = conn.execute("""
         SELECT COUNT(*) FROM ml_prediction_snapshots
         WHERE actual_growth_pct IS NOT NULL
@@ -124,7 +139,7 @@ def backfill_actuals(conn: DuckDBPyConnection) -> int:
     return n
 
 
-def get_tracking_report(conn: DuckDBPyConnection) -> dict:
+def get_tracking_report(conn: Any) -> dict:
     """Generate a report comparing predictions to actuals."""
     snapshots = conn.execute("""
         SELECT snapshot_date, COUNT(*) as n_predictions,

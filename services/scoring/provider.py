@@ -11,10 +11,8 @@ all registered providers onto the signal dicts.
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Protocol, runtime_checkable
+from typing import Any, Protocol, runtime_checkable
 
-if TYPE_CHECKING:
-    from duckdb import DuckDBPyConnection
 
 logger = logging.getLogger(__name__)
 
@@ -38,7 +36,7 @@ class ScoringProvider(Protocol):
         """Key prefix for fields added to signals (e.g. 'ml_')."""
         ...
 
-    def score_all(self, conn: DuckDBPyConnection) -> dict[str, dict]:
+    def score_all(self, conn: Any) -> dict[str, dict]:
         """Return {set_number: {field: value, ...}} for all scoreable sets.
 
         Must not raise -- return empty dict on failure.
@@ -66,7 +64,7 @@ def get_providers() -> list[ScoringProvider]:
 
 def enrich_signals(
     signals: list[dict],
-    conn: DuckDBPyConnection,
+    conn: Any,
 ) -> list[dict]:
     """Enrich signal dicts with predictions from all registered providers.
 

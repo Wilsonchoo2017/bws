@@ -10,16 +10,14 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import TYPE_CHECKING
 
 import numpy as np
 import pandas as pd
 
 from services.ml.helpers import safe_float
 from services.ml.types import FeatureMeta
+from typing import Any
 
-if TYPE_CHECKING:
-    from duckdb import DuckDBPyConnection
 
 logger = logging.getLogger(__name__)
 
@@ -65,7 +63,7 @@ class KeepaTimelineExtractor:
 
     def extract(
         self,
-        conn: DuckDBPyConnection,
+        conn: Any,
         base: pd.DataFrame,
     ) -> pd.DataFrame:
         """Load full Keepa timelines and extract time-series features."""
@@ -77,7 +75,7 @@ class KeepaTimelineExtractor:
         return _compute_timeline_features(keepa_df, rrp_map, base)
 
 
-def _load_keepa_full_timelines(conn: DuckDBPyConnection) -> pd.DataFrame:
+def _load_keepa_full_timelines(conn: Any) -> pd.DataFrame:
     """Load all Keepa JSON timeline columns."""
     return conn.execute("""
         SELECT
@@ -97,7 +95,7 @@ def _load_keepa_full_timelines(conn: DuckDBPyConnection) -> pd.DataFrame:
     """).df()
 
 
-def _load_rrp_map(conn: DuckDBPyConnection) -> dict[str, float]:
+def _load_rrp_map(conn: Any) -> dict[str, float]:
     """Load latest RRP USD cents per set."""
     df = conn.execute("""
         SELECT set_number, rrp_usd_cents

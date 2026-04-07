@@ -1,6 +1,6 @@
 """Unified LEGO items repository -- master catalog + price records."""
 
-from typing import TYPE_CHECKING
+from typing import Any
 
 from db.pg.writes import (
     _get_pg,
@@ -11,11 +11,8 @@ from db.pg.writes import (
     pg_upsert_lego_item,
 )
 
-if TYPE_CHECKING:
-    from duckdb import DuckDBPyConnection
 
-
-def item_exists(conn: "DuckDBPyConnection", set_number: str) -> bool:
+def item_exists(conn: Any, set_number: str) -> bool:
     """Check whether a lego_items row exists for this set number."""
     row = conn.execute(
         "SELECT 1 FROM lego_items WHERE set_number = ?", [set_number]
@@ -39,7 +36,7 @@ def is_polybag(set_number: str) -> bool:
 
 
 def get_or_create_item(
-    conn: "DuckDBPyConnection",
+    conn: Any,
     set_number: str,
     *,
     title: str | None = None,
@@ -103,7 +100,7 @@ def get_or_create_item(
          image_url],  # for ON CONFLICT update -- None lets COALESCE keep existing
     )
 
-    # Dual-write to Postgres
+    # Write to Postgres
     pg = _get_pg(conn)
     if pg is not None:
         pg_upsert_lego_item(
@@ -118,7 +115,7 @@ def get_or_create_item(
 
 
 def record_price(
-    conn: "DuckDBPyConnection",
+    conn: Any,
     set_number: str,
     source: str,
     price_cents: int,
@@ -143,7 +140,7 @@ def record_price(
         [set_number, source, price_cents, currency, title, url, shop_name, condition],
     )
 
-    # Dual-write to Postgres
+    # Write to Postgres
     pg = _get_pg(conn)
     if pg is not None:
         pg_insert_price_record(
@@ -153,19 +150,33 @@ def record_price(
         )
 
 
-def get_all_items_lite(conn: "DuckDBPyConnection") -> list[dict]:
+def get_all_items_lite(conn: Any) -> list[dict]:
     """Get all LEGO items with basic catalog data only (no price joins).
 
     This is the fast path for initial page load -- prices are fetched separately.
+    Retirement status uses a fallback chain: lego_items -> latest BrickEconomy snapshot.
     """
     result = conn.execute("""
+        WITH latest_be AS (
+            SELECT set_number, year_retired, retiring_soon, retired_date, availability,
+                   ROW_NUMBER() OVER (PARTITION BY set_number ORDER BY scraped_at DESC) AS rn
+            FROM brickeconomy_snapshots
+        )
         SELECT
             li.set_number,
             li.title,
             li.theme,
             li.year_released,
-            li.year_retired,
-            li.retiring_soon,
+            COALESCE(
+                li.year_retired,
+                be.year_retired,
+                CAST(SUBSTRING(be.retired_date FROM 1 FOR 4) AS INTEGER)
+            ) AS year_retired,
+            COALESCE(
+                li.retiring_soon,
+                be.retiring_soon,
+                CASE WHEN be.availability IS NOT NULL AND LOWER(be.availability) LIKE '%retiring%' THEN TRUE END
+            ) AS retiring_soon,
             li.watchlist,
             CASE
                 WHEN ia.status = 'downloaded' THEN '/api/images/set/' || li.set_number
@@ -175,8 +186,11 @@ def get_all_items_lite(conn: "DuckDBPyConnection") -> list[dict]:
             li.rrp_currency,
             li.updated_at,
             li.minifig_count,
-            li.dimensions
+            li.dimensions,
+            COALESCE(li.retired_date, be.retired_date) AS retired_date,
+            be.availability
         FROM lego_items li
+        LEFT JOIN latest_be be ON be.set_number = li.set_number AND be.rn = 1
         LEFT JOIN image_assets ia ON ia.asset_type = 'set' AND ia.item_id = li.set_number
         ORDER BY li.updated_at DESC
     """).fetchall()
@@ -184,12 +198,12 @@ def get_all_items_lite(conn: "DuckDBPyConnection") -> list[dict]:
     columns = [
         "set_number", "title", "theme", "year_released", "year_retired",
         "retiring_soon", "watchlist", "image_url", "rrp_cents", "rrp_currency",
-        "updated_at", "minifig_count", "dimensions",
+        "updated_at", "minifig_count", "dimensions", "retired_date", "availability",
     ]
     return [dict(zip(columns, row)) for row in result]
 
 
-def get_all_items(conn: "DuckDBPyConnection") -> list[dict]:
+def get_all_items(conn: Any) -> list[dict]:
     """Get all LEGO items with best/latest price from each retail source.
 
     Shopee: picks the cheapest price across all shops (best deal).
@@ -197,7 +211,12 @@ def get_all_items(conn: "DuckDBPyConnection") -> list[dict]:
     BrickLink: picks the latest new/used price.
     """
     result = conn.execute("""
-        WITH best_shopee AS (
+        WITH latest_be AS (
+            SELECT set_number, year_retired, retiring_soon, retired_date, availability,
+                   ROW_NUMBER() OVER (PARTITION BY set_number ORDER BY scraped_at DESC) AS rn
+            FROM brickeconomy_snapshots
+        ),
+        best_shopee AS (
             SELECT set_number, price_cents, currency, url, shop_name, recorded_at,
                    ROW_NUMBER() OVER (
                        PARTITION BY set_number
@@ -236,8 +255,16 @@ def get_all_items(conn: "DuckDBPyConnection") -> list[dict]:
             li.title,
             li.theme,
             li.year_released,
-            li.year_retired,
-            li.retiring_soon,
+            COALESCE(
+                li.year_retired,
+                be.year_retired,
+                CAST(SUBSTRING(be.retired_date FROM 1 FOR 4) AS INTEGER)
+            ) AS year_retired,
+            COALESCE(
+                li.retiring_soon,
+                be.retiring_soon,
+                CASE WHEN be.availability IS NOT NULL AND LOWER(be.availability) LIKE '%retiring%' THEN TRUE END
+            ) AS retiring_soon,
             li.watchlist,
             CASE
                 WHEN ia.status = 'downloaded' THEN '/api/images/set/' || li.set_number
@@ -248,6 +275,8 @@ def get_all_items(conn: "DuckDBPyConnection") -> list[dict]:
             li.updated_at,
             li.minifig_count,
             li.dimensions,
+            COALESCE(li.retired_date, be.retired_date) AS retired_date,
+            be.availability,
             s.price_cents AS shopee_price_cents,
             s.currency AS shopee_currency,
             s.url AS shopee_url,
@@ -269,6 +298,7 @@ def get_all_items(conn: "DuckDBPyConnection") -> list[dict]:
             bu.currency AS bricklink_used_currency,
             bu.recorded_at AS bricklink_used_last_seen
         FROM lego_items li
+        LEFT JOIN latest_be be ON be.set_number = li.set_number AND be.rn = 1
         LEFT JOIN best_shopee s ON s.set_number = li.set_number AND s.rn = 1
         LEFT JOIN shopee_listing_counts sc ON sc.set_number = li.set_number
         LEFT JOIN latest_toysrus tr ON tr.set_number = li.set_number AND tr.rn = 1
@@ -282,6 +312,7 @@ def get_all_items(conn: "DuckDBPyConnection") -> list[dict]:
     columns = [
         "set_number", "title", "theme", "year_released", "year_retired", "retiring_soon", "watchlist", "image_url",
         "rrp_cents", "rrp_currency", "updated_at", "minifig_count", "dimensions",
+        "retired_date", "availability",
         "shopee_price_cents", "shopee_currency", "shopee_url", "shopee_shop_name",
         "shopee_last_seen", "shopee_shop_count",
         "toysrus_price_cents", "toysrus_currency", "toysrus_url", "toysrus_last_seen",
@@ -292,7 +323,7 @@ def get_all_items(conn: "DuckDBPyConnection") -> list[dict]:
     return [dict(zip(columns, row)) for row in result]
 
 
-def get_item_detail(conn: "DuckDBPyConnection", set_number: str) -> dict | None:
+def get_item_detail(conn: Any, set_number: str) -> dict | None:
     """Get a single item with all its price records."""
     row = conn.execute(
         "SELECT * FROM lego_items WHERE set_number = ?", [set_number]
@@ -332,7 +363,7 @@ def get_item_detail(conn: "DuckDBPyConnection", set_number: str) -> dict | None:
     return item
 
 
-def get_unscraped_priority_items(conn: "DuckDBPyConnection") -> list[str]:
+def get_unscraped_priority_items(conn: Any) -> list[str]:
     """Return set numbers that are on watchlist or in portfolio but have no BrickEconomy snapshot."""
     rows = conn.execute(
         """
@@ -351,7 +382,7 @@ def get_unscraped_priority_items(conn: "DuckDBPyConnection") -> list[str]:
 
 
 def update_buy_rating(
-    conn: "DuckDBPyConnection", set_number: str, rating: int | None
+    conn: Any, set_number: str, rating: int | None
 ) -> int | None:
     """Set the buy rating for a lego_items row. Returns new value, or None if not found.
 
@@ -374,7 +405,7 @@ def update_buy_rating(
     return rating
 
 
-def delete_item(conn: "DuckDBPyConnection", set_number: str) -> bool:
+def delete_item(conn: Any, set_number: str) -> bool:
     """Delete a lego_items row and all related data across tables.
 
     Returns True if the item existed and was deleted.
@@ -416,7 +447,7 @@ def delete_item(conn: "DuckDBPyConnection", set_number: str) -> bool:
     return True
 
 
-def toggle_watchlist(conn: "DuckDBPyConnection", set_number: str) -> bool | None:
+def toggle_watchlist(conn: Any, set_number: str) -> bool | None:
     """Toggle the watchlist flag for a lego_items row. Returns new value, or None if not found."""
     row = conn.execute(
         "SELECT watchlist FROM lego_items WHERE set_number = ?", [set_number]

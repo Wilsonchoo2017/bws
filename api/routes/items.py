@@ -1,6 +1,6 @@
 """Items API routes."""
 
-from typing import TYPE_CHECKING
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
@@ -28,8 +28,6 @@ from services.shopee.saturation_repository import (
     get_latest_saturation,
 )
 
-if TYPE_CHECKING:
-    from duckdb import DuckDBPyConnection
 
 router = APIRouter(prefix="/items", tags=["items"])
 
@@ -45,7 +43,7 @@ class UpdateBuyRatingRequest(BaseModel):
 
 
 @router.post("", status_code=201)
-async def add_item(request: AddItemRequest, conn: "DuckDBPyConnection" = Depends(get_db)):
+async def add_item(request: AddItemRequest, conn: Any = Depends(get_db)):
     """Add a new LEGO set to the catalog by set number."""
     if item_exists(conn, request.set_number):
         raise HTTPException(
@@ -58,7 +56,7 @@ async def add_item(request: AddItemRequest, conn: "DuckDBPyConnection" = Depends
 
 
 @router.patch("/{set_number}/watchlist")
-async def toggle_item_watchlist(set_number: str, conn: "DuckDBPyConnection" = Depends(get_db)):
+async def toggle_item_watchlist(set_number: str, conn: Any = Depends(get_db)):
     """Toggle watchlist status for an item."""
     new_value = toggle_watchlist(conn, set_number)
     if new_value is None:
@@ -67,7 +65,7 @@ async def toggle_item_watchlist(set_number: str, conn: "DuckDBPyConnection" = De
 
 
 @router.put("/{set_number}/buy-rating")
-async def set_buy_rating(set_number: str, request: UpdateBuyRatingRequest, conn: "DuckDBPyConnection" = Depends(get_db)):
+async def set_buy_rating(set_number: str, request: UpdateBuyRatingRequest, conn: Any = Depends(get_db)):
     """Set or clear the buy rating for an item."""
     result = update_buy_rating(conn, set_number, request.rating)
     if result is None and request.rating is not None:
@@ -83,45 +81,64 @@ async def set_buy_rating(set_number: str, request: UpdateBuyRatingRequest, conn:
 
 
 @router.get("/lite")
-async def list_items_lite(conn: "DuckDBPyConnection" = Depends(get_db)):
+async def list_items_lite(conn: Any = Depends(get_db)):
     """List all LEGO items with catalog data only (no prices). Fast path for initial load."""
     items = get_all_items_lite(conn)
     return {"success": True, "data": items, "count": len(items)}
 
 
 @router.get("")
-async def list_items(conn: "DuckDBPyConnection" = Depends(get_db)):
+async def list_items(conn: Any = Depends(get_db)):
     """List all LEGO items with latest prices from each source."""
     items = get_all_items(conn)
     return {"success": True, "data": items, "count": len(items)}
 
 
+_signals_cache: dict = {}  # {"data": ..., "expires": float}
+_SIGNALS_TTL = 30 * 24 * 3600  # 30 days
+
+
 @router.get("/signals")
-async def list_signals(condition: str = "new", conn: "DuckDBPyConnection" = Depends(get_db)):
-    """Compute current trading signals for all items, enriched by scoring providers."""
+async def list_signals(
+    condition: str = "new",
+    refresh: bool = False,
+    conn: Any = Depends(get_db),
+):
+    """Trading signals enriched by ML predictions. Cached for 5 minutes."""
+    import time
     from services.scoring.provider import enrich_signals
+
+    cache_key = condition
+    now = time.time()
+
+    if not refresh and cache_key in _signals_cache and _signals_cache[cache_key]["expires"] > now:
+        cached = _signals_cache[cache_key]["data"]
+        return {"success": True, "data": cached, "count": len(cached), "cached": True}
 
     signals = compute_all_signals_with_cohort(conn, condition=condition)
     signals = enrich_signals(signals, conn)
-    return {"success": True, "data": sanitize_nan(signals), "count": len(signals)}
+    result = sanitize_nan(signals)
+
+    _signals_cache[cache_key] = {"data": result, "expires": now + _SIGNALS_TTL}
+    return {"success": True, "data": result, "count": len(result)}
 
 
 @router.get("/shopee")
-async def list_shopee_products(conn: "DuckDBPyConnection" = Depends(get_db)):
+async def list_shopee_products(conn: Any = Depends(get_db)):
     """List all raw Shopee products from the database."""
     products = get_all_products(conn)
     return {"success": True, "data": products, "count": len(products)}
 
 
 @router.get("/saturation")
-async def list_saturations(conn: "DuckDBPyConnection" = Depends(get_db)):
+async def list_saturations(conn: Any = Depends(get_db)):
     """List latest Shopee saturation data for all items."""
     data = get_all_latest_saturations(conn)
     return {"success": True, "data": data, "count": len(data)}
 
 
 @router.get("/{set_number}/saturation")
-async def get_item_saturation(set_number: str, conn: "DuckDBPyConnection" = Depends(get_db)):
+async def get_item_saturation(set_number: str, conn: Any = Depends(get_db)):
     """Get Shopee market saturation data for a LEGO set."""
     data = get_latest_saturation(conn, set_number)
     return {"success": True, "data": data}
@@ -132,7 +149,7 @@ async def get_item_kelly(
     set_number: str,
     budget: int | None = None,
     condition: str = "new",
-    conn: "DuckDBPyConnection" = Depends(get_db),
+    conn: Any = Depends(get_db),
 ):
     """Compute Kelly Criterion position sizing for a single item."""
     sizing = compute_position_sizing(
@@ -144,7 +161,7 @@ async def get_item_kelly(
 
 
 @router.get("/{set_number}/signals")
-async def get_item_signals(set_number: str, condition: str = "new", conn: "DuckDBPyConnection" = Depends(get_db)):
+async def get_item_signals(set_number: str, condition: str = "new", conn: Any = Depends(get_db)):
     """Compute current trading signals for a single item with cohort context."""
     all_signals = compute_all_signals_with_cohort(conn, condition=condition)
     match = next(
@@ -157,7 +174,7 @@ async def get_item_signals(set_number: str, condition: str = "new", conn: "DuckD
 
 
 @router.get("/{set_number}")
-async def get_item(set_number: str, conn: "DuckDBPyConnection" = Depends(get_db)):
+async def get_item(set_number: str, conn: Any = Depends(get_db)):
     """Get a single item with full price history from all sources."""
     item = get_item_detail(conn, set_number)
     if not item:
@@ -176,7 +193,7 @@ async def get_item(set_number: str, conn: "DuckDBPyConnection" = Depends(get_db)
 
 
 @router.get("/{set_number}/minifigures")
-async def get_item_minifigures(set_number: str, conn: "DuckDBPyConnection" = Depends(get_db)):
+async def get_item_minifigures(set_number: str, conn: Any = Depends(get_db)):
     """Get minifigure inventory and values for a LEGO set."""
     rows = conn.execute(
         "SELECT item_id FROM bricklink_items WHERE item_id LIKE ?",
@@ -210,7 +227,7 @@ async def get_item_minifigures(set_number: str, conn: "DuckDBPyConnection" = Dep
 
 
 @router.get("/{set_number}/minifigures/value-history")
-async def get_minifig_value_history(set_number: str, conn: "DuckDBPyConnection" = Depends(get_db)):
+async def get_minifig_value_history(set_number: str, conn: Any = Depends(get_db)):
     """Get aggregated minifigure value history for a LEGO set."""
     rows = conn.execute(
         "SELECT item_id FROM bricklink_items WHERE item_id LIKE ?",
@@ -227,7 +244,7 @@ async def get_minifig_value_history(set_number: str, conn: "DuckDBPyConnection" 
 
 
 @router.post("/{set_number}/minifigures/scrape")
-async def scrape_item_minifigures(set_number: str, conn: "DuckDBPyConnection" = Depends(get_db)):
+async def scrape_item_minifigures(set_number: str, conn: Any = Depends(get_db)):
     """Trigger minifigure scraping for a LEGO set."""
     rows = conn.execute(
         "SELECT item_id FROM bricklink_items WHERE item_id LIKE ?",
@@ -256,7 +273,7 @@ async def scrape_item_minifigures(set_number: str, conn: "DuckDBPyConnection" = 
 
 
 @router.get("/{set_number}/bricklink-prices")
-async def get_item_bricklink_prices(set_number: str, conn: "DuckDBPyConnection" = Depends(get_db)):
+async def get_item_bricklink_prices(set_number: str, conn: Any = Depends(get_db)):
     """Get BrickLink price history and monthly sales for an item."""
     rows = conn.execute(
         "SELECT item_id FROM bricklink_items WHERE item_id LIKE ?",
@@ -308,7 +325,7 @@ async def get_item_bricklink_prices(set_number: str, conn: "DuckDBPyConnection" 
 
 
 @router.get("/{set_number}/brickeconomy")
-async def get_item_brickeconomy(set_number: str, conn: "DuckDBPyConnection" = Depends(get_db)):
+async def get_item_brickeconomy(set_number: str, conn: Any = Depends(get_db)):
     """Get the latest BrickEconomy snapshot for an item."""
     from services.brickeconomy.repository import get_latest_snapshot
 
@@ -327,7 +344,7 @@ async def get_item_brickeconomy(set_number: str, conn: "DuckDBPyConnection" = De
 
 
 @router.get("/{set_number}/keepa")
-async def get_item_keepa(set_number: str, conn: "DuckDBPyConnection" = Depends(get_db)):
+async def get_item_keepa(set_number: str, conn: Any = Depends(get_db)):
     """Get the latest Keepa snapshot for an item."""
     from services.keepa.repository import get_latest_keepa_snapshot
 
@@ -342,7 +359,7 @@ async def get_item_keepa(set_number: str, conn: "DuckDBPyConnection" = Depends(g
 
 
 @router.get("/{set_number}/trends")
-async def get_item_trends(set_number: str, conn: "DuckDBPyConnection" = Depends(get_db)):
+async def get_item_trends(set_number: str, conn: Any = Depends(get_db)):
     """Get the latest Google Trends snapshot for an item."""
     from services.google_trends.repository import get_latest_trends_snapshot
 

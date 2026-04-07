@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 
 import pytest
 
-from db.connection import get_memory_connection
+from db.connection import get_connection
 from db.schema import init_schema
 from api.schemas import JobStatus, ScrapeQueueStats
 from services.scrape_queue.models import TaskType
@@ -20,8 +20,8 @@ from services.scrape_queue.repository import (
 
 @pytest.fixture
 def conn():
-    """In-memory DuckDB with schema initialized."""
-    c = get_memory_connection()
+    """Test DB connection with schema initialized."""
+    c = get_connection()
     init_schema(c)
     yield c
     c.close()

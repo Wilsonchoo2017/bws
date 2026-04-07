@@ -10,10 +10,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 from enum import Enum
-from typing import TYPE_CHECKING, Protocol
-
-if TYPE_CHECKING:
-    from duckdb import DuckDBPyConnection
+from typing import Any, Protocol
 
 
 # ---------------------------------------------------------------------------
@@ -116,7 +113,7 @@ class Executor(Protocol):
 
     def __call__(
         self,
-        conn: DuckDBPyConnection,
+        conn: Any,
         set_number: str,
         *,
         worker_index: int = 0,

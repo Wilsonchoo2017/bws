@@ -8,7 +8,6 @@ endpoint. Stops when a page contains only unavailable products.
 import asyncio
 import logging
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
 
 import httpx
 
@@ -16,10 +15,8 @@ from config.settings import get_random_delay
 from services.http import get_browser_headers
 from services.toysrus.parser import ToysRUsProduct, parse_products, parse_total_count
 from services.toysrus.repository import upsert_products
+from typing import Any
 
-
-if TYPE_CHECKING:
-    from duckdb import DuckDBPyConnection
 
 
 logger = logging.getLogger(__name__)
@@ -58,7 +55,7 @@ async def _fetch_page(client: httpx.AsyncClient, start: int) -> str:
 
 
 async def scrape_all_lego(
-    conn: "DuckDBPyConnection | None" = None,
+    conn: Any | None = None,
 ) -> ScrapeResult:
     """Scrape all available LEGO products from ToysRUs Malaysia.
 
@@ -66,7 +63,7 @@ async def scrape_all_lego(
     all unavailable products (sorted by availability).
 
     Args:
-        conn: DuckDB connection. If provided, saves products to DB.
+        conn: Database connection. If provided, saves products to DB.
     """
     all_products: list[ToysRUsProduct] = []
     pages_fetched = 0
@@ -165,7 +162,7 @@ async def scrape_all_lego(
 
 
 def scrape_all_lego_sync(
-    conn: "DuckDBPyConnection | None" = None,
+    conn: Any | None = None,
 ) -> ScrapeResult:
     """Synchronous wrapper for scrape_all_lego."""
     return asyncio.run(scrape_all_lego(conn=conn))

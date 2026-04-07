@@ -7,12 +7,11 @@ satisfy these protocols implicitly -- no explicit inheritance needed.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Protocol, runtime_checkable
+from typing import Any, TYPE_CHECKING, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
     import numpy as np
     import pandas as pd
-    from duckdb import DuckDBPyConnection
 
     from config.ml import MLPipelineConfig
     from services.ml.types import FeatureMeta
@@ -39,7 +38,7 @@ class FeatureExtractor(Protocol):
 
     def extract(
         self,
-        conn: DuckDBPyConnection,
+        conn: Any,
         base: pd.DataFrame,
     ) -> pd.DataFrame:
         """Extract features for sets in base DataFrame.

@@ -203,17 +203,12 @@ def main() -> None:
     import shutil
     import tempfile
 
-    import duckdb
-
-    from config.settings import BWS_DB_PATH
+    from db.connection import get_connection
 
     print_header("LEGO INVESTMENT SIGNAL BACKTESTER")
     print("  Running walk-forward backtest...")
 
-    # Copy database to temp file to avoid locking conflicts
-    tmp_db = tempfile.mktemp(suffix=".duckdb")
-    shutil.copy2(str(BWS_DB_PATH), tmp_db)
-    conn = duckdb.connect(tmp_db, read_only=True)
+    conn = get_connection()
     config = BacktestConfig(min_history_months=3)
     trades = run_backtest(conn, config)
 

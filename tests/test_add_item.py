@@ -1,9 +1,9 @@
 """GWT tests for add-item feature -- validation, duplicates, and creation."""
 
-import duckdb
 import pytest
 from fastapi.testclient import TestClient
 
+from db.connection import get_connection
 from db.schema import init_schema
 from services.items.repository import (
     get_or_create_item,
@@ -17,11 +17,10 @@ from services.items.repository import (
 
 @pytest.fixture
 def conn():
-    """In-memory DuckDB connection with schema initialized."""
-    connection = duckdb.connect(":memory:")
+    """Connection with schema initialized."""
+    connection = get_connection()
     init_schema(connection)
     yield connection
-    connection.close()
 
 
 class _NoCloseConnection:

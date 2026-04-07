@@ -8,7 +8,6 @@ global feature_registry stays populated for feature_store.py.
 """
 
 import logging
-from typing import TYPE_CHECKING
 
 import pandas as pd
 
@@ -17,9 +16,8 @@ from services.ml.extractors import extract_all
 from services.ml.feature_registry import register
 from services.ml.helpers import compute_cutoff_dates
 from services.ml.queries import load_base_metadata as _query_base_metadata
+from typing import Any
 
-if TYPE_CHECKING:
-    from duckdb import DuckDBPyConnection
 
 logger = logging.getLogger(__name__)
 
@@ -152,7 +150,7 @@ register("gt_theme_lego_vs_bare", "google_trends_theme_snapshots", "LEGO interes
 
 
 def extract_all_features(
-    conn: "DuckDBPyConnection",
+    conn: Any,
     set_numbers: list[str] | None = None,
 ) -> pd.DataFrame:
     """Extract all enabled features for the given sets.
@@ -175,7 +173,7 @@ def extract_all_features(
 
 
 def _load_base_metadata(
-    conn: "DuckDBPyConnection",
+    conn: Any,
     set_numbers: list[str] | None = None,
 ) -> pd.DataFrame:
     """Load core set metadata and compute cutoff dates."""

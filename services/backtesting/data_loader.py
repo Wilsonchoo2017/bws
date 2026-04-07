@@ -1,13 +1,11 @@
-"""Load historical data from DuckDB into pandas DataFrames for backtesting."""
+"""Load historical data from the database into pandas DataFrames for backtesting."""
 
 import logging
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
 
 import pandas as pd
+from typing import Any
 
-if TYPE_CHECKING:
-    from duckdb import DuckDBPyConnection
 
 logger = logging.getLogger(__name__)
 
@@ -24,7 +22,7 @@ class MinifigSetData:
     cheapest_alternative_price_cents: int | None
 
 
-def load_monthly_sales(conn: "DuckDBPyConnection") -> pd.DataFrame:
+def load_monthly_sales(conn: Any) -> pd.DataFrame:
     """Load all monthly sales data.
 
     Returns DataFrame with columns:
@@ -49,7 +47,7 @@ def load_monthly_sales(conn: "DuckDBPyConnection") -> pd.DataFrame:
     return conn.execute(query).df()
 
 
-def load_item_metadata(conn: "DuckDBPyConnection") -> pd.DataFrame:
+def load_item_metadata(conn: Any) -> pd.DataFrame:
     """Load item metadata from lego_items joined with bricklink_items.
 
     Returns DataFrame with columns:
@@ -85,7 +83,7 @@ def load_item_metadata(conn: "DuckDBPyConnection") -> pd.DataFrame:
     return conn.execute(query).df()
 
 
-def load_minifig_data(conn: "DuckDBPyConnection") -> dict[str, MinifigSetData]:
+def load_minifig_data(conn: Any) -> dict[str, MinifigSetData]:
     """Load minifigure analysis data per set.
 
     For each set computes:
@@ -218,7 +216,7 @@ def load_minifig_data(conn: "DuckDBPyConnection") -> dict[str, MinifigSetData]:
         return {}
 
 
-def load_price_snapshots(conn: "DuckDBPyConnection") -> pd.DataFrame:
+def load_price_snapshots(conn: Any) -> pd.DataFrame:
     """Load BrickLink price history snapshots.
 
     Returns DataFrame with parsed pricing box fields.

@@ -2,8 +2,7 @@
 
 import pytest
 
-import duckdb
-
+from db.connection import get_connection
 from db.schema import init_schema
 from services.portfolio.repository import (
     create_transaction,
@@ -20,11 +19,10 @@ from services.portfolio.repository import (
 
 @pytest.fixture
 def conn():
-    """In-memory DuckDB connection with schema initialized."""
-    c = duckdb.connect(":memory:")
+    """Connection with schema initialized."""
+    c = get_connection()
     init_schema(c)
     yield c
-    c.close()
 
 
 @pytest.fixture

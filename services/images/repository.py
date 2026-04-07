@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import Any
+
 
 from db.pg.writes import (
     _get_pg,
@@ -11,12 +12,9 @@ from db.pg.writes import (
     pg_upsert_image_asset,
 )
 
-if TYPE_CHECKING:
-    from duckdb import DuckDBPyConnection
-
 
 def get_asset(
-    conn: "DuckDBPyConnection", asset_type: str, item_id: str
+    conn: Any, asset_type: str, item_id: str
 ) -> dict | None:
     """Get a single image asset by type and item_id."""
     row = conn.execute(
@@ -36,7 +34,7 @@ def get_asset(
 
 
 def get_pending_assets(
-    conn: "DuckDBPyConnection", *, limit: int = 50
+    conn: Any, *, limit: int = 50
 ) -> list[dict]:
     """Get assets awaiting download (pending or failed with retries left)."""
     rows = conn.execute(
@@ -52,7 +50,7 @@ def get_pending_assets(
 
 
 def upsert_asset(
-    conn: "DuckDBPyConnection",
+    conn: Any,
     asset_type: str,
     item_id: str,
     source_url: str,
@@ -73,7 +71,7 @@ def upsert_asset(
         [asset_type, item_id, source_url, local_path],
     )
 
-    # Dual-write to Postgres
+    # Write to Postgres
     pg = _get_pg(conn)
     if pg is not None:
         pg_upsert_image_asset(
@@ -86,7 +84,7 @@ def upsert_asset(
 
 
 def mark_downloaded(
-    conn: "DuckDBPyConnection",
+    conn: Any,
     asset_type: str,
     item_id: str,
     file_size_bytes: int,
@@ -106,7 +104,7 @@ def mark_downloaded(
         [file_size_bytes, content_type, asset_type, item_id],
     )
 
-    # Dual-write to Postgres
+    # Write to Postgres
     pg = _get_pg(conn)
     if pg is not None:
         pg_mark_image_downloaded(
@@ -121,7 +119,7 @@ def mark_downloaded(
 
 
 def mark_failed(
-    conn: "DuckDBPyConnection",
+    conn: Any,
     asset_type: str,
     item_id: str,
     error: str,
@@ -138,7 +136,7 @@ def mark_failed(
         [error, asset_type, item_id],
     )
 
-    # Dual-write to Postgres
+    # Write to Postgres
     pg = _get_pg(conn)
     if pg is not None:
         pg_mark_image_failed(
@@ -150,7 +148,7 @@ def mark_failed(
         )
 
 
-def get_download_stats(conn: "DuckDBPyConnection") -> dict:
+def get_download_stats(conn: Any) -> dict:
     """Get image download statistics by status and type."""
     rows = conn.execute(
         "SELECT asset_type, status, COUNT(*) AS cnt, "
@@ -170,7 +168,7 @@ def get_download_stats(conn: "DuckDBPyConnection") -> dict:
     return stats
 
 
-def register_existing_images(conn: "DuckDBPyConnection") -> int:
+def register_existing_images(conn: Any) -> int:
     """Backfill image_assets from existing bricklink_items and minifigures.
 
     Returns the number of newly registered assets.

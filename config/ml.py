@@ -55,7 +55,9 @@ class MLPipelineConfig:
     n_cv_repeats: int = 3
     # Hyperparameter tuning (Optuna)
     tuning_trials: int = 75
-    model_candidates: tuple[str, ...] = ("lightgbm", "gbm")
+    model_candidates: tuple[str, ...] = ("lightgbm",)
+    # LightGBM only: GBM 100x slower for similar R2, CatBoost has NaN issues,
+    # RF 10x slower. LightGBM consistently best on this dataset.
     # Only prefer LightGBM if it beats GBM by this margin
     min_improvement_for_complex: float = 0.01
     # Loss function: "huber" (robust to outliers) or "squared_error"

@@ -6,7 +6,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from db.connection import get_memory_connection
+from db.connection import get_connection
 from db.schema import init_schema
 from services.scrape_queue.models import ExecutorResult, TaskType, TaskTypeConfig
 from services.scrape_queue.repository import claim_next, create_task
@@ -27,8 +27,8 @@ class _NoCloseConn:
 
 @pytest.fixture
 def conn():
-    """In-memory DuckDB with schema initialized."""
-    c = get_memory_connection()
+    """Test DB connection with schema initialized."""
+    c = get_connection()
     init_schema(c)
     yield c
     c.close()

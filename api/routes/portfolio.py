@@ -1,8 +1,8 @@
 """Portfolio API routes -- transactions, holdings, and summary."""
 
 import logging
+from typing import Any
 from datetime import datetime
-from typing import TYPE_CHECKING
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query
 from pydantic import BaseModel, Field
@@ -20,8 +20,6 @@ from services.portfolio.repository import (
     list_transactions,
 )
 
-if TYPE_CHECKING:
-    from duckdb import DuckDBPyConnection
 
 logger = logging.getLogger("bws.api.portfolio")
 
@@ -42,7 +40,7 @@ class CreateTransactionRequest(BaseModel):
 
 
 @router.post("/transactions", status_code=201)
-async def add_transaction(request: CreateTransactionRequest, conn: "DuckDBPyConnection" = Depends(get_db)) -> dict:
+async def add_transaction(request: CreateTransactionRequest, conn: Any = Depends(get_db)) -> dict:
     """Record a BUY or SELL transaction."""
     # Auto-create lego_items entry and queue enrichment if metadata missing
     get_or_create_item(conn, request.set_number)
@@ -74,7 +72,7 @@ async def list_txns(
     set_number: str | None = Query(default=None),
     limit: int = Query(default=100, ge=1, le=1000),
     offset: int = Query(default=0, ge=0),
-    conn: "DuckDBPyConnection" = Depends(get_db),
+    conn: Any = Depends(get_db),
 ) -> dict:
     """List transactions with optional filters."""
     txns = list_transactions(conn, set_number=set_number, limit=limit, offset=offset)
@@ -82,7 +80,7 @@ async def list_txns(
 
 
 @router.get("/transactions/{txn_id}")
-async def get_txn(txn_id: int, conn: "DuckDBPyConnection" = Depends(get_db)) -> dict:
+async def get_txn(txn_id: int, conn: Any = Depends(get_db)) -> dict:
     """Get a single transaction."""
     txn = get_transaction(conn, txn_id)
     if not txn:
@@ -91,7 +89,7 @@ async def get_txn(txn_id: int, conn: "DuckDBPyConnection" = Depends(get_db)) -> 
 
 
 @router.delete("/transactions/{txn_id}")
-async def remove_txn(txn_id: int, conn: "DuckDBPyConnection" = Depends(get_db)) -> dict:
+async def remove_txn(txn_id: int, conn: Any = Depends(get_db)) -> dict:
     """Delete a transaction."""
     deleted = delete_transaction(conn, txn_id)
     if not deleted:
@@ -100,7 +98,7 @@ async def remove_txn(txn_id: int, conn: "DuckDBPyConnection" = Depends(get_db)) 
 
 
 @router.get("/holdings")
-async def list_holdings(conn: "DuckDBPyConnection" = Depends(get_db)) -> dict:
+async def list_holdings(conn: Any = Depends(get_db)) -> dict:
     """Get current holdings with market values and P&L."""
     holdings = get_holdings(conn)
     return {"success": True, "data": holdings, "count": len(holdings)}
@@ -109,7 +107,7 @@ async def list_holdings(conn: "DuckDBPyConnection" = Depends(get_db)) -> dict:
 @router.get("/holdings/{set_number}")
 async def holding_detail(
     set_number: str = Path(..., pattern=r"^\d{3,6}(-\d+)?$"),
-    conn: "DuckDBPyConnection" = Depends(get_db),
+    conn: Any = Depends(get_db),
 ) -> dict:
     """Get holding detail for a single set."""
     detail = get_holding_detail(conn, set_number)
@@ -122,7 +120,7 @@ async def holding_detail(
 
 
 @router.post("/enrich")
-async def enrich_portfolio_items(conn: "DuckDBPyConnection" = Depends(get_db)) -> dict:
+async def enrich_portfolio_items(conn: Any = Depends(get_db)) -> dict:
     """Queue enrichment for all portfolio sets missing metadata."""
     # Ensure all portfolio sets exist in lego_items first
     missing_items = conn.execute(
@@ -163,7 +161,7 @@ async def enrich_portfolio_items(conn: "DuckDBPyConnection" = Depends(get_db)) -
 
 
 @router.get("/summary")
-async def portfolio_summary(conn: "DuckDBPyConnection" = Depends(get_db)) -> dict:
+async def portfolio_summary(conn: Any = Depends(get_db)) -> dict:
     """Get portfolio-wide summary totals."""
     summary = get_portfolio_summary(conn)
     return {"success": True, "data": summary}

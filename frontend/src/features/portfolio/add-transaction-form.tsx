@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
 
 interface AddTransactionFormProps {
@@ -10,6 +10,7 @@ interface AddTransactionFormProps {
 export function AddTransactionForm({ onSuccess }: AddTransactionFormProps) {
   const [open, setOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const submittingRef = useRef(false);
   const [error, setError] = useState<string | null>(null);
 
   const [setNumber, setSetNumber] = useState('');
@@ -33,6 +34,8 @@ export function AddTransactionForm({ onSuccess }: AddTransactionFormProps) {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (submittingRef.current) return;
+    submittingRef.current = true;
     setError(null);
     setSubmitting(true);
 
@@ -68,6 +71,7 @@ export function AddTransactionForm({ onSuccess }: AddTransactionFormProps) {
     } catch {
       setError('Network error');
     } finally {
+      submittingRef.current = false;
       setSubmitting(false);
     }
   };

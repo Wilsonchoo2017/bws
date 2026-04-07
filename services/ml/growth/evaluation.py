@@ -13,16 +13,14 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
 
 import numpy as np
 import pandas as pd
 from sklearn.ensemble import GradientBoostingRegressor
 from sklearn.metrics import mean_absolute_error, mean_squared_error
 from sklearn.preprocessing import StandardScaler
+from typing import Any
 
-if TYPE_CHECKING:
-    from duckdb import DuckDBPyConnection
 
 logger = logging.getLogger(__name__)
 
@@ -44,6 +42,13 @@ CIRCULAR_FEATURES: frozenset[str] = frozenset({
     "growth_90d_pct",
     # BE future estimate is derived from value trajectory
     "be_future_est_return",
+    # Growth ranks are LOO-encoded targets (circular by construction)
+    "growth_rank_in_year",
+    "growth_rank_in_quarter",
+    "growth_rank_in_price_tier",
+    "growth_rank_in_pieces_tier",
+    "growth_rank_in_theme",
+    "growth_rank_in_retire_year",
 })
 
 # Features that are acceptable: static attributes, demand signals,
@@ -77,7 +82,7 @@ class LeakageReport:
 
 
 def evaluate_leakage_free(
-    conn: DuckDBPyConnection,
+    conn: Any,
 ) -> LeakageReport:
     """Run a full leakage-free evaluation of the growth prediction model.
 
@@ -258,7 +263,7 @@ def evaluate_leakage_free(
 
 
 def compare_with_vs_without_leakage(
-    conn: DuckDBPyConnection,
+    conn: Any,
 ) -> None:
     """Print side-by-side comparison of leaked vs clean model performance.
 

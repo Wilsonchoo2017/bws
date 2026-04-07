@@ -9,7 +9,6 @@ to produce a final avoid recommendation per set.
 
 import logging
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
 
 import numpy as np
 import pandas as pd
@@ -18,9 +17,8 @@ from config.ml import InversionConfig
 from services.ml.feature_store import load_feature_store
 from services.ml.target import compute_outcome_labels, compute_retirement_returns
 from services.ml.training import load_model
+from typing import Any
 
-if TYPE_CHECKING:
-    from duckdb import DuckDBPyConnection
 
 logger = logging.getLogger(__name__)
 
@@ -46,7 +44,7 @@ RED_FLAG_WEIGHT = 0.4
 
 
 def predict_avoids(
-    conn: "DuckDBPyConnection",
+    conn: Any,
     model_path: str | None = None,
     horizon_months: int = 12,
     config: InversionConfig | None = None,
@@ -58,7 +56,7 @@ def predict_avoids(
     2. Red flag score: rule-based danger signals (when available)
 
     Args:
-        conn: DuckDB connection.
+        conn: Database connection.
         model_path: Path to serialized inversion model. If None, uses ML only.
         horizon_months: Prediction horizon.
         config: Inversion thresholds.
@@ -182,7 +180,7 @@ def _get_ml_probabilities(
 
 
 def _load_metadata(
-    conn: "DuckDBPyConnection",
+    conn: Any,
     set_numbers: list[str],
 ) -> dict[str, dict]:
     """Load title and theme for a list of sets."""

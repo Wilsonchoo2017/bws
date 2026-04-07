@@ -1,8 +1,8 @@
 """GWT tests for delete_item -- cascading deletion across all tables."""
 
-import duckdb
 import pytest
 
+from db.connection import get_connection
 from db.schema import init_schema
 from services.items.repository import (
     delete_item,
@@ -15,11 +15,10 @@ from services.items.repository import (
 
 @pytest.fixture
 def conn():
-    """In-memory DuckDB connection with schema initialized."""
-    connection = duckdb.connect(":memory:")
+    """Connection with schema initialized."""
+    connection = get_connection()
     init_schema(connection)
     yield connection
-    connection.close()
 
 
 def _insert_brickeconomy_snapshot(conn, set_number: str) -> None:

@@ -1,55 +1,51 @@
-"""Growth model prediction.
+"""Growth model prediction using hurdle model.
 
-Generates growth predictions using trained Tier 1/2 models.
+Combines classifier P(avoid) with regressor E[growth | non-loser]
+to produce risk-adjusted predictions per set.
 """
 
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING
 
 import numpy as np
 import pandas as pd
 
-from config.ml import FEATURE_CUTOFF_MONTHS_BEFORE_RETIREMENT, MLPipelineConfig
-from services.ml.extractors import extract_all as _extract_all_plugin
+from config.ml import MLPipelineConfig
+from services.ml.growth.classifier import (
+    TrainedClassifier,
+    hurdle_combine,
+    predict_avoid_proba,
+)
 from services.ml.growth.features import engineer_intrinsic_features, engineer_keepa_features
-from services.ml.growth.training import train_growth_models
 from services.ml.growth.types import GrowthPrediction, TrainedEnsemble, TrainedGrowthModel
-from services.ml.helpers import compute_cutoff_dates
-from services.ml.queries import load_base_metadata, load_growth_candidate_sets, load_keepa_timelines
 
 _cfg = MLPipelineConfig()
-
-if TYPE_CHECKING:
-    from duckdb import DuckDBPyConnection
 
 logger = logging.getLogger(__name__)
 
 
 def predict_growth(
-    conn: DuckDBPyConnection,
+    candidates: pd.DataFrame,
+    keepa_df: pd.DataFrame,
     tier1: TrainedGrowthModel,
     tier2: TrainedGrowthModel | None,
     theme_stats: dict,
     subtheme_stats: dict,
     *,
-    only_retiring: bool = False,
-    tier3: TrainedGrowthModel | None = None,
+    classifier: TrainedClassifier | None = None,
     ensemble: TrainedEnsemble | None = None,
 ) -> list[GrowthPrediction]:
-    """Generate growth predictions for candidate sets.
+    """Generate hurdle-model growth predictions for candidate sets.
 
-    Uses Tier 2 (with Keepa features) when available, falls back to Tier 1.
+    Steps:
+    1. Engineer features
+    2. Get P(avoid) from classifier (if available)
+    3. Get raw growth from regressor (Tier 2 if Keepa, else Tier 1)
+    4. Combine via hurdle: P(good) * regressor + P(bad) * median_loser
     """
-    candidates = load_growth_candidate_sets(conn)
-    if only_retiring:
-        candidates = candidates[candidates["retiring_soon"] == True]  # noqa: E712
-
     if candidates.empty:
         return []
-
-    keepa_df = load_keepa_timelines(conn)
 
     # Engineer features using pre-computed stats (no LOO leakage)
     df_feat, _, _ = engineer_intrinsic_features(
@@ -59,30 +55,21 @@ def predict_growth(
     )
     df_feat = engineer_keepa_features(df_feat, keepa_df)
 
-    # Split into tier 2 (has Keepa) and tier 1 (rest)
     has_kp = df_feat["kp_bb_premium"].notna() | df_feat["kp_below_rrp_pct"].notna()
     use_tier2 = tier2 is not None and has_kp.any()
 
-    # Generate predictions from ALL available tiers per set
-    all_tier_preds: list[GrowthPrediction] = []
+    # Tier 1: all sets
+    all_preds = _predict_batch(df_feat, tier1, classifier)
 
-    # Tier 1: predict ALL sets (always available)
-    all_tier_preds.extend(_predict_batch(df_feat, tier1))
-
-    # Tier 2: predict sets with Keepa data
+    # Tier 2: sets with Keepa
     if use_tier2 and tier2 is not None:
-        all_tier_preds.extend(_predict_batch(df_feat[has_kp], tier2))
+        all_preds.extend(_predict_batch(df_feat[has_kp], tier2, classifier))
 
-    # Tier 3: predict using all extractor features
-    if tier3 is not None:
-        all_tier_preds.extend(_predict_tier3(conn, candidates, tier3))
-
-    # Ensemble: blend individual tier predictions via meta-model
+    # Ensemble or best-tier selection
     if ensemble is not None:
-        predictions = _apply_ensemble(all_tier_preds, ensemble)
+        predictions = _apply_ensemble(all_preds, ensemble)
     else:
-        # Fall back to best-tier-wins logic
-        predictions = _select_best_tier(all_tier_preds)
+        predictions = _select_best_tier(all_preds)
 
     return sorted(predictions, key=lambda p: p.predicted_growth_pct, reverse=True)
 
@@ -90,8 +77,9 @@ def predict_growth(
 def _predict_batch(
     df_feat: pd.DataFrame,
     model_obj: TrainedGrowthModel,
+    classifier: TrainedClassifier | None,
 ) -> list[GrowthPrediction]:
-    """Generate predictions for a batch of sets using a single-tier model."""
+    """Predictions for a batch using one tier, with hurdle adjustment."""
     fill_map = dict(model_obj.fill_values)
     feat_names = [f for f in model_obj.feature_names if f in df_feat.columns]
     if len(feat_names) < len(model_obj.feature_names) * 0.5:
@@ -106,35 +94,67 @@ def _predict_batch(
     for f in feat_names:
         X_batch[f] = X_batch[f].fillna(fill_map.get(f, 0))
 
-    # Pad missing features
     for f in model_obj.feature_names:
         if f not in X_batch.columns:
             X_batch[f] = fill_map.get(f, 0)
 
     X_batch = X_batch[list(model_obj.feature_names)]
-    X_scaled = model_obj.scaler.transform(X_batch)
+    X_scaled = model_obj.scaler.transform(X_batch) if model_obj.scaler else X_batch.values
     preds = model_obj.model.predict(X_scaled)
 
-    # Inverse target transform if model was trained on transformed target
     if model_obj.target_transformer is not None:
         preds = model_obj.target_transformer.inverse_transform(
-            preds.reshape(-1, 1)
+            preds.reshape(-1, 1),
         ).ravel()
 
-    # Compute conformal intervals if calibration available
+    preds = np.clip(preds, 0.0, 50.0)
+
+    # Isotonic calibration
+    if model_obj.isotonic_calibrator is not None:
+        from services.ml.growth.calibration import apply_calibration
+
+        preds = apply_calibration(preds, model_obj.isotonic_calibrator)
+
+    raw_growth = preds.copy()
+
+    # Hurdle model: combine with classifier P(avoid)
+    avoid_probs = None
+    if classifier is not None:
+        # Build classifier feature matrix (same features as tier 1)
+        clf_feats = [f for f in classifier.feature_names if f in df_feat.columns]
+        X_clf = df_feat.loc[X_batch.index, clf_feats].copy()
+        for c in X_clf.columns:
+            X_clf[c] = pd.to_numeric(X_clf[c], errors="coerce")
+        clf_fill = dict(classifier.fill_values)
+        for f in clf_feats:
+            X_clf[f] = X_clf[f].fillna(clf_fill.get(f, 0))
+        for f in classifier.feature_names:
+            if f not in X_clf.columns:
+                X_clf[f] = clf_fill.get(f, 0)
+        X_clf = X_clf[list(classifier.feature_names)]
+
+        avoid_probs = predict_avoid_proba(X_clf.values, classifier)
+        preds = hurdle_combine(preds, avoid_probs, classifier.median_loser_return)
+
+    # Conformal intervals
     intervals: list | None = None
     if model_obj.conformal_calibration is not None:
         from services.ml.growth.conformal import batch_predict_with_intervals
+
         intervals = batch_predict_with_intervals(preds, model_obj.conformal_calibration)
 
-    # SHAP per-prediction explanations (or fall back to global importances)
+    # SHAP explanations
     shap_explanations = None
     if _cfg.compute_shap:
-        from services.ml.growth.explainer import explain_predictions
-        shap_explanations = explain_predictions(
-            model_obj.model, X_scaled, model_obj.feature_names,
-            top_k=_cfg.shap_top_k,
-        )
+        try:
+            from services.ml.growth.explainer import explain_predictions
+
+            shap_explanations = explain_predictions(
+                model_obj.model, X_scaled, model_obj.feature_names,
+                top_k=_cfg.shap_top_k,
+            )
+        except Exception:
+            pass
 
     importances = model_obj.model.feature_importances_
     top_global = tuple(sorted(
@@ -156,7 +176,7 @@ def _predict_batch(
         else:
             confidence = "low"
 
-        # Use SHAP contributions if available, otherwise global importances
+        # SHAP or global importances
         if shap_explanations and i < len(shap_explanations):
             shap_ex = shap_explanations[i]
             contribs = shap_ex.top_positive + shap_ex.top_negative
@@ -164,6 +184,17 @@ def _predict_batch(
         else:
             contribs = top_global
             base_val = None
+
+        ap = float(avoid_probs[i]) if avoid_probs is not None else None
+
+        # Kelly position sizing
+        win_prob_i, kelly_frac_i = None, None
+        if model_obj.kelly_calibration is not None:
+            from services.ml.growth.training import kelly_for_prediction
+
+            win_prob_i, kelly_frac_i = kelly_for_prediction(
+                float(preds[i]), model_obj.kelly_calibration, ap,
+            )
 
         predictions.append(GrowthPrediction(
             set_number=row["set_number"],
@@ -175,6 +206,10 @@ def _predict_batch(
             feature_contributions=contribs,
             prediction_interval=intervals[i] if intervals else None,
             shap_base_value=base_val,
+            avoid_probability=ap,
+            raw_growth_pct=round(float(raw_growth[i]), 1),
+            kelly_fraction=kelly_frac_i,
+            win_probability=win_prob_i,
         ))
 
     return predictions
@@ -183,14 +218,13 @@ def _predict_batch(
 def _select_best_tier(
     all_preds: list[GrowthPrediction],
 ) -> list[GrowthPrediction]:
-    """Select the best tier prediction per set (highest tier with good confidence)."""
+    """Best tier per set (highest tier with good confidence)."""
     by_set: dict[str, list[GrowthPrediction]] = {}
     for p in all_preds:
         by_set.setdefault(p.set_number, []).append(p)
 
     result: list[GrowthPrediction] = []
-    for sn, preds in by_set.items():
-        # Prefer higher tiers with at least moderate confidence
+    for preds in by_set.values():
         good = [p for p in preds if p.confidence in ("high", "moderate")]
         if good:
             result.append(max(good, key=lambda p: p.tier))
@@ -200,116 +234,19 @@ def _select_best_tier(
     return result
 
 
-def _predict_tier3(
-    conn: "DuckDBPyConnection",
-    candidates: pd.DataFrame,
-    tier3: TrainedGrowthModel,
-) -> list[GrowthPrediction]:
-    """Generate Tier 3 predictions using extractor features."""
-    set_numbers = candidates["set_number"].tolist()
-    base = load_base_metadata(conn, set_numbers)
-    if base.empty:
-        return []
-
-    base = compute_cutoff_dates(base, FEATURE_CUTOFF_MONTHS_BEFORE_RETIREMENT)
-
-    extractor_features = _extract_all_plugin(conn, base)
-    if extractor_features.empty:
-        return []
-
-    merged = candidates[["set_number", "title", "theme"]].merge(
-        extractor_features, on="set_number", how="inner"
-    )
-
-    fill_map = dict(tier3.fill_values)
-    available_features = [f for f in tier3.feature_names if f in merged.columns]
-    if len(available_features) < len(tier3.feature_names) * 0.5:
-        return []
-
-    X = merged[available_features].copy()
-    for c in X.columns:
-        X[c] = pd.to_numeric(X[c], errors="coerce")
-
-    n_missing_per_row = X.isna().sum(axis=1)
-
-    for f in available_features:
-        X[f] = X[f].fillna(fill_map.get(f, 0))
-
-    # Pad missing features with fill values
-    for f in tier3.feature_names:
-        if f not in X.columns:
-            X[f] = fill_map.get(f, 0)
-
-    X = X[list(tier3.feature_names)]
-    X_scaled = tier3.scaler.transform(X)
-    preds = tier3.model.predict(X_scaled)
-
-    # Inverse target transform
-    if tier3.target_transformer is not None:
-        preds = tier3.target_transformer.inverse_transform(
-            preds.reshape(-1, 1)
-        ).ravel()
-
-    # Compute conformal intervals if calibration available
-    intervals: list | None = None
-    if tier3.conformal_calibration is not None:
-        from services.ml.growth.conformal import batch_predict_with_intervals
-        intervals = batch_predict_with_intervals(preds, tier3.conformal_calibration)
-
-    importances = tier3.model.feature_importances_
-    top_global = tuple(sorted(
-        zip(tier3.feature_names, importances),
-        key=lambda x: x[1],
-        reverse=True,
-    )[:5])
-
-    predictions: list[GrowthPrediction] = []
-    n_feat = len(tier3.feature_names)
-    for i, (_, row) in enumerate(merged.iterrows()):
-        coverage = 1 - (n_missing_per_row.iloc[i] / n_feat) if n_feat > 0 else 0
-
-        if coverage > 0.7:
-            confidence = "high"
-        elif coverage > 0.4:
-            confidence = "moderate"
-        else:
-            confidence = "low"
-
-        predictions.append(GrowthPrediction(
-            set_number=row["set_number"],
-            title=str(row.get("title", "")),
-            theme=str(row.get("theme", "")),
-            predicted_growth_pct=round(float(preds[i]), 1),
-            confidence=confidence,
-            tier=3,
-            feature_contributions=top_global,
-            prediction_interval=intervals[i] if intervals else None,
-        ))
-
-    return predictions
-
-
 def _apply_ensemble(
     predictions: list[GrowthPrediction],
     ensemble: TrainedEnsemble,
 ) -> list[GrowthPrediction]:
-    """Replace predictions with ensemble-blended values where possible.
-
-    For each set that has predictions from multiple tiers, combine them
-    via the meta-model. Sets with only one tier prediction keep their
-    original value.
-    """
-    # Group predictions by set_number
+    """Blend predictions via meta-model where all tiers available."""
     by_set: dict[str, dict[int, GrowthPrediction]] = {}
     for p in predictions:
         by_set.setdefault(p.set_number, {})[p.tier] = p
 
-    # Identify which tiers the ensemble expects
     tier_order = [int(name.replace("tier", "")) for name, _ in ensemble.weights]
 
     result: list[GrowthPrediction] = []
-    for sn, tier_preds in by_set.items():
-        # Build meta-feature vector from individual tier predictions
+    for tier_preds in by_set.values():
         meta_feats = []
         for t in tier_order:
             if t in tier_preds:
@@ -317,9 +254,7 @@ def _apply_ensemble(
             else:
                 meta_feats.append(np.nan)
 
-        # Only use ensemble if we have all tiers
         if any(np.isnan(f) for f in meta_feats):
-            # Fall back to best available tier
             best = max(tier_preds.values(), key=lambda p: p.tier)
             result.append(best)
             continue
@@ -328,7 +263,6 @@ def _apply_ensemble(
         meta_X_s = ensemble.meta_scaler.transform(meta_X)
         blended = float(ensemble.meta_model.predict(meta_X_s)[0])
 
-        # Use the highest-tier prediction as template
         best = max(tier_preds.values(), key=lambda p: p.tier)
         result.append(GrowthPrediction(
             set_number=best.set_number,
@@ -336,23 +270,10 @@ def _apply_ensemble(
             theme=best.theme,
             predicted_growth_pct=round(blended, 1),
             confidence="high" if best.confidence in ("high", "moderate") else "moderate",
-            tier=4,  # ensemble
+            tier=4,
             feature_contributions=best.feature_contributions,
+            avoid_probability=best.avoid_probability,
+            raw_growth_pct=best.raw_growth_pct,
         ))
 
     return result
-
-
-def run_pipeline(
-    conn: DuckDBPyConnection,
-    *,
-    only_retiring: bool = False,
-) -> list[GrowthPrediction]:
-    """Train models and generate predictions in one call."""
-    tier1, tier2, theme_stats, subtheme_stats, tier3, ensemble = train_growth_models(conn)
-    return predict_growth(
-        conn, tier1, tier2, theme_stats, subtheme_stats,
-        only_retiring=only_retiring,
-        tier3=tier3,
-        ensemble=ensemble,
-    )

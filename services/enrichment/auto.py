@@ -15,7 +15,7 @@ def queue_enrichment_if_needed(
 
     Returns True if tasks were created, False if skipped (already active).
     The ``manager`` parameter is kept for API compatibility but is no longer
-    used -- tasks go directly to the persistent DuckDB queue.
+    used -- tasks go directly to the persistent database queue.
     """
     from db.connection import get_connection
     from db.schema import init_schema

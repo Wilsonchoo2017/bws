@@ -1,4 +1,4 @@
-"""Tests for PgConnection SQL translation and DuckDB-compat API."""
+"""Tests for PgConnection SQL translation and compatibility API."""
 
 from unittest.mock import MagicMock, patch
 
@@ -13,7 +13,7 @@ from db.pg.pg_connection import PgConnection, PgCursorResult, _duck_to_pg_sql
 
 
 class TestDuckToPgSql:
-    """Given DuckDB-flavoured SQL, when translated, then Postgres-compatible."""
+    """Given legacy-flavoured SQL, when translated, then Postgres-compatible."""
 
     def test_no_placeholders_unchanged(self) -> None:
         sql = "SELECT * FROM lego_items WHERE set_number = '75192'"
@@ -63,7 +63,7 @@ class TestDuckToPgSql:
 
 
 class TestPgCursorResult:
-    """Given a wrapped psycopg2 cursor, when using DuckDB-style API, then correct results."""
+    """Given a wrapped psycopg2 cursor, when using compatibility API, then correct results."""
 
     def test_fetchone_delegates(self) -> None:
         cursor = MagicMock()

@@ -1,19 +1,17 @@
-"""DuckDB persistence for BrickEconomy snapshots."""
+"""Persistence for BrickEconomy snapshots."""
 
 import json
 import logging
-from typing import TYPE_CHECKING
 
 from db.pg.writes import _get_pg, pg_insert_be_snapshot
 from services.brickeconomy.parser import BrickeconomySnapshot
+from typing import Any
 
-if TYPE_CHECKING:
-    from duckdb import DuckDBPyConnection
 
 logger = logging.getLogger("bws.brickeconomy.repository")
 
 
-def save_snapshot(conn: "DuckDBPyConnection", snapshot: BrickeconomySnapshot) -> int:
+def save_snapshot(conn: Any, snapshot: BrickeconomySnapshot) -> int:
     """Insert a snapshot row and return the new row ID."""
     row_id = conn.execute(
         "SELECT nextval('brickeconomy_snapshots_id_seq')"
@@ -108,7 +106,7 @@ def save_snapshot(conn: "DuckDBPyConnection", snapshot: BrickeconomySnapshot) ->
         ],
     )
 
-    # Dual-write to Postgres
+    # Write to Postgres
     pg = _get_pg(conn)
     if pg is not None:
         pg_insert_be_snapshot(
@@ -166,7 +164,7 @@ def save_snapshot(conn: "DuckDBPyConnection", snapshot: BrickeconomySnapshot) ->
 
 
 def record_current_value(
-    conn: "DuckDBPyConnection", snapshot: BrickeconomySnapshot
+    conn: Any, snapshot: BrickeconomySnapshot
 ) -> None:
     """Write the current new/sealed value to the unified price_records table."""
     if snapshot.value_new_cents is None:
@@ -186,7 +184,7 @@ def record_current_value(
 
 
 def get_latest_snapshot(
-    conn: "DuckDBPyConnection", set_number: str
+    conn: Any, set_number: str
 ) -> dict | None:
     """Get the most recent snapshot for a set."""
     from db.queries import get_latest_row
@@ -195,7 +193,7 @@ def get_latest_snapshot(
 
 
 def get_snapshots(
-    conn: "DuckDBPyConnection", set_number: str, *, limit: int = 50
+    conn: Any, set_number: str, *, limit: int = 50
 ) -> list[dict]:
     """Get snapshot history for a set, newest first."""
     rows = conn.execute(

@@ -1,16 +1,13 @@
-"""DuckDB persistence for Shopee saturation snapshots."""
+"""Repository for Shopee saturation snapshots."""
 
-from typing import TYPE_CHECKING
 
 from db.pg.writes import _get_pg, pg_insert_saturation_snapshot
 from services.shopee.saturation_types import SaturationSnapshot
-
-if TYPE_CHECKING:
-    from duckdb import DuckDBPyConnection
+from typing import Any
 
 
 def save_saturation_snapshot(
-    conn: "DuckDBPyConnection",
+    conn: Any,
     snapshot: SaturationSnapshot,
 ) -> None:
     """Insert a saturation snapshot row (append-only for trend history)."""
@@ -42,7 +39,7 @@ def save_saturation_snapshot(
         ],
     )
 
-    # Dual-write to Postgres
+    # Write to Postgres
     pg = _get_pg(conn)
     if pg is not None:
         pg_insert_saturation_snapshot(
@@ -63,7 +60,7 @@ def save_saturation_snapshot(
 
 
 def get_latest_saturation(
-    conn: "DuckDBPyConnection",
+    conn: Any,
     set_number: str,
 ) -> dict | None:
     """Get the most recent saturation snapshot for a set."""
@@ -81,7 +78,7 @@ def get_latest_saturation(
 
 
 def get_all_latest_saturations(
-    conn: "DuckDBPyConnection",
+    conn: Any,
 ) -> list[dict]:
     """Get the latest saturation snapshot for every set."""
     result = conn.execute(
@@ -112,7 +109,7 @@ def get_all_latest_saturations(
 
 
 def get_items_needing_saturation_check(
-    conn: "DuckDBPyConnection",
+    conn: Any,
     stale_days: int = 7,
     limit: int = 50,
 ) -> list[dict]:

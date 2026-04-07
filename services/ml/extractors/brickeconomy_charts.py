@@ -9,16 +9,14 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import TYPE_CHECKING
 
 import numpy as np
 import pandas as pd
 
 from services.ml.helpers import safe_float
 from services.ml.types import FeatureMeta
+from typing import Any
 
-if TYPE_CHECKING:
-    from duckdb import DuckDBPyConnection
 
 logger = logging.getLogger(__name__)
 
@@ -57,7 +55,7 @@ class BrickEconomyChartsExtractor:
 
     def extract(
         self,
-        conn: DuckDBPyConnection,
+        conn: Any,
         base: pd.DataFrame,
     ) -> pd.DataFrame:
         """Load BE chart data and extract features."""
@@ -79,7 +77,7 @@ class BrickEconomyChartsExtractor:
         return _compute_chart_features(charts_df, cutoff_lookup)
 
 
-def _load_be_charts(conn: DuckDBPyConnection) -> pd.DataFrame:
+def _load_be_charts(conn: Any) -> pd.DataFrame:
     """Load BE chart JSON columns (latest snapshot per set)."""
     return conn.execute("""
         SELECT

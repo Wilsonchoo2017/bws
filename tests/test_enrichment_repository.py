@@ -1,8 +1,8 @@
-"""Integration tests for enrichment repository with in-memory DuckDB."""
+"""Integration tests for enrichment repository."""
 
 import pytest
 
-from db.connection import get_memory_connection
+from db.connection import get_connection
 from db.schema import init_schema
 from services.enrichment.repository import (
     get_items_needing_enrichment,
@@ -20,8 +20,8 @@ from services.items.repository import get_or_create_item, get_item_detail
 
 @pytest.fixture
 def conn():
-    """Create an in-memory DuckDB with schema initialized."""
-    c = get_memory_connection()
+    """Create a connection with schema initialized."""
+    c = get_connection()
     init_schema(c)
     return c
 

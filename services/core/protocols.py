@@ -1,8 +1,8 @@
 """Repository and service protocols for dependency inversion.
 
 These protocols define the contracts that business logic depends on,
-decoupling executors from concrete DuckDB implementations.  Tests can
-provide in-memory fakes; production code injects the DuckDB-backed
+decoupling executors from concrete database implementations.  Tests can
+provide in-memory fakes; production code injects the Postgres-backed
 implementations.
 
 The protocols are deliberately thin -- only the methods that executors

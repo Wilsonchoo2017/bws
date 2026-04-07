@@ -1,8 +1,8 @@
 """GWT tests for ToysRUs RRP pipeline — parser, repository, and list query."""
 
-import duckdb
 import pytest
 
+from db.connection import get_connection
 from db.schema import init_schema
 from services.items.repository import get_all_items, get_item_detail, get_or_create_item
 from services.toysrus.parser import ToysRUsProduct, parse_products
@@ -10,11 +10,10 @@ from services.toysrus.parser import ToysRUsProduct, parse_products
 
 @pytest.fixture
 def conn():
-    """In-memory DuckDB connection with schema initialized."""
-    connection = duckdb.connect(":memory:")
+    """Connection with schema initialized."""
+    connection = get_connection()
     init_schema(connection)
     yield connection
-    connection.close()
 
 
 # --- Sample HTML fragments for parser tests ---

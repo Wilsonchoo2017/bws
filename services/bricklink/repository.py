@@ -1,11 +1,10 @@
 """Bricklink repository functions for database operations.
 
-Pure functions for CRUD operations on Bricklink data in DuckDB.
+Pure functions for CRUD operations on Bricklink data in the database.
 """
 
 import json
 from datetime import UTC, datetime, timedelta
-from typing import TYPE_CHECKING
 
 from db.pg.writes import (
     _get_pg,
@@ -30,10 +29,9 @@ from bws_types.models import (
     WatchStatus,
 )
 from bws_types.price import Cents
+from typing import Any
 
 
-if TYPE_CHECKING:
-    from duckdb import DuckDBPyConnection
 
 # Ensure UTC is used
 _UTC = UTC
@@ -107,11 +105,11 @@ def _row_to_bricklink_item(row: tuple) -> BricklinkItem:
     )
 
 
-def get_item(conn: "DuckDBPyConnection", item_id: str) -> BricklinkItem | None:
+def get_item(conn: Any, item_id: str) -> BricklinkItem | None:
     """Get a Bricklink item by item_id.
 
     Args:
-        conn: DuckDB connection
+        conn: Database connection
         item_id: Bricklink item ID (e.g., "75192-1")
 
     Returns:
@@ -132,13 +130,13 @@ def get_item(conn: "DuckDBPyConnection", item_id: str) -> BricklinkItem | None:
 
 
 def get_items_for_scraping(
-    conn: "DuckDBPyConnection",
+    conn: Any,
     limit: int = 10,
 ) -> list[BricklinkItem]:
     """Get items that are due for scraping.
 
     Args:
-        conn: DuckDB connection
+        conn: Database connection
         limit: Maximum number of items to return
 
     Returns:
@@ -163,11 +161,11 @@ def get_items_for_scraping(
     return [_row_to_bricklink_item(row) for row in results]
 
 
-def upsert_item(conn: "DuckDBPyConnection", data: BricklinkData) -> int:
+def upsert_item(conn: Any, data: BricklinkData) -> int:
     """Insert or update a Bricklink item.
 
     Args:
-        conn: DuckDB connection
+        conn: Database connection
         data: BricklinkData from scraping
 
     Returns:
@@ -212,7 +210,7 @@ def upsert_item(conn: "DuckDBPyConnection", data: BricklinkData) -> int:
             ],
         )
 
-        # Dual-write to Postgres
+        # Write to Postgres
         pg = _get_pg(conn)
         if pg is not None:
             pg_upsert_bricklink_item(
@@ -269,7 +267,7 @@ def upsert_item(conn: "DuckDBPyConnection", data: BricklinkData) -> int:
         ],
     )
 
-    # Dual-write to Postgres
+    # Write to Postgres
     pg = _get_pg(conn)
     if pg is not None:
         pg_upsert_bricklink_item(
@@ -309,7 +307,7 @@ def upsert_item(conn: "DuckDBPyConnection", data: BricklinkData) -> int:
 
 
 def _has_recent_record(
-    conn: "DuckDBPyConnection",
+    conn: Any,
     table: str,
     key_column: str,
     key_value: str,
@@ -330,7 +328,7 @@ def _has_recent_record(
 
 
 def has_recent_pricing(
-    conn: "DuckDBPyConnection",
+    conn: Any,
     item_id: str,
     freshness: timedelta,
 ) -> bool:
@@ -339,7 +337,7 @@ def has_recent_pricing(
 
 
 def has_recent_minifig_pricing(
-    conn: "DuckDBPyConnection",
+    conn: Any,
     minifig_id: str,
     freshness: timedelta,
 ) -> bool:
@@ -348,14 +346,14 @@ def has_recent_minifig_pricing(
 
 
 def create_price_history(
-    conn: "DuckDBPyConnection",
+    conn: Any,
     item_id: str,
     data: BricklinkData,
 ) -> int:
     """Create a price history record.
 
     Args:
-        conn: DuckDB connection
+        conn: Database connection
         item_id: Bricklink item ID
         data: BricklinkData with pricing info
 
@@ -382,7 +380,7 @@ def create_price_history(
         ],
     )
 
-    # Dual-write to Postgres
+    # Write to Postgres
     pg = _get_pg(conn)
     if pg is not None:
         pg_insert_bricklink_price_history(
@@ -415,14 +413,14 @@ def create_price_history(
 
 
 def upsert_monthly_sales(
-    conn: "DuckDBPyConnection",
+    conn: Any,
     item_id: str,
     sales: list[MonthlySale],
 ) -> int:
     """Insert or update monthly sales records.
 
     Args:
-        conn: DuckDB connection
+        conn: Database connection
         item_id: Bricklink item ID
         sales: List of MonthlySale records
 
@@ -474,7 +472,7 @@ def upsert_monthly_sales(
                 [item_id, sale.year, sale.month, sale.condition.value, *params],
             )
 
-        # Dual-write to Postgres
+        # Write to Postgres
         pg = _get_pg(conn)
         if pg is not None:
             pg_upsert_bricklink_monthly_sales(
@@ -498,14 +496,14 @@ def upsert_monthly_sales(
 
 
 def get_price_history(
-    conn: "DuckDBPyConnection",
+    conn: Any,
     item_id: str,
     limit: int = 10,
 ) -> list[dict]:
     """Get price history for an item.
 
     Args:
-        conn: DuckDB connection
+        conn: Database connection
         item_id: Bricklink item ID
         limit: Maximum number of records to return
 
@@ -538,14 +536,14 @@ def get_price_history(
 
 
 def get_monthly_sales(
-    conn: "DuckDBPyConnection",
+    conn: Any,
     item_id: str,
     condition: Condition | None = None,
 ) -> list[MonthlySale]:
     """Get monthly sales for an item.
 
     Args:
-        conn: DuckDB connection
+        conn: Database connection
         item_id: Bricklink item ID
         condition: Filter by condition (optional)
 
@@ -586,14 +584,14 @@ def get_monthly_sales(
 
 
 def list_items(
-    conn: "DuckDBPyConnection",
+    conn: Any,
     watch_status: WatchStatus | None = None,
     limit: int = 100,
 ) -> list[BricklinkItem]:
     """List Bricklink items.
 
     Args:
-        conn: DuckDB connection
+        conn: Database connection
         watch_status: Filter by watch status (optional)
         limit: Maximum number of items to return
 
@@ -620,13 +618,13 @@ def list_items(
 
 
 def upsert_minifigure(
-    conn: "DuckDBPyConnection",
+    conn: Any,
     data: MinifigureData,
 ) -> int:
     """Insert or update a minifigure in the master catalog.
 
     Args:
-        conn: DuckDB connection
+        conn: Database connection
         data: MinifigureData with minifig info and prices
 
     Returns:
@@ -652,7 +650,7 @@ def upsert_minifigure(
             [data.name, data.image_url, data.year_released, now, now, data.minifig_id],
         )
 
-        # Dual-write to Postgres
+        # Write to Postgres
         pg = _get_pg(conn)
         if pg is not None:
             pg_upsert_minifigure(
@@ -678,7 +676,7 @@ def upsert_minifigure(
          data.year_released, now, now, now],
     )
 
-    # Dual-write to Postgres
+    # Write to Postgres
     pg = _get_pg(conn)
     if pg is not None:
         pg_upsert_minifigure(
@@ -696,14 +694,14 @@ def upsert_minifigure(
 
 
 def upsert_set_minifigures(
-    conn: "DuckDBPyConnection",
+    conn: Any,
     set_item_id: str,
     minifigs: list[MinifigureInfo],
 ) -> int:
     """Insert or update the minifigure inventory for a set.
 
     Args:
-        conn: DuckDB connection
+        conn: Database connection
         set_item_id: Set item ID (e.g., "77256-1")
         minifigs: List of MinifigureInfo
 
@@ -738,7 +736,7 @@ def upsert_set_minifigures(
                 [sm_id, set_item_id, mf.minifig_id, mf.quantity, now],
             )
 
-        # Dual-write to Postgres
+        # Write to Postgres
         pg = _get_pg(conn)
         if pg is not None:
             pg_upsert_set_minifigure(
@@ -754,14 +752,14 @@ def upsert_set_minifigures(
 
 
 def create_minifig_price_history(
-    conn: "DuckDBPyConnection",
+    conn: Any,
     minifig_id: str,
     data: MinifigureData,
 ) -> int:
     """Create a price history record for a minifigure.
 
     Args:
-        conn: DuckDB connection
+        conn: Database connection
         minifig_id: Minifigure ID
         data: MinifigureData with pricing info
 
@@ -789,7 +787,7 @@ def create_minifig_price_history(
         ],
     )
 
-    # Dual-write to Postgres
+    # Write to Postgres
     pg = _get_pg(conn)
     if pg is not None:
         pg_insert_minifig_price_history(
@@ -806,13 +804,13 @@ def create_minifig_price_history(
 
 
 def get_set_minifigures(
-    conn: "DuckDBPyConnection",
+    conn: Any,
     set_item_id: str,
 ) -> list[dict]:
     """Get minifigures for a set with their latest prices.
 
     Args:
-        conn: DuckDB connection
+        conn: Database connection
         set_item_id: Set item ID (e.g., "77256-1")
 
     Returns:
@@ -876,14 +874,14 @@ def get_set_minifigures(
 
 
 def get_minifig_price_history(
-    conn: "DuckDBPyConnection",
+    conn: Any,
     minifig_id: str,
     limit: int = 10,
 ) -> list[dict]:
     """Get price history for a minifigure.
 
     Args:
-        conn: DuckDB connection
+        conn: Database connection
         minifig_id: Minifigure ID
         limit: Maximum number of records
 
@@ -917,7 +915,7 @@ def get_minifig_price_history(
 
 
 def get_set_minifig_value_history(
-    conn: "DuckDBPyConnection",
+    conn: Any,
     set_item_id: str,
 ) -> list[dict]:
     """Get aggregated minifigure value history for a set.
@@ -926,7 +924,7 @@ def get_set_minifig_value_history(
     in the set, grouped by scrape timestamp (rounded to hour).
 
     Args:
-        conn: DuckDB connection
+        conn: Database connection
         set_item_id: Set item ID (e.g., "75192-1")
 
     Returns:
@@ -938,14 +936,14 @@ def get_set_minifig_value_history(
             date_trunc('hour', mph.scraped_at) AS snapshot_hour,
             SUM(
                 COALESCE(
-                    CAST(json_extract(mph.current_new, '$.avg_price.amount') AS INTEGER)
+                    CAST(mph.current_new::jsonb -> 'avg_price' ->> 'amount' AS INTEGER)
                     * sm.quantity,
                     0
                 )
             ) AS total_new_cents,
             SUM(
                 COALESCE(
-                    CAST(json_extract(mph.current_used, '$.avg_price.amount') AS INTEGER)
+                    CAST(mph.current_used::jsonb -> 'avg_price' ->> 'amount' AS INTEGER)
                     * sm.quantity,
                     0
                 )
@@ -970,14 +968,14 @@ def get_set_minifig_value_history(
 
 
 def update_watch_status(
-    conn: "DuckDBPyConnection",
+    conn: Any,
     item_id: str,
     status: WatchStatus,
 ) -> bool:
     """Update the watch status of an item.
 
     Args:
-        conn: DuckDB connection
+        conn: Database connection
         item_id: Bricklink item ID
         status: New watch status
 
@@ -994,7 +992,7 @@ def update_watch_status(
         [status.value, now, item_id],
     )
 
-    # Dual-write to Postgres
+    # Write to Postgres
     pg = _get_pg(conn)
     if pg is not None:
         pg_upsert_bricklink_item(

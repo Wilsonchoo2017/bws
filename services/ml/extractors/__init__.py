@@ -8,7 +8,6 @@ adding its extractor to _ALL_EXTRACTORS.
 from __future__ import annotations
 
 from functools import reduce
-from typing import TYPE_CHECKING
 
 import pandas as pd
 
@@ -22,9 +21,8 @@ from services.ml.extractors.keepa import KeepaExtractor
 from services.ml.extractors.keepa_timeline import KeepaTimelineExtractor
 from services.ml.extractors.minifigs import MinifigExtractor
 from services.ml.extractors.shopee import ShopeeExtractor
+from typing import Any
 
-if TYPE_CHECKING:
-    from duckdb import DuckDBPyConnection
 
     from services.ml.protocols import FeatureExtractor
     from services.ml.types import FeatureMeta
@@ -57,7 +55,7 @@ def get_all_feature_metadata() -> list[FeatureMeta]:
 
 
 def extract_all(
-    conn: DuckDBPyConnection,
+    conn: Any,
     base: pd.DataFrame,
 ) -> pd.DataFrame:
     """Run all extractors and merge results.

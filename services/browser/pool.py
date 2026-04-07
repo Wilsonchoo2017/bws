@@ -37,7 +37,7 @@ class PersistentBrowser:
         self,
         coro_fn: Callable[..., Awaitable[Any]],
         *args: Any,
-        timeout: float = 280,
+        timeout: float = 90,
     ) -> Any:
         """Run an async function with the persistent page."""
         if self._closed:

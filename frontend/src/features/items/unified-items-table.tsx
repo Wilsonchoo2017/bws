@@ -127,14 +127,22 @@ const columns: ColumnDef<UnifiedItem>[] = [
     cell: ({ row }) => {
       const yr = row.original.year_retired;
       const soon = row.original.retiring_soon;
+      const retiredDate = row.original.retired_date;
+      const availability = row.original.availability;
       if (yr) {
+        const label = retiredDate ?? String(yr);
         return (
-          <span className='text-orange-600 dark:text-orange-400'>{yr}</span>
+          <span className='text-orange-600 dark:text-orange-400' title={availability ?? 'Retired'}>{label}</span>
         );
       }
       if (soon) {
         return (
           <span className='rounded bg-red-100 px-1.5 py-0.5 text-xs font-semibold text-red-700 dark:bg-red-900/30 dark:text-red-400'>SOON</span>
+        );
+      }
+      if (availability && availability.toLowerCase() === 'retired') {
+        return (
+          <span className='text-orange-600 dark:text-orange-400' title='Retired (no date)'>Retired</span>
         );
       }
       return <span className='text-muted-foreground'>-</span>;
@@ -157,11 +165,26 @@ const columns: ColumnDef<UnifiedItem>[] = [
         'text-red-500';
       const tier = row.original.ml_tier;
       const conf = row.original.ml_confidence;
+      const avoid = row.original.ml_avoid_probability;
+      const riskLabel = avoid != null
+        ? avoid >= 0.8 ? 'RISK' : avoid >= 0.5 ? 'WARN' : null
+        : null;
       return (
         <div className='flex flex-col gap-0.5'>
-          <span className={`font-mono text-sm font-semibold ${color}`}>
-            +{growth.toFixed(1)}%
-          </span>
+          <div className='flex items-center gap-1'>
+            <span className={`font-mono text-sm font-semibold ${color}`}>
+              +{growth.toFixed(1)}%
+            </span>
+            {riskLabel && (
+              <span className={`rounded px-1 text-[9px] font-bold ${
+                riskLabel === 'RISK'
+                  ? 'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300'
+                  : 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/40 dark:text-yellow-300'
+              }`}>
+                {riskLabel}
+              </span>
+            )}
+          </div>
           {tier != null && (
             <span className='text-muted-foreground text-[10px] leading-tight'>
               T{tier}{conf === 'high' ? ' H' : conf === 'moderate' ? ' M' : conf === 'low' ? ' L' : ''}
@@ -170,7 +193,7 @@ const columns: ColumnDef<UnifiedItem>[] = [
         </div>
       );
     },
-    size: 85
+    size: 95
   },
   {
     accessorKey: 'rrp_cents',
@@ -372,9 +395,9 @@ export function UnifiedItemsTable() {
       );
     }
     if (retirementFilter === 'retired') {
-      result = result.filter((item) => item.year_retired !== null);
+      result = result.filter((item) => item.year_retired !== null || item.availability?.toLowerCase() === 'retired');
     } else if (retirementFilter === 'active') {
-      result = result.filter((item) => item.year_retired === null);
+      result = result.filter((item) => item.year_retired === null && item.availability?.toLowerCase() !== 'retired');
     } else if (retirementFilter === 'retiring_soon') {
       result = result.filter((item) => item.retiring_soon === true && item.year_retired === null);
     }
@@ -450,7 +473,15 @@ export function UnifiedItemsTable() {
 
       if (!itemsRes.success) return;
 
-      const mlMap = new Map<string, { growth: number; confidence: string | null; tier: number | null }>();
+      const mlMap = new Map<string, {
+        growth: number;
+        confidence: string | null;
+        tier: number | null;
+        avoid_probability: number | null;
+        raw_growth_pct: number | null;
+        kelly_fraction: number | null;
+        win_probability: number | null;
+      }>();
       if (signalsRes?.success && Array.isArray(signalsRes.data)) {
         for (const sig of signalsRes.data) {
           const setNum = (sig.set_number ?? sig.item_id?.replace(/-\d+$/, '')) as string | undefined;
@@ -459,6 +490,10 @@ export function UnifiedItemsTable() {
               growth: sig.ml_growth_pct,
               confidence: sig.ml_confidence ?? null,
               tier: sig.ml_tier ?? null,
+              avoid_probability: sig.ml_avoid_probability ?? null,
+              raw_growth_pct: sig.ml_raw_growth_pct ?? null,
+              kelly_fraction: sig.ml_kelly_fraction ?? null,
+              win_probability: sig.ml_win_probability ?? null,
             });
           }
         }
@@ -471,6 +506,10 @@ export function UnifiedItemsTable() {
           ml_growth_pct: ml?.growth ?? null,
           ml_confidence: ml?.confidence ?? null,
           ml_tier: ml?.tier ?? null,
+          ml_avoid_probability: ml?.avoid_probability ?? null,
+          ml_raw_growth_pct: ml?.raw_growth_pct ?? null,
+          ml_kelly_fraction: ml?.kelly_fraction ?? null,
+          ml_win_probability: ml?.win_probability ?? null,
         };
       });
 
@@ -517,6 +556,10 @@ export function UnifiedItemsTable() {
         ml_growth_pct: null,
         ml_confidence: null,
         ml_tier: null,
+        ml_avoid_probability: null,
+        ml_raw_growth_pct: null,
+        ml_kelly_fraction: null,
+        ml_win_probability: null,
       } as UnifiedItem));
 
       setData(liteItems);

@@ -1,8 +1,8 @@
 """GWT tests for items repository — ensures all price sources appear in list query."""
 
-import duckdb
 import pytest
 
+from db.connection import get_connection
 from db.schema import init_schema
 from services.items.repository import (
     get_all_items,
@@ -14,11 +14,10 @@ from services.items.repository import (
 
 @pytest.fixture
 def conn():
-    """In-memory DuckDB connection with schema initialized."""
-    connection = duckdb.connect(":memory:")
+    """Connection with schema initialized."""
+    connection = get_connection()
     init_schema(connection)
     yield connection
-    connection.close()
 
 
 @pytest.fixture

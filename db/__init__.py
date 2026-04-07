@@ -1,1 +1,1 @@
-"""BWS database operations (DuckDB)."""
+"""BWS database operations (PostgreSQL)."""

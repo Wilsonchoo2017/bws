@@ -17,16 +17,11 @@ from dotenv import load_dotenv
 load_dotenv()
 
 
-# Database path (isolated from MoonBridge)
-BWS_DB_PATH = Path.home() / ".bws" / "bws.duckdb"
-
 # PostgreSQL configuration
 POSTGRES_URL = os.environ.get(
     "BWS_POSTGRES_URL",
     "postgresql+psycopg2://bws:bws@localhost:5432/bws",
 )
-PG_ENABLED = os.environ.get("BWS_PG_ENABLED", "false").lower() == "true"
-DUCK_ENABLED = os.environ.get("BWS_DUCK_ENABLED", "true").lower() == "true"
 
 # Local image storage
 BWS_IMAGES_PATH = Path.home() / ".bws" / "images"
@@ -206,7 +201,7 @@ class KeepaSettings:
     captcha_timeout_s: int = 120
     min_delay_ms: int = 5_000
     max_delay_ms: int = 15_000
-    max_requests_per_hour: int = 30  # conservative
+    max_requests_per_hour: int = 200
 
 
 KEEPA_CONFIG = KeepaSettings()
@@ -495,7 +490,7 @@ class BrickeconomySettings:
     captcha_timeout_s: int = 120
     min_delay_ms: int = 8_000
     max_delay_ms: int = 20_000
-    max_requests_per_hour: int = 60
+    max_requests_per_hour: int = 120
 
 
 BRICKECONOMY_CONFIG = BrickeconomySettings()

@@ -1,16 +1,13 @@
-"""DuckDB persistence for Shopee scraped products."""
+"""Repository for Shopee scraped products."""
 
 
 import re
-from typing import TYPE_CHECKING
 
 from db.pg.writes import _get_pg, pg_insert_scrape_history, pg_upsert_shopee_product
 from services.items.repository import get_or_create_item, record_price
 from services.items.set_number import extract_set_number
 from services.shopee.parser import ShopeeProduct
-
-if TYPE_CHECKING:
-    from duckdb import DuckDBPyConnection
+from typing import Any
 
 
 def _parse_price_cents(price_display: str) -> int | None:
@@ -26,7 +23,7 @@ def _parse_price_cents(price_display: str) -> int | None:
 
 
 def upsert_products(
-    conn: "DuckDBPyConnection",
+    conn: Any,
     products: tuple[ShopeeProduct, ...],
     source_url: str,
 ) -> int:
@@ -35,7 +32,7 @@ def upsert_products(
     Uses product_url as the unique key for upserts.
 
     Args:
-        conn: DuckDB connection
+        conn: Database connection
         products: Tuple of ShopeeProduct to save
         source_url: The URL that was scraped (shop/collection page)
 
@@ -85,7 +82,7 @@ def upsert_products(
                 product.is_sold_out,
             ],
         )
-        # Dual-write to Postgres
+        # Write to Postgres
         pg = _get_pg(conn)
         if pg is not None:
             pg_upsert_shopee_product(
@@ -128,7 +125,7 @@ def upsert_products(
 
 
 def record_scrape(
-    conn: "DuckDBPyConnection",
+    conn: Any,
     source_url: str,
     items_found: int,
     success: bool,
@@ -147,7 +144,7 @@ def record_scrape(
         [source_url, items_found, success, error],
     )
 
-    # Dual-write to Postgres
+    # Write to Postgres
     pg = _get_pg(conn)
     if pg is not None:
         pg_insert_scrape_history(
@@ -159,7 +156,7 @@ def record_scrape(
         )
 
 
-def get_all_products(conn: "DuckDBPyConnection") -> list[dict]:
+def get_all_products(conn: Any) -> list[dict]:
     """Get all Shopee products ordered by most recent scrape."""
     result = conn.execute(
         """

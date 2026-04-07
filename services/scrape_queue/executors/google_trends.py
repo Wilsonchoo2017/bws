@@ -8,14 +8,12 @@ from __future__ import annotations
 import logging
 import threading
 import time
-from typing import TYPE_CHECKING
 
 from services.core.result import Err, Ok, Result
 from services.scrape_queue.models import ErrorCategory, ExecutorResult, TaskType
 from services.scrape_queue.registry import executor
+from typing import Any
 
-if TYPE_CHECKING:
-    from duckdb import DuckDBPyConnection
 
 logger = logging.getLogger("bws.scrape_queue.executor.google_trends")
 
@@ -88,7 +86,7 @@ def restore_trends_cooldown_snapshot(snap: dict) -> None:
 
 
 def _check_prerequisites(
-    conn: DuckDBPyConnection, set_number: str,
+    conn: Any, set_number: str,
 ) -> Result[tuple[str, int], ExecutorResult]:
     """Pure: validate that title and year_released exist."""
     from services.enrichment.config import is_placeholder_title
@@ -114,7 +112,7 @@ def _check_prerequisites(
     return Ok((title, year_released))
 
 
-def _check_freshness(conn: DuckDBPyConnection, set_number: str) -> Result[bool, ExecutorResult]:
+def _check_freshness(conn: Any, set_number: str) -> Result[bool, ExecutorResult]:
     """IO: check if we already have fresh data. Returns Ok(True) if stale/missing."""
     from datetime import timedelta
 
@@ -148,7 +146,7 @@ def _fetch(set_number: str, year_released: int) -> Result[object, ExecutorResult
     return Ok(trends_result.data)
 
 
-def _persist(conn: DuckDBPyConnection, data: object) -> None:
+def _persist(conn: Any, data: object) -> None:
     """IO: save the trends snapshot."""
     from services.google_trends.repository import save_trends_snapshot
     save_trends_snapshot(conn, data)
@@ -161,7 +159,7 @@ def _persist(conn: DuckDBPyConnection, data: object) -> None:
 
 @executor(TaskType.GOOGLE_TRENDS, concurrency=1, timeout=180)
 def execute_google_trends(
-    conn: DuckDBPyConnection,
+    conn: Any,
     set_number: str,
     *,
     worker_index: int = 0,

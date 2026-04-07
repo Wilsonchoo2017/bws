@@ -1,9 +1,9 @@
 """GWT tests for signals score in items listing and filtering."""
 
-import duckdb
 import pandas as pd
 import pytest
 
+from db.connection import get_connection
 from db.schema import init_schema
 from services.items.repository import get_all_items, get_or_create_item
 from services.backtesting.screener import compute_all_signals
@@ -16,11 +16,10 @@ from services.backtesting.screener import compute_all_signals
 
 @pytest.fixture
 def conn():
-    """In-memory DuckDB connection with schema initialized."""
-    connection = duckdb.connect(":memory:")
+    """Connection with schema initialized."""
+    connection = get_connection()
     init_schema(connection)
     yield connection
-    connection.close()
 
 
 def _seed_item(conn, set_number: str, title: str = "Test Set", theme: str = "City") -> None:

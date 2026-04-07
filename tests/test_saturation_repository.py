@@ -6,9 +6,9 @@ and items needing saturation checks.
 
 from datetime import datetime, timezone
 
-import duckdb
 import pytest
 
+from db.connection import get_connection
 from db.schema import init_schema
 from services.shopee.saturation_repository import (
     get_all_latest_saturations,
@@ -21,11 +21,10 @@ from services.shopee.saturation_types import SaturationLevel, SaturationSnapshot
 
 @pytest.fixture
 def conn():
-    """In-memory DuckDB connection with schema initialized."""
-    c = duckdb.connect(":memory:")
+    """Connection with schema initialized."""
+    c = get_connection()
     init_schema(c)
     yield c
-    c.close()
 
 
 def _make_snapshot(

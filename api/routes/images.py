@@ -1,6 +1,6 @@
 """Image assets API routes -- serve local images, trigger downloads."""
 
-from typing import TYPE_CHECKING
+from typing import Any
 
 from fastapi import APIRouter, BackgroundTasks, Depends
 from fastapi.responses import FileResponse, RedirectResponse, JSONResponse
@@ -15,20 +15,18 @@ from services.images.repository import (
     register_existing_images,
 )
 
-if TYPE_CHECKING:
-    from duckdb import DuckDBPyConnection
 
 router = APIRouter(prefix="/images", tags=["images"])
 
 
 @router.get("/stats")
-async def image_stats(conn: "DuckDBPyConnection" = Depends(get_db)):
+async def image_stats(conn: Any = Depends(get_db)):
     """Get image download statistics."""
     return get_download_stats(conn)
 
 
 @router.get("/{asset_type}/{item_id}")
-async def serve_image(asset_type: str, item_id: str, conn: "DuckDBPyConnection" = Depends(get_db)):
+async def serve_image(asset_type: str, item_id: str, conn: Any = Depends(get_db)):
     """Serve a locally downloaded image, or redirect to CDN if not yet downloaded."""
     asset = get_asset(conn, asset_type, item_id)
 
@@ -85,7 +83,7 @@ async def serve_keepa_chart(set_number: str):
 async def trigger_download(
     background_tasks: BackgroundTasks,
     batch_size: int = 50,
-    conn: "DuckDBPyConnection" = Depends(get_db),
+    conn: Any = Depends(get_db),
 ):
     """Trigger a batch image download in the background."""
     # Register any unregistered existing items first

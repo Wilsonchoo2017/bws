@@ -4,8 +4,7 @@ const NAV_ITEMS = [
   { href: '/portfolio', label: 'Portfolio' },
   { href: '/items', label: 'Items' },
   { href: '/scrape', label: 'Scrape' },
-  { href: '/workers', label: 'Workers' },
-  { href: '/stats', label: 'Stats' },
+  { href: '/operations', label: 'Operations' },
 ];
 
 export function Nav() {

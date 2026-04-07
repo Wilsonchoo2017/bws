@@ -8,15 +8,13 @@ momentum -- signals that individual set-level trends miss.
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING
 
 import pandas as pd
 
 from services.ml.helpers import safe_float
 from services.ml.types import FeatureMeta
+from typing import Any
 
-if TYPE_CHECKING:
-    from duckdb import DuckDBPyConnection
 
 logger = logging.getLogger(__name__)
 
@@ -40,7 +38,7 @@ class GoogleTrendsThemeExtractor:
 
     def extract(
         self,
-        conn: DuckDBPyConnection,
+        conn: Any,
         base: pd.DataFrame,
     ) -> pd.DataFrame:
         """Load theme-level trends and join to sets via theme column."""
@@ -51,7 +49,7 @@ class GoogleTrendsThemeExtractor:
         return _compute_theme_features(theme_df, base)
 
 
-def _load_theme_trends(conn: DuckDBPyConnection) -> pd.DataFrame:
+def _load_theme_trends(conn: Any) -> pd.DataFrame:
     """Load latest Google Trends theme snapshot per theme."""
     return conn.execute("""
         SELECT

@@ -3,20 +3,18 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING
 
 from services.scrape_queue.models import ExecutorResult, TaskType
 from services.scrape_queue.registry import executor
+from typing import Any
 
-if TYPE_CHECKING:
-    from duckdb import DuckDBPyConnection
 
 logger = logging.getLogger("bws.scrape_queue.executor.minifigures")
 
 
 @executor(TaskType.MINIFIGURES, concurrency=1, timeout=600)
 def execute_minifigures(
-    conn: DuckDBPyConnection,
+    conn: Any,
     set_number: str,
     *,
     worker_index: int = 0,

@@ -3,21 +3,20 @@
 Covers insert, update, duplicate-key safety, and sequence resilience.
 """
 
-import duckdb
 import pytest
 
 from bws_types.models import Condition, MonthlySale, PriceData
+from db.connection import get_connection
 from db.schema import init_schema
 from services.bricklink.repository import upsert_monthly_sales
 
 
 @pytest.fixture
 def conn():
-    """In-memory DuckDB connection with schema initialized."""
-    connection = duckdb.connect(":memory:")
+    """Connection with schema initialized."""
+    connection = get_connection()
     init_schema(connection)
     yield connection
-    connection.close()
 
 
 def _make_sale(

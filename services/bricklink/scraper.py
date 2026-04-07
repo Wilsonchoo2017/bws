@@ -7,8 +7,8 @@ import asyncio
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import timedelta
-from typing import TYPE_CHECKING
+from datetime import datetime, timedelta
+from pathlib import Path
 
 import httpx
 
@@ -41,10 +41,8 @@ from services.bricklink.repository import (
     upsert_set_minifigures,
 )
 from bws_types.models import BricklinkData, BricklinkItem, CatalogListItem, MinifigureData, MonthlySale
+from typing import Any
 
-
-if TYPE_CHECKING:
-    from duckdb import DuckDBPyConnection
 
 
 @dataclass(frozen=True)
@@ -100,6 +98,76 @@ class BricklinkQuotaExceeded(Exception):
     """Raised when BrickLink returns a quota exceeded redirect."""
 
 
+class BricklinkSilentBan(Exception):
+    """Raised when BrickLink serves an empty/shell page (HTTP 200 but no data)."""
+
+
+# Minimum bytes for a real BrickLink page (catalog or price guide).
+# A real price guide page is typically 15-40KB; a shell/error page is <2KB.
+_MIN_PAGE_BYTES = 2000
+
+# Markers in the HTML that confirm BrickLink is NOT silently blocking us.
+# At least one must be present for the page to be considered genuine.
+_REAL_PAGE_MARKERS = (
+    'bgcolor="#C0C0C0"',       # price guide pricing table
+    "catalogitem.page",         # catalog page nav links
+    "catalogPG.asp",            # price guide link
+    "catalogList.asp",          # catalog list link
+    "priceguide",               # price guide section
+)
+
+# Markers that indicate an explicit block/challenge page.
+# Note: "challenge.js" from AWS WAF is always present and NOT a block signal.
+# Only match active challenge forms/interstitials, not passive JS loading.
+_BLOCK_MARKERS = (
+    "access denied",
+    "please try again later",
+    "captcha",
+    "challenge-platform",     # AWS WAF active interstitial
+    "awswaf-captcha",         # AWS WAF captcha challenge
+)
+
+_logger = logging.getLogger("bws.bricklink")
+
+_SNAPSHOT_DIR = Path("logs/bricklink_snapshots")
+_MAX_SNAPSHOTS = 50  # keep disk usage bounded
+
+
+def _save_snapshot(html: str, url: str, reason: str) -> Path | None:
+    """Save raw HTML to disk for post-mortem analysis.
+
+    Files are written to logs/bricklink_snapshots/ with a timestamp,
+    the item ID (extracted from the URL), and the failure reason.
+    Old snapshots beyond _MAX_SNAPSHOTS are pruned automatically.
+    """
+    try:
+        _SNAPSHOT_DIR.mkdir(parents=True, exist_ok=True)
+
+        # Extract item id from URL for the filename
+        item_part = "unknown"
+        for param in ("S=", "M=", "P=", "G="):
+            if param in url:
+                item_part = url.split(param)[-1].split("&")[0]
+                break
+
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        safe_reason = reason.replace(" ", "_")[:30]
+        filename = f"{ts}_{item_part}_{safe_reason}.html"
+        path = _SNAPSHOT_DIR / filename
+        path.write_text(html, encoding="utf-8")
+        _logger.info("Saved error snapshot: %s (%d bytes)", path, len(html))
+
+        # Prune old snapshots
+        snapshots = sorted(_SNAPSHOT_DIR.glob("*.html"))
+        for old in snapshots[:-_MAX_SNAPSHOTS]:
+            old.unlink(missing_ok=True)
+
+        return path
+    except OSError as e:
+        _logger.warning("Failed to save snapshot: %s", e)
+        return None
+
+
 def _is_rate_limited(response: httpx.Response) -> bool:
     """Check if BrickLink redirected to a rate-limit error page (429)."""
     return "error.page" in str(response.url) and "code=429" in str(response.url)
@@ -114,12 +182,68 @@ def _is_forbidden(response: httpx.Response) -> bool:
     return "error.page" in str(response.url) and "code=403" in str(response.url)
 
 
-async def _fetch_page(client: httpx.AsyncClient, url: str) -> str:
-    """Fetch a page with browser-like headers and exponential backoff.
+def _is_shell_page(html: str) -> bool:
+    """Detect if BrickLink returned an empty shell instead of real content.
 
-    Retries on HTTP 429/503 status codes and BrickLink's quota exceeded
-    redirect (302 -> error.page?code=429 returning 200).
-    Backoff starts at 30s and doubles each attempt.
+    Silent bans serve HTTP 200 with valid HTML structure but no actual
+    data -- no pricing tables, no catalog links. This catches that case.
+    """
+    if len(html.encode("utf-8")) < _MIN_PAGE_BYTES:
+        return True
+
+    html_lower = html.lower()
+
+    # Check for explicit block markers
+    for marker in _BLOCK_MARKERS:
+        if marker in html_lower:
+            return True
+
+    # Check that at least one real marker is present
+    for marker in _REAL_PAGE_MARKERS:
+        if marker in html:
+            return False
+
+    # No real markers found -- likely a shell
+    return True
+
+
+class _ScrapePathBanTracker:
+    """Track consecutive empty/shell responses on the direct scrape path.
+
+    Mirrors _BrickLinkBanTracker in the executor but for scrape_item() calls.
+    """
+
+    THRESHOLD = 3  # Lower threshold for direct path (each item = 2 fetches)
+
+    def __init__(self) -> None:
+        self._consecutive_shells = 0
+
+    def record_shell(self) -> bool:
+        """Record a shell/empty page. Returns True if threshold hit."""
+        self._consecutive_shells += 1
+        return self._consecutive_shells >= self.THRESHOLD
+
+    def record_parse_failure(self) -> bool:
+        """Record a parse failure (missing price table). Returns True if threshold hit."""
+        self._consecutive_shells += 1
+        return self._consecutive_shells >= self.THRESHOLD
+
+    def reset(self) -> None:
+        self._consecutive_shells = 0
+
+    @property
+    def count(self) -> int:
+        return self._consecutive_shells
+
+
+_scrape_ban_tracker = _ScrapePathBanTracker()
+
+
+async def _fetch_page(client: httpx.AsyncClient, url: str) -> str:
+    """Fetch a page with browser-like headers.
+
+    Detects explicit rate limits (429/403 redirects), silent bans
+    (shell pages with no data), and block pages (captcha/challenge).
 
     Args:
         client: HTTP client
@@ -130,7 +254,8 @@ async def _fetch_page(client: httpx.AsyncClient, url: str) -> str:
 
     Raises:
         httpx.HTTPStatusError: If request fails after retries
-        BricklinkQuotaExceeded: If quota exceeded after all retries
+        BricklinkQuotaExceeded: If quota exceeded
+        BricklinkSilentBan: If page is an empty shell (silent ban)
     """
     for attempt in range(1, RETRY_CONFIG.max_retries + 1):
         await BRICKLINK_RATE_LIMITER.acquire()
@@ -144,20 +269,43 @@ async def _fetch_page(client: httpx.AsyncClient, url: str) -> str:
         is_rate_limited = response.status_code in (429, 503) or _is_rate_limited(response)
 
         if is_rate_limited:
-            logging.getLogger("bws.bricklink").warning(
-                "Rate limited — activating 1h+ cooldown immediately: %s", url,
+            _logger.warning(
+                "Rate limited -- activating 1h+ cooldown immediately: %s", url,
             )
             BRICKLINK_RATE_LIMITER.trip_quota_exceeded()
             raise BricklinkQuotaExceeded(f"Quota exceeded (immediate cooldown): {url}")
 
         response.raise_for_status()
-        return response.text
+        html = response.text
+
+        # Detect silent ban: HTTP 200 but empty/shell page
+        if _is_shell_page(html):
+            content_len = len(html.encode("utf-8"))
+            _save_snapshot(html, url, "shell_page")
+            _logger.warning(
+                "Shell page detected (%d bytes, attempt %d): %s",
+                content_len, attempt, url,
+            )
+            if _scrape_ban_tracker.record_shell():
+                _logger.warning(
+                    "Silent ban: %d consecutive shell pages -- tripping circuit breaker",
+                    _scrape_ban_tracker.count,
+                )
+                BRICKLINK_RATE_LIMITER.trip_silent_ban()
+                _scrape_ban_tracker.reset()
+                raise BricklinkQuotaExceeded(
+                    f"Silent ban detected ({_scrape_ban_tracker.THRESHOLD} consecutive "
+                    f"shell pages): {url}"
+                )
+            raise BricklinkSilentBan(f"Shell page ({content_len} bytes): {url}")
+
+        return html
     # Unreachable, but satisfies type checker
     raise BricklinkQuotaExceeded(f"Quota exceeded: {url}")
 
 
 async def scrape_item(
-    conn: "DuckDBPyConnection",
+    conn: Any,
     url: str,
     *,
     save: bool = True,
@@ -167,7 +315,7 @@ async def scrape_item(
     """Scrape a single Bricklink item.
 
     Args:
-        conn: DuckDB connection
+        conn: Database connection
         url: Bricklink URL (price guide or catalog page)
         save: Whether to save results to database
         client: Optional HTTP client (creates one if not provided)
@@ -189,6 +337,9 @@ async def scrape_item(
         item_url = build_item_url(item_type, item_id)
         price_guide_url = build_price_guide_url(item_type, item_id)
 
+        # Track raw HTML for error snapshots
+        _last_price_html: str | None = None
+
         # Fetch item page
         item_html = await _fetch_page(client, item_url)
 
@@ -197,9 +348,39 @@ async def scrape_item(
 
         # Fetch price guide
         price_guide_html = await _fetch_page(client, price_guide_url)
+        _last_price_html = price_guide_html
 
         # Parse data
         data = parse_full_item(item_html, price_guide_html, item_type, item_id)
+
+        # Detect degraded data: parsed OK but all pricing is None
+        all_pricing_empty = (
+            data.six_month_new is None
+            and data.six_month_used is None
+            and data.current_new is None
+            and data.current_used is None
+        )
+        if all_pricing_empty:
+            _save_snapshot(price_guide_html, price_guide_url, "empty_pricing")
+            _logger.warning(
+                "Degraded data for %s: parsed OK but all pricing is None",
+                item_id,
+            )
+            if _scrape_ban_tracker.record_parse_failure():
+                _logger.warning(
+                    "Silent ban: %d consecutive empty parses -- tripping circuit breaker",
+                    _scrape_ban_tracker.count,
+                )
+                BRICKLINK_RATE_LIMITER.trip_silent_ban()
+                _scrape_ban_tracker.reset()
+                return ScrapeResult(
+                    success=False,
+                    item_id=item_id,
+                    error="Silent ban detected: consecutive items returned no pricing",
+                )
+
+        if not all_pricing_empty:
+            _scrape_ban_tracker.reset()
 
         # Parse monthly sales
         monthly_sales_list = parse_monthly_sales(price_guide_html)
@@ -237,12 +418,17 @@ async def scrape_item(
 
     except BricklinkQuotaExceeded as e:
         return ScrapeResult(success=False, item_id=item_id, error=str(e))
+    except BricklinkSilentBan as e:
+        return ScrapeResult(success=False, item_id=item_id, error=str(e))
     except httpx.HTTPStatusError as e:
         error_msg = f"HTTP {e.response.status_code}: {e.response.reason_phrase}"
         return ScrapeResult(success=False, item_id=item_id, error=error_msg)
     except httpx.RequestError as e:
         return ScrapeResult(success=False, item_id=item_id, error=f"Request error: {e}")
     except ValueError as e:
+        # Parser raised ValueError -- likely missing price table structure.
+        if _last_price_html is not None:
+            _save_snapshot(_last_price_html, price_guide_url, "parse_error")
         return ScrapeResult(success=False, item_id=item_id, error=str(e))
     except (TimeoutError, OSError) as e:
         return ScrapeResult(success=False, item_id=item_id, error=f"Network error: {e}")
@@ -252,7 +438,7 @@ async def scrape_item(
 
 
 async def scrape_item_by_id(
-    conn: "DuckDBPyConnection",
+    conn: Any,
     item_type: str,
     item_id: str,
     *,
@@ -263,7 +449,7 @@ async def scrape_item_by_id(
     """Scrape a Bricklink item by type and ID.
 
     Args:
-        conn: DuckDB connection
+        conn: Database connection
         item_type: Item type (P, S, M, etc.)
         item_id: Item ID
         save: Whether to save results to database
@@ -278,7 +464,7 @@ async def scrape_item_by_id(
 
 
 async def scrape_set_minifigures(
-    conn: "DuckDBPyConnection",
+    conn: Any,
     item_id: str,
     *,
     save: bool = True,
@@ -289,7 +475,7 @@ async def scrape_set_minifigures(
     """Scrape minifigure inventory and prices for a LEGO set.
 
     Args:
-        conn: DuckDB connection
+        conn: Database connection
         item_id: Set item ID (e.g., "77256-1")
         save: Whether to save results to database
         scrape_prices: Whether to fetch individual minifig prices
@@ -380,8 +566,8 @@ async def scrape_set_minifigures(
                     if not skip_mf_pricing:
                         create_minifig_price_history(conn, mf_info.minifig_id, mf_data)
 
-            except BricklinkQuotaExceeded:
-                raise  # Stop all scraping on quota exceeded
+            except (BricklinkQuotaExceeded, BricklinkSilentBan):
+                raise  # Stop all scraping on quota exceeded or silent ban
             except (httpx.HTTPStatusError, httpx.RequestError, ValueError, TimeoutError) as e:
                 # Log but continue with other minifigs
                 minifig_data_list.append(MinifigureData(
@@ -402,7 +588,7 @@ async def scrape_set_minifigures(
             total_value_cents=total_value_cents if has_value else None,
         )
 
-    except BricklinkQuotaExceeded as e:
+    except (BricklinkQuotaExceeded, BricklinkSilentBan) as e:
         return MinifigScrapeResult(success=False, set_item_id=item_id, error=str(e))
     except httpx.HTTPStatusError as e:
         error_msg = f"HTTP {e.response.status_code}: {e.response.reason_phrase}"
@@ -417,7 +603,7 @@ async def scrape_set_minifigures(
 
 
 async def scrape_catalog_list(
-    conn: "DuckDBPyConnection",
+    conn: Any,
     url: str,
     *,
     save: bool = True,
@@ -430,7 +616,7 @@ async def scrape_catalog_list(
     so the enrichment worker can populate metadata later.
 
     Args:
-        conn: DuckDB connection
+        conn: Database connection
         url: catalogList.asp URL (any page -- pagination is auto-detected)
         save: Whether to save discovered items to database
         client: Optional HTTP client
@@ -519,7 +705,7 @@ async def scrape_catalog_list(
 
 
 def scrape_set_minifigures_sync(
-    conn: "DuckDBPyConnection",
+    conn: Any,
     item_id: str,
     *,
     save: bool = True,
@@ -536,7 +722,7 @@ def scrape_set_minifigures_sync(
 
 
 async def scrape_batch(
-    conn: "DuckDBPyConnection",
+    conn: Any,
     items: list[BricklinkItem],
     *,
     progress_callback: Callable[[int, int, ScrapeResult], None] | None = None,
@@ -544,7 +730,7 @@ async def scrape_batch(
     """Scrape a batch of items with rate limiting.
 
     Args:
-        conn: DuckDB connection
+        conn: Database connection
         items: List of BricklinkItem to scrape
         progress_callback: Optional callback(current, total, result)
 
@@ -579,7 +765,7 @@ async def scrape_batch(
 
 
 def scrape_item_sync(
-    conn: "DuckDBPyConnection",
+    conn: Any,
     url: str,
     *,
     save: bool = True,
@@ -588,7 +774,7 @@ def scrape_item_sync(
     """Synchronous wrapper for scrape_item.
 
     Args:
-        conn: DuckDB connection
+        conn: Database connection
         url: Bricklink URL
         save: Whether to save results to database
         skip_pricing: Whether to skip writing pricing data
@@ -600,7 +786,7 @@ def scrape_item_sync(
 
 
 def scrape_batch_sync(
-    conn: "DuckDBPyConnection",
+    conn: Any,
     items: list[BricklinkItem],
     *,
     progress_callback: Callable[[int, int, ScrapeResult], None] | None = None,
@@ -608,7 +794,7 @@ def scrape_batch_sync(
     """Synchronous wrapper for scrape_batch.
 
     Args:
-        conn: DuckDB connection
+        conn: Database connection
         items: List of BricklinkItem to scrape
         progress_callback: Optional callback(current, total, result)
 

@@ -6,13 +6,10 @@ Usage:
 """
 
 import sys
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from duckdb import DuckDBPyConnection
+from typing import Any
 
 
-def check_coverage(conn: "DuckDBPyConnection") -> None:
+def check_coverage(conn: Any) -> None:
     """Print current data coverage for the backtest universe."""
     from config.backtest_universe import BACKTEST_SETS
 
@@ -86,7 +83,7 @@ def check_coverage(conn: "DuckDBPyConnection") -> None:
 
 
 def bootstrap_metadata(
-    conn: "DuckDBPyConnection",
+    conn: Any,
     *,
     headless: bool = True,
     limit: int | None = None,
@@ -162,7 +159,7 @@ def bootstrap_metadata(
 
 
 def _find_sets_needing_metadata(
-    conn: "DuckDBPyConnection",
+    conn: Any,
     all_sets: tuple[str, ...],
 ) -> list[str]:
     """Find sets missing year_retired or rrp_cents in lego_items."""

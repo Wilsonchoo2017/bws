@@ -1,4 +1,4 @@
-"""DuckDB-backed implementation of ScrapeTaskRepository.
+"""Database-backed implementation of ScrapeTaskRepository.
 
 Wraps the existing free functions in ``repository.py`` behind the
 :class:`~services.core.protocols.ScrapeTaskRepository` protocol so
@@ -8,21 +8,18 @@ of raw ``conn + free-function`` calls.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
 
 from services.scrape_queue import repository as repo
 from services.scrape_queue.models import ErrorCategory, ScrapeTask, TaskType
-
-if TYPE_CHECKING:
-    from duckdb import DuckDBPyConnection
+from typing import Any
 
 
-class DuckDBScrapeTaskRepo:
-    """Concrete :class:`ScrapeTaskRepository` backed by DuckDB."""
+class PgScrapeTaskRepo:
+    """Concrete :class:`ScrapeTaskRepository` backed by Postgres."""
 
     __slots__ = ("_conn",)
 
-    def __init__(self, conn: DuckDBPyConnection) -> None:
+    def __init__(self, conn: Any) -> None:
         self._conn = conn
 
     # -- Protocol methods ----------------------------------------------------

@@ -66,13 +66,11 @@ class TestFeatureExtractors:
 
     def test_extract_intrinsics_empty_db(self, tmp_path):
         """Should handle empty database gracefully."""
-        import duckdb
-
+        from db.connection import get_connection
         from db.schema import init_schema
         from services.ml.feature_extractors import extract_all_features
 
-        db_path = str(tmp_path / "test.duckdb")
-        conn = duckdb.connect(db_path)
+        conn = get_connection()
         init_schema(conn)
 
         result = extract_all_features(conn)
@@ -81,13 +79,11 @@ class TestFeatureExtractors:
 
     def test_extract_with_data(self, tmp_path):
         """Should extract features for a set with data."""
-        import duckdb
-
+        from db.connection import get_connection
         from db.schema import init_schema
         from services.ml.feature_extractors import extract_all_features
 
-        db_path = str(tmp_path / "test.duckdb")
-        conn = duckdb.connect(db_path)
+        conn = get_connection()
         init_schema(conn)
 
         # Insert a set

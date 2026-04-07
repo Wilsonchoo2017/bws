@@ -83,7 +83,9 @@ def run_evaluation():
 
     from services.ml.growth.training import train_growth_models
 
-    tier1, tier2, theme_stats, subtheme_stats, tier3, ensemble = train_growth_models(conn)
+    tier1, tier2, theme_stats, subtheme_stats, tier3, ensemble = train_growth_models(
+        df_raw=df_raw, keepa_df=keepa_df,
+    )
 
     print(f"\nTier 1: {tier1.n_train} sets, {len(tier1.feature_names)} features, "
           f"CV R2={tier1.cv_r2_mean:.3f} +/-{tier1.cv_r2_std:.3f}, "
@@ -168,11 +170,12 @@ def run_evaluation():
     section("5. PREDICTIONS (Retiring-Soon Sets)")
 
     from services.ml.growth.prediction import predict_growth
+    from services.ml.queries import load_growth_candidate_sets
 
+    candidates = load_growth_candidate_sets(conn)
     predictions = predict_growth(
-        conn, tier1, tier2, theme_stats, subtheme_stats,
-        only_retiring=True,
-        tier3=tier3,
+        candidates, keepa_df, tier1, tier2, theme_stats, subtheme_stats,
+        classifier=tier3,
         ensemble=ensemble,
     )
 
