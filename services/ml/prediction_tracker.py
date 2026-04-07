@@ -12,13 +12,15 @@ from __future__ import annotations
 
 import logging
 from datetime import date
+from typing import Any
 
 import pandas as pd
 
-from typing import Any
-
 
 logger = logging.getLogger(__name__)
+
+BUY_HURDLE_PCT = 8.0
+AVOID_GATE_THRESHOLD = 0.5
 
 
 def save_prediction_snapshot(conn: Any) -> int:
@@ -57,25 +59,124 @@ def save_prediction_snapshot(conn: Any) -> int:
 
     saved = 0
     for pred in predictions:
+        ap = pred.avoid_probability
+        is_avoid = ap is not None and ap >= AVOID_GATE_THRESHOLD
+        is_buy = (not is_avoid) and pred.predicted_growth_pct >= BUY_HURDLE_PCT
+        interval = pred.prediction_interval
+
         try:
             conn.execute(
                 """
                 INSERT INTO ml_prediction_snapshots
                     (snapshot_date, set_number, predicted_growth_pct,
-                     confidence, tier, model_version)
-                VALUES (?, ?, ?, ?, ?, ?)
-                ON CONFLICT (snapshot_date, set_number) DO NOTHING
+                     confidence, tier, model_version,
+                     avoid_probability, buy_signal, kelly_fraction,
+                     win_probability, interval_lower, interval_upper)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT (snapshot_date, set_number)
+                DO UPDATE SET
+                    predicted_growth_pct = EXCLUDED.predicted_growth_pct,
+                    confidence = EXCLUDED.confidence,
+                    tier = EXCLUDED.tier,
+                    model_version = EXCLUDED.model_version,
+                    avoid_probability = EXCLUDED.avoid_probability,
+                    buy_signal = EXCLUDED.buy_signal,
+                    kelly_fraction = EXCLUDED.kelly_fraction,
+                    win_probability = EXCLUDED.win_probability,
+                    interval_lower = EXCLUDED.interval_lower,
+                    interval_upper = EXCLUDED.interval_upper
                 """,
-                [today, pred.set_number, pred.predicted_growth_pct,
-                 pred.confidence, pred.tier, model_version],
+                [
+                    today, pred.set_number, pred.predicted_growth_pct,
+                    pred.confidence, pred.tier, model_version,
+                    ap, is_buy, pred.kelly_fraction,
+                    pred.win_probability,
+                    interval.lower if interval else None,
+                    interval.upper if interval else None,
+                ],
             )
-
             saved += 1
         except Exception:
-            logger.debug("Skipped %s (already exists or error)", pred.set_number)
+            logger.debug("Skipped %s (error)", pred.set_number)
 
     logger.info("Saved %d prediction snapshots for %s (model: %s)", saved, today, model_version)
     return saved
+
+
+def save_scored_snapshot(conn: Any, scored: dict[str, dict]) -> int:
+    """Save pre-scored predictions (from growth_provider.score_all) to tracking table.
+
+    This avoids retraining -- just persists whatever the cached predictions are.
+    Returns the number of new/updated predictions saved.
+    """
+    if not scored:
+        return 0
+
+    today = date.today().isoformat()
+    saved = 0
+
+    for set_number, entry in scored.items():
+        growth = entry.get("growth_pct")
+        if growth is None:
+            continue
+
+        try:
+            conn.execute(
+                """
+                INSERT INTO ml_prediction_snapshots
+                    (snapshot_date, set_number, predicted_growth_pct,
+                     confidence, tier, model_version,
+                     avoid_probability, buy_signal, kelly_fraction,
+                     win_probability, interval_lower, interval_upper)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT (snapshot_date, set_number) DO NOTHING
+                """,
+                [
+                    today, set_number, growth,
+                    entry.get("confidence"), entry.get("tier"),
+                    None,  # model_version not available from scored dict
+                    entry.get("avoid_probability"),
+                    entry.get("buy_signal"),
+                    entry.get("kelly_fraction"),
+                    entry.get("win_probability"),
+                    entry.get("interval_lower"),
+                    entry.get("interval_upper"),
+                ],
+            )
+            saved += 1
+        except Exception:
+            logger.debug("Skipped snapshot for %s", set_number)
+
+    if saved:
+        logger.info("Auto-saved %d prediction snapshots for %s", saved, today)
+    return saved
+
+
+def get_prediction_history(conn: Any, set_number: str) -> list[dict]:
+    """Get prediction history for a single set, ordered by date."""
+    rows = conn.execute(
+        """
+        SELECT snapshot_date, predicted_growth_pct, confidence, tier,
+               model_version, actual_growth_pct,
+               avoid_probability, buy_signal, kelly_fraction,
+               win_probability, interval_lower, interval_upper
+        FROM ml_prediction_snapshots
+        WHERE set_number = ?
+        ORDER BY snapshot_date
+        """,
+        [set_number],
+    ).fetchall()
+
+    columns = [
+        "date", "growth_pct", "confidence", "tier",
+        "model_version", "actual_growth_pct",
+        "avoid_probability", "buy_signal", "kelly_fraction",
+        "win_probability", "interval_lower", "interval_upper",
+    ]
+    return [
+        {col: (str(val) if col == "date" else val) for col, val in zip(columns, row)}
+        for row in rows
+    ]
 
 
 def backfill_actuals(conn: Any) -> int:
@@ -86,7 +187,7 @@ def backfill_actuals(conn: Any) -> int:
 
     Returns number of records updated.
     """
-    result = conn.execute("""
+    conn.execute("""
         UPDATE ml_prediction_snapshots ps
         SET actual_growth_pct = be.annual_growth_pct,
             actual_measured_at = CURRENT_DATE
@@ -95,9 +196,7 @@ def backfill_actuals(conn: Any) -> int:
           AND ps.actual_growth_pct IS NULL
           AND be.annual_growth_pct IS NOT NULL
     """)
-    updated = getattr(result, 'rowcount', 0) or 0
 
-    # database doesn't return update count easily, query instead
     n = conn.execute("""
         SELECT COUNT(*) FROM ml_prediction_snapshots
         WHERE actual_growth_pct IS NOT NULL
@@ -124,7 +223,6 @@ def get_tracking_report(conn: Any) -> dict:
     if snapshots.empty:
         return {"snapshots": [], "message": "No prediction snapshots yet. Run 'snapshot' first."}
 
-    # Overall stats
     all_with_actuals = conn.execute("""
         SELECT predicted_growth_pct, actual_growth_pct, confidence, tier,
                set_number, snapshot_date
@@ -132,7 +230,7 @@ def get_tracking_report(conn: Any) -> dict:
         WHERE actual_growth_pct IS NOT NULL
     """).fetchdf()
 
-    report = {
+    report: dict = {
         "snapshots": snapshots.to_dict(orient="records"),
         "total_predictions": int(conn.execute("SELECT COUNT(*) FROM ml_prediction_snapshots").fetchone()[0]),
         "total_with_actuals": len(all_with_actuals),
@@ -146,7 +244,6 @@ def get_tracking_report(conn: Any) -> dict:
         report["overall_correlation"] = round(float(np.corrcoef(pred, actual)[0, 1]), 3)
         report["overall_r2"] = round(float(1 - np.sum((actual - pred)**2) / np.sum((actual - actual.mean())**2)), 3)
 
-        # By confidence tier
         for conf in ["high", "moderate", "low"]:
             mask = all_with_actuals["confidence"] == conf
             if mask.sum() >= 5:

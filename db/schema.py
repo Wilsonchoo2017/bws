@@ -731,6 +731,30 @@ def _migrate_brickeconomy_snapshots(conn: Any) -> None:
             )
 
 
+def _migrate_ml_prediction_snapshots(conn: Any) -> None:
+    """Add richer prediction fields to ml_prediction_snapshots."""
+    existing = {
+        row[0]
+        for row in conn.execute(
+            "SELECT column_name FROM information_schema.columns "
+            "WHERE table_name = 'ml_prediction_snapshots'"
+        ).fetchall()
+    }
+    _new_columns: list[tuple[str, str]] = [
+        ("avoid_probability", "FLOAT"),
+        ("buy_signal", "BOOLEAN"),
+        ("kelly_fraction", "FLOAT"),
+        ("win_probability", "FLOAT"),
+        ("interval_lower", "FLOAT"),
+        ("interval_upper", "FLOAT"),
+    ]
+    for col_name, col_type in _new_columns:
+        if col_name not in existing:
+            conn.execute(
+                f"ALTER TABLE ml_prediction_snapshots ADD COLUMN {col_name} {col_type}"
+            )
+
+
 def _migrate_shopee_products(conn: Any) -> None:
     """Add is_sold_out column to shopee_products."""
     existing = {
@@ -809,6 +833,7 @@ def init_schema(conn: Any) -> None:
     _migrate_bricklink_items(conn)
     _migrate_lego_items(conn)
     _migrate_brickeconomy_snapshots(conn)
+    _migrate_ml_prediction_snapshots(conn)
     _migrate_shopee_products(conn)
     # Sequences are auto-synced by Postgres via nextval() in INSERT statements.
 

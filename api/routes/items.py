@@ -162,15 +162,27 @@ async def get_item_kelly(
 
 @router.get("/{set_number}/signals")
 async def get_item_signals(set_number: str, condition: str = "new", conn: Any = Depends(get_db)):
-    """Compute current trading signals for a single item with cohort context."""
-    all_signals = compute_all_signals_with_cohort(conn, condition=condition)
+    """Trading signals for a single item. Uses cached signals list, computes on first call."""
+    import time
+    from services.scoring.provider import enrich_signals
+
+    cache_key = condition
+    now = time.time()
+
+    if cache_key not in _signals_cache or _signals_cache[cache_key]["expires"] <= now:
+        signals = compute_all_signals_with_cohort(conn, condition=condition)
+        signals = enrich_signals(signals, conn)
+        result = sanitize_nan(signals)
+        _signals_cache[cache_key] = {"data": result, "expires": now + _SIGNALS_TTL}
+
+    cached = _signals_cache[cache_key]["data"]
     match = next(
-        (s for s in all_signals if s["set_number"] == set_number),
+        (s for s in cached if s.get("set_number") == set_number),
         None,
     )
     if not match:
         return {"success": True, "data": None}
-    return {"success": True, "data": sanitize_nan(match)}
+    return {"success": True, "data": match}
 
 
 @router.get("/{set_number}")

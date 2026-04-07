@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { PredictionHistoryChart } from './prediction-history-chart';
 
 interface Driver {
   feature: string;
@@ -70,27 +71,51 @@ function tierLabel(tier: number): string {
 }
 
 const FEATURE_LABELS: Record<string, string> = {
-  theme_bayes: 'Theme identity',
-  subtheme_loo: 'Subtheme (e.g. UCS, Modular)',
-  log_rrp: 'Retail price (RRP)',
+  // Theme & subtheme
+  theme_bayes: 'Theme track record',
+  theme_growth_std: 'Theme volatility',
+  theme_size: 'Theme popularity',
+  theme_x_price: 'Theme x price fit',
+  subtheme_loo: 'Subtheme track record',
+  sub_size: 'Subtheme size',
+  is_licensed: 'Licensed theme',
+  // Set characteristics
+  log_rrp: 'Retail price',
   log_parts: 'Piece count',
   price_per_part: 'Price per piece',
   mfigs: 'Minifigure count',
-  minifig_density: 'Minifigures per 100 pcs',
-  price_tier: 'Price tier bracket',
+  minifig_density: 'Minifig density',
+  mfig_value_to_rrp: 'Minifig value vs RRP',
+  price_tier: 'Price tier',
   rating_value: 'Collector rating',
-  review_count: 'Number of reviews',
-  theme_size: 'Theme popularity (# sets)',
-  is_licensed: 'Licensed theme (Star Wars, etc.)',
-  usd_gbp_ratio: 'Regional pricing ratio',
-  sub_size: 'Subtheme size',
-  kp_below_rrp_pct: 'Time below RRP on Amazon',
-  kp_avg_discount: 'Average Amazon discount',
-  kp_max_discount: 'Deepest Amazon discount',
-  kp_price_trend: 'Amazon price trend',
-  kp_price_cv: 'Amazon price volatility',
-  kp_months_stock: 'Months in stock on Amazon',
+  rating_x_price: 'Rating x price',
+  log_reviews: 'Review count',
+  has_designer: 'Designer credited',
+  retire_quarter: 'Retirement quarter',
+  retires_before_q4: 'Retires before Q4',
+  // Relative rankings
+  review_rank_in_year: 'Popularity in year',
+  review_rank_in_theme: 'Popularity in theme',
+  review_rank_in_retire_year: 'Popularity at retirement',
+  review_rank_in_pieces_tier: 'Popularity in size tier',
+  shelf_life_x_reviews: 'Shelf life x reviews',
+  // Pricing & regional
+  usd_gbp_ratio: 'Regional pricing gap',
+  usd_vs_mean: 'US price vs global avg',
+  currency_cv: 'Cross-currency variance',
+  dist_cv: 'Distribution variance',
+  // Amazon / Keepa
+  kp_below_rrp_pct: 'Time below RRP (Amazon)',
+  kp_avg_discount: 'Avg discount (Amazon)',
+  kp_max_discount: 'Max discount (Amazon)',
+  kp_price_trend: 'Price trend (Amazon)',
+  kp_price_cv: 'Price volatility (Amazon)',
+  kp_months_stock: 'Months in stock (Amazon)',
   kp_bb_premium: 'Buy box premium at OOS',
+  kp_fba_floor_vs_rrp: 'FBA floor vs RRP',
+  kp_fbm_mean_vs_rrp: 'FBM price vs RRP',
+  kp_fba_floor_above_rrp: 'FBA floor above RRP',
+  kp_fba_never_below_rrp: 'FBA never below RRP',
 };
 
 function featureLabel(feature: string): string {
@@ -212,59 +237,26 @@ export function MLPredictionPanel({ setNumber }: MLPredictionPanelProps) {
       {drivers && drivers.length > 0 && (
         <div className="mt-4">
           <h3 className="text-sm font-medium text-muted-foreground">
-            {hasShap ? 'Key Drivers (SHAP)' : 'Top Feature Importances'}
+            {hasShap ? 'Why this prediction' : 'Top factors'}
           </h3>
-          <div className="mt-2 space-y-1.5">
+          <div className="mt-2 flex flex-wrap gap-2">
             {drivers.map((d) => {
-              const maxImpact = Math.max(...drivers.map((x) => Math.abs(x.impact)));
-              const barWidth = maxImpact > 0 ? (Math.abs(d.impact) / maxImpact) * 100 : 0;
               const isPositive = d.impact >= 0;
               return (
-                <div key={d.feature} className="flex items-center gap-2 text-sm">
-                  <span className="w-44 shrink-0 truncate text-muted-foreground" title={d.feature}>
-                    {featureLabel(d.feature)}
-                  </span>
-                  <div className="flex h-4 flex-1 items-center">
-                    {hasShap ? (
-                      /* SHAP: directional bar from center */
-                      <div className="relative h-3 w-full">
-                        <div className="absolute top-0 left-1/2 h-full w-px bg-border" />
-                        {isPositive ? (
-                          <div
-                            className="absolute top-0 left-1/2 h-full rounded-r bg-emerald-500/70"
-                            style={{ width: `${barWidth / 2}%` }}
-                          />
-                        ) : (
-                          <div
-                            className="absolute top-0 h-full rounded-l bg-red-400/70"
-                            style={{ width: `${barWidth / 2}%`, right: '50%' }}
-                          />
-                        )}
-                      </div>
-                    ) : (
-                      /* Global importance: simple bar */
-                      <div className="h-3 w-full rounded bg-muted">
-                        <div
-                          className="h-full rounded bg-blue-500/60"
-                          style={{ width: `${barWidth}%` }}
-                        />
-                      </div>
-                    )}
-                  </div>
-                  <span className="w-14 shrink-0 text-right tabular-nums text-xs text-muted-foreground">
-                    {hasShap
-                      ? `${isPositive ? '+' : ''}${d.impact.toFixed(2)}`
-                      : `${(d.impact * 100).toFixed(0)}%`}
-                  </span>
-                </div>
+                <span
+                  key={d.feature}
+                  className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium ${
+                    isPositive
+                      ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
+                      : 'bg-red-500/10 text-red-600 dark:text-red-400'
+                  }`}
+                  title={`${d.feature}: ${isPositive ? '+' : ''}${d.impact.toFixed(3)}`}
+                >
+                  {isPositive ? '\u2191' : '\u2193'} {featureLabel(d.feature)}
+                </span>
               );
             })}
           </div>
-          <p className="mt-1.5 text-xs text-muted-foreground">
-            {hasShap
-              ? 'SHAP values show how each feature pushed the prediction above or below the baseline.'
-              : 'Global feature importances show which features the model relies on most across all sets.'}
-          </p>
         </div>
       )}
 
@@ -296,6 +288,9 @@ export function MLPredictionPanel({ setNumber }: MLPredictionPanelProps) {
           />
         </div>
       </div>
+
+      {/* Prediction history chart */}
+      <PredictionHistoryChart setNumber={prediction.set_number} />
 
     </div>
   );

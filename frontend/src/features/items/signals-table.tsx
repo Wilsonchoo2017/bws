@@ -65,13 +65,34 @@ function ScoreBar({ value }: { value: number | null }) {
 }
 
 const COHORT_LABELS: Record<string, { label: string; desc: string }> = {
-  half_year: { label: 'Half-Year', desc: 'vs same release window' },
-  year: { label: 'Year', desc: 'vs same release year' },
-  theme: { label: 'Theme', desc: 'vs all sets in theme' },
+  half_year: { label: 'Half-Year', desc: 'vs sets released same half' },
+  year: { label: 'Year', desc: 'vs sets released same year' },
+  theme: { label: 'Theme', desc: 'vs all sets in same theme' },
   year_theme: { label: 'Year + Theme', desc: 'vs same theme & year' },
-  price_tier: { label: 'Price Tier', desc: 'vs similar price range' },
-  piece_group: { label: 'Piece Group', desc: 'vs similar complexity' },
+  price_tier: { label: 'Price Tier', desc: 'vs similarly priced sets' },
+  piece_group: { label: 'Piece Group', desc: 'vs similar piece count' },
 };
+
+const PCT_TOOLTIPS: Record<string, string> = {
+  Overall: 'Combined score percentile vs peers',
+  Pop: 'Sales volume percentile — how well it sells vs peers',
+  Theme: 'Theme appreciation percentile — how well this theme grows vs peers',
+};
+
+function PctInline({ label, value }: { label: string; value: number | null }) {
+  if (value === null) return null;
+  return (
+    <span
+      className="inline-flex items-center gap-1 cursor-help"
+      title={PCT_TOOLTIPS[label] ?? label}
+    >
+      <span className="text-muted-foreground text-xs">{label}</span>
+      <span className={`font-mono text-xs font-semibold ${scoreColor(value)}`}>
+        {value.toFixed(0)}
+      </span>
+    </span>
+  );
+}
 
 export function CohortSection({
   cohorts,
@@ -88,78 +109,39 @@ export function CohortSection({
       <div className="bg-muted/50 border-b px-4 py-2">
         <span className="text-xs font-medium">Cohort Rankings</span>
         <span className="text-muted-foreground ml-2 text-xs">
-          Percentile rank within peer group
+          Percentile vs peer group (higher = better)
         </span>
       </div>
-      <table className="w-full">
-        <thead>
-          <tr className="border-b">
-            <th className="px-4 py-1.5 text-left text-xs font-medium">
-              Cohort
-            </th>
-            <th className="px-4 py-1.5 text-left text-xs font-medium">
-              Bucket
-            </th>
-            <th className="w-16 px-4 py-1.5 text-right text-xs font-medium">
-              Rank
-            </th>
-            <th className="w-20 px-4 py-1.5 text-right text-xs font-medium">
-              Overall
-            </th>
-            <th className="w-20 px-4 py-1.5 text-right text-xs font-medium">
-              Demand
-            </th>
-            <th className="w-20 px-4 py-1.5 text-right text-xs font-medium">
-              Price
-            </th>
-            <th className="w-24 px-4 py-1.5 text-xs font-medium">Level</th>
-          </tr>
-        </thead>
-        <tbody>
-          {entries.map(([strategy, cohort]) => {
-            const meta = COHORT_LABELS[strategy];
-            return (
-              <tr key={strategy} className="border-b last:border-b-0">
-                <td className="px-4 py-2 text-sm font-medium">
-                  {meta.label}
-                  <span className="text-muted-foreground ml-1 text-xs">
-                    {meta.desc}
+      <div className="divide-y">
+        {entries.map(([strategy, cohort]) => {
+          const meta = COHORT_LABELS[strategy];
+          const overall = cohort.composite_pct;
+          const popularity = cohort.popularity_pct ?? (cohort as any).demand_pct ?? null;
+          const theme = cohort.theme_pct ?? (cohort as any).price_perf_pct ?? null;
+          return (
+            <div key={strategy} className="flex items-center justify-between px-4 py-1.5">
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-medium">{meta.label}</span>
+                <span className="text-muted-foreground text-xs">
+                  {meta.desc}
+                </span>
+              </div>
+              <div className="flex items-center gap-3">
+                <div className="flex items-center gap-2.5">
+                  <PctInline label="Overall" value={overall} />
+                  <PctInline label="Pop" value={popularity} />
+                  <PctInline label="Theme" value={theme} />
+                </div>
+                {cohort.rank != null && (
+                  <span className={`rounded px-1.5 py-0.5 text-xs font-semibold ${scoreColor(overall)} ${scoreBg(overall)}`}>
+                    #{cohort.rank}/{cohort.size}
                   </span>
-                </td>
-                <td className="px-4 py-2">
-                  <span className="bg-muted rounded px-1.5 py-0.5 font-mono text-xs">
-                    {cohort.key}
-                  </span>
-                  <span className="text-muted-foreground ml-1 text-xs">
-                    ({cohort.size} sets)
-                  </span>
-                </td>
-                <td className="px-4 py-2 text-right font-mono text-sm">
-                  {cohort.rank != null ? (
-                    <span className={scoreColor(cohort.composite_pct)}>
-                      #{cohort.rank}
-                    </span>
-                  ) : (
-                    '--'
-                  )}
-                </td>
-                <td className="px-4 py-2 text-right">
-                  <PctBadge value={cohort.composite_pct} />
-                </td>
-                <td className="px-4 py-2 text-right">
-                  <PctBadge value={cohort.demand_pct} />
-                </td>
-                <td className="px-4 py-2 text-right">
-                  <PctBadge value={cohort.price_perf_pct} />
-                </td>
-                <td className="px-4 py-2">
-                  <ScoreBar value={cohort.composite_pct} />
-                </td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }

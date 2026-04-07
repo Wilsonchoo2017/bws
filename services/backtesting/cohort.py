@@ -22,7 +22,7 @@ MIN_COHORT_SIZE = 3
 RANKED_METRICS: tuple[str, ...] = (
     "composite_score",
     "demand_pressure",
-    "price_vs_rrp",
+    "theme_growth",
 )
 
 PIECE_GROUPS: tuple[tuple[str, int, int], ...] = (
@@ -166,8 +166,8 @@ def enrich_with_cohort_ranks(
                     "key": "2022",
                     "size": 42,
                     "composite_pct": 85.4,
-                    "demand_pct": 71.2,
-                    "price_perf_pct": 90.1,
+                    "popularity_pct": 71.2,
+                    "theme_pct": 90.1,
                     "rank": 5,
                 },
                 "theme": { ... },
@@ -230,8 +230,8 @@ def enrich_with_cohort_ranks(
                 # Percentile for each ranked metric
                 pct_keys = {
                     "composite_score": "composite_pct",
-                    "demand_pressure": "demand_pct",
-                    "price_vs_rrp": "price_perf_pct",
+                    "demand_pressure": "popularity_pct",
+                    "theme_growth": "theme_pct",
                 }
                 for metric, pct_key in pct_keys.items():
                     vals_list = metric_values.get(metric, [])

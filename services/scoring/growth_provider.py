@@ -94,6 +94,20 @@ class GrowthScoringProvider:
 
         _prediction_cache["data"] = result
         _prediction_cache["expires"] = now + _PREDICTION_TTL
+
+        # Auto-persist snapshot for time series tracking
+        try:
+            from db.connection import get_connection
+            from services.ml.prediction_tracker import save_scored_snapshot
+
+            snap_conn = get_connection()
+            try:
+                save_scored_snapshot(snap_conn, result)
+            finally:
+                snap_conn.close()
+        except Exception:
+            logger.debug("Auto-snapshot failed (non-critical)", exc_info=True)
+
         return result
 
     def predict_single(self, set_number: str) -> dict | None:

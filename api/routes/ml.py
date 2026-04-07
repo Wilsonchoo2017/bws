@@ -13,6 +13,24 @@ router = APIRouter(prefix="/ml", tags=["ml"])
 logger = logging.getLogger(__name__)
 
 
+@router.get("/health")
+async def ml_health():
+    """Check if ML models are loaded and prediction cache is warm."""
+    from services.scoring.growth_provider import _cache, _prediction_cache
+
+    models_loaded = bool(_cache)
+    n_predictions = len(_prediction_cache.get("data", {}))
+
+    if not models_loaded:
+        return {"status": "not_loaded", "models_loaded": False, "predictions": 0}
+
+    return {
+        "status": "ready" if n_predictions > 0 else "no_predictions",
+        "models_loaded": True,
+        "predictions": n_predictions,
+    }
+
+
 @router.get("/predictions")
 async def list_predictions(
     horizon: int = Query(12, description="Horizon in months (12, 24, 36)"),
@@ -336,6 +354,15 @@ async def tracking_report(conn: Any = Depends(get_db)):
     from services.ml.prediction_tracker import get_tracking_report
 
     return sanitize_nan(get_tracking_report(conn))
+
+
+@router.get("/tracking/{set_number}")
+async def get_prediction_history(set_number: str, conn: Any = Depends(get_db)):
+    """Get prediction history for a single set as time series."""
+    from services.ml.prediction_tracker import get_prediction_history
+
+    history = get_prediction_history(conn, set_number)
+    return sanitize_nan({"success": True, "data": history})
 
 
 @router.post("/tracking/snapshot")

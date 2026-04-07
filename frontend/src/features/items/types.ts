@@ -86,6 +86,7 @@ export interface ItemDetail {
   weight: string | null;
   image_url: string | null;
   buy_rating: BuyRating | null;
+  watchlist: boolean;
   prices: PriceRecord[];
   ml_prediction?: {
     growth_pct: number;
@@ -169,8 +170,8 @@ export interface CohortRank {
   key: string;
   size: number;
   composite_pct: number | null;
-  demand_pct: number | null;
-  price_perf_pct: number | null;
+  popularity_pct: number | null;
+  theme_pct: number | null;
   rank: number | null;
 }
 

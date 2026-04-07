@@ -129,7 +129,7 @@ class TestEnrichWithCohortRanks:
                 "rrp_usd_cents": 5000 + i * 2000,
                 "composite_score": 40.0 + i * 10.0,
                 "demand_pressure": 30.0 + i * 8.0,
-                "price_vs_rrp": 50.0 + i * 5.0,
+                "theme_growth": 50.0 + i * 5.0,
             }
             for i in range(n)
         ]
@@ -214,11 +214,11 @@ class TestEnrichWithCohortRanks:
         # But should still have year cohort
         assert "year" in result[0]["cohorts"]
 
-    def test_demand_and_price_percentiles_present(self):
+    def test_popularity_and_theme_percentiles_present(self):
         items = self._make_items(5)
         result = enrich_with_cohort_ranks(items)
         cohort = result[2]["cohorts"]["year"]
-        assert "demand_pct" in cohort
-        assert "price_perf_pct" in cohort
-        assert cohort["demand_pct"] is not None
-        assert cohort["price_perf_pct"] is not None
+        assert "popularity_pct" in cohort
+        assert "theme_pct" in cohort
+        assert cohort["popularity_pct"] is not None
+        assert cohort["theme_pct"] is not None
