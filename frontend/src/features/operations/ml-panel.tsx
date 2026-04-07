@@ -22,6 +22,7 @@ interface PredictionSummary {
 
 export function MLPanel() {
   const [training, setTraining] = useState(false);
+  const [reloading, setReloading] = useState(false);
   const [result, setResult] = useState<ModelStats | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [summary, setSummary] = useState<PredictionSummary | null>(null);
@@ -84,20 +85,46 @@ export function MLPanel() {
               Runs Optuna hyperparameter tuning + trains regressor and classifier. Takes ~10 minutes.
             </p>
           </div>
-          <Button
-            onClick={handleRetrain}
-            disabled={training}
-            variant={training ? 'outline' : 'default'}
-          >
-            {training ? (
-              <span className="flex items-center gap-2">
-                <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-current border-t-transparent" />
-                Training...
-              </span>
-            ) : (
-              'Train Model'
-            )}
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button
+              onClick={async () => {
+                setReloading(true);
+                setError(null);
+                try {
+                  const res = await fetch('/api/ml/growth/reload', { method: 'POST' });
+                  const json = await res.json();
+                  if (json.status === 'reloaded') {
+                    await fetchSummary();
+                  } else {
+                    setError(json.error ?? 'Reload failed');
+                  }
+                } catch (err) {
+                  setError(err instanceof Error ? err.message : 'Network error');
+                } finally {
+                  setReloading(false);
+                }
+              }}
+              disabled={reloading || training}
+              variant="outline"
+              size="sm"
+            >
+              {reloading ? 'Reloading...' : 'Reload Model'}
+            </Button>
+            <Button
+              onClick={handleRetrain}
+              disabled={training || reloading}
+              variant={training ? 'outline' : 'default'}
+            >
+              {training ? (
+                <span className="flex items-center gap-2">
+                  <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-current border-t-transparent" />
+                  Training...
+                </span>
+              ) : (
+                'Train Model'
+              )}
+            </Button>
+          </div>
         </div>
 
         {error && (

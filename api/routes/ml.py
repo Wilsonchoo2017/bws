@@ -428,3 +428,23 @@ async def retrain_growth_models():
 
     stats = growth_provider.retrain()
     return {"status": "retrained", **stats}
+
+
+@router.post("/growth/reload")
+async def reload_growth_models():
+    """Reload models from disk without retraining.
+
+    Use after running ./train externally to pick up the new model
+    without restarting the API.
+    """
+    from services.scoring.growth_provider import growth_provider, _cache, _prediction_cache
+    from api.routes.items import _signals_cache
+
+    _cache.clear()
+    _prediction_cache.clear()
+    _signals_cache.clear()
+
+    growth_provider.warm_cache()
+
+    n_preds = len(_prediction_cache.get("data", {}))
+    return {"status": "reloaded", "predictions": n_preds}
