@@ -810,7 +810,7 @@ def init_schema(conn: Any) -> None:
     _migrate_lego_items(conn)
     _migrate_brickeconomy_snapshots(conn)
     _migrate_shopee_products(conn)
-    _sync_sequences(conn)
+    # Sequences are auto-synced by Postgres via nextval() in INSERT statements.
 
 
 def drop_all_tables(conn: Any) -> None:

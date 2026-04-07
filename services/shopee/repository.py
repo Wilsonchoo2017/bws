@@ -3,7 +3,6 @@
 
 import re
 
-from db.pg.writes import _get_pg, pg_insert_scrape_history, pg_upsert_shopee_product
 from services.items.repository import get_or_create_item, record_price
 from services.items.set_number import extract_set_number
 from services.shopee.parser import ShopeeProduct
@@ -82,22 +81,6 @@ def upsert_products(
                 product.is_sold_out,
             ],
         )
-        # Write to Postgres
-        pg = _get_pg(conn)
-        if pg is not None:
-            pg_upsert_shopee_product(
-                pg,
-                title=product.title,
-                price_display=product.price_display,
-                price_cents=price_cents,
-                sold_count=product.sold_count,
-                rating=product.rating,
-                shop_name=product.shop_name,
-                product_url=product.product_url,
-                image_url=product.image_url,
-                source_url=source_url,
-                is_sold_out=product.is_sold_out,
-            )
 
         saved += 1
 
@@ -143,17 +126,6 @@ def record_scrape(
         """,
         [source_url, items_found, success, error],
     )
-
-    # Write to Postgres
-    pg = _get_pg(conn)
-    if pg is not None:
-        pg_insert_scrape_history(
-            pg,
-            source_url=source_url,
-            items_found=items_found,
-            success=success,
-            error=error,
-        )
 
 
 def get_all_products(conn: Any) -> list[dict]:

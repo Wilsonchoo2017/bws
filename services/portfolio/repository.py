@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from db.pg.writes import _get_pg, pg_delete_portfolio_transaction, pg_insert_portfolio_transaction
 from typing import Any
 
 
@@ -51,21 +50,6 @@ def create_transaction(
         """,
         [set_number, txn_type, quantity, price_cents, currency, condition, txn_date, notes],
     ).fetchone()
-
-    # Write to Postgres
-    pg = _get_pg(conn)
-    if pg is not None:
-        pg_insert_portfolio_transaction(
-            pg,
-            set_number=set_number,
-            txn_type=txn_type,
-            quantity=quantity,
-            price_cents=price_cents,
-            currency=currency,
-            condition=condition,
-            txn_date=txn_date,
-            notes=notes,
-        )
 
     return row[0]
 
@@ -150,12 +134,6 @@ def delete_transaction(conn: Any, txn_id: int) -> bool:
     row = conn.execute(
         "DELETE FROM portfolio_transactions WHERE id = ? RETURNING id", [txn_id]
     ).fetchone()
-
-    if row is not None:
-        # Write to Postgres
-        pg = _get_pg(conn)
-        if pg is not None:
-            pg_delete_portfolio_transaction(pg, txn_id)
 
     return row is not None
 

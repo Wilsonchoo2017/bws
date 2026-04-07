@@ -152,8 +152,8 @@ class TestScoreResult:
 
 
 class TestLookupItemTitle:
-    """Given sets that may or may not exist in bricklink_items,
-    verify the fallback to lego_items works."""
+    """Given sets that may or may not exist in trusted sources,
+    verify the cascading lookup: bricklink -> brickeconomy -> enriched lego_items."""
 
     def test_given_set_in_bricklink_items_when_lookup_then_returns_bricklink_title(self):
         """Given set '60305' exists in bricklink_items with title 'Car Transporter',
@@ -165,8 +165,29 @@ class TestLookupItemTitle:
         conn.execute.return_value.fetchone.return_value = ("Car Transporter",)
         assert _lookup_item_title(conn, "60305") == "Car Transporter"
 
-    def test_given_set_only_in_lego_items_when_lookup_then_falls_back(self):
-        """Given set '10789' is NOT in bricklink_items but IS in lego_items,
+    def test_given_set_only_in_brickeconomy_when_lookup_then_returns_be_title(self):
+        """Given set '10789' is NOT in bricklink_items but IS in brickeconomy_snapshots,
+        when _lookup_item_title is called,
+        then returns the brickeconomy title."""
+        from services.scrape_queue.executors.keepa import _lookup_item_title
+
+        conn = MagicMock()
+
+        def side_effect(query, params):
+            result = MagicMock()
+            if "bricklink_items" in query:
+                result.fetchone.return_value = None
+            elif "brickeconomy_snapshots" in query:
+                result.fetchone.return_value = ("Spider-Man's Car and Doc Ock",)
+            else:
+                result.fetchone.return_value = None
+            return result
+
+        conn.execute.side_effect = side_effect
+        assert _lookup_item_title(conn, "10789") == "Spider-Man's Car and Doc Ock"
+
+    def test_given_set_only_in_enriched_lego_items_when_lookup_then_falls_back(self):
+        """Given set exists only in lego_items with last_enriched_at set,
         when _lookup_item_title is called,
         then returns the lego_items title."""
         from services.scrape_queue.executors.keepa import _lookup_item_title
@@ -177,6 +198,8 @@ class TestLookupItemTitle:
             result = MagicMock()
             if "bricklink_items" in query:
                 result.fetchone.return_value = None
+            elif "brickeconomy_snapshots" in query:
+                result.fetchone.return_value = None
             else:
                 result.fetchone.return_value = ("Spider-Man's Car and Doc Ock",)
             return result
@@ -184,8 +207,8 @@ class TestLookupItemTitle:
         conn.execute.side_effect = side_effect
         assert _lookup_item_title(conn, "10789") == "Spider-Man's Car and Doc Ock"
 
-    def test_given_set_in_neither_table_when_lookup_then_returns_none(self):
-        """Given set '99999' exists in neither table,
+    def test_given_set_in_no_source_when_lookup_then_returns_none(self):
+        """Given set '99999' exists in no trusted source,
         when _lookup_item_title is called,
         then returns None."""
         from services.scrape_queue.executors.keepa import _lookup_item_title
@@ -197,7 +220,7 @@ class TestLookupItemTitle:
     def test_given_bricklink_returns_empty_string_when_lookup_then_falls_back(self):
         """Given bricklink_items returns an empty-string title,
         when _lookup_item_title is called,
-        then treats it as missing and falls back to lego_items."""
+        then treats it as missing and falls back to brickeconomy."""
         from services.scrape_queue.executors.keepa import _lookup_item_title
 
         conn = MagicMock()
@@ -206,12 +229,31 @@ class TestLookupItemTitle:
             result = MagicMock()
             if "bricklink_items" in query:
                 result.fetchone.return_value = ("",)
-            else:
+            elif "brickeconomy_snapshots" in query:
                 result.fetchone.return_value = ("Growing Carrot",)
+            else:
+                result.fetchone.return_value = None
             return result
 
         conn.execute.side_effect = side_effect
         assert _lookup_item_title(conn, "10981") == "Growing Carrot"
+
+    def test_given_unenriched_lego_item_with_placeholder_when_lookup_then_returns_none(self):
+        """Given a lego_item that hasn't been enriched (retail placeholder title),
+        when _lookup_item_title is called,
+        then returns None -- we don't trust un-enriched titles."""
+        from services.scrape_queue.executors.keepa import _lookup_item_title
+
+        conn = MagicMock()
+
+        def side_effect(query, params):
+            result = MagicMock()
+            # last_enriched_at IS NOT NULL filter means no row returned
+            result.fetchone.return_value = None
+            return result
+
+        conn.execute.side_effect = side_effect
+        assert _lookup_item_title(conn, "12345") is None
 
     def test_given_database_error_when_lookup_then_returns_none(self):
         """Given the database raises an exception,
@@ -600,13 +642,10 @@ class TestProductionFailureRegression:
         )
         assert result.error is not None
 
-    def test_given_10981_title_only_in_lego_items_when_lookup_then_found(self):
-        """Given set 10981 'Growing Carrot' exists only in lego_items (not
-        bricklink_items), when _lookup_item_title is called,
-        then returns 'Growing Carrot' via the fallback query.
-
-        Before fix: returned None (only checked bricklink_items).
-        After fix: falls back to lego_items."""
+    def test_given_10981_title_only_in_brickeconomy_when_lookup_then_found(self):
+        """Given set 10981 'Growing Carrot' exists only in brickeconomy_snapshots,
+        when _lookup_item_title is called,
+        then returns 'Growing Carrot' via the BrickEconomy fallback."""
         from services.scrape_queue.executors.keepa import _lookup_item_title
 
         conn = MagicMock()
@@ -615,8 +654,10 @@ class TestProductionFailureRegression:
             result = MagicMock()
             if "bricklink_items" in query:
                 result.fetchone.return_value = None
-            else:
+            elif "brickeconomy_snapshots" in query:
                 result.fetchone.return_value = ("Growing Carrot",)
+            else:
+                result.fetchone.return_value = None
             return result
 
         conn.execute.side_effect = side_effect
@@ -625,7 +666,7 @@ class TestProductionFailureRegression:
 
     def test_given_10789_title_used_for_fallback_search(self):
         """Given set 10789 'Spider-Man's Car and Doc Ock' has a title from
-        lego_items, when no search candidates are found,
+        brickeconomy, when no search candidates are found,
         then _click_first_result should attempt title-based search.
 
         This test verifies the title is passed through from executor to scraper,
@@ -638,14 +679,16 @@ class TestProductionFailureRegression:
             result = MagicMock()
             if "bricklink_items" in query:
                 result.fetchone.return_value = None
-            else:
+            elif "brickeconomy_snapshots" in query:
                 result.fetchone.return_value = ("Spider-Man's Car and Doc Ock",)
+            else:
+                result.fetchone.return_value = None
             return result
 
         conn.execute.side_effect = side_effect
         title = _lookup_item_title(conn, "10789")
         assert title is not None, (
-            "10789 should have a title from lego_items for fallback search"
+            "10789 should have a title from a trusted source for fallback search"
         )
         assert "Spider-Man" in title
 

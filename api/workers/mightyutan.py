@@ -24,8 +24,11 @@ class MightyutanWorker:
         conn = get_connection()
         init_schema(conn)
 
+        def _progress(msg: str) -> None:
+            mgr.update_progress(job.job_id, msg)
+
         try:
-            result = await scrape_all_lego(conn=conn)
+            result = await scrape_all_lego(conn=conn, on_progress=_progress)
         finally:
             conn.close()
 

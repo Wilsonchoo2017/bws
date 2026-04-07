@@ -1,7 +1,6 @@
 """Repository for Shopee saturation snapshots."""
 
 
-from db.pg.writes import _get_pg, pg_insert_saturation_snapshot
 from services.shopee.saturation_types import SaturationSnapshot
 from typing import Any
 
@@ -38,25 +37,6 @@ def save_saturation_snapshot(
             snapshot.scraped_at,
         ],
     )
-
-    # Write to Postgres
-    pg = _get_pg(conn)
-    if pg is not None:
-        pg_insert_saturation_snapshot(
-            pg,
-            set_number=snapshot.set_number,
-            listings_count=snapshot.listings_count,
-            unique_sellers=snapshot.unique_sellers,
-            min_price_cents=snapshot.min_price_cents,
-            max_price_cents=snapshot.max_price_cents,
-            avg_price_cents=snapshot.avg_price_cents,
-            median_price_cents=snapshot.median_price_cents,
-            price_spread_pct=snapshot.price_spread_pct,
-            saturation_score=snapshot.saturation_score,
-            saturation_level=snapshot.saturation_level.value,
-            search_query=snapshot.search_query,
-            scraped_at=snapshot.scraped_at,
-        )
 
 
 def get_latest_saturation(

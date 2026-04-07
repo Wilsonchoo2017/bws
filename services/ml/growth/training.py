@@ -40,6 +40,7 @@ from services.ml.growth.model_selection import (
     cross_validate_model,
     temporal_cross_validate,
     tune_and_select,
+    winsorize_targets,
 )
 from services.ml.growth.types import KellyCalibration, TrainedEnsemble, TrainedGrowthModel
 from services.ml.helpers import compute_cutoff_dates
@@ -164,6 +165,9 @@ def _select_and_train(
 
     X_clipped = clip_outliers(X)
     X_arr = X_clipped.values
+
+    # Winsorize extreme target values (P1/P99) to reduce outlier pull
+    y = winsorize_targets(y, lower_pct=1.0, upper_pct=99.0)
 
     logger.info(
         "%s target: n=%d, mean=%.1f%%, median=%.1f%%, std=%.1f%%, range=[%.1f%%, %.1f%%]",
@@ -494,6 +498,7 @@ def train_growth_models(
         X1_arr, y_all, tier1_features,
         tuple((f, float(fill1[f])) for f in tier1_features),
         threshold=8.0,  # 8% hurdle rate for buy decision
+        tuning_trials=_cfg.classifier_tuning_trials,
     )
 
     # -- Phase 3: Tier 2 features (Keepa) --

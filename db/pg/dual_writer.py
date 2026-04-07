@@ -1,36 +1,35 @@
-"""Connection adapter: wraps PgConnection + optional SQLAlchemy session.
+"""Connection adapter: wraps PgConnection.
 
-Provides a unified interface for repository code that needs both raw SQL
-(via PgConnection) and ORM access (via SQLAlchemy Session).
+Provides a unified interface for repository code that uses raw SQL
+via PgConnection. The ORM session (SQLAlchemy) dual-write path has
+been removed -- all writes go through PgConnection directly.
 """
 
 import logging
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from sqlalchemy.orm import Session
-
     from db.pg.pg_connection import PgConnection
 
 logger = logging.getLogger("bws.dual_writer")
 
 
 class DualWriter:
-    """Wraps a PgConnection and an optional SQLAlchemy ORM session.
+    """Wraps a PgConnection.
 
     All existing code continues to work unchanged because .execute(),
     .fetchone(), .fetchall(), and .description delegate to PgConnection.
 
-    Repository code that needs ORM access can use .pg_session().
+    The .duck attribute is kept for backward compat with ML code.
     """
 
     def __init__(
         self,
         conn: "PgConnection",
-        pg_session: "Session | None" = None,
+        pg_session: Any = None,
     ) -> None:
         self.duck = conn  # kept as .duck for backward compat with ML code
-        self._pg = pg_session
+        self._pg = pg_session  # retained for callers that still pass it
 
     def execute(self, query: str, params: Any = None) -> Any:
         """Execute a query on the connection (passthrough)."""
@@ -51,12 +50,12 @@ class DualWriter:
         """Column descriptions from the connection (passthrough)."""
         return self.duck.description
 
-    def pg_session(self) -> "Session | None":
-        """Get the SQLAlchemy session, or None."""
+    def pg_session(self) -> Any:
+        """Get the SQLAlchemy session, or None. Kept for backward compat."""
         return self._pg
 
     def pg_flush(self) -> None:
-        """Flush pending ORM changes. Safe to call even if session is None."""
+        """Flush pending ORM changes. No-op since ORM writes were removed."""
         if self._pg is None:
             return
         try:
@@ -66,7 +65,7 @@ class DualWriter:
             self._pg.rollback()
 
     def pg_commit(self) -> None:
-        """Commit the ORM session. Safe to call even if session is None."""
+        """Commit the ORM session. No-op if session is None."""
         if self._pg is None:
             return
         try:
@@ -76,7 +75,7 @@ class DualWriter:
             self._pg.rollback()
 
     def close(self) -> None:
-        """Close both connections."""
+        """Close the connection."""
         self.duck.close()
         if self._pg is not None:
             self._pg.close()

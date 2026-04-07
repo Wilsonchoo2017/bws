@@ -5,14 +5,6 @@ from __future__ import annotations
 from typing import Any
 
 
-from db.pg.writes import (
-    _get_pg,
-    pg_mark_image_downloaded,
-    pg_mark_image_failed,
-    pg_upsert_image_asset,
-)
-
-
 def get_asset(
     conn: Any, asset_type: str, item_id: str
 ) -> dict | None:
@@ -71,17 +63,6 @@ def upsert_asset(
         [asset_type, item_id, source_url, local_path],
     )
 
-    # Write to Postgres
-    pg = _get_pg(conn)
-    if pg is not None:
-        pg_upsert_image_asset(
-            pg,
-            asset_type=asset_type,
-            item_id=item_id,
-            source_url=source_url,
-            local_path=local_path,
-        )
-
 
 def mark_downloaded(
     conn: Any,
@@ -104,19 +85,6 @@ def mark_downloaded(
         [file_size_bytes, content_type, asset_type, item_id],
     )
 
-    # Write to Postgres
-    pg = _get_pg(conn)
-    if pg is not None:
-        pg_mark_image_downloaded(
-            pg,
-            asset_type=asset_type,
-            item_id=item_id,
-            status="downloaded",
-            file_size_bytes=file_size_bytes,
-            content_type=content_type,
-            error=None,
-        )
-
 
 def mark_failed(
     conn: Any,
@@ -135,17 +103,6 @@ def mark_failed(
         """,
         [error, asset_type, item_id],
     )
-
-    # Write to Postgres
-    pg = _get_pg(conn)
-    if pg is not None:
-        pg_mark_image_failed(
-            pg,
-            asset_type=asset_type,
-            item_id=item_id,
-            status="failed",
-            error=error,
-        )
 
 
 def get_download_stats(conn: Any) -> dict:

@@ -3,7 +3,6 @@
 import json
 import logging
 
-from db.pg.writes import _get_pg, pg_insert_keepa_snapshot
 from services.keepa.types import KeepaProductData
 from typing import Any
 
@@ -86,38 +85,6 @@ def save_keepa_snapshot(
             exc_info=True,
         )
         raise
-
-    # Write to Postgres
-    pg = _get_pg(conn)
-    if pg is not None:
-        pg_insert_keepa_snapshot(
-            pg,
-            set_number=data.set_number,
-            asin=data.asin,
-            title=data.title,
-            keepa_url=data.keepa_url,
-            scraped_at=data.scraped_at,
-            current_buy_box_cents=data.current_buy_box_cents,
-            current_amazon_cents=data.current_amazon_cents,
-            current_new_cents=data.current_new_cents,
-            lowest_ever_cents=data.lowest_ever_cents,
-            highest_ever_cents=data.highest_ever_cents,
-            amazon_price_json=_series_to_json(data.amazon_price),
-            new_price_json=_series_to_json(data.new_price),
-            new_3p_fba_json=_series_to_json(data.new_3p_fba),
-            new_3p_fbm_json=_series_to_json(data.new_3p_fbm),
-            used_price_json=_series_to_json(data.used_price),
-            used_like_new_json=_series_to_json(data.used_like_new),
-            buy_box_json=_series_to_json(data.buy_box),
-            list_price_json=_series_to_json(data.list_price),
-            warehouse_deals_json=_series_to_json(data.warehouse_deals),
-            collectible_json=_series_to_json(data.collectible),
-            sales_rank_json=_series_to_json(data.sales_rank),
-            rating=data.rating,
-            review_count=data.review_count,
-            tracking_users=data.tracking_users,
-            chart_screenshot_path=data.chart_screenshot_path,
-        )
 
     logger.info("Saved Keepa snapshot id=%d for %s", row_id, data.set_number)
     return row_id

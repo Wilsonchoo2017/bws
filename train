@@ -1,0 +1,126 @@
+#!/usr/bin/env python3
+"""Train growth models offline and save to disk.
+
+Usage:
+    ./train              # train + backtest
+    ./train --no-save    # dry run
+    ./train --no-backtest # skip backtest (faster)
+"""
+
+import argparse
+import logging
+import sys
+import time
+import warnings
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+warnings.filterwarnings("ignore")
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(name)-30s %(message)s",
+    datefmt="%H:%M:%S",
+)
+logger = logging.getLogger("bws.train")
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Train BWS growth models")
+    parser.add_argument("--no-save", action="store_true", help="Dry run, don't save")
+    parser.add_argument("--no-backtest", action="store_true", help="Skip backtest")
+    args = parser.parse_args()
+
+    from db.pg.engine import get_engine
+    from services.ml.growth.persistence import save_growth_models
+    from services.ml.growth.training import train_growth_models
+    from services.ml.pg_queries import load_growth_training_data, load_keepa_timelines
+
+    engine = get_engine()
+    logger.info("Loading data from PostgreSQL...")
+    df_raw = load_growth_training_data(engine)
+    keepa_df = load_keepa_timelines(engine)
+    logger.info("Loaded %d training sets, %d Keepa rows", len(df_raw), len(keepa_df))
+
+    logger.info("Starting model training...")
+    t0 = time.time()
+
+    tier1, tier2, theme_stats, subtheme_stats, classifier, ensemble = train_growth_models(
+        df_raw=df_raw, keepa_df=keepa_df,
+    )
+
+    elapsed = time.time() - t0
+    logger.info("Training completed in %.1f minutes", elapsed / 60)
+
+    # Model summary
+    print(f"\n{'=' * 65}")
+    print(f"  MODEL SUMMARY")
+    print(f"{'=' * 65}")
+    print(f"  Regressor Tier 1: {tier1.n_train} sets, {len(tier1.feature_names)} features, "
+          f"CV R2={tier1.cv_r2_mean:.3f}")
+    if tier2:
+        print(f"  Regressor Tier 2: {tier2.n_train} sets, {len(tier2.feature_names)} features, "
+              f"CV R2={tier2.cv_r2_mean:.3f}")
+    if classifier:
+        print(f"  Classifier: {classifier.n_train} sets, "
+              f"AUC={classifier.cv_auc:.3f}, F1={classifier.cv_f1:.3f}, "
+              f"Recall={classifier.cv_recall:.3f}")
+    if ensemble:
+        print(f"  Ensemble: OOS R2={ensemble.oos_r2:.3f}")
+
+    # Backtest
+    if not args.no_backtest:
+        _run_backtest(df_raw)
+
+    if not args.no_save:
+        path = save_growth_models(
+            tier1, tier2, theme_stats, subtheme_stats, classifier, ensemble,
+        )
+        logger.info("Models saved to %s", path)
+    else:
+        logger.info("Dry run -- models not saved")
+
+
+def _run_backtest(df_raw):
+    """Run walk-forward backtest and print report card."""
+    import numpy as np
+    import pandas as pd
+    from services.ml.growth.backtest import run_backtest, run_benchmark_backtest
+    from services.ml.growth.features import TIER1_FEATURES, engineer_intrinsic_features
+    from services.ml.growth.feature_selection import select_features
+    from services.ml.growth.model_selection import clip_outliers
+
+    y = df_raw["annual_growth_pct"].values.astype(float)
+    year_retired = np.asarray(
+        pd.to_numeric(df_raw.get("year_retired"), errors="coerce"), dtype=float,
+    )
+
+    if np.isfinite(year_retired).sum() < len(y) * 0.5:
+        logger.info("Backtest skipped: insufficient year_retired coverage")
+        return
+
+    df_feat, _, _ = engineer_intrinsic_features(df_raw, training_target=pd.Series(y))
+    cands = [f for f in TIER1_FEATURES if f in df_feat.columns]
+    X_raw = df_feat[cands].copy()
+    for c in X_raw.columns:
+        X_raw[c] = pd.to_numeric(X_raw[c], errors="coerce")
+
+    feats = select_features(X_raw, y, min_mi_score=0.005, max_correlation=0.90, lofo_prune=False)
+    X = X_raw[feats].fillna(X_raw[feats].median())
+    X_arr = clip_outliers(X).values
+
+    # Run backtest at different portfolio sizes
+    for pct in [20, 30]:
+        result = run_backtest(
+            X_arr, y, year_retired, feats,
+            df_meta=df_raw, top_pct=pct,
+        )
+        print(result.format_report())
+
+    # Benchmark
+    bench = run_benchmark_backtest(X_arr, y, year_retired)
+    print(bench.format_report())
+
+
+if __name__ == "__main__":
+    main()

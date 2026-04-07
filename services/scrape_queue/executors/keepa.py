@@ -22,22 +22,42 @@ logger = logging.getLogger("bws.scrape_queue.executor.keepa")
 
 
 def _lookup_item_title(conn: Any, set_number: str) -> str | None:
-    """Look up the item title for search verification.
+    """Look up the item title from trusted enrichment sources only.
 
-    Checks bricklink_items first, falls back to lego_items.
+    Queries BrickLink and BrickEconomy directly -- these are curated
+    catalogues so their titles are reliable.  Falls back to lego_items
+    only when the row has been through enrichment (last_enriched_at set).
+
+    Returns None when no trusted title exists, so Keepa falls back to
+    set-number-only search rather than searching garbage like
+    'Image Coming Soon' from a retail placeholder.
     """
     try:
+        # 1. BrickLink catalogue (highest priority)
         row = conn.execute(
             "SELECT title FROM bricklink_items WHERE item_id = ?",
             [set_number],
         ).fetchone()
         if row and row[0]:
             return row[0]
+
+        # 2. Latest BrickEconomy snapshot
         row = conn.execute(
-            "SELECT title FROM lego_items WHERE set_number = ?",
+            "SELECT title FROM brickeconomy_snapshots "
+            "WHERE set_number = ? ORDER BY scraped_at DESC LIMIT 1",
             [set_number],
         ).fetchone()
-        return row[0] if row else None
+        if row and row[0]:
+            return row[0]
+
+        # 3. lego_items only if enrichment has run (title came from a
+        #    trusted source, not a retail scrape placeholder)
+        row = conn.execute(
+            "SELECT title FROM lego_items "
+            "WHERE set_number = ? AND last_enriched_at IS NOT NULL",
+            [set_number],
+        ).fetchone()
+        return row[0] if row and row[0] else None
     except Exception:
         logger.warning("Failed to look up title for %s", set_number, exc_info=True)
         return None

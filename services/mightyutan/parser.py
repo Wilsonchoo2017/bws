@@ -145,7 +145,6 @@ def _parse_product(raw: dict) -> MightyUtanProduct | None:
 
     product_id = raw.get("id", 0)
     sku = raw.get("sku", "")
-    price = raw.get("converted_price") or raw.get("price", "0")
     quantity = raw.get("totalQty", 0) or 0
     total_sold = raw.get("total_sold") or 0
 
@@ -160,10 +159,20 @@ def _parse_product(raw: dict) -> MightyUtanProduct | None:
     min_price = raw.get("minPrice")
     is_special = raw.get("isSpecialPrice", False)
 
+    # minPrice is the actual selling price (after discount).
+    # minOriPrice / converted_price / price is the original RRP.
+    # When there's no promotion, minPrice == minOriPrice.
     original_price_myr = None
     if is_special and min_ori_price and min_price:
         if float(min_ori_price) > float(min_price):
             original_price_myr = str(min_ori_price)
+            price = str(min_price)
+        else:
+            price = raw.get("converted_price") or raw.get("price", "0")
+    elif min_price and float(min_price) > 0:
+        price = str(min_price)
+    else:
+        price = raw.get("converted_price") or raw.get("price", "0")
 
     return MightyUtanProduct(
         product_id=product_id,

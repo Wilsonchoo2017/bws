@@ -147,6 +147,7 @@ export function ItemDetailView({ setNumber }: ItemDetailViewProps) {
   const [error, setError] = useState<string | null>(null);
   const [enrichStatus, setEnrichStatus] = useState<EnrichStatus>('idle');
   const [enrichMessage, setEnrichMessage] = useState<string | null>(null);
+  const [mlPredicting, setMlPredicting] = useState(false);
 
   const [priceSorts, setPriceSorts] = useState<SortEntry[]>([{ key: 'date', dir: 'desc' }]);
 
@@ -298,6 +299,30 @@ export function ItemDetailView({ setNumber }: ItemDetailViewProps) {
     }
   };
 
+  const handleMlPredict = async () => {
+    setMlPredicting(true);
+    try {
+      const res = await fetch(`/api/ml/growth/predict/${setNumber}`, {
+        method: 'POST',
+      });
+      const json = await res.json();
+      if (json.error) {
+        setEnrichStatus('error');
+        setEnrichMessage(json.error);
+      } else {
+        const { set_number: _sn, ...pred } = json;
+        setItem((prev) => prev ? { ...prev, ml_prediction: pred } : prev);
+        setEnrichStatus('success');
+        setEnrichMessage('ML prediction generated');
+      }
+    } catch (err) {
+      setEnrichStatus('error');
+      setEnrichMessage(err instanceof Error ? err.message : 'ML predict failed');
+    } finally {
+      setMlPredicting(false);
+    }
+  };
+
   if (loading) {
     return (
       <div className='flex h-96 items-center justify-center'>
@@ -429,6 +454,43 @@ export function ItemDetailView({ setNumber }: ItemDetailViewProps) {
               </span>
             )}
           </div>
+
+          {/* ML Prediction */}
+          {item.ml_prediction ? (
+            <div className='mt-3 flex items-center gap-3 text-sm'>
+              <span className='font-medium'>ML Growth:</span>
+              <span className={`font-mono font-semibold ${
+                item.ml_prediction.growth_pct > 0
+                  ? 'text-green-600 dark:text-green-400'
+                  : 'text-red-600 dark:text-red-400'
+              }`}>
+                {item.ml_prediction.growth_pct > 0 ? '+' : ''}{item.ml_prediction.growth_pct}%
+              </span>
+              <span className='text-muted-foreground'>
+                ({item.ml_prediction.confidence}, T{item.ml_prediction.tier})
+              </span>
+              {item.ml_prediction.avoid_probability != null && (
+                <span className='text-muted-foreground'>
+                  Avoid: {(item.ml_prediction.avoid_probability * 100).toFixed(0)}%
+                </span>
+              )}
+              {item.ml_prediction.kelly_fraction != null && (
+                <span className='text-muted-foreground'>
+                  Kelly: {(item.ml_prediction.kelly_fraction * 100).toFixed(1)}%
+                </span>
+              )}
+            </div>
+          ) : (
+            <div className='mt-3'>
+              <button
+                onClick={handleMlPredict}
+                disabled={mlPredicting}
+                className='inline-flex items-center gap-1.5 rounded-md border border-purple-300 bg-purple-50 px-3 py-1.5 text-sm font-medium text-purple-700 transition-colors hover:bg-purple-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-purple-700 dark:bg-purple-900/30 dark:text-purple-300 dark:hover:bg-purple-900/50'
+              >
+                {mlPredicting ? 'Predicting...' : 'Run ML Predict'}
+              </button>
+            </div>
+          )}
 
           {/* Latest prices summary */}
           <div className='mt-4 flex flex-wrap gap-3'>

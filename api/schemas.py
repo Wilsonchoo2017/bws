@@ -46,6 +46,8 @@ class ScrapeJobsResponse(BaseModel):
 
 
 class ScrapeItemResponse(BaseModel):
+    model_config = {"extra": "ignore"}
+
     title: str
     price_display: str
     sold_count: str | None = None

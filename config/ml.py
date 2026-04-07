@@ -55,6 +55,7 @@ class MLPipelineConfig:
     n_cv_repeats: int = 3
     # Hyperparameter tuning (Optuna)
     tuning_trials: int = 75
+    classifier_tuning_trials: int = 50  # binary classification converges faster
     model_candidates: tuple[str, ...] = ("lightgbm",)
     # LightGBM only: GBM 100x slower for similar R2, CatBoost has NaN issues,
     # RF 10x slower. LightGBM consistently best on this dataset.

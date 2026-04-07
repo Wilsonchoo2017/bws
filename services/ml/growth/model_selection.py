@@ -135,8 +135,8 @@ def build_model(params: dict | None = None) -> Any:
 
 def winsorize_targets(
     y: np.ndarray,
-    lower_pct: float = 5.0,
-    upper_pct: float = 95.0,
+    lower_pct: float = 1.0,
+    upper_pct: float = 99.0,
 ) -> np.ndarray:
     """Clip extreme target values to reduce outlier influence."""
     lo = np.percentile(y, lower_pct)
@@ -238,6 +238,7 @@ def cross_validate_model(
     target_transform: str = "none",
     sample_weight: np.ndarray | None = None,
     monotonic_constraints: list[int] | None = None,
+    winsorize_pct: tuple[float, float] | None = (1.0, 99.0),
 ) -> CVResult:
     """RepeatedKFold CV with per-fold scaling (no leakage)."""
     rkf = RepeatedKFold(
@@ -252,6 +253,12 @@ def cross_validate_model(
         X_tr, X_va = X[train_idx], X[val_idx]
         y_tr, y_va = y[train_idx], y[val_idx]
         w_tr = sample_weight[train_idx] if sample_weight is not None else None
+
+        # Per-fold winsorization on training targets only (Exp 25: P1/P99)
+        if winsorize_pct is not None:
+            lo = np.percentile(y_tr, winsorize_pct[0])
+            hi = np.percentile(y_tr, winsorize_pct[1])
+            y_tr = np.clip(y_tr, lo, hi)
 
         # Per-fold target transform
         pt = None
@@ -316,6 +323,7 @@ def temporal_cross_validate(
     target_transform: str = "none",
     sample_weight: np.ndarray | None = None,
     monotonic_constraints: list[int] | None = None,
+    winsorize_pct: tuple[float, float] | None = (1.0, 99.0),
 ) -> CVResult:
     """Expanding-window temporal CV grouped by retirement year."""
     groups = np.asarray(groups, dtype=float)
@@ -328,6 +336,7 @@ def temporal_cross_validate(
             target_transform=target_transform,
             sample_weight=sample_weight,
             monotonic_constraints=monotonic_constraints,
+            winsorize_pct=winsorize_pct,
         )
 
     r2_scores: list[float] = []
@@ -350,6 +359,12 @@ def temporal_cross_validate(
         X_tr, X_te = X[train_mask], X[test_mask]
         y_tr, y_te = y[train_mask], y[test_mask]
         w_tr = sample_weight[train_mask] if sample_weight is not None else None
+
+        # Per-fold winsorization on training targets
+        if winsorize_pct is not None:
+            lo = np.percentile(y_tr, winsorize_pct[0])
+            hi = np.percentile(y_tr, winsorize_pct[1])
+            y_tr = np.clip(y_tr, lo, hi)
 
         pt = None
         if target_transform == "yeo-johnson":

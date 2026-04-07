@@ -46,7 +46,11 @@ def load_growth_training_data(engine: Engine) -> pd.DataFrame:
             COALESCE(
                 CAST(li.release_date AS TEXT),
                 CAST(be.release_date AS TEXT)
-            ) AS release_date
+            ) AS release_date,
+            COALESCE(
+                CAST(li.retired_date AS TEXT),
+                CAST(be.retired_date AS TEXT)
+            ) AS retired_date
         FROM lego_items li
         JOIN (
             SELECT DISTINCT ON (set_number) *
@@ -101,7 +105,11 @@ def load_growth_candidate_sets(engine: Engine) -> pd.DataFrame:
             COALESCE(
                 CAST(li.release_date AS TEXT),
                 CAST(be.release_date AS TEXT)
-            ) AS release_date
+            ) AS release_date,
+            COALESCE(
+                CAST(li.retired_date AS TEXT),
+                CAST(be.retired_date AS TEXT)
+            ) AS retired_date
         FROM lego_items li
         JOIN (
             SELECT DISTINCT ON (set_number) *

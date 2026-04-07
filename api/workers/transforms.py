@@ -37,10 +37,13 @@ def toysrus_product_to_dict(product: Any) -> dict:
 
 def mightyutan_product_to_dict(product: Any) -> dict:
     """Transform a Mighty Utan product into a normalized item dict."""
+    price_display = f"RM {product.price_myr}"
+    if product.original_price_myr:
+        price_display = f"RM {product.price_myr} (was RM {product.original_price_myr})"
     return {
         "title": product.name,
-        "price_display": f"RM {product.price_myr}",
-        "sold_count": product.total_sold,
+        "price_display": price_display,
+        "sold_count": str(product.total_sold) if product.total_sold else None,
         "rating": product.rating,
         "shop_name": "Mighty Utan Malaysia",
         "product_url": product.url,

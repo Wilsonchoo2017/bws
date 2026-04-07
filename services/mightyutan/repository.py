@@ -5,12 +5,6 @@ Pure functions for CRUD operations on Mighty Utan data in the database.
 
 from datetime import datetime, timezone
 
-from db.pg.writes import (
-    _get_pg,
-    pg_insert_mightyutan_price_history,
-    pg_upsert_mightyutan_product,
-)
-from db.queries import get_next_id
 from services.items.repository import get_or_create_item, record_price
 from services.items.set_number import extract_set_number
 from services.mightyutan.parser import MightyUtanProduct
@@ -72,39 +66,18 @@ def upsert_product(conn: Any, product: MightyUtanProduct) -> int:
             ],
         )
         product_id = existing[0]
-
-        # Write to Postgres
-        pg = _get_pg(conn)
-        if pg is not None:
-            pg_upsert_mightyutan_product(
-                pg,
-                sku=product.sku,
-                name=product.name,
-                price_myr=product.price_myr,
-                original_price_myr=product.original_price_myr,
-                url=product.url,
-                image_url=product.image_url,
-                available=product.available,
-                quantity=product.quantity,
-                total_sold=product.total_sold,
-                rating=product.rating,
-                rating_count=product.rating_count,
-                last_scraped_at=now,
-                updated_at=now,
-            )
     else:
-        product_id = get_next_id(conn, "mightyutan_products_id_seq")
-        conn.execute(
+        row = conn.execute(
             """
             INSERT INTO mightyutan_products (
                 id, sku, name, price_myr, original_price_myr,
                 url, image_url, available, quantity, total_sold,
                 rating, rating_count,
                 last_scraped_at, created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (nextval('mightyutan_products_id_seq'), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            RETURNING id
             """,
             [
-                product_id,
                 product.sku,
                 product.name,
                 product.price_myr,
@@ -120,28 +93,8 @@ def upsert_product(conn: Any, product: MightyUtanProduct) -> int:
                 now,
                 now,
             ],
-        )
-
-        # Write to Postgres
-        pg = _get_pg(conn)
-        if pg is not None:
-            pg_upsert_mightyutan_product(
-                pg,
-                sku=product.sku,
-                name=product.name,
-                price_myr=product.price_myr,
-                original_price_myr=product.original_price_myr,
-                url=product.url,
-                image_url=product.image_url,
-                available=product.available,
-                quantity=product.quantity,
-                total_sold=product.total_sold,
-                rating=product.rating,
-                rating_count=product.rating_count,
-                last_scraped_at=now,
-                created_at=now,
-                updated_at=now,
-            )
+        ).fetchone()
+        product_id = row[0]
 
     _create_price_history(conn, product.sku, product.price_myr, product.available)
 
@@ -180,27 +133,17 @@ def _create_price_history(
     available: bool,
 ) -> int:
     """Create a price history record."""
-    history_id = get_next_id(conn, "mightyutan_price_history_id_seq")
     now = datetime.now(tz=_UTC).isoformat()
 
-    conn.execute(
+    row = conn.execute(
         """
         INSERT INTO mightyutan_price_history (id, sku, price_myr, available, scraped_at)
-        VALUES (?, ?, ?, ?, ?)
+        VALUES (nextval('mightyutan_price_history_id_seq'), ?, ?, ?, ?)
+        RETURNING id
         """,
-        [history_id, sku, price_myr, available, now],
-    )
-
-    # Write to Postgres
-    pg = _get_pg(conn)
-    if pg is not None:
-        pg_insert_mightyutan_price_history(
-            pg,
-            sku=sku,
-            price_myr=price_myr,
-            available=available,
-            scraped_at=now,
-        )
+        [sku, price_myr, available, now],
+    ).fetchone()
+    history_id = row[0]
 
     return history_id
 

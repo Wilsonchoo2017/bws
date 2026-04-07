@@ -410,6 +410,17 @@ def _diagnose_missing_data(conn: Any, set_number: str) -> dict:
     return {"missing": missing, "has": has}
 
 
+@router.post("/growth/predict/{set_number}")
+async def predict_single_growth(set_number: str):
+    """Force ML prediction for a single set, even if missing from cache."""
+    from services.scoring.growth_provider import growth_provider
+
+    pred = growth_provider.predict_single(set_number)
+    if pred is None:
+        return {"error": f"Cannot predict for {set_number} — no base metadata found"}
+    return sanitize_nan({"set_number": set_number, **pred})
+
+
 @router.post("/growth/retrain")
 async def retrain_growth_models():
     """Force retrain growth models (clears cache)."""

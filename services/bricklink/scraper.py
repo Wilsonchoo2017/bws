@@ -353,6 +353,19 @@ async def scrape_item(
         # Parse data
         data = parse_full_item(item_html, price_guide_html, item_type, item_id)
 
+        # Detect degraded metadata: catalog page returned no title/year/theme
+        all_metadata_empty = (
+            data.title is None
+            and data.year_released is None
+            and data.theme is None
+        )
+        if all_metadata_empty:
+            _save_snapshot(item_html, item_url, "empty_metadata")
+            _logger.warning(
+                "Degraded data for %s: parsed OK but title/year/theme all None",
+                item_id,
+            )
+
         # Detect degraded data: parsed OK but all pricing is None
         all_pricing_empty = (
             data.six_month_new is None

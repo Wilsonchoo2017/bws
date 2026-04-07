@@ -87,6 +87,19 @@ export interface ItemDetail {
   image_url: string | null;
   buy_rating: BuyRating | null;
   prices: PriceRecord[];
+  ml_prediction?: {
+    growth_pct: number;
+    confidence: string;
+    tier: number;
+    avoid_probability?: number;
+    raw_growth_pct?: number;
+    kelly_fraction?: number;
+    win_probability?: number;
+    interval_lower?: number;
+    interval_upper?: number;
+    drivers?: { feature: string; impact: number }[];
+    shap_base?: number;
+  } | null;
 }
 
 export interface MinifigurePrice {

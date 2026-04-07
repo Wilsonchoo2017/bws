@@ -187,7 +187,9 @@ async def get_item(set_number: str, conn: Any = Depends(get_db)):
     ml_section = enrich_signals([{"set_number": set_number}], conn)[0]
     ml_section.pop("set_number", None)
     if ml_section:
-        item["ml_prediction"] = sanitize_nan(ml_section)
+        # Strip ml_ prefix for cleaner nesting under ml_prediction
+        stripped = {k.removeprefix("ml_"): v for k, v in ml_section.items()}
+        item["ml_prediction"] = sanitize_nan(stripped)
 
     return {"success": True, "data": item}
 

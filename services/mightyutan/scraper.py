@@ -7,7 +7,9 @@ to extract product data from the Next.js RSC payload.
 
 import asyncio
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass
+from typing import Any
 
 import httpx
 
@@ -15,7 +17,6 @@ from config.settings import get_random_delay
 from services.http import get_browser_headers
 from services.mightyutan.parser import MightyUtanProduct, parse_page
 from services.mightyutan.repository import upsert_products
-from typing import Any
 
 
 
@@ -54,6 +55,7 @@ async def _fetch_page(client: httpx.AsyncClient, page: int) -> str:
 
 async def scrape_all_lego(
     conn: Any | None = None,
+    on_progress: Callable[[str], None] | None = None,
 ) -> ScrapeResult:
     """Scrape all LEGO products from Mighty Utan Malaysia.
 
@@ -89,9 +91,15 @@ async def scrape_all_lego(
                 total_listed,
                 last_page,
             )
+            if on_progress:
+                on_progress(f"Page 1/{last_page} — {len(all_products)} products")
 
             for page_num in range(2, last_page + 1):
                 delay = get_random_delay(min_ms=2_000, max_ms=5_000)
+                if on_progress:
+                    on_progress(
+                        f"Page {page_num}/{last_page} — waiting {delay:.1f}s"
+                    )
                 await asyncio.sleep(delay)
 
                 html = await _fetch_page(client, page=page_num)
@@ -110,6 +118,10 @@ async def scrape_all_lego(
                     len(products),
                     len(all_products),
                 )
+                if on_progress:
+                    on_progress(
+                        f"Page {page_num}/{last_page} — {len(all_products)} products"
+                    )
 
         except httpx.HTTPStatusError as e:
             return ScrapeResult(
@@ -132,6 +144,8 @@ async def scrape_all_lego(
     saved_count = 0
 
     if conn is not None and products_tuple:
+        if on_progress:
+            on_progress(f"Saving {len(products_tuple)} products to database...")
         saved_count = upsert_products(conn, products_tuple)
         logger.info("Saved %d products to database", saved_count)
 

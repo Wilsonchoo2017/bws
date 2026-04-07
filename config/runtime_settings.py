@@ -100,6 +100,27 @@ _DEFAULTS: dict[str, Any] = {
 
 
 # ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+
+def _deep_copy(obj: Any) -> Any:
+    """Return a deep copy via JSON round-trip (works for JSON-safe dicts)."""
+    return json.loads(json.dumps(obj))
+
+
+def _merge_defaults(defaults: dict, overrides: dict) -> dict:
+    """Recursively merge overrides into defaults, keeping default keys."""
+    result = _deep_copy(defaults)
+    for key, value in overrides.items():
+        if key in result and isinstance(result[key], dict) and isinstance(value, dict):
+            result[key] = _merge_defaults(result[key], value)
+        else:
+            result[key] = value
+    return result
+
+
+# ---------------------------------------------------------------------------
 # Singleton settings store
 # ---------------------------------------------------------------------------
 
@@ -234,16 +255,20 @@ def _apply_workers(values: dict[str, Any]) -> None:
         "google_trends": TaskType.GOOGLE_TRENDS,
         "google_trends_theme": TaskType.GOOGLE_TRENDS_THEME,
     }
+    from dataclasses import replace
     for key, tt in task_type_map.items():
         if key not in values or tt not in REGISTRY:
             continue
         cfg = REGISTRY[tt]
         new_concurrency = values[key].get("concurrency")
         new_timeout = values[key].get("timeout_s")
+        updates: dict[str, Any] = {}
         if new_concurrency is not None:
-            cfg.concurrency = new_concurrency
+            updates["concurrency"] = new_concurrency
         if new_timeout is not None:
-            cfg.timeout_seconds = new_timeout
+            updates["timeout_seconds"] = new_timeout
+        if updates:
+            REGISTRY[tt] = replace(cfg, **updates)
     logger.info("Applied worker settings")
 
 
@@ -286,24 +311,3 @@ def _apply_dispatcher(values: dict[str, Any]) -> None:
     if "checkpoint_interval_s" in values:
         m._CHECKPOINT_INTERVAL = values["checkpoint_interval_s"]
     logger.info("Applied dispatcher settings")
-
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-
-def _deep_copy(obj: Any) -> Any:
-    """Return a deep copy via JSON round-trip (works for JSON-safe dicts)."""
-    return json.loads(json.dumps(obj))
-
-
-def _merge_defaults(defaults: dict, overrides: dict) -> dict:
-    """Recursively merge overrides into defaults, keeping default keys."""
-    result = _deep_copy(defaults)
-    for key, value in overrides.items():
-        if key in result and isinstance(result[key], dict) and isinstance(value, dict):
-            result[key] = _merge_defaults(result[key], value)
-        else:
-            result[key] = value
-    return result

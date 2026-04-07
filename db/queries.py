@@ -4,14 +4,6 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 
-def get_next_id(conn: Any, sequence_name: str) -> int:
-    """Get the next ID from a sequence."""
-    result = conn.execute(f"SELECT nextval('{sequence_name}')").fetchone()
-    if result is None:
-        msg = f"Failed to get next ID from sequence {sequence_name}"
-        raise RuntimeError(msg)
-    return int(result[0])
-
 
 def format_timestamp(dt: datetime | None) -> str | None:
     """Format a datetime as ISO string."""

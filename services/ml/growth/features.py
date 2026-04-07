@@ -30,6 +30,8 @@ TIER1_FEATURES: tuple[str, ...] = (
     "rating_value", "log_reviews", "rating_x_reviews",
     # Distribution & value signals (NEW)
     "dist_cv", "has_designer", "mfig_value_to_rrp",
+    # Lifecycle features (from BrickTalk gap analysis)
+    "shelf_life_months", "retire_quarter", "retires_before_q4",
     # Theme/subtheme encodings
     "theme_bayes", "theme_size", "theme_growth_std",
     "subtheme_loo", "sub_size",
@@ -37,6 +39,8 @@ TIER1_FEATURES: tuple[str, ...] = (
     "review_rank_in_year", "review_rank_in_quarter",
     "review_rank_in_price_tier", "review_rank_in_pieces_tier",
     "review_rank_in_theme", "review_rank_in_retire_year",
+    # BrickTalk gap analysis signals
+    "high_price_barrier", "shelf_life_x_reviews",
     # Feature interactions
     "theme_x_price", "licensed_x_parts", "rating_x_price",
 )
@@ -219,6 +223,25 @@ def engineer_intrinsic_features(
     )
     result["has_designer"] = result.get("designer", pd.Series(dtype=str)).notna().astype(int)
 
+    # Lifecycle features (shelf life, retirement timing)
+    release_dt = pd.to_datetime(result.get("release_date"), errors="coerce")
+    retired_dt = pd.to_datetime(result.get("retired_date"), errors="coerce")
+    # Fallback: approximate retired_date from year_retired (July 1 of that year)
+    yr_retired = pd.to_numeric(result.get("year_retired"), errors="coerce")
+    retired_dt_approx = pd.to_datetime(
+        yr_retired.dropna().astype(int).astype(str) + "-07-01", errors="coerce"
+    ).reindex(result.index)
+    retired_dt = retired_dt.fillna(retired_dt_approx)
+
+    shelf_days = (retired_dt - release_dt).dt.days
+    result["shelf_life_months"] = np.where(
+        shelf_days > 0, shelf_days / 30.44, np.nan
+    )
+    result["retire_quarter"] = retired_dt.dt.quarter.astype(float)
+    result["retires_before_q4"] = np.where(
+        retired_dt.notna(), (retired_dt.dt.month < 10).astype(float), np.nan
+    )
+
     # Cohort ranking features
     result = _add_cohort_rankings(result, training_target)
 
@@ -268,6 +291,12 @@ def engineer_intrinsic_features(
             result["subtheme"], adapted_sub, alpha=0
         )
         result["sub_size"] = group_size_encode(result["subtheme"], adapted_sub)
+
+    # BrickTalk gap analysis: high price barrier reduces investor competition
+    result["high_price_barrier"] = (rrp_raw > 30000).astype(int)  # >$300
+
+    # BrickTalk gap analysis: shelf life interacts with demand (reviews as proxy)
+    result["shelf_life_x_reviews"] = result["shelf_life_months"] * result["log_reviews"]
 
     # Feature interactions (computed after theme encoding so theme_bayes exists)
     if "theme_bayes" in result.columns:

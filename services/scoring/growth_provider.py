@@ -91,6 +91,74 @@ class GrowthScoringProvider:
         _prediction_cache["expires"] = now + _PREDICTION_TTL
         return result
 
+    def predict_single(self, set_number: str) -> dict | None:
+        """Force prediction for a single set and inject into cache."""
+        from services.ml.growth.prediction import predict_growth
+        from services.ml.pg_queries import load_growth_candidate_sets, load_keepa_timelines
+
+        try:
+            tier1, tier2, ts, ss, clf, ensemble = self._get_models()
+
+            from db.pg.engine import get_engine
+            engine = get_engine()
+
+            # Load candidates filtered to this one set
+            all_candidates = load_growth_candidate_sets(engine)
+            candidate = all_candidates[all_candidates["set_number"] == set_number]
+
+            if candidate.empty:
+                # Try loading base metadata as fallback (looser criteria)
+                from services.ml.pg_queries import load_base_metadata
+                candidate = load_base_metadata(engine, [set_number])
+
+            if candidate.empty:
+                return None
+
+            keepa_df = load_keepa_timelines(engine)
+
+            predictions = predict_growth(
+                candidate, keepa_df,
+                tier1, tier2, ts, ss,
+                classifier=clf, ensemble=ensemble,
+            )
+        except Exception:
+            logger.warning("predict_single failed for %s", set_number, exc_info=True)
+            return None
+
+        if not predictions:
+            return None
+
+        p = predictions[0]
+        entry: dict = {
+            "growth_pct": p.predicted_growth_pct,
+            "confidence": p.confidence,
+            "tier": p.tier,
+        }
+        if p.avoid_probability is not None:
+            entry["avoid_probability"] = round(p.avoid_probability, 3)
+        if p.raw_growth_pct is not None:
+            entry["raw_growth_pct"] = p.raw_growth_pct
+        if p.kelly_fraction is not None:
+            entry["kelly_fraction"] = p.kelly_fraction
+        if p.win_probability is not None:
+            entry["win_probability"] = round(p.win_probability, 3)
+        if p.prediction_interval:
+            entry["interval_lower"] = p.prediction_interval.lower
+            entry["interval_upper"] = p.prediction_interval.upper
+        if p.feature_contributions:
+            entry["drivers"] = [
+                {"feature": f, "impact": round(float(v), 4)}
+                for f, v in p.feature_contributions[:5]
+            ]
+        if p.shap_base_value is not None:
+            entry["shap_base"] = p.shap_base_value
+
+        # Inject into prediction cache so subsequent GET requests pick it up
+        if "data" in _prediction_cache:
+            _prediction_cache["data"][set_number] = entry
+
+        return entry
+
     def retrain(self) -> dict:
         """Force retrain and return model stats."""
         from db.pg.engine import get_engine

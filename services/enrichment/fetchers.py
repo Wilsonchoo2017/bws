@@ -65,7 +65,7 @@ def fetch_from_bricklink(
                     minifig_count=row[9],
                     dimensions=row[10],
                 )
-                logger.info("Bricklink cache hit for %s (age: %s)", set_number, datetime.now(tz=timezone.utc) - scraped_at)
+                logger.info("Bricklink cache hit for %s (last_scraped: %s)", set_number, row[8])
                 return adapt_bricklink(cached)
     except Exception:
         logger.debug("Bricklink cache lookup failed for %s, falling back to HTTP", set_number, exc_info=True)
@@ -98,7 +98,16 @@ def fetch_from_bricklink(
         if scrape_result.data is None:
             return make_failed_result(SourceId.BRICKLINK, "No data returned")
 
-        return adapt_bricklink(scrape_result.data)
+        result = adapt_bricklink(scrape_result.data)
+        non_null_fields = [k.value for k, v in result.fields.items() if v is not None]
+        null_fields = [k.value for k, v in result.fields.items() if v is None]
+        if null_fields:
+            logger.info(
+                "BrickLink for %s: got %d fields (%s), missing %d (%s)",
+                set_number, len(non_null_fields), non_null_fields,
+                len(null_fields), null_fields,
+            )
+        return result
 
     except Exception as e:
         logger.exception("Bricklink fetch failed for %s", set_number)
@@ -128,7 +137,7 @@ def fetch_from_brickeconomy(
                 from services.brickeconomy.parser import BrickeconomySnapshot
                 snapshot = BrickeconomySnapshot(
                     set_number=cached["set_number"],
-                    scraped_at=scraped_at,
+                    scraped_at=cached["scraped_at"],
                     title=cached.get("title"),
                     theme=cached.get("theme"),
                     subtheme=cached.get("subtheme"),

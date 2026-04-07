@@ -4,15 +4,6 @@ import logging
 import re
 from typing import Any
 
-from db.pg.writes import (
-    _get_pg,
-    pg_delete_item,
-    pg_insert_price_record,
-    pg_toggle_watchlist,
-    pg_update_buy_rating,
-    pg_upsert_lego_item,
-)
-
 logger = logging.getLogger("bws.items.repository")
 
 # Set numbers must be numeric, optionally with a dash suffix (e.g. "75192" or "75192-1").
@@ -145,18 +136,6 @@ def get_or_create_item(
          image_url],  # for ON CONFLICT update -- None lets COALESCE keep existing
     )
 
-    # Write to Postgres
-    pg = _get_pg(conn)
-    if pg is not None:
-        pg_upsert_lego_item(
-            pg, set_number,
-            title=title, theme=theme, year_released=year_released,
-            year_retired=year_retired, parts_count=parts_count, weight=weight,
-            image_url=image_url, rrp_cents=rrp_cents, rrp_currency=rrp_currency,
-            retiring_soon=retiring_soon, minifig_count=minifig_count,
-            dimensions=dimensions, release_date=release_date,
-            retired_date=retired_date,
-        )
 
 
 def record_price(
@@ -185,14 +164,6 @@ def record_price(
         [set_number, source, price_cents, currency, title, url, shop_name, condition],
     )
 
-    # Write to Postgres
-    pg = _get_pg(conn)
-    if pg is not None:
-        pg_insert_price_record(
-            pg, set_number, source, price_cents,
-            currency=currency, title=title, url=url,
-            shop_name=shop_name, condition=condition,
-        )
 
 
 def get_all_items_lite(conn: Any) -> list[dict]:
@@ -450,10 +421,6 @@ def update_buy_rating(
         [rating, set_number],
     )
 
-    pg = _get_pg(conn)
-    if pg is not None:
-        pg_update_buy_rating(pg, set_number, rating)
-
     return rating
 
 
@@ -491,10 +458,6 @@ def delete_item(conn: Any, set_number: str) -> bool:
     )
 
     conn.execute("DELETE FROM lego_items WHERE set_number = ?", [set_number])
-
-    pg = _get_pg(conn)
-    if pg is not None:
-        pg_delete_item(pg, set_number)
 
     return True
 
@@ -535,9 +498,5 @@ def toggle_watchlist(conn: Any, set_number: str) -> bool | None:
         "UPDATE lego_items SET watchlist = ?, updated_at = now() WHERE set_number = ?",
         [new_value, set_number],
     )
-
-    pg = _get_pg(conn)
-    if pg is not None:
-        pg_toggle_watchlist(pg, set_number, new_value)
 
     return new_value
