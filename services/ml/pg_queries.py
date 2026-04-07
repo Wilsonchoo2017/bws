@@ -66,6 +66,7 @@ def load_keepa_timelines(engine: Engine) -> pd.DataFrame:
     """Load Keepa historical price timeline data."""
     return _read(engine, """
         SELECT set_number, amazon_price_json, buy_box_json,
+               new_3p_fba_json, new_3p_fbm_json,
                tracking_users, review_count AS kp_reviews, rating AS kp_rating
         FROM (
             SELECT DISTINCT ON (set_number) *

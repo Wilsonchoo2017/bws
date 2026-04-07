@@ -60,17 +60,22 @@ class GrowthScoringProvider:
             logger.warning("Growth model failed", exc_info=True)
             return {}
 
+        from services.ml.growth.prediction import AVOID_GATE_THRESHOLD, BUY_HURDLE_PCT
+
         result: dict[str, dict] = {}
         for p in predictions:
+            ap = p.avoid_probability
+            is_avoid = ap is not None and ap >= AVOID_GATE_THRESHOLD
+            is_buy = (not is_avoid) and p.predicted_growth_pct >= BUY_HURDLE_PCT
+
             entry: dict = {
                 "growth_pct": p.predicted_growth_pct,
                 "confidence": p.confidence,
-                "tier": p.tier,
+                "buy_signal": is_buy,
+                "avoid": is_avoid,
             }
-            if p.avoid_probability is not None:
-                entry["avoid_probability"] = round(p.avoid_probability, 3)
-            if p.raw_growth_pct is not None:
-                entry["raw_growth_pct"] = p.raw_growth_pct
+            if ap is not None:
+                entry["avoid_probability"] = round(ap, 3)
             if p.kelly_fraction is not None:
                 entry["kelly_fraction"] = p.kelly_fraction
             if p.win_probability is not None:
@@ -128,16 +133,21 @@ class GrowthScoringProvider:
         if not predictions:
             return None
 
+        from services.ml.growth.prediction import AVOID_GATE_THRESHOLD, BUY_HURDLE_PCT
+
         p = predictions[0]
+        ap = p.avoid_probability
+        is_avoid = ap is not None and ap >= AVOID_GATE_THRESHOLD
+        is_buy = (not is_avoid) and p.predicted_growth_pct >= BUY_HURDLE_PCT
+
         entry: dict = {
             "growth_pct": p.predicted_growth_pct,
             "confidence": p.confidence,
-            "tier": p.tier,
+            "buy_signal": is_buy,
+            "avoid": is_avoid,
         }
-        if p.avoid_probability is not None:
-            entry["avoid_probability"] = round(p.avoid_probability, 3)
-        if p.raw_growth_pct is not None:
-            entry["raw_growth_pct"] = p.raw_growth_pct
+        if ap is not None:
+            entry["avoid_probability"] = round(ap, 3)
         if p.kelly_fraction is not None:
             entry["kelly_fraction"] = p.kelly_fraction
         if p.win_probability is not None:
@@ -186,19 +196,14 @@ class GrowthScoringProvider:
         _cache["subtheme_stats"] = ss
 
         result = {
-            "tier1_n_train": tier1.n_train,
-            "tier1_cv_r2": round(tier1.cv_r2_mean or 0, 3),
-            "tier1_features": len(tier1.feature_names),
+            "n_train": tier1.n_train,
+            "regressor_cv_r2": round(tier1.cv_r2_mean or 0, 3),
+            "regressor_features": len(tier1.feature_names),
         }
-        if tier2:
-            result["tier2_n_train"] = tier2.n_train
-            result["tier2_cv_r2"] = round(tier2.cv_r2_mean or 0, 3)
         if clf:
             result["classifier_auc"] = round(clf.cv_auc, 3)
             result["classifier_recall"] = round(clf.cv_recall, 3)
             result["n_avoid"] = clf.n_avoid
-        if ensemble:
-            result["ensemble_r2"] = round(ensemble.oos_r2, 3)
         return result
 
     def warm_cache(self) -> None:

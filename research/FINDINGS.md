@@ -72,6 +72,7 @@
 25. **Keepa 3P/FBA/FBM/BB: real signal, too noisy** -- r=0.22-0.37 correlations, NOT purely leaky (premiums appear 17mo before retirement, survive partial correlation). But hurt CV at current n=607. Worth revisiting at 3000+ sets
 26. **Sales rank is the missing gold** -- scraper stores empty sales_rank_json (0 data points extracted); BrickTalk's #1 conviction signal (Amazon velocity/demand)
 27. **Stock market TA does not transfer** -- tested 67 indicators (SMA/EMA/RSI/MACD/Bollinger/Donchian/momentum) on Keepa prices; every feature hurts CV; LEGO prices are RRP-anchored algorithmic, not human-sentiment-driven
+28. **Binary 3P floor above RRP is the first working Keepa feature** -- `kp_fba_floor_above_rrp` gives +0.017 R2 in CV; 135 sets with 3P floor >= RRP grow 11.4% vs 8.8% (+2.5% delta); binary framing avoids the overfitting that killed continuous Keepa features
 
 ## Production Files
 
@@ -137,6 +138,7 @@
 | 27 | Classifier tuning + BrickTalk features | 1701 | AUC=0.979 | Classifier Optuna +0.018 AUC; high_price_barrier dead (MI=0); shelf_life_x_reviews neutral (delta R2=-0.001); regressor unchanged |
 | 28 | Keepa separated signals | 1193 | All hurt CV | 3P FBA/FBM/BB r=0.30-0.37 but all hurt CV; NOT purely leaky (premiums appear 17mo pre-retire, survive partial corr); too noisy at n=607; sales rank empty |
 | 29 | Keepa technical analysis | 550 | All hurt CV | SMA/EMA/RSI/MACD/Bollinger/Donchian on Amazon prices; 67 features tested; best r=0.25; every feature hurts CV; TA doesn't transfer to LEGO pricing |
+| 30 | 3P spread (BrickTalk exact) | 642 | fba_floor +0.017 | Binary "3P floor above RRP" = first Keepa feature to improve CV; 135 sets, +2.5% avg growth delta; added to pipeline |
 
 ## Architecture Change: v1 -> v2
 
@@ -515,6 +517,52 @@ Applied stock market technical analysis indicators to Keepa Amazon price timelin
 5. **No volume data** -- TA assumes price+volume. Without sales rank/volume, half the TA toolkit (OBV, VWAP, accumulation/distribution) is unavailable.
 
 **Verdict**: Stock market TA does not transfer to LEGO price analysis. The price dynamics are fundamentally different (algorithmic RRP-anchored vs human sentiment-driven). The only potentially useful Keepa signal remains sales rank (velocity), which our scraper doesn't extract.
+
+## Experiment 30: 3P Spread Analysis — BrickTalk's Exact Signal (2026-04-07)
+
+Tested BrickTalk's specific framing: "has the 3P FBA minimum price stayed above retail?" as a binary demand signal.
+
+### BrickTalk Signal Validation
+
+| Group | n | Avg Growth | Median |
+|-------|---|-----------|--------|
+| 3P floor ABOVE RRP | 135 | **11.4%** | **9.7%** |
+| 3P floor below RRP | 507 | 8.8% | 6.6% |
+| **Delta** | | **+2.5%** | **+3.2%** |
+
+Amazon-discounting-while-3P-holds divergence:
+- Q1 (both discounting): 7.4% growth
+- Q4 (Amazon cheap, 3P premium): 10.3% growth
+- Clean monotonic gradient across quartiles
+
+### CV Results (features with positive delta)
+
+| Feature | R2 | Delta |
+|---------|-----|-------|
+| T1 only (642 sets) | 0.278 | baseline |
+| + **kp_fba_floor_above_rrp** (binary) | **0.295** | **+0.017** |
+| + spread_bb_last_vs_rrp | 0.287 | +0.008 |
+| + spread_fbm_mean_vs_rrp | 0.286 | +0.008 |
+| + spread_fba_never_below_rrp | 0.282 | +0.004 |
+| + spread_fba_floor_vs_rrp (continuous) | 0.280 | +0.002 |
+| + top 3 combined | 0.222 | -0.056 |
+
+### Why Binary Works Where Continuous Failed
+
+`kp_fba_floor_above_rrp` is the **first Keepa feature to improve CV**. The binary framing succeeds because:
+1. It captures a categorical distinction (demand > supply sets) without overfitting to price magnitude
+2. It's robust to price noise -- a set either maintained 3P above retail or it didn't
+3. Combining multiple continuous spread features causes collinearity and overfitting
+
+### Added to Pipeline
+
+Added to `TIER2_FEATURES` and `engineer_keepa_features()`:
+- `kp_fba_floor_above_rrp` -- binary: min 3P FBA price >= 98% RRP
+- `kp_fba_floor_vs_rrp` -- continuous: min 3P FBA vs RRP %
+- `kp_fbm_mean_vs_rrp` -- continuous: mean 3P FBM vs RRP %
+- `kp_fba_never_below_rrp` -- binary: all 3P FBA prices >= 95% RRP
+
+Feature selection (MI + LOFO) will prune any that don't survive in production training.
 
 ## Next Steps
 

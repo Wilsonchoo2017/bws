@@ -11,7 +11,10 @@ interface GrowthPrediction {
   set_number: string;
   growth_pct: number;
   confidence: string;
-  tier: number;
+  tier?: number;
+  buy_signal?: boolean;
+  avoid?: boolean;
+  avoid_probability?: number;
   drivers?: Driver[];
   shap_base?: number;
 }
@@ -141,20 +144,31 @@ export function MLPredictionPanel({ setNumber }: MLPredictionPanelProps) {
     );
   }
 
-  const { growth_pct, confidence, tier, drivers, shap_base } = prediction;
+  const { growth_pct, confidence, drivers, shap_base, buy_signal, avoid, avoid_probability } = prediction;
   const badge = confidenceBadge(confidence);
   const hasShap = shap_base != null;
+
+  const signalLabel = avoid
+    ? 'AVOID'
+    : buy_signal
+      ? 'BUY'
+      : 'HOLD';
+  const signalColor = avoid
+    ? 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300'
+    : buy_signal
+      ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-300'
+      : 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-300';
 
   return (
     <div className="rounded-lg border border-border p-4">
       <div className="flex items-center justify-between">
         <h2 className="text-lg font-semibold">ML Growth Prediction</h2>
         <div className="flex items-center gap-2">
+          <span className={`rounded-full px-2.5 py-0.5 text-xs font-bold ${signalColor}`}>
+            {signalLabel}
+          </span>
           <span className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${badge.className}`}>
             {badge.label}
-          </span>
-          <span className="text-xs text-muted-foreground">
-            {tierLabel(tier)}
           </span>
         </div>
       </div>
@@ -173,27 +187,23 @@ export function MLPredictionPanel({ setNumber }: MLPredictionPanelProps) {
         {/* Context */}
         <div className="flex flex-col gap-2 text-sm">
           <div className="flex items-center gap-2">
-            <span className="text-muted-foreground">Verdict:</span>
+            <span className="text-muted-foreground">Signal:</span>
             <span className="font-medium">
-              {growth_pct >= 15
-                ? 'Strong Buy'
-                : growth_pct >= 10
-                  ? 'Buy'
-                  : growth_pct >= 5
-                    ? 'Hold'
-                    : 'Avoid'}
+              {avoid
+                ? 'Classifier flagged as loser — do not buy'
+                : buy_signal
+                  ? `Buy — growth above ${8}% hurdle`
+                  : `Hold — growth below ${8}% hurdle`}
             </span>
           </div>
-          <div className="flex items-center gap-2">
-            <span className="text-muted-foreground">Model:</span>
-            <span>
-              GBM with{' '}
-              {tier === 2 ? '21 features (incl. Keepa Amazon data)' : '14 intrinsic features'}
-            </span>
-          </div>
+          {avoid_probability != null && (
+            <div className="flex items-center gap-2">
+              <span className="text-muted-foreground">Risk:</span>
+              <span>{(avoid_probability * 100).toFixed(0)}% chance of underperformance</span>
+            </div>
+          )}
           <div className="text-xs text-muted-foreground">
             Based on theme, subtheme, set characteristics, and pricing strategy.
-            {tier === 2 && ' Enhanced with Amazon demand signals.'}
           </div>
         </div>
       </div>
@@ -287,12 +297,6 @@ export function MLPredictionPanel({ setNumber }: MLPredictionPanelProps) {
         </div>
       </div>
 
-      {/* Tier upgrade hint for Tier 1 predictions */}
-      {tier === 1 && (
-        <p className="mt-3 text-xs text-muted-foreground">
-          Tier 1 only (intrinsic features). Add Keepa Amazon price history to unlock Tier 2 for higher confidence.
-        </p>
-      )}
     </div>
   );
 }

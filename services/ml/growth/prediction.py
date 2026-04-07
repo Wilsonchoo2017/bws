@@ -1,7 +1,11 @@
-"""Growth model prediction using hurdle model.
+"""Growth model prediction — simplified production pipeline.
 
-Combines classifier P(avoid) with regressor E[growth | non-loser]
-to produce risk-adjusted predictions per set.
+Architecture:
+  1. Classifier: P(avoid) — gate to filter out losers
+  2. Regressor: E[growth] — predicted annual growth %
+  3. Buy signal: pass classifier AND growth >= hurdle
+
+No T1/T2/ensemble complexity. One regressor, one classifier, one answer.
 """
 
 from __future__ import annotations
@@ -14,7 +18,6 @@ import pandas as pd
 from config.ml import MLPipelineConfig
 from services.ml.growth.classifier import (
     TrainedClassifier,
-    hurdle_combine,
     predict_avoid_proba,
 )
 from services.ml.growth.features import engineer_intrinsic_features, engineer_keepa_features
@@ -23,6 +26,12 @@ from services.ml.growth.types import GrowthPrediction, TrainedEnsemble, TrainedG
 _cfg = MLPipelineConfig()
 
 logger = logging.getLogger(__name__)
+
+# Sets with P(avoid) above this are flagged as AVOID
+AVOID_GATE_THRESHOLD = 0.5
+
+# Minimum predicted growth to trigger a BUY signal
+BUY_HURDLE_PCT = 8.0
 
 
 def predict_growth(
@@ -36,13 +45,13 @@ def predict_growth(
     classifier: TrainedClassifier | None = None,
     ensemble: TrainedEnsemble | None = None,
 ) -> list[GrowthPrediction]:
-    """Generate hurdle-model growth predictions for candidate sets.
+    """Generate growth predictions with buy/avoid signals.
 
     Steps:
-    1. Engineer features
-    2. Get P(avoid) from classifier (if available)
-    3. Get raw growth from regressor (Tier 2 if Keepa, else Tier 1)
-    4. Combine via hurdle: P(good) * regressor + P(bad) * median_loser
+    1. Engineer features (intrinsic + Keepa)
+    2. Regressor predicts growth % (uses tier1 model on all sets)
+    3. Classifier computes P(avoid)
+    4. Buy signal = P(avoid) < gate AND growth >= hurdle
     """
     if candidates.empty:
         return []
@@ -55,21 +64,9 @@ def predict_growth(
     )
     df_feat = engineer_keepa_features(df_feat, keepa_df)
 
-    has_kp = df_feat["kp_bb_premium"].notna() | df_feat["kp_below_rrp_pct"].notna()
-    use_tier2 = tier2 is not None and has_kp.any()
-
-    # Tier 1: all sets
-    all_preds = _predict_batch(df_feat, tier1, classifier)
-
-    # Tier 2: sets with Keepa
-    if use_tier2 and tier2 is not None:
-        all_preds.extend(_predict_batch(df_feat[has_kp], tier2, classifier))
-
-    # Ensemble or best-tier selection
-    if ensemble is not None:
-        predictions = _apply_ensemble(all_preds, ensemble)
-    else:
-        predictions = _select_best_tier(all_preds)
+    # Use tier1 (primary model) for all sets
+    model_obj = tier1
+    predictions = _predict_batch(df_feat, model_obj, classifier)
 
     return sorted(predictions, key=lambda p: p.predicted_growth_pct, reverse=True)
 
@@ -79,7 +76,7 @@ def _predict_batch(
     model_obj: TrainedGrowthModel,
     classifier: TrainedClassifier | None,
 ) -> list[GrowthPrediction]:
-    """Predictions for a batch using one tier, with hurdle adjustment."""
+    """Predictions for all sets: regressor growth + classifier gate + buy signal."""
     fill_map = dict(model_obj.fill_values)
     feat_names = [f for f in model_obj.feature_names if f in df_feat.columns]
     if len(feat_names) < len(model_obj.feature_names) * 0.5:
@@ -115,12 +112,11 @@ def _predict_batch(
 
         preds = apply_calibration(preds, model_obj.isotonic_calibrator)
 
-    raw_growth = preds.copy()
+    predicted_growth = preds.copy()
 
-    # Hurdle model: combine with classifier P(avoid)
+    # Classifier: P(avoid)
     avoid_probs = None
     if classifier is not None:
-        # Build classifier feature matrix (same features as tier 1)
         clf_feats = [f for f in classifier.feature_names if f in df_feat.columns]
         X_clf = df_feat.loc[X_batch.index, clf_feats].copy()
         for c in X_clf.columns:
@@ -134,14 +130,13 @@ def _predict_batch(
         X_clf = X_clf[list(classifier.feature_names)]
 
         avoid_probs = predict_avoid_proba(X_clf.values, classifier)
-        preds = hurdle_combine(preds, avoid_probs, classifier.median_loser_return)
 
     # Conformal intervals
     intervals: list | None = None
     if model_obj.conformal_calibration is not None:
         from services.ml.growth.conformal import batch_predict_with_intervals
 
-        intervals = batch_predict_with_intervals(preds, model_obj.conformal_calibration)
+        intervals = batch_predict_with_intervals(predicted_growth, model_obj.conformal_calibration)
 
     # SHAP explanations
     shap_explanations = None
@@ -168,8 +163,11 @@ def _predict_batch(
 
     for i, (_, row) in enumerate(df_feat.loc[X_batch.index].iterrows()):
         coverage = 1 - (n_missing_per_row.iloc[i] / n_feat) if n_feat > 0 else 0
+        growth_i = float(predicted_growth[i])
+        ap = float(avoid_probs[i]) if avoid_probs is not None else None
 
-        if model_obj.tier == 2 and coverage > 0.8:
+        # Confidence from feature coverage
+        if coverage > 0.8:
             confidence = "high"
         elif coverage > 0.7:
             confidence = "moderate"
@@ -185,95 +183,29 @@ def _predict_batch(
             contribs = top_global
             base_val = None
 
-        ap = float(avoid_probs[i]) if avoid_probs is not None else None
-
         # Kelly position sizing
         win_prob_i, kelly_frac_i = None, None
         if model_obj.kelly_calibration is not None:
             from services.ml.growth.training import kelly_for_prediction
 
             win_prob_i, kelly_frac_i = kelly_for_prediction(
-                float(preds[i]), model_obj.kelly_calibration, ap,
+                growth_i, model_obj.kelly_calibration, ap,
             )
 
         predictions.append(GrowthPrediction(
             set_number=row["set_number"],
             title=str(row.get("title", "")),
             theme=str(row.get("theme", "")),
-            predicted_growth_pct=round(float(preds[i]), 1),
+            predicted_growth_pct=round(growth_i, 1),
             confidence=confidence,
-            tier=model_obj.tier,
+            tier=1,
             feature_contributions=contribs,
             prediction_interval=intervals[i] if intervals else None,
             shap_base_value=base_val,
             avoid_probability=ap,
-            raw_growth_pct=round(float(raw_growth[i]), 1),
+            raw_growth_pct=round(growth_i, 1),
             kelly_fraction=kelly_frac_i,
             win_probability=win_prob_i,
         ))
 
     return predictions
-
-
-def _select_best_tier(
-    all_preds: list[GrowthPrediction],
-) -> list[GrowthPrediction]:
-    """Best tier per set (highest tier with good confidence)."""
-    by_set: dict[str, list[GrowthPrediction]] = {}
-    for p in all_preds:
-        by_set.setdefault(p.set_number, []).append(p)
-
-    result: list[GrowthPrediction] = []
-    for preds in by_set.values():
-        good = [p for p in preds if p.confidence in ("high", "moderate")]
-        if good:
-            result.append(max(good, key=lambda p: p.tier))
-        else:
-            result.append(max(preds, key=lambda p: p.tier))
-
-    return result
-
-
-def _apply_ensemble(
-    predictions: list[GrowthPrediction],
-    ensemble: TrainedEnsemble,
-) -> list[GrowthPrediction]:
-    """Blend predictions via meta-model where all tiers available."""
-    by_set: dict[str, dict[int, GrowthPrediction]] = {}
-    for p in predictions:
-        by_set.setdefault(p.set_number, {})[p.tier] = p
-
-    tier_order = [int(name.replace("tier", "")) for name, _ in ensemble.weights]
-
-    result: list[GrowthPrediction] = []
-    for tier_preds in by_set.values():
-        meta_feats = []
-        for t in tier_order:
-            if t in tier_preds:
-                meta_feats.append(tier_preds[t].predicted_growth_pct)
-            else:
-                meta_feats.append(np.nan)
-
-        if any(np.isnan(f) for f in meta_feats):
-            best = max(tier_preds.values(), key=lambda p: p.tier)
-            result.append(best)
-            continue
-
-        meta_X = np.array([meta_feats])
-        meta_X_s = ensemble.meta_scaler.transform(meta_X)
-        blended = float(ensemble.meta_model.predict(meta_X_s)[0])
-
-        best = max(tier_preds.values(), key=lambda p: p.tier)
-        result.append(GrowthPrediction(
-            set_number=best.set_number,
-            title=best.title,
-            theme=best.theme,
-            predicted_growth_pct=round(blended, 1),
-            confidence="high" if best.confidence in ("high", "moderate") else "moderate",
-            tier=4,
-            feature_contributions=best.feature_contributions,
-            avoid_probability=best.avoid_probability,
-            raw_growth_pct=best.raw_growth_pct,
-        ))
-
-    return result

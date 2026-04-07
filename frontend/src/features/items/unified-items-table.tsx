@@ -163,33 +163,25 @@ const columns: ColumnDef<UnifiedItem>[] = [
         growth >= 10 ? 'text-green-600 dark:text-green-400' :
         growth >= 5 ? 'text-yellow-600 dark:text-yellow-400' :
         'text-red-500';
-      const tier = row.original.ml_tier;
-      const conf = row.original.ml_confidence;
       const avoid = row.original.ml_avoid_probability;
-      const riskLabel = avoid != null
-        ? avoid >= 0.8 ? 'RISK' : avoid >= 0.5 ? 'WARN' : null
-        : null;
+      const isAvoid = avoid != null && avoid >= 0.5;
+      const isBuy = !isAvoid && growth >= 8;
+      const signalLabel = isAvoid ? 'AVOID' : isBuy ? 'BUY' : 'HOLD';
+      const signalClass = isAvoid
+        ? 'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300'
+        : isBuy
+          ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300'
+          : 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/40 dark:text-yellow-300';
       return (
         <div className='flex flex-col gap-0.5'>
           <div className='flex items-center gap-1'>
             <span className={`font-mono text-sm font-semibold ${color}`}>
               +{growth.toFixed(1)}%
             </span>
-            {riskLabel && (
-              <span className={`rounded px-1 text-[9px] font-bold ${
-                riskLabel === 'RISK'
-                  ? 'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300'
-                  : 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/40 dark:text-yellow-300'
-              }`}>
-                {riskLabel}
-              </span>
-            )}
-          </div>
-          {tier != null && (
-            <span className='text-muted-foreground text-[10px] leading-tight'>
-              T{tier}{conf === 'high' ? ' H' : conf === 'moderate' ? ' M' : conf === 'low' ? ' L' : ''}
+            <span className={`rounded px-1 text-[9px] font-bold ${signalClass}`}>
+              {signalLabel}
             </span>
-          )}
+          </div>
         </div>
       );
     },
@@ -369,7 +361,7 @@ export function UnifiedItemsTable() {
   const [adding, setAdding] = useState(false);
   const [addError, setAddError] = useState<string | null>(null);
   const [growthFilter, setGrowthFilter] = useState<'all' | 'strong' | 'buy' | 'hold' | 'avoid' | 'no_pred'>('all');
-  const [tierFilter, setTierFilter] = useState<'all' | '1' | '2' | '3' | '4'>('all');
+  const [tierFilter, setTierFilter] = useState<'all' | 'buy' | 'hold' | 'avoid'>('all');
   const [confidenceFilter, setConfidenceFilter] = useState<'all' | 'high' | 'moderate' | 'low'>('all');
   const [showWatchlistOnly, setShowWatchlistOnly] = useState(false);
 
@@ -413,8 +405,22 @@ export function UnifiedItemsTable() {
       result = result.filter((item) => item.ml_growth_pct == null);
     }
     if (tierFilter !== 'all') {
-      const t = Number(tierFilter);
-      result = result.filter((item) => item.ml_tier === t);
+      // tierFilter now acts as signal filter: buy/hold/avoid
+      if (tierFilter === 'buy') {
+        result = result.filter((item) => {
+          const avoid = item.ml_avoid_probability;
+          const isAvoid = avoid != null && avoid >= 0.5;
+          return !isAvoid && item.ml_growth_pct != null && item.ml_growth_pct >= 8;
+        });
+      } else if (tierFilter === 'avoid') {
+        result = result.filter((item) => item.ml_avoid_probability != null && item.ml_avoid_probability >= 0.5);
+      } else if (tierFilter === 'hold') {
+        result = result.filter((item) => {
+          const avoid = item.ml_avoid_probability;
+          const isAvoid = avoid != null && avoid >= 0.5;
+          return !isAvoid && item.ml_growth_pct != null && item.ml_growth_pct < 8;
+        });
+      }
     }
     if (confidenceFilter !== 'all') {
       result = result.filter((item) => item.ml_confidence === confidenceFilter);
@@ -476,9 +482,9 @@ export function UnifiedItemsTable() {
       const mlMap = new Map<string, {
         growth: number;
         confidence: string | null;
-        tier: number | null;
         avoid_probability: number | null;
-        raw_growth_pct: number | null;
+        buy_signal: boolean;
+        avoid: boolean;
         kelly_fraction: number | null;
         win_probability: number | null;
       }>();
@@ -489,9 +495,9 @@ export function UnifiedItemsTable() {
             mlMap.set(setNum, {
               growth: sig.ml_growth_pct,
               confidence: sig.ml_confidence ?? null,
-              tier: sig.ml_tier ?? null,
               avoid_probability: sig.ml_avoid_probability ?? null,
-              raw_growth_pct: sig.ml_raw_growth_pct ?? null,
+              buy_signal: sig.ml_buy_signal ?? false,
+              avoid: sig.ml_avoid ?? false,
               kelly_fraction: sig.ml_kelly_fraction ?? null,
               win_probability: sig.ml_win_probability ?? null,
             });
@@ -505,9 +511,10 @@ export function UnifiedItemsTable() {
           ...item,
           ml_growth_pct: ml?.growth ?? null,
           ml_confidence: ml?.confidence ?? null,
-          ml_tier: ml?.tier ?? null,
+          ml_tier: null,
           ml_avoid_probability: ml?.avoid_probability ?? null,
-          ml_raw_growth_pct: ml?.raw_growth_pct ?? null,
+          ml_buy_signal: ml?.buy_signal ?? false,
+          ml_avoid: ml?.avoid ?? false,
           ml_kelly_fraction: ml?.kelly_fraction ?? null,
           ml_win_probability: ml?.win_probability ?? null,
         };
@@ -730,11 +737,10 @@ export function UnifiedItemsTable() {
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value='all'>All tiers</SelectItem>
-              <SelectItem value='1'>Tier 1 (Intrinsic)</SelectItem>
-              <SelectItem value='2'>Tier 2 (+ Keepa)</SelectItem>
-              <SelectItem value='3'>Tier 3 (Extractors)</SelectItem>
-              <SelectItem value='4'>Tier 4 (Ensemble)</SelectItem>
+              <SelectItem value='all'>All signals</SelectItem>
+              <SelectItem value='buy'>BUY only</SelectItem>
+              <SelectItem value='hold'>HOLD only</SelectItem>
+              <SelectItem value='avoid'>AVOID only</SelectItem>
             </SelectContent>
           </Select>
           <Select

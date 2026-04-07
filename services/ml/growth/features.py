@@ -56,6 +56,9 @@ GROWTH_RANK_FEATURES: tuple[str, ...] = (
 TIER2_FEATURES: tuple[str, ...] = TIER1_FEATURES + (
     "kp_below_rrp_pct", "kp_avg_discount", "kp_max_discount",
     "kp_price_trend", "kp_price_cv", "kp_months_stock", "kp_bb_premium",
+    # 3P spread features (Exp 30: BrickTalk "3P floor above retail" signal)
+    "kp_fba_floor_above_rrp", "kp_fba_floor_vs_rrp",
+    "kp_fbm_mean_vs_rrp", "kp_fba_never_below_rrp",
 )
 
 
@@ -394,10 +397,48 @@ def engineer_keepa_features(
                             rec["kp_bb_premium"] = (point[1] - set_rrp) / set_rrp * 100
                             break
 
+        # --- 3P FBA spread features (BrickTalk "floor above retail" signal) ---
+        fba_raw = kr.get("new_3p_fba_json")
+        fba_data = json.loads(fba_raw) if isinstance(fba_raw, str) else (fba_raw or [])
+        if isinstance(fba_data, list):
+            fba_prices: list[float] = []
+            for point in fba_data:
+                if cutoff and isinstance(point[0], str) and point[0][:7] > cutoff:
+                    break
+                if len(point) >= 2 and point[1] is not None and point[1] > 0:
+                    fba_prices.append(float(point[1]))
+
+            if len(fba_prices) >= 3:
+                fba_min = min(fba_prices)
+                rec["kp_fba_floor_vs_rrp"] = (fba_min - set_rrp) / set_rrp * 100
+                rec["kp_fba_floor_above_rrp"] = 1.0 if fba_min > set_rrp * 0.98 else 0.0
+                rec["kp_fba_never_below_rrp"] = (
+                    1.0 if all(p >= set_rrp * 0.95 for p in fba_prices) else 0.0
+                )
+
+        # --- 3P FBM mean vs RRP ---
+        fbm_raw = kr.get("new_3p_fbm_json")
+        fbm_data = json.loads(fbm_raw) if isinstance(fbm_raw, str) else (fbm_raw or [])
+        if isinstance(fbm_data, list):
+            fbm_prices: list[float] = []
+            for point in fbm_data:
+                if cutoff and isinstance(point[0], str) and point[0][:7] > cutoff:
+                    break
+                if len(point) >= 2 and point[1] is not None and point[1] > 0:
+                    fbm_prices.append(float(point[1]))
+
+            if len(fbm_prices) >= 3:
+                rec["kp_fbm_mean_vs_rrp"] = (np.mean(fbm_prices) - set_rrp) / set_rrp * 100
+
         keepa_feats[sn] = rec
 
-    for feat in ("kp_below_rrp_pct", "kp_avg_discount", "kp_max_discount",
-                 "kp_price_trend", "kp_price_cv", "kp_months_stock", "kp_bb_premium"):
+    all_keepa_cols = (
+        "kp_below_rrp_pct", "kp_avg_discount", "kp_max_discount",
+        "kp_price_trend", "kp_price_cv", "kp_months_stock", "kp_bb_premium",
+        "kp_fba_floor_above_rrp", "kp_fba_floor_vs_rrp",
+        "kp_fbm_mean_vs_rrp", "kp_fba_never_below_rrp",
+    )
+    for feat in all_keepa_cols:
         result[feat] = result["set_number"].map(
             lambda sn, f=feat: keepa_feats.get(sn, {}).get(f, np.nan)
         )
