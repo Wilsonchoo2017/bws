@@ -6,14 +6,16 @@ import { WorkersPanel } from './workers-panel';
 import { CoveragePanel } from './coverage-panel';
 import { CooldownsPanel } from './cooldowns-panel';
 import { SettingsPanel } from './settings-panel';
+import { MLPanel } from './ml-panel';
 import type { QueueStats, WorkerJob } from './types';
 
-type Tab = 'workers' | 'cooldowns' | 'coverage' | 'settings';
+type Tab = 'workers' | 'cooldowns' | 'coverage' | 'settings' | 'ml';
 
 const TABS: ReadonlyArray<{ readonly id: Tab; readonly label: string }> = [
   { id: 'workers', label: 'Workers' },
   { id: 'cooldowns', label: 'Cooldowns' },
   { id: 'coverage', label: 'Coverage' },
+  { id: 'ml', label: 'ML' },
   { id: 'settings', label: 'Settings' },
 ];
 
@@ -172,6 +174,7 @@ export function OperationsDashboard() {
       )}
       {tab === 'cooldowns' && <CooldownsPanel />}
       {tab === 'coverage' && <CoveragePanel />}
+      {tab === 'ml' && <MLPanel />}
       {tab === 'settings' && <SettingsPanel />}
     </div>
   );
