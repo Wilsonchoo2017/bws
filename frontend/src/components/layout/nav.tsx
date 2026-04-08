@@ -5,6 +5,7 @@ import { MlStatusBadge } from './ml-status-badge';
 const NAV_ITEMS = [
   { href: '/portfolio', label: 'Portfolio' },
   { href: '/items', label: 'Items' },
+  { href: '/cart', label: 'Cart' },
   { href: '/scrape', label: 'Scrape' },
   { href: '/operations', label: 'Operations' },
 ];

@@ -153,6 +153,16 @@ export function TransactionsTable() {
       size: 110,
     },
     {
+      accessorKey: 'supplier',
+      header: 'Supplier',
+      cell: ({ row }) => (
+        <span className='text-muted-foreground max-w-[100px] truncate text-xs'>
+          {row.getValue('supplier') ?? ''}
+        </span>
+      ),
+      size: 100,
+    },
+    {
       accessorKey: 'notes',
       header: 'Notes',
       cell: ({ row }) => (

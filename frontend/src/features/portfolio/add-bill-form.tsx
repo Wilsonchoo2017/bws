@@ -71,6 +71,9 @@ export function AddBillForm({ onSuccess, editData, onCancel }: AddBillFormProps)
   const [notes, setNotes] = useState(
     isEdit ? editData.transactions[0].notes ?? '' : ''
   );
+  const [supplier, setSupplier] = useState(
+    isEdit ? editData.transactions[0].supplier ?? '' : ''
+  );
 
   const resetForm = () => {
     setItems([emptyLine()]);
@@ -78,6 +81,7 @@ export function AddBillForm({ onSuccess, editData, onCancel }: AddBillFormProps)
     setTxnDate(new Date().toISOString().split('T')[0]);
     setCondition('new');
     setNotes('');
+    setSupplier('');
     setError(null);
   };
 
@@ -205,6 +209,7 @@ export function AddBillForm({ onSuccess, editData, onCancel }: AddBillFormProps)
       txn_date: new Date(txnDate).toISOString(),
       condition,
       notes: notes.trim() || null,
+      supplier: supplier.trim() || null,
     };
 
     const url = isEdit
@@ -267,7 +272,7 @@ export function AddBillForm({ onSuccess, editData, onCancel }: AddBillFormProps)
       {error && <p className='text-destructive text-sm'>{error}</p>}
 
       {/* Shared fields */}
-      <div className='grid grid-cols-3 gap-3'>
+      <div className='grid grid-cols-2 gap-3 sm:grid-cols-4'>
         <div>
           <label className='text-muted-foreground text-xs'>Date</label>
           <input
@@ -288,6 +293,16 @@ export function AddBillForm({ onSuccess, editData, onCancel }: AddBillFormProps)
             <option value='new'>New</option>
             <option value='used'>Used</option>
           </select>
+        </div>
+        <div>
+          <label className='text-muted-foreground text-xs'>Supplier</label>
+          <input
+            type='text'
+            value={supplier}
+            onChange={(e) => setSupplier(e.target.value)}
+            placeholder='Shopee, Lazada...'
+            className='border-input bg-background mt-1 w-full rounded border px-2 py-1.5 text-sm'
+          />
         </div>
         <div>
           <label className='text-muted-foreground text-xs'>Notes</label>

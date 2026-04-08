@@ -23,6 +23,13 @@ interface SettingsData {
       category: string;
     };
   };
+  cart: {
+    min_liquidity_score: number;
+    deal_threshold_pct: number;
+    min_confidence: string;
+    max_avoid_probability: number;
+    min_growth_pct: number;
+  };
 }
 
 type Section = keyof SettingsData;
@@ -34,6 +41,7 @@ const SECTION_LABELS: Record<string, string> = {
   schedulers: 'Scheduler Intervals',
   dispatcher: 'Dispatcher',
   listing: 'Listing Defaults',
+  cart: 'Cart Auto-Scan',
 };
 
 const FIELD_LABELS: Record<string, string> = {
@@ -53,6 +61,11 @@ const FIELD_LABELS: Record<string, string> = {
   checkpoint_interval_s: 'Checkpoint Interval (s)',
   max_photos: 'Max Photos',
   category: 'Category',
+  min_liquidity_score: 'Min Liquidity Score',
+  deal_threshold_pct: 'Deal Threshold (%)',
+  min_confidence: 'Min ML Confidence',
+  max_avoid_probability: 'Max Avoid Probability',
+  min_growth_pct: 'Min Growth (%)',
 };
 
 const SOURCE_LABELS: Record<string, string> = {
@@ -475,6 +488,46 @@ export function SettingsPanel() {
             onChange={(v) =>
               updateStringField('listing', ['shopee', 'category'], v)
             }
+          />
+        </div>
+      </SettingsSection>
+
+      {/* Cart Auto-Scan */}
+      <SettingsSection
+        title={SECTION_LABELS.cart}
+        section='cart'
+        hasChanges={hasChanges('cart')}
+        isDefault={isDefault('cart')}
+        saving={saving === 'cart'}
+        saved={saved === 'cart'}
+        onSave={() => saveSection('cart')}
+        onReset={() => resetSection('cart')}
+      >
+        <div className='grid gap-x-6 gap-y-1 sm:grid-cols-2 lg:grid-cols-3'>
+          <NumberField
+            label={FIELD_LABELS.min_liquidity_score}
+            value={draft.cart.min_liquidity_score}
+            onChange={(v) => updateField('cart', ['min_liquidity_score'], v)}
+          />
+          <NumberField
+            label={FIELD_LABELS.deal_threshold_pct}
+            value={draft.cart.deal_threshold_pct}
+            onChange={(v) => updateField('cart', ['deal_threshold_pct'], v)}
+          />
+          <TextField
+            label={FIELD_LABELS.min_confidence}
+            value={draft.cart.min_confidence}
+            onChange={(v) => updateStringField('cart', ['min_confidence'], v)}
+          />
+          <NumberField
+            label={FIELD_LABELS.max_avoid_probability}
+            value={draft.cart.max_avoid_probability}
+            onChange={(v) => updateField('cart', ['max_avoid_probability'], v)}
+          />
+          <NumberField
+            label={FIELD_LABELS.min_growth_pct}
+            value={draft.cart.min_growth_pct}
+            onChange={(v) => updateField('cart', ['min_growth_pct'], v)}
           />
         </div>
       </SettingsSection>

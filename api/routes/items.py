@@ -335,6 +335,15 @@ async def get_item(set_number: str, conn: Any = Depends(get_db)):
     ).fetchone()
     item["in_portfolio"] = (held[0] or 0) > 0
 
+    # Marketplace listings
+    from services.listing.repository import get_listings_for_set
+    item["marketplace_listings"] = get_listings_for_set(conn, set_number)
+    item["listed_on"] = [
+        ml["platform"]
+        for ml in item["marketplace_listings"]
+        if ml["status"] == "active"
+    ]
+
     # ML growth prediction
     from services.scoring.provider import enrich_signals
 

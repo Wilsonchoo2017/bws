@@ -30,6 +30,7 @@ export function EditTransactionForm({
     new Date(transaction.txn_date).toISOString().split('T')[0]
   );
   const [notes, setNotes] = useState(transaction.notes ?? '');
+  const [supplier, setSupplier] = useState(transaction.supplier ?? '');
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -60,6 +61,14 @@ export function EditTransactionForm({
         body.clear_notes = true;
       } else {
         body.notes = trimmedNotes;
+      }
+    }
+    const trimmedSupplier = supplier.trim() || null;
+    if (trimmedSupplier !== (transaction.supplier ?? null)) {
+      if (trimmedSupplier === null) {
+        body.clear_supplier = true;
+      } else {
+        body.supplier = trimmedSupplier;
       }
     }
 
@@ -152,7 +161,17 @@ export function EditTransactionForm({
             className='border-input bg-background mt-1 w-full rounded border px-2 py-1.5 text-sm'
           />
         </div>
-        <div className='col-span-2'>
+        <div>
+          <label className='text-muted-foreground text-xs'>Supplier</label>
+          <input
+            type='text'
+            value={supplier}
+            onChange={(e) => setSupplier(e.target.value)}
+            placeholder='Shopee, Lazada...'
+            className='border-input bg-background mt-1 w-full rounded border px-2 py-1.5 text-sm'
+          />
+        </div>
+        <div>
           <label className='text-muted-foreground text-xs'>Notes</label>
           <input
             type='text'

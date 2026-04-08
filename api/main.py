@@ -11,7 +11,7 @@ import colorlog
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from api.routes import enrichment, images, items, listing, ml, portfolio, scrape, settings, stats
+from api.routes import cart, enrichment, images, items, listing, ml, portfolio, scrape, settings, stats
 from api.worker import run_worker
 from services.brickeconomy.analysis_scheduler import run_analysis_sweep
 from services.enrichment.scheduler import run_enrichment_sweep, run_priority_rescrape_sweep, run_retiring_soon_sweep
@@ -252,6 +252,7 @@ app.include_router(ml.router, prefix="/api")
 app.include_router(stats.router, prefix="/api")
 app.include_router(settings.router, prefix="/api")
 app.include_router(listing.router, prefix="/api")
+app.include_router(cart.router, prefix="/api")
 
 
 @app.get("/api/health")

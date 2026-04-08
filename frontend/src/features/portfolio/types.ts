@@ -10,6 +10,7 @@ export interface Transaction {
   notes: string | null;
   created_at: string;
   bill_id: string | null;
+  supplier: string | null;
   title: string | null;
   image_url: string | null;
   theme: string | null;

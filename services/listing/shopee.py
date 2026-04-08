@@ -90,7 +90,7 @@ async def _create_listing(page: Page, set_number: str) -> bool:
     )
 
     # Step 5: Fill the product form
-    return await create_product(
+    success = await create_product(
         page,
         item=item,
         minifigures=minifigures,
@@ -101,6 +101,13 @@ async def _create_listing(page: Page, set_number: str) -> bool:
         weight_kg=weight,
         dims=dims,
     )
+
+    # Step 6: Record listing in database
+    if success:
+        from services.listing.repository import record_listing
+        record_listing(conn, set_number, "shopee", listing_price)
+
+    return success
 
 
 def navigate_and_login() -> bool:

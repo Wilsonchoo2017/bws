@@ -196,6 +196,14 @@ class CarousellSettings:
     timezone_id: str = "Asia/Kuala_Lumpur"
     captcha_timeout_s: int = 120  # seconds to wait for human captcha solve
 
+    # Listing defaults
+    meetup_location_query: str = "KG07 MRT Surian"
+    meetup_location_label: str = "RapidKL Surian (KG07)"
+    postage_fee_note: str = "Postage Fee +10 MYR for West Malaysia"
+    meetup_note: str = (
+        "COD/Meet UP: McDonald's Kota Damansara DT or Surian MRT Station"
+    )
+
 
 CAROUSELL_CONFIG = CarousellSettings()
 

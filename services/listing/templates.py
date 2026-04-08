@@ -14,10 +14,40 @@ import asyncio
 import logging
 
 import httpx
+from PIL import Image
 
 _IMAGES_BASE = Path.home() / ".bws" / "images"
+_PROCESSED_DIR = _IMAGES_BASE / "processed"
+
+BRAND_COLOR = (149, 22, 12)  # Brickwerk dark red (#95160c)
+BORDER_RATIO = 0.06  # Border width as fraction of shorter dimension
 
 logger = logging.getLogger("bws.listing.templates")
+
+
+def _add_brand_border(src: Path) -> Path:
+    """Add a brand-colored border to an image, returning the processed path.
+
+    The original file is never modified. Bordered copies are cached in
+    ``_PROCESSED_DIR`` and reused if they already exist and are newer than
+    the source.
+    """
+    _PROCESSED_DIR.mkdir(parents=True, exist_ok=True)
+    dest = _PROCESSED_DIR / f"bordered_{src.name}"
+
+    # Re-use cached version if it's newer than the source
+    if dest.exists() and dest.stat().st_mtime >= src.stat().st_mtime:
+        return dest
+
+    img = Image.open(src).convert("RGB")
+    w, h = img.size
+    border = max(int(min(w, h) * BORDER_RATIO), 2)
+
+    bordered = Image.new("RGB", (w + 2 * border, h + 2 * border), BRAND_COLOR)
+    bordered.paste(img, (border, border))
+    bordered.save(dest, format="PNG")
+    logger.info("Created bordered image %s (%dx%d, border=%dpx)", dest.name, w, h, border)
+    return dest
 
 
 def generate_listing_title(item: dict[str, Any]) -> str:
@@ -54,8 +84,16 @@ def generate_listing_title(item: dict[str, Any]) -> str:
 def generate_listing_description(
     item: dict[str, Any],
     minifigures: list[dict[str, Any]],
+    *,
+    platform: str = "shopee",
 ) -> str:
-    """Generate a marketplace listing description."""
+    """Generate a marketplace listing description.
+
+    Args:
+        item: Item detail dict from database.
+        minifigures: List of minifigure dicts.
+        platform: Target marketplace ("shopee", "carousell", "facebook").
+    """
     lines: list[str] = []
 
     # Keywords up top
@@ -81,6 +119,18 @@ def generate_listing_description(
         lines.append(f"Minifigures: {minifig_count} ({names})")
     elif minifig_count:
         lines.append(f"Minifigures: {minifig_count}")
+
+    # Platform-specific additions
+    if platform == "carousell":
+        from config.settings import CAROUSELL_CONFIG
+        lines.append("")
+        lines.append(CAROUSELL_CONFIG.postage_fee_note)
+        lines.append(CAROUSELL_CONFIG.meetup_note)
+    elif platform == "facebook":
+        from config.settings import CAROUSELL_CONFIG
+        lines.append("")
+        lines.append(CAROUSELL_CONFIG.postage_fee_note)
+        lines.append(CAROUSELL_CONFIG.meetup_note)
 
     return "\n".join(lines)
 
@@ -222,6 +272,7 @@ def collect_image_paths(
     conn: Any,
     set_number: str,
     max_photos: int = 9,
+    brand_border: bool = True,
 ) -> list[Path]:
     """Collect downloaded image file paths for a set and its minifigures.
 
@@ -269,5 +320,9 @@ def collect_image_paths(
                     if p.exists():
                         paths.append(p)
             break
+
+    # Add brand border to the first (set) image
+    if paths and brand_border:
+        paths = [_add_brand_border(paths[0]), *paths[1:]]
 
     return paths[:max_photos]

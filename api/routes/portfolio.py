@@ -40,6 +40,7 @@ class CreateTransactionRequest(BaseModel):
     txn_date: datetime
     currency: str = Field(default="MYR", max_length=3)
     notes: str | None = None
+    supplier: str | None = Field(default=None, max_length=100)
 
 
 @router.post("/transactions", status_code=201)
@@ -65,6 +66,7 @@ async def add_transaction(request: CreateTransactionRequest, conn: Any = Depends
         request.txn_date,
         currency=request.currency,
         notes=request.notes,
+        supplier=request.supplier,
     )
     txn = get_transaction(conn, txn_id)
     return {"success": True, "data": txn}
@@ -85,6 +87,7 @@ class CreateBillRequest(BaseModel):
     condition: str = Field(default="new", pattern=r"^(new|used)$")
     currency: str = Field(default="MYR", max_length=3)
     notes: str | None = None
+    supplier: str | None = Field(default=None, max_length=100)
 
 
 def _compute_effective_prices(
@@ -240,6 +243,7 @@ async def update_bill(
             currency=request.currency,
             notes=request.notes,
             bill_id=bill_id,
+            supplier=request.supplier,
         )
         txn = get_transaction(conn, txn_id)
         created_txns.append(txn)
@@ -288,6 +292,8 @@ class UpdateTransactionRequest(BaseModel):
     txn_date: datetime | None = None
     notes: str | None = None
     clear_notes: bool = False
+    supplier: str | None = None
+    clear_supplier: bool = False
 
 
 @router.put("/transactions/{txn_id}")
@@ -310,6 +316,10 @@ async def edit_transaction(
         kwargs["notes"] = None
     elif request.notes is not None:
         kwargs["notes"] = request.notes
+    if request.clear_supplier:
+        kwargs["supplier"] = None
+    elif request.supplier is not None:
+        kwargs["supplier"] = request.supplier
 
     if not kwargs:
         raise HTTPException(status_code=400, detail="No fields to update")

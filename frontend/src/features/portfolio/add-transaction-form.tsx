@@ -21,6 +21,7 @@ export function AddTransactionForm({ onSuccess }: AddTransactionFormProps) {
     new Date().toISOString().split('T')[0]
   );
   const [notes, setNotes] = useState('');
+  const [supplier, setSupplier] = useState('');
 
   const resetForm = () => {
     setSetNumber('');
@@ -29,6 +30,7 @@ export function AddTransactionForm({ onSuccess }: AddTransactionFormProps) {
     setPriceRM('');
     setTxnDate(new Date().toISOString().split('T')[0]);
     setNotes('');
+    setSupplier('');
     setError(null);
   };
 
@@ -57,6 +59,7 @@ export function AddTransactionForm({ onSuccess }: AddTransactionFormProps) {
           price_cents: priceCents,
           txn_date: new Date(txnDate).toISOString(),
           notes: notes.trim() || null,
+          supplier: supplier.trim() || null,
         }),
       });
 
@@ -166,7 +169,17 @@ export function AddTransactionForm({ onSuccess }: AddTransactionFormProps) {
             className='border-input bg-background mt-1 w-full rounded border px-2 py-1.5 text-sm'
           />
         </div>
-        <div className='col-span-2'>
+        <div>
+          <label className='text-muted-foreground text-xs'>Supplier</label>
+          <input
+            type='text'
+            value={supplier}
+            onChange={(e) => setSupplier(e.target.value)}
+            placeholder='Shopee, Lazada...'
+            className='border-input bg-background mt-1 w-full rounded border px-2 py-1.5 text-sm'
+          />
+        </div>
+        <div>
           <label className='text-muted-foreground text-xs'>Notes</label>
           <input
             type='text'

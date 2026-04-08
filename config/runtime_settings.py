@@ -102,6 +102,16 @@ _DEFAULTS: dict[str, Any] = {
             "max_photos": 9,
             "category": "",
         },
+        "facebook": {
+            "max_photos": 10,
+        },
+    },
+    "cart": {
+        "min_liquidity_score": 50,
+        "deal_threshold_pct": 5,
+        "min_confidence": "high",
+        "max_avoid_probability": 0.5,
+        "min_growth_pct": 8,
     },
 }
 
@@ -213,6 +223,8 @@ def _apply_runtime(section: str, values: dict[str, Any]) -> None:
     elif section == "paused_workers":
         _apply_paused_workers(values)
     elif section == "listing":
+        pass  # static config, no live propagation needed
+    elif section == "cart":
         pass  # static config, no live propagation needed
 
 
