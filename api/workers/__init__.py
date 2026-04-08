@@ -1,6 +1,7 @@
 """Worker registry -- maps scraper_id to source worker instances."""
 
 from api.workers.brickeconomy import BrickeconomyWorker
+from api.workers.hobbydigi import HobbydigiWorker
 from api.workers.bricklink_catalog import BricklinkCatalogWorker
 from api.workers.carousell import CarousellWorker
 from api.workers.enrichment import EnrichmentWorker
@@ -20,6 +21,7 @@ WORKER_REGISTRY = {
         ShopeeWorker(),
         ToysrusWorker(),
         MightyutanWorker(),
+        HobbydigiWorker(),
         ShopeeSaturationWorker(),
         ShopeeCompetitionWorker(),
         BricklinkCatalogWorker(),

@@ -102,6 +102,26 @@ EMPTY_SATURATION_SUMMARY: dict = {
 }
 
 
+def hobbydigi_product_to_dict(product: Any) -> dict:
+    """Transform a HobbyDigi product into a normalized item dict."""
+    price_display = f"RM {product.price_myr}"
+    if product.original_price_myr:
+        price_display = f"RM {product.price_myr} (was RM {product.original_price_myr})"
+    return {
+        "title": product.name,
+        "price_display": price_display,
+        "sold_count": None,
+        "rating": product.rating_pct,
+        "shop_name": "HobbyDigi Malaysia",
+        "product_url": product.url,
+        "image_url": product.image_url,
+        "available": product.available,
+        "original_price_myr": product.original_price_myr,
+        "is_special_price": product.is_special_price,
+        "tags": list(product.tags) if product.tags else [],
+    }
+
+
 def carousell_listing_to_dict(listing: Any) -> dict:
     """Transform a Carousell listing into a normalized item dict."""
     return {

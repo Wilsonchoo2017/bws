@@ -136,6 +136,34 @@ CREATE TABLE IF NOT EXISTS mightyutan_price_history (
 );
 """
 
+HOBBYDIGI_PRODUCTS_DDL = """
+CREATE TABLE IF NOT EXISTS hobbydigi_products (
+    id INTEGER PRIMARY KEY,
+    product_id VARCHAR NOT NULL UNIQUE,
+    name VARCHAR NOT NULL,
+    price_myr VARCHAR,
+    original_price_myr VARCHAR,
+    url VARCHAR,
+    image_url VARCHAR,
+    available BOOLEAN DEFAULT TRUE,
+    rating_pct VARCHAR,
+    tags VARCHAR,
+    last_scraped_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+);
+"""
+
+HOBBYDIGI_PRICE_HISTORY_DDL = """
+CREATE TABLE IF NOT EXISTS hobbydigi_price_history (
+    id INTEGER PRIMARY KEY,
+    product_id VARCHAR NOT NULL,
+    price_myr VARCHAR NOT NULL,
+    available BOOLEAN DEFAULT TRUE,
+    scraped_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+);
+"""
+
 TOYSRUS_PRODUCTS_DDL = """
 CREATE TABLE IF NOT EXISTS toysrus_products (
     id INTEGER PRIMARY KEY,
@@ -555,6 +583,8 @@ CREATE SEQUENCE IF NOT EXISTS shopee_saturation_id_seq;
 CREATE SEQUENCE IF NOT EXISTS shopee_scrape_history_id_seq;
 CREATE SEQUENCE IF NOT EXISTS mightyutan_products_id_seq;
 CREATE SEQUENCE IF NOT EXISTS mightyutan_price_history_id_seq;
+CREATE SEQUENCE IF NOT EXISTS hobbydigi_products_id_seq;
+CREATE SEQUENCE IF NOT EXISTS hobbydigi_price_history_id_seq;
 CREATE SEQUENCE IF NOT EXISTS toysrus_products_id_seq;
 CREATE SEQUENCE IF NOT EXISTS toysrus_price_history_id_seq;
 CREATE SEQUENCE IF NOT EXISTS lego_items_id_seq;
@@ -617,6 +647,10 @@ CREATE INDEX IF NOT EXISTS idx_mightyutan_products_available
     ON mightyutan_products(available);
 CREATE INDEX IF NOT EXISTS idx_mightyutan_price_history_sku
     ON mightyutan_price_history(sku, scraped_at);
+CREATE INDEX IF NOT EXISTS idx_hobbydigi_products_available
+    ON hobbydigi_products(available);
+CREATE INDEX IF NOT EXISTS idx_hobbydigi_price_history_product_id
+    ON hobbydigi_price_history(product_id, scraped_at);
 CREATE INDEX IF NOT EXISTS idx_toysrus_products_available
     ON toysrus_products(available);
 CREATE INDEX IF NOT EXISTS idx_toysrus_price_history_sku
@@ -677,6 +711,9 @@ CREATE INDEX IF NOT EXISTS idx_price_records_source_toysrus
 CREATE INDEX IF NOT EXISTS idx_price_records_source_mightyutan
     ON price_records(set_number, recorded_at DESC)
     WHERE source = 'mightyutan';
+CREATE INDEX IF NOT EXISTS idx_price_records_source_hobbydigi
+    ON price_records(set_number, recorded_at DESC)
+    WHERE source = 'hobbydigi';
 CREATE INDEX IF NOT EXISTS idx_price_records_source_bricklink_new
     ON price_records(set_number, recorded_at DESC)
     WHERE source = 'bricklink_new';
@@ -706,6 +743,8 @@ ALL_DDL = [
     SHOPEE_SCRAPE_HISTORY_DDL,
     MIGHTYUTAN_PRODUCTS_DDL,
     MIGHTYUTAN_PRICE_HISTORY_DDL,
+    HOBBYDIGI_PRODUCTS_DDL,
+    HOBBYDIGI_PRICE_HISTORY_DDL,
     TOYSRUS_PRODUCTS_DDL,
     TOYSRUS_PRICE_HISTORY_DDL,
     LEGO_ITEMS_DDL,
@@ -991,6 +1030,8 @@ _SEQUENCE_TABLE_MAP = [
     ("shopee_scrape_history_id_seq", "shopee_scrape_history"),
     ("mightyutan_products_id_seq", "mightyutan_products"),
     ("mightyutan_price_history_id_seq", "mightyutan_price_history"),
+    ("hobbydigi_products_id_seq", "hobbydigi_products"),
+    ("hobbydigi_price_history_id_seq", "hobbydigi_price_history"),
     ("toysrus_products_id_seq", "toysrus_products"),
     ("toysrus_price_history_id_seq", "toysrus_price_history"),
     ("lego_items_id_seq", "lego_items"),

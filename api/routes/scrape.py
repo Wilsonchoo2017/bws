@@ -72,6 +72,19 @@ SCRAPERS: list[ScraperInfo] = [
         ],
     ),
     ScraperInfo(
+        id="hobbydigi",
+        name="HobbyDigi Malaysia",
+        description="Scrape LEGO catalog from hobbydigi.com/my via Camoufox browser (Magento)",
+        targets=[
+            ScrapeTargetInfo(
+                id="lego-catalog",
+                label="LEGO Full Catalog",
+                url="https://www.hobbydigi.com/my/lego",
+                description="Full LEGO product catalog on HobbyDigi Malaysia",
+            )
+        ],
+    ),
+    ScraperInfo(
         id="shopee_saturation",
         name="Shopee Saturation Checker",
         description="Check market saturation on Shopee for items with retail pricing",
