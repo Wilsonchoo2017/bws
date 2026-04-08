@@ -5,6 +5,8 @@ All functions in this module are pure -- no side effects, no I/O.
 
 from __future__ import annotations
 
+import datetime
+
 import numpy as np
 
 
@@ -65,21 +67,23 @@ def set_number_to_item_id(set_number: str) -> str:
 
 
 def parse_retirement_date(
-    retired_date: str | None,
+    retired_date: str | datetime.date | None,
     year_retired: int | None,
 ) -> tuple[int | None, int | None]:
     """Parse retirement timing into (year, month).
 
-    Tries retired_date ("YYYY-MM" string) first, falls back to
-    year_retired with month=12.
+    Handles DATE objects (from DB), ISO strings ("YYYY-MM-DD" or "YYYY-MM"),
+    and falls back to year_retired with month=12.
 
     Args:
-        retired_date: ISO date string like "2022-06", or None.
+        retired_date: Date object, ISO string, or None.
         year_retired: Retirement year integer, or None.
 
     Returns:
         (year, month) or (None, None) if unparseable.
     """
+    if isinstance(retired_date, datetime.date):
+        return retired_date.year, retired_date.month
     if retired_date and isinstance(retired_date, str) and "-" in retired_date:
         parts = retired_date.split("-")
         try:
@@ -118,7 +122,7 @@ def compute_cutoff_dates(
     for idx, row in result.iterrows():
         rd = row.get("retired_date")
         yr = row.get("year_retired")
-        if pd.notna(rd) and isinstance(rd, str) and "-" in rd:
+        if pd.notna(rd) and (isinstance(rd, (str, datetime.date))):
             ret_year, ret_month = parse_retirement_date(rd, None)
             if ret_year is not None:
                 cy, cm = offset_months(ret_year, ret_month, -cutoff_months)

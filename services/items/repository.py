@@ -186,7 +186,7 @@ def get_all_items_lite(conn: Any) -> list[dict]:
             COALESCE(
                 li.year_retired,
                 be.year_retired,
-                CAST(SUBSTRING(be.retired_date FROM 1 FOR 4) AS INTEGER)
+                EXTRACT(YEAR FROM COALESCE(li.retired_date, be.retired_date))::INTEGER
             ) AS year_retired,
             COALESCE(
                 li.retiring_soon,
@@ -203,7 +203,7 @@ def get_all_items_lite(conn: Any) -> list[dict]:
             li.updated_at,
             li.minifig_count,
             li.dimensions,
-            COALESCE(li.retired_date, be.retired_date) AS retired_date,
+            CAST(COALESCE(li.retired_date, be.retired_date) AS TEXT) AS retired_date,
             be.availability
         FROM lego_items li
         LEFT JOIN latest_be be ON be.set_number = li.set_number AND be.rn = 1
@@ -281,7 +281,7 @@ def get_all_items(conn: Any) -> list[dict]:
             COALESCE(
                 li.year_retired,
                 be.year_retired,
-                CAST(SUBSTRING(be.retired_date FROM 1 FOR 4) AS INTEGER)
+                EXTRACT(YEAR FROM COALESCE(li.retired_date, be.retired_date))::INTEGER
             ) AS year_retired,
             COALESCE(
                 li.retiring_soon,
@@ -298,7 +298,7 @@ def get_all_items(conn: Any) -> list[dict]:
             li.updated_at,
             li.minifig_count,
             li.dimensions,
-            COALESCE(li.retired_date, be.retired_date) AS retired_date,
+            CAST(COALESCE(li.retired_date, be.retired_date) AS TEXT) AS retired_date,
             be.availability,
             s.price_cents AS shopee_price_cents,
             s.currency AS shopee_currency,

@@ -13,8 +13,12 @@ import re
 from dataclasses import dataclass
 
 from config.settings import BRICKECONOMY_CONFIG, BRICKECONOMY_RATE_LIMITER
-from services.brickeconomy.scraper import _detect_cloudflare, _wait_for_cloudflare
 from services.browser import human_delay, new_page, stealth_browser
+from services.browser.cloudflare import (
+    capture_cf_diagnostics,
+    detect_cloudflare,
+    wait_for_cloudflare,
+)
 
 logger = logging.getLogger("bws.brickeconomy.retiring_soon")
 
@@ -96,8 +100,17 @@ async def _scrape_retiring_soon_page(page) -> RetiringSoonResult:
 
     await human_delay(2_000, 4_000)
 
-    if await _detect_cloudflare(page):
-        solved = await _wait_for_cloudflare(page, "retiring-soon-list")
+    if await detect_cloudflare(page):
+        await capture_cf_diagnostics(
+            page, "challenge_detected",
+            source="brickeconomy", query="retiring-soon-list",
+        )
+        solved = await wait_for_cloudflare(
+            page, "retiring-soon-list",
+            source="brickeconomy",
+            timeout_s=BRICKECONOMY_CONFIG.captcha_timeout_s,
+            max_auto_attempts=3,
+        )
         if not solved:
             return RetiringSoonResult(
                 success=False,

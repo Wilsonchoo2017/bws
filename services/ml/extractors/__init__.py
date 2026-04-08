@@ -21,9 +21,9 @@ from services.ml.extractors.keepa import KeepaExtractor
 from services.ml.extractors.keepa_timeline import KeepaTimelineExtractor
 from services.ml.extractors.minifigs import MinifigExtractor
 from services.ml.extractors.shopee import ShopeeExtractor
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-
+if TYPE_CHECKING:
     from services.ml.protocols import FeatureExtractor
     from services.ml.types import FeatureMeta
 

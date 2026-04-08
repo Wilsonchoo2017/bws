@@ -165,6 +165,12 @@ def _extract_features_with_cutoff(
             )
             base.at[idx, "cutoff_year"] = cy
             base.at[idx, "cutoff_month"] = cm
+        elif pd.notna(rd) and hasattr(rd, "year"):  # datetime.date from DB
+            cy, cm = offset_months(
+                rd.year, rd.month, -FEATURE_CUTOFF_MONTHS_BEFORE_RETIREMENT
+            )
+            base.at[idx, "cutoff_year"] = cy
+            base.at[idx, "cutoff_month"] = cm
         elif pd.notna(yr):
             cy, cm = offset_months(
                 int(yr), 1, -FEATURE_CUTOFF_MONTHS_BEFORE_RETIREMENT

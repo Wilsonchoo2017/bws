@@ -65,6 +65,7 @@ export interface UnifiedItem {
   cohort_year_theme: number | null;
   cohort_price_tier: number | null;
   cohort_piece_group: number | null;
+  liquidity_score: number | null;
 }
 
 export interface PriceRecord {

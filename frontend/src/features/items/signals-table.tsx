@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import type { CohortRank, ItemSignals } from './types';
+import { scoreColor, scoreBg, rankToPercentile } from './percentile-utils';
 
 const SIGNALS = [
   { key: 'demand_pressure', label: 'Demand', desc: '3-month average sales volume' },
@@ -24,23 +25,6 @@ const MODIFIERS = [
   { key: 'mod_niche', label: 'Niche', desc: 'Niche theme penalty' },
 ] as const;
 
-function scoreColor(score: number | null): string {
-  if (score === null) return 'text-muted-foreground';
-  if (score >= 80) return 'text-emerald-400';
-  if (score >= 65) return 'text-emerald-600 dark:text-emerald-500';
-  if (score >= 50) return 'text-yellow-600 dark:text-yellow-400';
-  if (score >= 35) return 'text-orange-500';
-  return 'text-red-500';
-}
-
-function scoreBg(score: number | null): string {
-  if (score === null) return '';
-  if (score >= 80) return 'bg-emerald-500/10';
-  if (score >= 65) return 'bg-emerald-500/5';
-  if (score >= 50) return 'bg-yellow-500/5';
-  if (score >= 35) return 'bg-orange-500/5';
-  return 'bg-red-500/10';
-}
 
 function ScoreBar({ value }: { value: number | null }) {
   if (value === null) return null;
@@ -98,7 +82,7 @@ function PctInline({ label, value, tooltip }: { label: string; value: number | n
     >
       <span className="text-muted-foreground text-xs">{label}</span>
       <span className={`font-mono text-xs font-semibold ${scoreColor(value)}`}>
-        {value.toFixed(0)}
+        P{value.toFixed(0)}
       </span>
     </span>
   );
@@ -154,9 +138,10 @@ export function CohortSection({
                     ({cohort.key})
                   </span>
                 </div>
-                {cohort.rank != null && (
+                {rankToPercentile(cohort.rank, cohort.size) != null && (
                   <span className={`rounded px-1.5 py-0.5 text-xs font-semibold ${scoreColor(overall as number | null)} ${scoreBg(overall as number | null)}`}>
-                    #{cohort.rank}/{cohort.size}
+                    P{rankToPercentile(cohort.rank, cohort.size)}
+                    <span className="text-muted-foreground ml-1 font-normal">n={cohort.size}</span>
                   </span>
                 )}
               </div>

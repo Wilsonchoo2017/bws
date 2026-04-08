@@ -22,8 +22,12 @@ from services.brickeconomy.analysis_parser import (
     parse_themes_page,
     parse_years_page,
 )
-from services.brickeconomy.scraper import _detect_cloudflare, _wait_for_cloudflare
 from services.browser import human_delay, new_page, stealth_browser
+from services.browser.cloudflare import (
+    capture_cf_diagnostics,
+    detect_cloudflare,
+    wait_for_cloudflare,
+)
 
 logger = logging.getLogger("bws.brickeconomy.analysis_scraper")
 
@@ -49,8 +53,17 @@ async def _navigate_analysis_page(page, url: str, label: str) -> str | None:
 
     await human_delay(2_000, 4_000)
 
-    if await _detect_cloudflare(page):
-        solved = await _wait_for_cloudflare(page, label)
+    if await detect_cloudflare(page):
+        await capture_cf_diagnostics(
+            page, "challenge_detected",
+            source="brickeconomy", query=label,
+        )
+        solved = await wait_for_cloudflare(
+            page, label,
+            source="brickeconomy",
+            timeout_s=BRICKECONOMY_CONFIG.captcha_timeout_s,
+            max_auto_attempts=3,
+        )
         if not solved:
             logger.error("Cloudflare not solved for %s", label)
             return None

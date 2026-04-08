@@ -50,6 +50,18 @@ captcha_snapshots/
 models/
 
 # Database
+*.duckdb
+*.duckdb.wal
+*.db
+
+# Data
+data/
+
+# ML training artifacts
+catboost_info/
+
+# Local notes
+findings.md
 
 # Claude Code
-.claude/settings.local.json
+.claude/

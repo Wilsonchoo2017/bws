@@ -38,19 +38,10 @@ def load_growth_training_data(engine: Engine) -> pd.DataFrame:
             COALESCE(
                 li.year_retired,
                 be.year_retired,
-                CAST(LEFT(COALESCE(
-                    CAST(li.retired_date AS TEXT),
-                    CAST(be.retired_date AS TEXT)
-                ), 4) AS INTEGER)
+                EXTRACT(YEAR FROM COALESCE(li.retired_date, be.retired_date))::INTEGER
             ) AS year_retired,
-            COALESCE(
-                CAST(li.release_date AS TEXT),
-                CAST(be.release_date AS TEXT)
-            ) AS release_date,
-            COALESCE(
-                CAST(li.retired_date AS TEXT),
-                CAST(be.retired_date AS TEXT)
-            ) AS retired_date
+            CAST(COALESCE(li.release_date, be.release_date) AS TEXT) AS release_date,
+            CAST(COALESCE(li.retired_date, be.retired_date) AS TEXT) AS retired_date
         FROM lego_items li
         JOIN (
             SELECT DISTINCT ON (set_number) *
@@ -98,19 +89,10 @@ def load_growth_candidate_sets(engine: Engine) -> pd.DataFrame:
             COALESCE(
                 li.year_retired,
                 be.year_retired,
-                CAST(LEFT(COALESCE(
-                    CAST(li.retired_date AS TEXT),
-                    CAST(be.retired_date AS TEXT)
-                ), 4) AS INTEGER)
+                EXTRACT(YEAR FROM COALESCE(li.retired_date, be.retired_date))::INTEGER
             ) AS year_retired,
-            COALESCE(
-                CAST(li.release_date AS TEXT),
-                CAST(be.release_date AS TEXT)
-            ) AS release_date,
-            COALESCE(
-                CAST(li.retired_date AS TEXT),
-                CAST(be.retired_date AS TEXT)
-            ) AS retired_date
+            CAST(COALESCE(li.release_date, be.release_date) AS TEXT) AS release_date,
+            CAST(COALESCE(li.retired_date, be.retired_date) AS TEXT) AS retired_date
         FROM lego_items li
         JOIN (
             SELECT DISTINCT ON (set_number) *
@@ -146,15 +128,9 @@ def load_base_metadata(
             COALESCE(
                 li.year_retired,
                 be.year_retired,
-                CAST(LEFT(COALESCE(
-                    CAST(li.retired_date AS TEXT),
-                    CAST(be.retired_date AS TEXT)
-                ), 4) AS INTEGER)
+                EXTRACT(YEAR FROM COALESCE(li.retired_date, be.retired_date))::INTEGER
             ) AS year_retired,
-            COALESCE(
-                CAST(li.retired_date AS TEXT),
-                CAST(be.retired_date AS TEXT)
-            ) AS retired_date,
+            CAST(COALESCE(li.retired_date, be.retired_date) AS TEXT) AS retired_date,
             COALESCE(be.pieces, li.parts_count) AS parts_count,
             COALESCE(be.minifigs, li.minifig_count) AS minifig_count,
             COALESCE(li.retiring_soon, be.retiring_soon) AS retiring_soon

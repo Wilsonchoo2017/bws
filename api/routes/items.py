@@ -238,6 +238,62 @@ async def get_item_signals_be(set_number: str, conn: Any = Depends(get_db)):
     return {"success": True, "data": match}
 
 
+_liquidity_cache: dict = {}
+_LIQUIDITY_TTL = 30 * 24 * 3600
+
+
+@router.get("/liquidity/bulk")
+async def get_liquidity_bulk(
+    source: str = "bricklink",
+    condition: str = "new",
+    refresh: bool = False,
+    conn: Any = Depends(get_db),
+) -> dict:
+    """Return composite liquidity percentile for every item. Reuses same cache."""
+    import time
+
+    cache_key = f"{source}:{condition}"
+    now = time.time()
+
+    if refresh or cache_key not in _liquidity_cache or _liquidity_cache[cache_key]["expires"] <= now:
+        await get_item_liquidity("__warmup__", source, condition, refresh, conn)
+
+    cached = _liquidity_cache.get(cache_key)
+    if not cached:
+        return {"success": True, "data": {}}
+
+    ranked = cached["ranked"]
+    result = {sn: r["composite_pct"] for sn, r in ranked.items()}
+    return {"success": True, "data": result}
+
+
+@router.get("/liquidity/cohorts/bulk")
+async def get_liquidity_cohorts_bulk(
+    source: str = "bricklink",
+    condition: str = "new",
+    conn: Any = Depends(get_db),
+) -> dict:
+    """Return per-cohort liquidity percentiles for every item."""
+    # Trigger per-item cohort build via the single-item endpoint
+    await get_item_liquidity_cohorts("__warmup__", source, condition, conn)
+
+    cache_key = f"{source}:{condition}"
+    cached = _liq_cohort_cache.get(cache_key)
+    if not cached:
+        return {"success": True, "data": {}}
+
+    # Return only non-empty entries, with composite_pct per strategy
+    result: dict[str, dict[str, float | None]] = {}
+    for sn, strategies in cached["results"].items():
+        if not strategies:
+            continue
+        entry: dict[str, float | None] = {}
+        for strategy, vals in strategies.items():
+            entry[strategy] = vals.get("composite_pct")
+        result[sn] = entry
+    return {"success": True, "data": sanitize_nan(result)}
+
+
 @router.get("/{set_number}")
 async def get_item(set_number: str, conn: Any = Depends(get_db)):
     """Get a single item with full price history from all sources."""
@@ -300,10 +356,6 @@ def _percentile(all_values: list[float], target: float) -> float:
     equal = sum(1 for v in all_values if v == target)
     return round((below + 0.5 * equal) / n * 100.0, 1)
 
-
-
-_liquidity_cache: dict = {}
-_LIQUIDITY_TTL = 30 * 24 * 3600
 
 
 @router.get("/{set_number}/liquidity")
@@ -418,7 +470,11 @@ async def get_item_liquidity(
             if v.get("listing_ratio") is not None and lr_vals:
                 lr_pct = round(100.0 - _percentile(lr_vals, v["listing_ratio"]), 1)
 
-            comp = round(v_pct * 0.5 + c_pct * 0.3 + t_pct * 0.2, 1) if t_pct is not None else round(v_pct * 0.6 + c_pct * 0.4, 1)
+            # Optimized weights: volume 50%, consistency 38%, listing_ratio 12%
+            if lr_pct is not None:
+                comp = round(v_pct * 0.50 + c_pct * 0.38 + lr_pct * 0.12, 1)
+            else:
+                comp = round(v_pct * 0.57 + c_pct * 0.43, 1)
             composites.append((k, comp))
 
             ranked[k] = {
@@ -479,6 +535,190 @@ async def get_item_liquidity(
         "size": r["size"],
     }
     return {"success": True, "data": sanitize_nan(data)}
+
+
+_liq_cohort_cache: dict = {}
+_LIQ_COHORT_TTL = 30 * 24 * 3600
+
+
+@router.get("/{set_number}/liquidity/cohorts")
+async def get_item_liquidity_cohorts(
+    set_number: str,
+    source: str = "bricklink",
+    condition: str = "new",
+    conn: Any = Depends(get_db),
+):
+    """Liquidity percentile rankings within cohort peer groups."""
+    import time
+
+    from services.backtesting.cohort import STRATEGY_NAMES, _assign_bucket, _compute_percentile
+
+    cache_key = f"{source}:{condition}"
+    now = time.time()
+
+    # Ensure liquidity cache is warm
+    if cache_key not in _liquidity_cache or _liquidity_cache[cache_key]["expires"] <= now:
+        await get_item_liquidity("__warmup__", source, condition, False, conn)
+
+    cached = _liquidity_cache.get(cache_key)
+    if not cached:
+        return {"success": True, "data": None}
+
+    all_stats = cached["stats"]
+    all_ranked = cached["ranked"]
+
+    if set_number not in all_stats:
+        return {"success": True, "data": None}
+
+    # Build or use cohort cache
+    if (
+        cache_key not in _liq_cohort_cache
+        or _liq_cohort_cache[cache_key]["expires"] <= now
+    ):
+        # Load item metadata for bucket assignment.
+        # Use brickeconomy_snapshots as primary source (has theme, pieces,
+        # rrp_usd_cents) and enrich with bricklink_items where available.
+        be_rows = conn.execute(
+            """
+            SELECT set_number, year_released, theme, pieces, rrp_usd_cents
+            FROM (
+                SELECT set_number, year_released, theme, pieces, rrp_usd_cents,
+                       ROW_NUMBER() OVER (
+                           PARTITION BY set_number ORDER BY scraped_at DESC
+                       ) AS rn
+                FROM brickeconomy_snapshots
+            ) sub WHERE rn = 1
+            """
+        ).fetchall()
+        meta_map: dict[str, dict] = {}
+        for r in be_rows:
+            meta_map[r[0]] = {
+                "set_number": r[0],
+                "year_released": r[1],
+                "theme": r[2],
+                "parts_count": r[3],
+                "rrp_usd_cents": r[4],
+            }
+        # Enrich with bricklink_items (has year_released, parts_count)
+        bl_rows = conn.execute(
+            "SELECT item_id, year_released, theme, parts_count FROM bricklink_items"
+        ).fetchall()
+        for r in bl_rows:
+            sn = r[0].removesuffix("-1")
+            if sn not in meta_map:
+                meta_map[sn] = {
+                    "set_number": sn,
+                    "year_released": r[1],
+                    "theme": r[2],
+                    "parts_count": r[3],
+                    "rrp_usd_cents": None,
+                }
+            else:
+                # Prefer bricklink year_released if BE is missing
+                if not meta_map[sn].get("year_released") and r[1]:
+                    meta_map[sn]["year_released"] = r[1]
+
+        # Assign buckets for each strategy
+        from collections import defaultdict
+
+        buckets: dict[str, dict[str, list[str]]] = {
+            s: defaultdict(list) for s in STRATEGY_NAMES
+        }
+        for sn in all_stats:
+            meta = meta_map.get(sn, {})
+            for strategy in STRATEGY_NAMES:
+                key = _assign_bucket(meta, strategy)
+                if key is not None:
+                    buckets[strategy][key].append(sn)
+
+        # Compute per-cohort percentiles for liquidity metrics
+        liq_metrics = ("avg_monthly_txns", "consistency", "trend_ratio", "listing_ratio")
+        cohort_results: dict[str, dict[str, dict]] = {sn: {} for sn in all_stats}
+
+        for strategy in STRATEGY_NAMES:
+            for bucket_key, members in buckets[strategy].items():
+                # Filter to members that have liquidity stats
+                valid = [sn for sn in members if sn in all_ranked]
+                if len(valid) < 3:
+                    continue
+
+                cohort_size = len(valid)
+
+                # Collect metric values
+                metric_vals: dict[str, list[float]] = {}
+                for metric in liq_metrics:
+                    vals = []
+                    for sn in valid:
+                        v = all_stats[sn].get(metric)
+                        if v is not None:
+                            vals.append(float(v))
+                    metric_vals[metric] = vals
+
+                # Collect composite values for ranking
+                comp_vals = [(sn, all_ranked[sn]["composite_pct"]) for sn in valid]
+                comp_sorted = sorted(comp_vals, key=lambda x: x[1], reverse=True)
+                ordinal: dict[str, int] = {}
+                for pos, (sn, _) in enumerate(comp_sorted, 1):
+                    ordinal[sn] = pos
+
+                # Composite percentiles within cohort
+                all_comp = [all_ranked[sn]["composite_pct"] for sn in valid]
+
+                for sn in valid:
+                    stats = all_stats[sn]
+                    ranked = all_ranked[sn]
+
+                    vol_pct = None
+                    if metric_vals["avg_monthly_txns"]:
+                        v = stats.get("avg_monthly_txns")
+                        if v is not None:
+                            vol_pct = _compute_percentile(metric_vals["avg_monthly_txns"], float(v))
+
+                    con_pct = None
+                    if metric_vals["consistency"]:
+                        v = stats.get("consistency")
+                        if v is not None:
+                            con_pct = _compute_percentile(metric_vals["consistency"], float(v))
+
+                    trend_pct = None
+                    if len(metric_vals["trend_ratio"]) >= 3:
+                        v = stats.get("trend_ratio")
+                        if v is not None:
+                            trend_pct = _compute_percentile(metric_vals["trend_ratio"], float(v))
+
+                    # Listing ratio: lower = better, so invert
+                    lr_pct = None
+                    if len(metric_vals["listing_ratio"]) >= 3:
+                        v = stats.get("listing_ratio")
+                        if v is not None:
+                            lr_pct = round(
+                                100.0 - _compute_percentile(metric_vals["listing_ratio"], float(v)),
+                                1,
+                            )
+
+                    comp_pct = _compute_percentile(all_comp, ranked["composite_pct"])
+
+                    cohort_results[sn][strategy] = {
+                        "key": bucket_key,
+                        "size": cohort_size,
+                        "rank": ordinal.get(sn),
+                        "composite_pct": comp_pct,
+                        "volume_pct": vol_pct,
+                        "consistency_pct": con_pct,
+                        "trend_pct": trend_pct,
+                        "listing_ratio_pct": lr_pct,
+                    }
+
+        _liq_cohort_cache[cache_key] = {
+            "results": cohort_results,
+            "expires": now + _LIQ_COHORT_TTL,
+        }
+
+    cohort_data = _liq_cohort_cache[cache_key]["results"].get(set_number, {})
+    if not cohort_data:
+        return {"success": True, "data": None}
+
+    return {"success": True, "data": sanitize_nan(cohort_data)}
 
 
 @router.get("/{set_number}/minifigures")

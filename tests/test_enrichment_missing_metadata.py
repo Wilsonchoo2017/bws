@@ -359,8 +359,8 @@ class TestDetectMissingIncludesNewFields:
             retiring_soon=False,
             minifig_count=7,
             dimensions="58.2 x 49.0 x 21.0 cm",
-            release_date="2017-09",
-            retired_date="2023-12",
+            release_date="2017-09-01",
+            retired_date="2023-12-01",
         )
         missing = detect_missing_fields(item)
         assert len(missing) == 0

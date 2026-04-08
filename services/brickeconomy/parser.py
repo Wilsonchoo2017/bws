@@ -172,14 +172,17 @@ _MONTH_NAMES = {
 
 
 def _parse_month_year(text: str) -> str | None:
-    """Parse 'January 2025' or 'October 2021' to ISO month '2025-01'."""
+    """Parse 'January 2025' or 'October 2021' to ISO date '2025-01-01'.
+
+    Returns the first day of the month so the value is valid for DATE columns.
+    """
     m = re.match(r"(\w+)\s+(\d{4})", text.strip())
     if not m:
         return None
     month_num = _MONTH_NAMES.get(m.group(1).lower())
     if month_num is None:
         return None
-    return f"{int(m.group(2)):04d}-{month_num:02d}"
+    return f"{int(m.group(2)):04d}-{month_num:02d}-01"
 
 
 def _dollars_to_cents(value: float) -> int:

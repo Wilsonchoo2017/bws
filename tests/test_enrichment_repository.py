@@ -51,6 +51,18 @@ class TestGetItemsNeedingEnrichment:
             "VALUES (nextval('google_trends_snapshots_id_seq'), ?, ?)",
             [set_number, f"LEGO {set_number}"],
         )
+        conn.execute(
+            "INSERT INTO keepa_snapshots (id, set_number) "
+            "VALUES (nextval('keepa_snapshots_id_seq'), ?) "
+            "ON CONFLICT DO NOTHING",
+            [set_number],
+        )
+        conn.execute(
+            "INSERT INTO bricklink_items (id, item_id, item_type) "
+            "VALUES (nextval('bricklink_items_id_seq'), ?, 'SET') "
+            "ON CONFLICT (item_id) DO NOTHING",
+            [set_number],
+        )
 
     def test_finds_items_with_null_fields(self, conn):
         """Given items with NULL metadata. Then detected as needing enrichment."""
@@ -74,10 +86,10 @@ class TestGetItemsNeedingEnrichment:
             year_released=2013,
             parts_count=271,
             image_url="https://example.com/31009.png",
-            release_date="2013-06",
+            release_date="2013-06-01",
         )
         self._add_price_record(conn, "31009")
-        self._add_mandatory_snapshots(conn, "31009", release_date="2013-06")
+        self._add_mandatory_snapshots(conn, "31009", release_date="2013-06-01")
 
         items = get_items_needing_enrichment(conn)
         set_numbers = [i["set_number"] for i in items]

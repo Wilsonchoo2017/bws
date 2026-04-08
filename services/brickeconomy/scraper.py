@@ -11,28 +11,16 @@ from dataclasses import dataclass
 from config.settings import BRICKECONOMY_CONFIG, BRICKECONOMY_RATE_LIMITER
 from services.brickeconomy.parser import BrickeconomySnapshot, parse_brickeconomy_page
 from services.browser import human_delay, new_page, stealth_browser
+from services.browser.cloudflare import (
+    capture_cf_diagnostics,
+    detect_cloudflare,
+    wait_for_cloudflare,
+)
 from services.notifications.ntfy import NtfyMessage, send_notification
 
 logger = logging.getLogger("bws.brickeconomy.scraper")
 
 BRICKECONOMY_BASE = BRICKECONOMY_CONFIG.base_url
-
-# Cloudflare challenge indicators (shared with Carousell)
-_CF_CHALLENGE_TITLES = (
-    "just a moment",
-    "attention required",
-    "checking your browser",
-)
-
-# DOM selectors that indicate a Cloudflare challenge page
-_CF_CHALLENGE_SELECTORS = (
-    "#challenge-running",
-    "#challenge-stage",
-    "#cf-challenge-running",
-    ".cf-browser-verification",
-    "#turnstile-wrapper",
-    "#challenge-form",
-)
 
 
 @dataclass(frozen=True)
@@ -59,58 +47,6 @@ def _notify_captcha(set_number: str) -> None:
             tags=("warning", "robot"),
         )
     )
-
-
-async def _detect_cloudflare(page) -> bool:
-    """Check if the current page is a Cloudflare challenge.
-
-    Uses both title-based and DOM-based detection to catch silent
-    CF blocks that don't set the usual challenge titles.
-    """
-    try:
-        title = await page.title()
-        if any(cf in title.lower() for cf in _CF_CHALLENGE_TITLES):
-            return True
-        # DOM-based detection for JS challenges / Turnstile
-        cf_found = await page.evaluate(
-            """() => {
-                const selectors = %s;
-                return selectors.some(s => document.querySelector(s) !== null);
-            }"""
-            % str(list(_CF_CHALLENGE_SELECTORS))
-        )
-        return cf_found
-    except Exception:
-        return False
-
-
-async def _wait_for_cloudflare(
-    page, set_number: str, timeout_s: int | None = None
-) -> bool:
-    """Wait for a Cloudflare challenge to be solved.
-
-    Sends an ntfy notification, then polls until the challenge page
-    is gone or the timeout is reached.
-
-    Returns True if challenge was solved, False on timeout.
-    """
-    timeout = timeout_s or BRICKECONOMY_CONFIG.captcha_timeout_s
-    logger.warning("Cloudflare challenge detected for set: %s", set_number)
-    _notify_captcha(set_number)
-
-    elapsed = 0
-    poll_interval = 3
-    while elapsed < timeout:
-        await asyncio.sleep(poll_interval)
-        elapsed += poll_interval
-        if not await _detect_cloudflare(page):
-            logger.info("Cloudflare challenge solved after %ds", elapsed)
-            return True
-
-    logger.error(
-        "Cloudflare challenge timeout after %ds for set: %s", timeout, set_number
-    )
-    return False
 
 
 async def scrape_set(
@@ -165,8 +101,20 @@ async def _navigate_and_bypass_cf(page, url: str, set_number: str) -> bool:
         return False
     await human_delay(2_000, 4_000)
 
-    if await _detect_cloudflare(page):
-        solved = await _wait_for_cloudflare(page, set_number)
+    if await detect_cloudflare(page):
+        # Snapshot the challenge page for debugging
+        await capture_cf_diagnostics(
+            page, "challenge_detected",
+            source="brickeconomy", query=set_number,
+        )
+        solved = await wait_for_cloudflare(
+            page,
+            set_number,
+            source="brickeconomy",
+            timeout_s=BRICKECONOMY_CONFIG.captcha_timeout_s,
+            max_auto_attempts=3,
+            notify_fn=_notify_captcha,
+        )
         if not solved:
             return False
         try:
@@ -203,7 +151,7 @@ async def _resolve_set_url(page, set_number: str) -> list[str]:
     )
     if not has_search:
         # Double-check for CF elements we might have missed
-        if await _detect_cloudflare(page):
+        if await detect_cloudflare(page):
             logger.warning("Silent Cloudflare block detected on homepage for %s", set_number)
         else:
             logger.warning("Homepage loaded but search input missing for %s -- possible layout change or block", set_number)

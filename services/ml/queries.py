@@ -53,7 +53,7 @@ def load_base_metadata(
                 ELSE li.year_released
             END AS year_released,
             COALESCE(li.year_retired, be.year_retired) AS year_retired,
-            COALESCE(li.retired_date, be.retired_date) AS retired_date,
+            CAST(COALESCE(li.retired_date, be.retired_date) AS TEXT) AS retired_date,
             COALESCE(be.pieces, li.parts_count) AS parts_count,
             COALESCE(be.minifigs, li.minifig_count) AS minifig_count,
             COALESCE(li.retiring_soon, be.retiring_soon) AS retiring_soon
@@ -78,7 +78,7 @@ def load_retired_sets(conn: Any) -> pd.DataFrame:
         SELECT
             li.set_number,
             li.year_retired,
-            li.retired_date,
+            CAST(li.retired_date AS TEXT) AS retired_date,
             be.rrp_usd_cents
         FROM lego_items li
         JOIN (
@@ -440,9 +440,9 @@ def load_growth_training_data(conn: Any) -> pd.DataFrame:
             COALESCE(
                 li.year_retired,
                 be.year_retired,
-                CAST(LEFT(COALESCE(li.retired_date, be.retired_date), 4) AS INTEGER)
+                EXTRACT(YEAR FROM COALESCE(li.retired_date, be.retired_date))::INTEGER
             ) AS year_retired,
-            COALESCE(li.release_date, be.release_date) AS release_date
+            CAST(COALESCE(li.release_date, be.release_date) AS TEXT) AS release_date
         FROM lego_items li
         JOIN (
             SELECT DISTINCT ON (set_number) *
@@ -473,7 +473,7 @@ def load_growth_candidate_sets(conn: Any) -> pd.DataFrame:
             be.minifig_value_cents, be.exclusive_minifigs,
             be.designer,
             COALESCE(li.year_released, be.year_released) AS year_released,
-            COALESCE(li.release_date, be.release_date) AS release_date
+            CAST(COALESCE(li.release_date, be.release_date) AS TEXT) AS release_date
         FROM lego_items li
         JOIN (
             SELECT DISTINCT ON (set_number) *

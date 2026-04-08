@@ -8,7 +8,6 @@ Cloudflare challenge or login CAPTCHA requires human intervention.
 
 import asyncio
 import dataclasses
-import json
 import logging
 import re
 import secrets
@@ -22,6 +21,16 @@ from playwright.async_api import Page
 
 from config.settings import KEEPA_CONFIG, KEEPA_RATE_LIMITER
 from services.browser import human_delay
+from services.browser.cloudflare import (
+    CF_CHALLENGE_TITLES,
+    CF_DEBUG_DIR,
+    CF_WIDGET_SELECTORS,
+    capture_cf_diagnostics as _capture_cf_diagnostics,
+    detect_cloudflare as _detect_cloudflare_generic,
+    human_mouse_move as _human_mouse_move,
+    idle_behavior as _idle_behavior,
+    pre_click_wander as _pre_click_wander,
+)
 from services.keepa.auth import is_logged_in, login
 from services.keepa.parser import click_all_date_range, extract_product_data
 from services.keepa.types import KeepaDataPoint, KeepaProductData, KeepaScrapeResult
@@ -31,25 +40,6 @@ from services.notifications.scraper_alerts import alert_cloudflare_blocked
 logger = logging.getLogger("bws.keepa.scraper")
 
 KEEPA_BASE = "https://keepa.com"
-
-# Debug diagnostics directory for Cloudflare challenge analysis
-CF_DEBUG_DIR = Path.home() / ".bws" / "cf-debug"
-
-# Cloudflare challenge indicators
-CF_CHALLENGE_TITLES: tuple[str, ...] = (
-    "just a moment",
-    "attention required",
-    "checking your browser",
-)
-
-# In-page Cloudflare Turnstile widget selectors (iframe/div)
-CF_WIDGET_SELECTORS: tuple[str, ...] = (
-    'iframe[src*="challenges.cloudflare.com"]',
-    'iframe[src*="cloudflare.com/cdn-cgi/challenge"]',
-    "#cf-turnstile",
-    ".cf-turnstile",
-    "#turnstile-wrapper",
-)
 
 # Consecutive Cloudflare challenge tracking for preventive alerts
 _cf_challenge_count: int = 0
@@ -111,241 +101,17 @@ def _notify_captcha(query: str) -> None:
     )
 
 
-async def _capture_cf_diagnostics(
-    page: Page,
-    label: str,
-    *,
-    query: str = "",
-    click_coords: tuple[float, float] | None = None,
-    strategy: str = "",
-    attempt: int = 0,
-    extra: dict[str, Any] | None = None,
-) -> Path | None:
-    """Capture a full diagnostic snapshot of Cloudflare challenge state.
-
-    Saves a screenshot, page metadata, iframe attributes, visible text,
-    and click coordinates to CF_DEBUG_DIR as a timestamped bundle.
-    Returns the directory path of the snapshot, or None on failure.
-    """
-    try:
-        ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S_%f")
-        snap_dir = CF_DEBUG_DIR / f"{ts}_{label}"
-        snap_dir.mkdir(parents=True, exist_ok=True)
-
-        # Screenshot
-        screenshot_path = snap_dir / "page.png"
-        await page.screenshot(path=str(screenshot_path), full_page=False)
-
-        # Collect page state
-        title = ""
-        url = ""
-        try:
-            title = await page.title()
-            url = page.url
-        except Exception:
-            pass
-
-        # Collect all iframe attributes for analysis
-        iframe_info: list[dict[str, Any]] = []
-        try:
-            iframes = await page.query_selector_all("iframe")
-            for iframe in iframes:
-                attrs: dict[str, Any] = {}
-                for attr in ("src", "title", "id", "class", "name", "width", "height"):
-                    val = await iframe.get_attribute(attr)
-                    if val:
-                        attrs[attr] = val
-                box = await iframe.bounding_box()
-                if box:
-                    attrs["bounding_box"] = box
-                attrs["visible"] = await iframe.is_visible()
-                iframe_info.append(attrs)
-        except Exception as exc:
-            iframe_info.append({"error": str(exc)})
-
-        # Visible text snippet (first 2000 chars)
-        body_text = ""
-        try:
-            body_text = await page.evaluate(
-                "() => document.body.innerText.substring(0, 2000)"
-            )
-        except Exception:
-            pass
-
-        # Check which CF selectors matched
-        matched_selectors: list[str] = []
-        for selector in CF_WIDGET_SELECTORS:
-            try:
-                el = await page.query_selector(selector)
-                if el and await el.is_visible():
-                    matched_selectors.append(selector)
-            except Exception:
-                pass
-
-        # Turnstile iframe content (if accessible)
-        turnstile_inner: dict[str, Any] = {}
-        try:
-            for sel in ('iframe[src*="challenges.cloudflare.com"]',
-                        'iframe[src*="turnstile"]'):
-                iframe_el = await page.query_selector(sel)
-                if not iframe_el:
-                    continue
-                frame = await iframe_el.content_frame()
-                if frame:
-                    try:
-                        inner_html = await frame.evaluate(
-                            "() => document.body.innerHTML.substring(0, 3000)"
-                        )
-                        turnstile_inner["selector"] = sel
-                        turnstile_inner["inner_html"] = inner_html
-                        # Check checkbox state
-                        cb = await frame.query_selector(
-                            'input[type="checkbox"]'
-                        )
-                        if cb:
-                            turnstile_inner["checkbox_checked"] = (
-                                await cb.is_checked()
-                            )
-                            turnstile_inner["checkbox_visible"] = (
-                                await cb.is_visible()
-                            )
-                            cb_box = await cb.bounding_box()
-                            if cb_box:
-                                turnstile_inner["checkbox_box"] = cb_box
-                    except Exception as exc:
-                        turnstile_inner["inner_error"] = str(exc)
-                    break
-        except Exception as exc:
-            turnstile_inner["error"] = str(exc)
-
-        # Dump the anti-bot modal DOM structure to identify clickable
-        # elements (Turnstile container, checkboxes, data-sitekey, etc.)
-        antibot_dom: dict[str, Any] = {}
-        try:
-            antibot_dom = await page.evaluate("""() => {
-                const result = {};
-                // Find elements with data-sitekey (Turnstile container)
-                const sitekey = document.querySelector('[data-sitekey]');
-                if (sitekey) {
-                    const r = sitekey.getBoundingClientRect();
-                    result.sitekey = {
-                        tag: sitekey.tagName,
-                        id: sitekey.id,
-                        className: sitekey.className,
-                        sitekey: sitekey.getAttribute('data-sitekey'),
-                        rect: {x: r.x, y: r.y, w: r.width, h: r.height},
-                        outerHTML: sitekey.outerHTML.substring(0, 500),
-                    };
-                }
-                // Find cf-turnstile containers
-                const cft = document.querySelector('.cf-turnstile, #cf-turnstile');
-                if (cft) {
-                    const r = cft.getBoundingClientRect();
-                    result.cf_turnstile = {
-                        tag: cft.tagName,
-                        id: cft.id,
-                        className: cft.className,
-                        rect: {x: r.x, y: r.y, w: r.width, h: r.height},
-                    };
-                }
-                // Find all visible checkboxes
-                const cbs = document.querySelectorAll('input[type="checkbox"]');
-                result.checkboxes = Array.from(cbs).map(cb => {
-                    const r = cb.getBoundingClientRect();
-                    return {
-                        id: cb.id, name: cb.name, checked: cb.checked,
-                        visible: r.width > 0 && r.height > 0,
-                        rect: {x: r.x, y: r.y, w: r.width, h: r.height},
-                    };
-                });
-                // Find "Verify" text element
-                const walker = document.createTreeWalker(
-                    document.body, NodeFilter.SHOW_TEXT
-                );
-                while (walker.nextNode()) {
-                    if (walker.currentNode.textContent.includes('Verify')) {
-                        const el = walker.currentNode.parentElement;
-                        if (el) {
-                            const r = el.getBoundingClientRect();
-                            result.verify_text = {
-                                tag: el.tagName, className: el.className,
-                                text: el.textContent.substring(0, 100),
-                                rect: {x: r.x, y: r.y, w: r.width, h: r.height},
-                            };
-                        }
-                        break;
-                    }
-                }
-                return result;
-            }""")
-        except Exception as exc:
-            antibot_dom = {"error": str(exc)}
-
-        record = {
-            "timestamp": ts,
-            "label": label,
-            "query": query,
-            "attempt": attempt,
-            "strategy": strategy,
-            "click_coords": (
-                {"x": click_coords[0], "y": click_coords[1]}
-                if click_coords else None
-            ),
-            "page_url": url,
-            "page_title": title,
-            "matched_cf_selectors": matched_selectors,
-            "iframes": iframe_info,
-            "turnstile_inner": turnstile_inner or None,
-            "antibot_dom": antibot_dom,
-            "body_text_snippet": body_text[:500],
-            "extra": extra or {},
-        }
-
-        record_path = snap_dir / "diagnostics.json"
-        record_path.write_text(
-            json.dumps(record, indent=2, default=str), encoding="utf-8"
-        )
-
-        logger.info(
-            "CF diagnostics captured: %s (%s)", label, snap_dir,
-        )
-        return snap_dir
-
-    except Exception as exc:
-        logger.warning("Failed to capture CF diagnostics: %s", exc)
-        return None
-
-
 async def _detect_cloudflare(page: Page) -> bool:
     """Check if the current page is a Cloudflare challenge.
 
-    Detects full-page challenges (title-based), in-page Turnstile
-    widgets (iframe/div checkbox dialogs), and Keepa's custom
-    anti-bot modal dialog.
+    Delegates to the shared detector, then adds Keepa-specific
+    anti-bot modal detection (contains Turnstile widget inside a
+    custom dialog that may not match standard CF selectors).
     """
-    try:
-        title = await page.title()
-        if any(cf in title.lower() for cf in CF_CHALLENGE_TITLES):
-            return True
-    except Exception:
-        pass
+    if await _detect_cloudflare_generic(page):
+        return True
 
-    # Check for in-page Turnstile widget (checkbox dialog)
-    try:
-        for selector in CF_WIDGET_SELECTORS:
-            el = await page.query_selector(selector)
-            if el:
-                visible = await el.is_visible()
-                if visible:
-                    logger.info(
-                        "Cloudflare Turnstile widget detected: %s", selector,
-                    )
-                    return True
-    except Exception:
-        pass
-
-    # Check for Keepa's in-page anti-bot modal (contains Turnstile
-    # widget inside a dialog that may not match standard CF selectors)
+    # Keepa-specific: in-page anti-bot modal with "anti-bot check" text
     try:
         body_text = await page.evaluate(
             "() => document.body.innerText.substring(0, 1000)"
@@ -357,131 +123,6 @@ async def _detect_cloudflare(page: Page) -> bool:
         pass
 
     return False
-
-
-async def _human_mouse_move(
-    page: Page,
-    target_x: float,
-    target_y: float,
-    *,
-    start_x: float | None = None,
-    start_y: float | None = None,
-) -> None:
-    """Move mouse to target with a curved, human-like trajectory.
-
-    Simulates natural hand movement with:
-    - Bezier-like curve (random control point offset for arc)
-    - Variable speed (slower at start/end, faster in middle)
-    - Lateral jitter that peaks mid-path
-    - Occasional micro-pause (humans hesitate)
-    - Slight overshoot + correction on ~30% of movements
-    """
-    sx = start_x if start_x is not None else target_x + secrets.randbelow(100) - 50
-    sy = start_y if start_y is not None else target_y - 50 - secrets.randbelow(60)
-    await page.mouse.move(sx, sy)
-    await human_delay(50, 150)
-
-    # Random control point for bezier-like curve
-    ctrl_x = (sx + target_x) / 2 + secrets.randbelow(40) - 20
-    ctrl_y = (sy + target_y) / 2 + secrets.randbelow(30) - 15
-
-    steps = 5 + secrets.randbelow(6)  # 5-10 steps
-    for i in range(1, steps + 1):
-        t = i / steps
-        # Quadratic bezier: B(t) = (1-t)^2*P0 + 2*(1-t)*t*P1 + t^2*P2
-        inv_t = 1 - t
-        mid_x = inv_t * inv_t * sx + 2 * inv_t * t * ctrl_x + t * t * target_x
-        mid_y = inv_t * inv_t * sy + 2 * inv_t * t * ctrl_y + t * t * target_y
-
-        # Jitter: peaks in the middle of the path
-        jitter = (1 - abs(t - 0.5) * 2) * 6
-        mid_x += secrets.randbelow(max(1, int(jitter * 2 + 1))) - jitter
-        mid_y += secrets.randbelow(max(1, int(jitter * 2 + 1))) - jitter
-
-        await page.mouse.move(mid_x, mid_y)
-
-        # Variable speed: slower at start/end, faster in middle
-        if t < 0.2 or t > 0.8:
-            await human_delay(40, 120)
-        else:
-            await human_delay(15, 50)
-
-        # Occasional micro-pause (human hesitation, ~15% chance)
-        if secrets.randbelow(100) < 15:
-            await human_delay(80, 250)
-
-    # ~30% chance of slight overshoot then correction
-    if secrets.randbelow(100) < 30:
-        overshoot_x = target_x + secrets.randbelow(8) - 2
-        overshoot_y = target_y + secrets.randbelow(6) - 1
-        await page.mouse.move(overshoot_x, overshoot_y)
-        await human_delay(60, 180)
-
-    # Final settle on target with tiny offset
-    await page.mouse.move(
-        target_x + secrets.randbelow(3) - 1,
-        target_y + secrets.randbelow(3) - 1,
-    )
-
-
-async def _idle_behavior(page: Page) -> None:
-    """Occasional random mouse movement and micro-scroll between actions.
-
-    Called between major page interactions to break up the mechanical
-    pattern of navigate -> wait -> click -> wait -> click. Humans
-    fidget, glance at different parts of the page, scroll idly.
-    Only does something ~50% of the time to keep it unpredictable.
-    """
-    if secrets.randbelow(100) >= 50:
-        return
-
-    viewport = page.viewport_size or {"width": 1366, "height": 768}
-    vw, vh = viewport["width"], viewport["height"]
-
-    # Random mouse drift
-    await page.mouse.move(
-        secrets.randbelow(int(vw * 0.8)) + int(vw * 0.1),
-        secrets.randbelow(int(vh * 0.6)) + int(vh * 0.15),
-    )
-    await human_delay(200, 600)
-
-    # Micro-scroll (~30% within this path)
-    if secrets.randbelow(100) < 30:
-        await page.mouse.wheel(0, secrets.randbelow(80) - 40)
-        await human_delay(150, 400)
-
-
-async def _pre_click_wander(page: Page) -> None:
-    """Simulate natural human behavior before clicking the checkbox.
-
-    When a human sees an anti-bot dialog, they don't immediately click
-    the checkbox. They read it, maybe move the mouse around, perhaps
-    scroll slightly. This adds that natural pre-click behavior.
-    """
-    viewport = page.viewport_size or {"width": 1366, "height": 768}
-    vw, vh = viewport["width"], viewport["height"]
-
-    # Move mouse to a random "reading" position near center of page
-    await page.mouse.move(
-        vw * 0.3 + secrets.randbelow(int(vw * 0.4)),
-        vh * 0.3 + secrets.randbelow(int(vh * 0.3)),
-    )
-    await human_delay(500, 1500)
-
-    # Maybe do a small scroll (human habit), ~40% chance
-    if secrets.randbelow(100) < 40:
-        scroll_y = secrets.randbelow(60) - 30
-        await page.mouse.wheel(0, scroll_y)
-        await human_delay(300, 800)
-
-    # 1-2 additional random mouse movements (reading/scanning)
-    wander_count = 1 + secrets.randbelow(2)
-    for _ in range(wander_count):
-        await page.mouse.move(
-            vw * 0.2 + secrets.randbelow(int(vw * 0.6)),
-            vh * 0.2 + secrets.randbelow(int(vh * 0.5)),
-        )
-        await human_delay(200, 700)
 
 
 async def _try_click_keepa_antibot(

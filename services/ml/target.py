@@ -223,6 +223,9 @@ def _parse_retired_sets(raw_df: pd.DataFrame) -> pd.DataFrame:
             parts = rd.split("-")
             df.at[idx, "retired_year"] = int(parts[0])
             df.at[idx, "retired_month"] = int(parts[1])
+        elif hasattr(rd, "year"):  # datetime.date from DB
+            df.at[idx, "retired_year"] = rd.year
+            df.at[idx, "retired_month"] = rd.month
         elif yr:
             df.at[idx, "retired_year"] = int(yr)
             df.at[idx, "retired_month"] = 12

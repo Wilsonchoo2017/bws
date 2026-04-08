@@ -248,6 +248,31 @@ const columns: ColumnDef<UnifiedItem>[] = [
     size: 55
   },
   {
+    accessorKey: 'liquidity_score',
+    header: ({ column }) => (
+      <DataTableColumnHeader column={column} title='Liq' />
+    ),
+    cell: ({ row, table }) => {
+      const score = row.getValue('liquidity_score') as number | null;
+      if (table.options.meta?.enriching && score == null) return <PriceShimmer />;
+      if (score == null) return <span className='text-muted-foreground'>-</span>;
+      const color =
+        score >= 70 ? 'text-emerald-400' :
+        score >= 50 ? 'text-emerald-600 dark:text-emerald-500' :
+        score >= 30 ? 'text-yellow-600 dark:text-yellow-400' :
+        'text-red-500';
+      return (
+        <span
+          className={`font-mono text-sm font-semibold ${color}`}
+          title='vol 50% + consistency 38% + listing ratio 12%'
+        >
+          {score.toFixed(0)}
+        </span>
+      );
+    },
+    size: 55
+  },
+  {
     accessorKey: 'rrp_cents',
     header: ({ column }) => (
       <DataTableColumnHeader column={column} title='RRP' />
@@ -473,9 +498,10 @@ export function UnifiedItemsTable() {
   const enrichItems = useCallback(async () => {
     setEnriching(true);
     try {
-      const [itemsRes, signalsRes] = await Promise.all([
+      const [itemsRes, signalsRes, liqRes] = await Promise.all([
         fetch('/api/items').then((r) => r.json()),
         fetch('/api/items/signals').then((r) => r.json()).catch(() => null),
+        fetch('/api/items/liquidity').then((r) => r.json()).catch(() => null),
       ]);
 
       if (!itemsRes.success) return;
@@ -508,6 +534,8 @@ export function UnifiedItemsTable() {
         }
       }
 
+      const liqMap: Record<string, number> = liqRes?.success && liqRes.data ? liqRes.data : {};
+
       const merged = (itemsRes.data as UnifiedItem[]).map((item) => {
         const ml = mlMap.get(item.set_number);
         const c = ml?.cohorts;
@@ -527,6 +555,7 @@ export function UnifiedItemsTable() {
           cohort_year_theme: c?.year_theme?.composite_pct ?? null,
           cohort_price_tier: c?.price_tier?.composite_pct ?? null,
           cohort_piece_group: c?.piece_group?.composite_pct ?? null,
+          liquidity_score: liqMap[item.set_number] ?? null,
         };
       });
 
@@ -583,6 +612,7 @@ export function UnifiedItemsTable() {
         cohort_year_theme: null,
         cohort_price_tier: null,
         cohort_piece_group: null,
+        liquidity_score: null,
       } as UnifiedItem));
 
       setData(liteItems);

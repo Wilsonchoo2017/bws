@@ -111,6 +111,16 @@ def _create_task_inner(
     if recently_completed:
         return None
 
+    recently_failed = conn.execute(
+        "SELECT 1 FROM scrape_tasks "
+        "WHERE set_number = ? AND task_type = ? AND status = 'failed' "
+        "AND completed_at > CURRENT_TIMESTAMP - INTERVAL '7 days' "
+        "LIMIT 1",
+        [set_number, task_type.value],
+    ).fetchone()
+    if recently_failed:
+        return None
+
     task_id = uuid.uuid4().hex
     priority = TASK_PRIORITIES[task_type]
     dep = TASK_DEPENDENCIES.get(task_type)
@@ -118,15 +128,29 @@ def _create_task_inner(
     status = TaskStatus.BLOCKED if dep else TaskStatus.PENDING
 
     seq_id = conn.execute("SELECT nextval('scrape_tasks_id_seq')").fetchone()[0]
-    conn.execute(
-        """
-        INSERT INTO scrape_tasks (id, task_id, set_number, task_type, priority,
-                                  status, depends_on)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-        """,
-        [seq_id, task_id, set_number, task_type.value, priority,
-         status.value, depends_on],
-    )
+    try:
+        conn.execute(
+            """
+            INSERT INTO scrape_tasks (id, task_id, set_number, task_type, priority,
+                                      status, depends_on)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            [seq_id, task_id, set_number, task_type.value, priority,
+             status.value, depends_on],
+        )
+    except Exception as exc:
+        # Partial unique index (idx_scrape_tasks_active_unique) prevents
+        # duplicate active tasks for the same (set_number, task_type).
+        # A race between concurrent sweeps can trigger this safely.
+        # psycopg2 raises psycopg2.errors.UniqueViolation; we match
+        # by message to avoid importing the driver directly.
+        if "unique" in str(exc).lower() or "duplicate" in str(exc).lower():
+            logger.debug(
+                "Duplicate active task for %s/%s (concurrent insert)",
+                set_number, task_type.value,
+            )
+            return None
+        raise
 
     row = conn.execute(
         f"SELECT {_COLUMNS_SQL} FROM scrape_tasks WHERE task_id = ?",  # noqa: S608
@@ -383,11 +407,20 @@ def requeue_for_cooldown(
 
     Used when a source is in cooldown -- the task should be retried
     later, not counted as a failure.
+
+    Only decrements attempt_count when the task still has real retries
+    remaining (attempt_count < max_attempts).  When attempt_count has
+    reached max_attempts, decrementing would create an infinite
+    pending(n-1) -> claim(n) -> cooldown -> pending(n-1) loop.
+    Keeping the count at max_attempts ensures the next real execution
+    correctly marks the task as failed via fail_task().
     """
     conn.execute(
         """UPDATE scrape_tasks
            SET status = 'pending', locked_by = NULL, locked_at = NULL,
-               attempt_count = attempt_count - 1
+               attempt_count = CASE WHEN attempt_count < max_attempts
+                                    THEN attempt_count - 1
+                                    ELSE attempt_count END
            WHERE task_id = ?""",
         [task_id],
     )
@@ -654,12 +687,11 @@ def get_priority_rescrape_candidates(
 
             UNION
 
-            -- Retired within last 6 months (use retired_date when parseable)
+            -- Retired within last 6 months
             SELECT li.set_number
             FROM lego_items li
             WHERE li.retired_date IS NOT NULL
-              AND li.retired_date ~ '^\\d{{4}}-\\d{{2}}'
-              AND CAST(li.retired_date AS DATE) >= CURRENT_DATE - INTERVAL '6 months'
+              AND li.retired_date >= CURRENT_DATE - INTERVAL '6 months'
 
             UNION
 
@@ -776,8 +808,7 @@ def get_rescrape_candidates(
             SELECT li.set_number, {TIER_GENERAL_DAYS} AS stale_days
             FROM lego_items li
             WHERE li.retired_date IS NOT NULL
-              AND li.retired_date ~ '^\\d{{4}}-\\d{{2}}'
-              AND CAST(li.retired_date || '-01' AS DATE)
+              AND li.retired_date
                   >= CURRENT_DATE - INTERVAL '{RETIREMENT_WINDOW_MONTHS} months'
               AND COALESCE(li.retiring_soon, FALSE) = FALSE
               AND li.set_number NOT IN (SELECT set_number FROM portfolio_sets)
@@ -823,8 +854,15 @@ def get_rescrape_candidates(
                 AND st.task_type = ?
                 AND st.status IN ({active_placeholders})
           )
+          AND NOT EXISTS (
+              SELECT 1 FROM scrape_tasks st
+              WHERE st.set_number = bt.set_number
+                AND st.task_type = ?
+                AND st.status = 'failed'
+                AND st.completed_at > CURRENT_TIMESTAMP - INTERVAL '7 days'
+          )
         ORDER BY bt.set_number
     """  # noqa: S608
 
-    rows = conn.execute(sql, [task_type_value, task_type_value, *active_list]).fetchall()
+    rows = conn.execute(sql, [task_type_value, task_type_value, *active_list, task_type_value]).fetchall()
     return [row[0] for row in rows]

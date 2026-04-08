@@ -58,14 +58,14 @@ def _complete_task_at(conn, set_number: str, task_type: TaskType, days_ago: int)
 
 
 def _retired_date_months_ago(months: int) -> str:
-    """Return an ISO month string (YYYY-MM) for N months ago."""
+    """Return an ISO date string (YYYY-MM-01) for N months ago."""
     now = datetime.now()
     year = now.year
     month = now.month - months
     while month <= 0:
         month += 12
         year -= 1
-    return f"{year}-{month:02d}"
+    return f"{year}-{month:02d}-01"
 
 
 def _add_portfolio_holding(conn, set_number: str) -> None:

@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { scoreColor, scoreBg, rankToPercentile, formatMetricValue as fmtMetric } from '../percentile-utils';
 
 interface LiquidityMetric {
   value: number;
@@ -36,24 +37,6 @@ interface LiquidityData {
   monthly: LiquidityMonth[];
 }
 
-// Match cohort panel color functions
-function scoreColor(score: number | null): string {
-  if (score === null) return 'text-muted-foreground';
-  if (score >= 80) return 'text-emerald-400';
-  if (score >= 65) return 'text-emerald-600 dark:text-emerald-500';
-  if (score >= 50) return 'text-yellow-600 dark:text-yellow-400';
-  if (score >= 35) return 'text-orange-500';
-  return 'text-red-500';
-}
-
-function scoreBg(score: number | null): string {
-  if (score === null) return '';
-  if (score >= 80) return 'bg-emerald-500/10';
-  if (score >= 65) return 'bg-emerald-500/5';
-  if (score >= 50) return 'bg-yellow-500/5';
-  if (score >= 35) return 'bg-orange-500/5';
-  return 'bg-red-500/10';
-}
 
 function PctBadge({ value }: { value: number }) {
   return (
@@ -65,12 +48,6 @@ function PctBadge({ value }: { value: number }) {
   );
 }
 
-function formatMetricValue(key: string, metric: LiquidityMetric): string {
-  if (key === 'consistency') return `${(metric.value * 100).toFixed(0)}%`;
-  if (key === 'trend') return `${metric.value >= 1 ? '+' : ''}${((metric.value - 1) * 100).toFixed(0)}%`;
-  if (key === 'listing_ratio') return `${metric.value.toFixed(1)}x`;
-  return metric.value?.toFixed(1) ?? '--';
-}
 
 function MetricDesc({ metricKey, data }: { metricKey: string; data: LiquidityData }) {
   if (metricKey === 'volume')
@@ -158,17 +135,13 @@ function LiquiditySource({
         <div className="flex items-center gap-2">
           <span className="text-xs font-medium">Overall</span>
           <span className="text-muted-foreground text-xs">
-            vol 50% + consistency 30% + trend 20%
+            vol 50% + consistency 38% + listing ratio 12%
           </span>
         </div>
         <div className="flex items-center gap-2">
           <PctBadge value={data.composite_pct} />
-          {data.rank != null && (
-            <span
-              className={`rounded px-1.5 py-0.5 text-xs font-semibold ${scoreColor(data.composite_pct)} ${scoreBg(data.composite_pct)}`}
-            >
-              #{data.rank}/{data.size}
-            </span>
+          {data.size > 0 && (
+            <span className="text-muted-foreground text-xs">n={data.size}</span>
           )}
         </div>
       </div>
@@ -185,7 +158,7 @@ function LiquiditySource({
             </div>
             <div className="flex items-center gap-2">
               <span className={`font-mono text-xs ${scoreColor(metric.pct)}`}>
-                {formatMetricValue(key, metric)}
+                {fmtMetric(key, metric.value)}
               </span>
               <PctBadge value={metric.pct} />
             </div>
@@ -204,6 +177,96 @@ function LiquiditySource({
   );
 }
 
+interface LiquidityCohort {
+  key: string;
+  size: number;
+  rank: number | null;
+  volume_pct: number | null;
+  consistency_pct: number | null;
+  trend_pct: number | null;
+  listing_ratio_pct: number | null;
+  composite_pct: number | null;
+}
+
+const COHORT_LABELS: Record<string, { label: string; desc: string }> = {
+  half_year: { label: 'Half-Year', desc: 'vs sets released same half' },
+  year: { label: 'Year', desc: 'vs sets released same year' },
+  theme: { label: 'Theme', desc: 'vs all sets in same theme' },
+  year_theme: { label: 'Year + Theme', desc: 'vs same theme & year' },
+  price_tier: { label: 'Price Tier', desc: 'vs similarly priced sets' },
+  piece_group: { label: 'Piece Group', desc: 'vs similar piece count' },
+};
+
+const LIQ_PCT_FIELDS: { key: keyof LiquidityCohort; label: string }[] = [
+  { key: 'composite_pct', label: 'Overall' },
+  { key: 'volume_pct', label: 'Volume' },
+  { key: 'consistency_pct', label: 'Consistency' },
+  { key: 'trend_pct', label: 'Trend' },
+  { key: 'listing_ratio_pct', label: 'Listing' },
+];
+
+function LiquidityCohortGrid({ cohorts }: { cohorts: Record<string, LiquidityCohort> }) {
+  const entries = Object.entries(cohorts).filter(([key]) => key in COHORT_LABELS);
+  if (entries.length === 0) return null;
+
+  return (
+    <div className="rounded-lg border">
+      <div className="bg-muted/50 border-b px-4 py-2 flex items-center justify-between">
+        <div>
+          <span className="text-xs font-medium mr-2">Liquidity</span>
+          <span className="text-muted-foreground text-xs">
+            percentile vs peer group (higher = better)
+          </span>
+        </div>
+      </div>
+      <div className="divide-y">
+        {entries.map(([strategy, cohort]) => {
+          const meta = COHORT_LABELS[strategy];
+          const rankPct = rankToPercentile(cohort.rank, cohort.size);
+          const overall = cohort.composite_pct ?? rankPct;
+          return (
+            <div key={strategy} className="px-4 py-2">
+              <div className="flex items-center justify-between mb-1">
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-medium">{meta.label}</span>
+                  <span className="text-muted-foreground text-xs">{meta.desc}</span>
+                  <span className="text-muted-foreground text-xs">
+                    ({cohort.key})
+                  </span>
+                </div>
+                {rankPct != null && (
+                  <span className={`rounded px-1.5 py-0.5 text-xs font-semibold ${scoreColor(overall)} ${scoreBg(overall)}`}>
+                    P{rankPct}
+                    <span className="text-muted-foreground ml-1 font-normal">n={cohort.size}</span>
+                  </span>
+                )}
+              </div>
+              <div className="flex flex-wrap items-center gap-2.5">
+                {LIQ_PCT_FIELDS.map(({ key, label }) => {
+                  const value = cohort[key];
+                  const numVal = typeof value === 'number' ? value : null;
+                  return (
+                    <span
+                      key={key}
+                      className="inline-flex items-center gap-1"
+                      title={label}
+                    >
+                      <span className="text-muted-foreground text-xs">{label}</span>
+                      <span className={`font-mono text-xs font-semibold ${scoreColor(numVal)}`}>
+                        {numVal !== null ? `P${numVal.toFixed(0)}` : '--'}
+                      </span>
+                    </span>
+                  );
+                })}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 interface LiquidityPanelProps {
   setNumber: string;
 }
@@ -213,11 +276,12 @@ export function LiquidityPanel({ setNumber }: LiquidityPanelProps) {
   const [be, setBe] = useState<LiquidityData | null | undefined>(undefined);
   const [blLoading, setBlLoading] = useState(true);
   const [beLoading, setBeLoading] = useState(true);
+  const [cohorts, setCohorts] = useState<Record<string, LiquidityCohort> | null>(null);
 
   useEffect(() => {
     const controllers: AbortController[] = [];
 
-    // Fetch BrickLink
+    // Fetch BrickLink liquidity
     const blCtrl = new AbortController();
     controllers.push(blCtrl);
     fetch(`/api/items/${setNumber}/liquidity?source=bricklink`, { signal: blCtrl.signal })
@@ -226,7 +290,7 @@ export function LiquidityPanel({ setNumber }: LiquidityPanelProps) {
       .catch((err) => { if (err.name !== 'AbortError') setBl(null); })
       .finally(() => setBlLoading(false));
 
-    // Fetch BrickEconomy
+    // Fetch BrickEconomy liquidity
     const beCtrl = new AbortController();
     controllers.push(beCtrl);
     fetch(`/api/items/${setNumber}/liquidity?source=brickeconomy`, { signal: beCtrl.signal })
@@ -234,6 +298,18 @@ export function LiquidityPanel({ setNumber }: LiquidityPanelProps) {
       .then((json) => setBe(json.success ? json.data : null))
       .catch((err) => { if (err.name !== 'AbortError') setBe(null); })
       .finally(() => setBeLoading(false));
+
+    // Fetch liquidity cohort percentiles
+    const cohortCtrl = new AbortController();
+    controllers.push(cohortCtrl);
+    fetch(`/api/items/${setNumber}/liquidity/cohorts`, { signal: cohortCtrl.signal })
+      .then((res) => res.json())
+      .then((json) => {
+        if (json.success && json.data) {
+          setCohorts(json.data);
+        }
+      })
+      .catch(() => {});
 
     return () => controllers.forEach((c) => c.abort());
   }, [setNumber]);
@@ -261,9 +337,14 @@ export function LiquidityPanel({ setNumber }: LiquidityPanelProps) {
   }
 
   return (
-    <div className="flex gap-4">
-      <LiquiditySource label="BrickLink" data={bl} loading={blLoading} />
-      <LiquiditySource label="BrickEconomy" data={be} loading={beLoading} />
+    <div className="flex flex-col gap-4">
+      <div className="flex gap-4">
+        <LiquiditySource label="BrickLink" data={bl} loading={blLoading} />
+        <LiquiditySource label="BrickEconomy" data={be} loading={beLoading} />
+      </div>
+      {cohorts && Object.keys(cohorts).length > 0 && (
+        <LiquidityCohortGrid cohorts={cohorts} />
+      )}
     </div>
   );
 }

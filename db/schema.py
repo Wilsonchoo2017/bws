@@ -23,10 +23,10 @@ CREATE TABLE IF NOT EXISTS bricklink_items (
     theme VARCHAR,
     watch_status VARCHAR DEFAULT 'active',
     scrape_interval_days INTEGER DEFAULT 7,
-    last_scraped_at TIMESTAMP,
-    next_scrape_at TIMESTAMP,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    last_scraped_at TIMESTAMPTZ,
+    next_scrape_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
 );
 """
 
@@ -38,7 +38,7 @@ CREATE TABLE IF NOT EXISTS bricklink_price_history (
     six_month_used JSON,
     current_new JSON,
     current_used JSON,
-    scraped_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    scraped_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
 );
 """
 
@@ -55,7 +55,7 @@ CREATE TABLE IF NOT EXISTS bricklink_monthly_sales (
     max_price INTEGER,
     avg_price INTEGER,
     currency VARCHAR DEFAULT 'USD',
-    scraped_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    scraped_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(item_id, year, month, condition)
 );
 """
@@ -71,7 +71,7 @@ CREATE TABLE IF NOT EXISTS product_analysis (
     dimensional_scores JSON,
     risks JSON,
     opportunities JSON,
-    analyzed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    analyzed_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
 );
 """
 
@@ -88,7 +88,7 @@ CREATE TABLE IF NOT EXISTS shopee_products (
     image_url VARCHAR,
     source_url VARCHAR,
     is_sold_out BOOLEAN DEFAULT FALSE,
-    scraped_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    scraped_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
 );
 """
 
@@ -99,7 +99,7 @@ CREATE TABLE IF NOT EXISTS shopee_scrape_history (
     items_found INTEGER DEFAULT 0,
     success BOOLEAN DEFAULT TRUE,
     error VARCHAR,
-    scraped_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    scraped_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
 );
 """
 
@@ -117,9 +117,9 @@ CREATE TABLE IF NOT EXISTS mightyutan_products (
     total_sold INTEGER DEFAULT 0,
     rating VARCHAR,
     rating_count INTEGER DEFAULT 0,
-    last_scraped_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    last_scraped_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
 );
 """
 
@@ -129,7 +129,7 @@ CREATE TABLE IF NOT EXISTS mightyutan_price_history (
     sku VARCHAR NOT NULL,
     price_myr VARCHAR NOT NULL,
     available BOOLEAN DEFAULT TRUE,
-    scraped_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    scraped_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
 );
 """
 
@@ -145,9 +145,9 @@ CREATE TABLE IF NOT EXISTS toysrus_products (
     url VARCHAR,
     image_url VARCHAR,
     available BOOLEAN DEFAULT TRUE,
-    last_scraped_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    last_scraped_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
 );
 """
 
@@ -157,7 +157,7 @@ CREATE TABLE IF NOT EXISTS toysrus_price_history (
     sku VARCHAR NOT NULL,
     price_myr VARCHAR NOT NULL,
     available BOOLEAN DEFAULT TRUE,
-    scraped_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    scraped_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
 );
 """
 
@@ -176,9 +176,9 @@ CREATE TABLE IF NOT EXISTS lego_items (
     rrp_currency VARCHAR DEFAULT 'MYR',
     retiring_soon BOOLEAN DEFAULT FALSE,
     watchlist BOOLEAN DEFAULT FALSE,
-    last_enriched_at TIMESTAMP,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    last_enriched_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
 );
 """
 
@@ -193,7 +193,7 @@ CREATE TABLE IF NOT EXISTS price_records (
     url VARCHAR,
     shop_name VARCHAR,
     condition VARCHAR,
-    recorded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    recorded_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
 );
 """
 
@@ -211,7 +211,7 @@ CREATE TABLE IF NOT EXISTS shopee_saturation (
     saturation_score FLOAT NOT NULL,
     saturation_level VARCHAR NOT NULL,
     search_query VARCHAR NOT NULL,
-    scraped_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    scraped_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
 );
 """
 
@@ -224,10 +224,10 @@ CREATE TABLE IF NOT EXISTS portfolio_transactions (
     price_cents INTEGER NOT NULL,
     currency VARCHAR NOT NULL DEFAULT 'MYR',
     condition VARCHAR NOT NULL DEFAULT 'new',
-    txn_date TIMESTAMP NOT NULL,
+    txn_date TIMESTAMPTZ NOT NULL,
     notes VARCHAR,
     bill_id VARCHAR,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
 );
 """
 
@@ -240,7 +240,7 @@ CREATE TABLE IF NOT EXISTS portfolio_snapshots (
     unrealized_pl_cents BIGINT NOT NULL,
     realized_pl_cents BIGINT NOT NULL,
     holdings_count INTEGER NOT NULL,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
 );
 """
 
@@ -251,9 +251,9 @@ CREATE TABLE IF NOT EXISTS minifigures (
     name VARCHAR,
     image_url VARCHAR,
     year_released INTEGER,
-    last_scraped_at TIMESTAMP,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    last_scraped_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
 );
 """
 
@@ -263,7 +263,7 @@ CREATE TABLE IF NOT EXISTS set_minifigures (
     set_item_id VARCHAR NOT NULL,
     minifig_id VARCHAR NOT NULL,
     quantity INTEGER DEFAULT 1,
-    scraped_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    scraped_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(set_item_id, minifig_id)
 );
 """
@@ -276,7 +276,7 @@ CREATE TABLE IF NOT EXISTS minifig_price_history (
     six_month_used JSON,
     current_new JSON,
     current_used JSON,
-    scraped_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    scraped_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
 );
 """
 
@@ -289,11 +289,11 @@ CREATE TABLE IF NOT EXISTS image_assets (
     local_path VARCHAR NOT NULL,
     file_size_bytes INTEGER,
     content_type VARCHAR DEFAULT 'image/png',
-    downloaded_at TIMESTAMP,
+    downloaded_at TIMESTAMPTZ,
     status VARCHAR DEFAULT 'pending',
     error VARCHAR,
     retry_count INTEGER DEFAULT 0,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(asset_type, item_id)
 );
 """
@@ -310,11 +310,11 @@ CREATE TABLE IF NOT EXISTS scrape_tasks (
     attempt_count INTEGER DEFAULT 0,
     max_attempts INTEGER DEFAULT 3,
     error VARCHAR,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    started_at TIMESTAMP,
-    completed_at TIMESTAMP,
+    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+    started_at TIMESTAMPTZ,
+    completed_at TIMESTAMPTZ,
     locked_by VARCHAR,
-    locked_at TIMESTAMP
+    locked_at TIMESTAMPTZ
 );
 """
 
@@ -326,7 +326,7 @@ CREATE TABLE IF NOT EXISTS scrape_task_attempts (
     error_category VARCHAR,
     error_message VARCHAR,
     duration_seconds FLOAT,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
 );
 """
 
@@ -343,7 +343,7 @@ CREATE TABLE IF NOT EXISTS google_trends_snapshots (
     peak_value INTEGER,
     peak_date VARCHAR,
     average_value FLOAT,
-    scraped_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    scraped_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
 );
 """
 
@@ -366,7 +366,7 @@ CREATE TABLE IF NOT EXISTS google_trends_theme_snapshots (
     peak_bare INTEGER,
     lego_share FLOAT,
     n_weeks INTEGER,
-    scraped_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    scraped_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
 );
 """
 
@@ -377,7 +377,7 @@ CREATE TABLE IF NOT EXISTS keepa_snapshots (
     asin VARCHAR,
     title VARCHAR,
     keepa_url VARCHAR,
-    scraped_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    scraped_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
     current_buy_box_cents INTEGER,
     current_amazon_cents INTEGER,
     current_new_cents INTEGER,
@@ -406,7 +406,7 @@ BRICKECONOMY_SNAPSHOTS_DDL = """
 CREATE TABLE IF NOT EXISTS brickeconomy_snapshots (
     id INTEGER PRIMARY KEY,
     set_number VARCHAR NOT NULL,
-    scraped_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    scraped_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
     title VARCHAR,
     theme VARCHAR,
     subtheme VARCHAR,
@@ -441,11 +441,11 @@ CREATE TABLE IF NOT EXISTS ml_feature_store (
     id INTEGER PRIMARY KEY,
     set_number VARCHAR NOT NULL,
     horizon_months INTEGER NOT NULL,
-    snapshot_date TIMESTAMP,
+    snapshot_date TIMESTAMPTZ,
     target_return FLOAT,
     target_profitable BOOLEAN,
     features_json JSON NOT NULL,
-    computed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    computed_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(set_number, horizon_months)
 );
 """
@@ -464,7 +464,7 @@ CREATE TABLE IF NOT EXISTS ml_model_runs (
     n_test INTEGER,
     feature_count INTEGER,
     artifact_path VARCHAR,
-    trained_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    trained_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
 );
 """
 
@@ -481,7 +481,7 @@ CREATE TABLE IF NOT EXISTS shopee_competition_snapshots (
     median_price_cents INTEGER,
     saturation_score FLOAT NOT NULL,
     saturation_level VARCHAR NOT NULL,
-    scraped_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    scraped_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
 );
 """
 
@@ -502,7 +502,7 @@ CREATE TABLE IF NOT EXISTS shopee_competition_listings (
     is_sold_out BOOLEAN DEFAULT FALSE,
     is_delisted BOOLEAN DEFAULT FALSE,
     discovery_method VARCHAR NOT NULL DEFAULT 'search',
-    scraped_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    scraped_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
 );
 """
 
@@ -570,8 +570,6 @@ CREATE INDEX IF NOT EXISTS idx_product_analysis_action
     ON product_analysis(action);
 CREATE INDEX IF NOT EXISTS idx_product_analysis_score
     ON product_analysis(overall_score);
-CREATE INDEX IF NOT EXISTS idx_minifigures_minifig_id
-    ON minifigures(minifig_id);
 CREATE INDEX IF NOT EXISTS idx_set_minifigures_set
     ON set_minifigures(set_item_id);
 CREATE INDEX IF NOT EXISTS idx_set_minifigures_minifig
@@ -586,20 +584,14 @@ CREATE INDEX IF NOT EXISTS idx_shopee_products_scraped
     ON shopee_products(scraped_at);
 CREATE INDEX IF NOT EXISTS idx_shopee_saturation_set
     ON shopee_saturation(set_number, scraped_at);
-CREATE INDEX IF NOT EXISTS idx_mightyutan_products_sku
-    ON mightyutan_products(sku);
 CREATE INDEX IF NOT EXISTS idx_mightyutan_products_available
     ON mightyutan_products(available);
 CREATE INDEX IF NOT EXISTS idx_mightyutan_price_history_sku
     ON mightyutan_price_history(sku, scraped_at);
-CREATE INDEX IF NOT EXISTS idx_toysrus_products_sku
-    ON toysrus_products(sku);
 CREATE INDEX IF NOT EXISTS idx_toysrus_products_available
     ON toysrus_products(available);
 CREATE INDEX IF NOT EXISTS idx_toysrus_price_history_sku
     ON toysrus_price_history(sku, scraped_at);
-CREATE INDEX IF NOT EXISTS idx_lego_items_set_number
-    ON lego_items(set_number);
 CREATE INDEX IF NOT EXISTS idx_price_records_set_source
     ON price_records(set_number, source, recorded_at);
 CREATE INDEX IF NOT EXISTS idx_price_records_recorded
@@ -630,6 +622,9 @@ CREATE INDEX IF NOT EXISTS idx_scrape_tasks_status_priority
     ON scrape_tasks(status, priority, created_at);
 CREATE INDEX IF NOT EXISTS idx_scrape_tasks_set_type
     ON scrape_tasks(set_number, task_type);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_scrape_tasks_active_unique
+    ON scrape_tasks(set_number, task_type)
+    WHERE status IN ('pending', 'running', 'blocked');
 CREATE INDEX IF NOT EXISTS idx_scrape_task_attempts_task_id
     ON scrape_task_attempts(task_id);
 CREATE INDEX IF NOT EXISTS idx_ml_feature_store_set
@@ -644,6 +639,27 @@ CREATE INDEX IF NOT EXISTS idx_competition_listings_set_url
     ON shopee_competition_listings(set_number, product_url, scraped_at);
 CREATE INDEX IF NOT EXISTS idx_competition_listings_set_shop
     ON shopee_competition_listings(set_number, shop_id);
+CREATE INDEX IF NOT EXISTS idx_price_records_source_shopee
+    ON price_records(set_number, recorded_at DESC)
+    WHERE source = 'shopee';
+CREATE INDEX IF NOT EXISTS idx_price_records_source_toysrus
+    ON price_records(set_number, recorded_at DESC)
+    WHERE source = 'toysrus';
+CREATE INDEX IF NOT EXISTS idx_price_records_source_mightyutan
+    ON price_records(set_number, recorded_at DESC)
+    WHERE source = 'mightyutan';
+CREATE INDEX IF NOT EXISTS idx_price_records_source_bricklink_new
+    ON price_records(set_number, recorded_at DESC)
+    WHERE source = 'bricklink_new';
+CREATE INDEX IF NOT EXISTS idx_price_records_source_bricklink_used
+    ON price_records(set_number, recorded_at DESC)
+    WHERE source = 'bricklink_used';
+CREATE INDEX IF NOT EXISTS idx_scrape_tasks_pending_type
+    ON scrape_tasks(task_type, created_at)
+    WHERE status = 'pending';
+CREATE INDEX IF NOT EXISTS idx_bricklink_monthly_sales_new
+    ON bricklink_monthly_sales(item_id, year, month)
+    WHERE condition = 'N';
 """
 
 ALL_DDL = [
@@ -728,7 +744,7 @@ def _migrate_lego_items(conn: Any) -> None:
         )
     if "last_enriched_at" not in existing:
         conn.execute(
-            "ALTER TABLE lego_items ADD COLUMN last_enriched_at TIMESTAMP"
+            "ALTER TABLE lego_items ADD COLUMN last_enriched_at TIMESTAMPTZ"
         )
     if "minifig_count" not in existing:
         conn.execute("ALTER TABLE lego_items ADD COLUMN minifig_count INTEGER")
@@ -741,9 +757,9 @@ def _migrate_lego_items(conn: Any) -> None:
     if "buy_rating" not in existing:
         conn.execute("ALTER TABLE lego_items ADD COLUMN buy_rating INTEGER")
     if "release_date" not in existing:
-        conn.execute("ALTER TABLE lego_items ADD COLUMN release_date VARCHAR")
+        conn.execute("ALTER TABLE lego_items ADD COLUMN release_date DATE")
     if "retired_date" not in existing:
-        conn.execute("ALTER TABLE lego_items ADD COLUMN retired_date VARCHAR")
+        conn.execute("ALTER TABLE lego_items ADD COLUMN retired_date DATE")
 
 
 def _migrate_brickeconomy_snapshots(conn: Any) -> None:
@@ -758,8 +774,8 @@ def _migrate_brickeconomy_snapshots(conn: Any) -> None:
     _new_columns: list[tuple[str, str]] = [
         ("year_retired", "INTEGER"),
         ("retiring_soon", "BOOLEAN"),
-        ("release_date", "VARCHAR"),
-        ("retired_date", "VARCHAR"),
+        ("release_date", "DATE"),
+        ("retired_date", "DATE"),
         ("minifig_value_cents", "INTEGER"),
         ("exclusive_minifigs", "BOOLEAN"),
         ("upc", "VARCHAR"),
@@ -819,6 +835,80 @@ def _migrate_shopee_products(conn: Any) -> None:
         conn.execute(
             "ALTER TABLE shopee_products ADD COLUMN is_sold_out BOOLEAN DEFAULT FALSE"
         )
+
+
+def _migrate_date_columns(conn: Any) -> None:
+    """Convert retired_date/release_date from VARCHAR to DATE.
+
+    Existing data is 'YYYY-MM' format; appends '-01' during conversion.
+    Safe to run multiple times -- skips if columns are already DATE type.
+    """
+    _conversions = [
+        ("lego_items", "retired_date"),
+        ("lego_items", "release_date"),
+        ("brickeconomy_snapshots", "retired_date"),
+        ("brickeconomy_snapshots", "release_date"),
+    ]
+    for table, col in _conversions:
+        try:
+            row = conn.execute(
+                "SELECT data_type FROM information_schema.columns "
+                f"WHERE table_name = '{table}' AND column_name = '{col}'"  # noqa: S608
+            ).fetchone()
+            if row and row[0] in ("character varying", "text"):
+                conn.execute(
+                    f"ALTER TABLE {table} "  # noqa: S608
+                    f"ALTER COLUMN {col} TYPE DATE "
+                    f"USING CASE "
+                    f"  WHEN {col} ~ '^\\d{{4}}-\\d{{2}}-\\d{{2}}$' "
+                    f"    THEN {col}::DATE "
+                    f"  WHEN {col} ~ '^\\d{{4}}-\\d{{2}}$' "
+                    f"    THEN ({col} || '-01')::DATE "
+                    f"  ELSE NULL "
+                    f"END"
+                )
+                logger.info("Converted %s.%s from VARCHAR to DATE", table, col)
+        except Exception:  # noqa: BLE001
+            logger.debug("Date migration skipped for %s.%s", table, col)
+
+
+def _migrate_timestamp_to_timestamptz(conn: Any) -> None:
+    """Convert TIMESTAMP columns to TIMESTAMPTZ.
+
+    This is a metadata-only change in PostgreSQL (no data rewrite).
+    Safe to run multiple times -- skips if already TIMESTAMPTZ.
+    """
+    rows = conn.execute(
+        "SELECT table_name, column_name FROM information_schema.columns "
+        "WHERE table_schema = 'public' "
+        "  AND data_type = 'timestamp without time zone'"
+    ).fetchall()
+    for table_name, column_name in rows:
+        try:
+            conn.execute(
+                f"ALTER TABLE {table_name} "  # noqa: S608
+                f"ALTER COLUMN {column_name} TYPE TIMESTAMPTZ"
+            )
+            logger.info("Converted %s.%s to TIMESTAMPTZ", table_name, column_name)
+        except Exception:  # noqa: BLE001
+            logger.debug(
+                "TIMESTAMPTZ migration skipped for %s.%s", table_name, column_name
+            )
+
+
+def _drop_redundant_indexes(conn: Any) -> None:
+    """Drop indexes that duplicate UNIQUE constraints."""
+    redundant = [
+        "idx_lego_items_set_number",
+        "idx_mightyutan_products_sku",
+        "idx_toysrus_products_sku",
+        "idx_minifigures_minifig_id",
+    ]
+    for idx_name in redundant:
+        try:
+            conn.execute(f"DROP INDEX IF EXISTS {idx_name}")  # noqa: S608
+        except Exception:  # noqa: BLE001
+            logger.debug("Could not drop index %s", idx_name)
 
 
 _SEQUENCE_TABLE_MAP = [
@@ -888,6 +978,9 @@ def init_schema(conn: Any) -> None:
     _migrate_brickeconomy_snapshots(conn)
     _migrate_ml_prediction_snapshots(conn)
     _migrate_shopee_products(conn)
+    _migrate_timestamp_to_timestamptz(conn)
+    _migrate_date_columns(conn)
+    _drop_redundant_indexes(conn)
     # Sequences are auto-synced by Postgres via nextval() in INSERT statements.
 
 

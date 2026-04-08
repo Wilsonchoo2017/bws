@@ -26,7 +26,11 @@ export type FilterKey =
   | 'cohort_theme'
   | 'cohort_year_theme'
   | 'cohort_price_tier'
-  | 'cohort_piece_group';
+  | 'cohort_piece_group'
+  | 'liq_high'
+  | 'liq_medium'
+  | 'liq_low'
+  | 'liq_none';
 
 export interface FilterGroup {
   id: string;
@@ -96,6 +100,16 @@ export const FILTER_GROUPS: FilterGroup[] = [
     ],
   },
   {
+    id: 'liquidity',
+    label: 'Liquidity',
+    filters: [
+      { key: 'liq_high', label: 'High (70+)' },
+      { key: 'liq_medium', label: 'Medium (40+)' },
+      { key: 'liq_low', label: 'Low (<40)' },
+      { key: 'liq_none', label: 'No Data' },
+    ],
+  },
+  {
     id: 'other',
     label: 'Other',
     filters: [
@@ -149,6 +163,10 @@ const PREDICATES: Record<FilterKey, (item: UnifiedItem, dealThreshold: number, c
   cohort_year_theme: (item, _dt, ct) => item.cohort_year_theme != null && item.cohort_year_theme >= ct,
   cohort_price_tier: (item, _dt, ct) => item.cohort_price_tier != null && item.cohort_price_tier >= ct,
   cohort_piece_group: (item, _dt, ct) => item.cohort_piece_group != null && item.cohort_piece_group >= ct,
+  liq_high: (item) => item.liquidity_score != null && item.liquidity_score >= 70,
+  liq_medium: (item) => item.liquidity_score != null && item.liquidity_score >= 40 && item.liquidity_score < 70,
+  liq_low: (item) => item.liquidity_score != null && item.liquidity_score < 40,
+  liq_none: (item) => item.liquidity_score == null,
   deal: (item, dealThreshold) => {
     const blNewCents = item.bricklink_new_cents;
     if (blNewCents == null) return false;

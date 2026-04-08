@@ -43,7 +43,7 @@ TIER1_FEATURES: tuple[str, ...] = (
     # BrickTalk gap analysis signals
     "high_price_barrier", "shelf_life_x_reviews",
     # BE analysis page aggregate growth (market-level context)
-    "be_theme_avg_growth", "be_year_avg_growth",
+    "be_theme_avg_growth",
     # Feature interactions
     "theme_x_price", "licensed_x_parts", "rating_x_price",
 )
@@ -317,16 +317,6 @@ def engineer_intrinsic_features(
         )
     else:
         result["be_theme_avg_growth"] = np.nan
-
-    if be_analysis.get("years"):
-        year_growth_lookup = {
-            y["year"]: y["annual_growth_pct"]
-            for y in be_analysis["years"]
-        }
-        yr = pd.to_numeric(result.get("year_released"), errors="coerce")
-        result["be_year_avg_growth"] = yr.map(year_growth_lookup)
-    else:
-        result["be_year_avg_growth"] = np.nan
 
     # BrickTalk gap analysis: high price barrier reduces investor competition
     result["high_price_barrier"] = (rrp_raw > 30000).astype(int)  # >$300

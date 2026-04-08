@@ -11,6 +11,15 @@ Decomposed into focused components:
 Public API re-exported here for backward compatibility.
 """
 
+from services.browser.cloudflare import (
+    capture_cf_diagnostics,
+    detect_cloudflare,
+    human_mouse_move,
+    idle_behavior,
+    pre_click_wander,
+    try_click_turnstile,
+    wait_for_cloudflare,
+)
 from services.browser.config import BrowserConfig
 from services.browser.pool import PersistentBrowser, close_all_browsers, get_persistent_browser
 from services.browser.process_guard import clear_stale_profile_lock as _clear_stale_profile_lock
@@ -22,9 +31,16 @@ __all__ = [
     "BrowserSession",
     "PersistentBrowser",
     "_clear_stale_profile_lock",
+    "capture_cf_diagnostics",
     "close_all_browsers",
+    "detect_cloudflare",
     "get_persistent_browser",
     "human_delay",
+    "human_mouse_move",
+    "idle_behavior",
     "new_page",
+    "pre_click_wander",
     "stealth_browser",
+    "try_click_turnstile",
+    "wait_for_cloudflare",
 ]

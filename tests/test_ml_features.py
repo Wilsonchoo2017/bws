@@ -93,7 +93,7 @@ class TestFeatureExtractors:
                  parts_count, minifig_count, retired_date)
             VALUES
                 (1, '75192', 'Millennium Falcon', 'Star Wars', 2017, 2022,
-                 7541, 8, '2022-06')
+                 7541, 8, '2022-06-01')
         """)
 
         # Insert BrickEconomy snapshot
