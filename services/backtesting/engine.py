@@ -68,8 +68,7 @@ def run_backtest(
         # Get metadata for this item
         item_meta = metadata[metadata["item_id"] == item_id]
         if item_meta.empty:
-            # Try without -1 suffix
-            base_id = str(item_id).replace("-1", "")
+            base_id = str(item_id).split("-")[0]
             item_meta = metadata[
                 metadata["set_number"] == base_id
             ]

@@ -87,7 +87,7 @@ def enrich_signals(
 
         prefix = provider.prefix
         for sig in signals:
-            sn = sig.get("set_number") or str(sig.get("item_id", "")).removesuffix("-1")
+            sn = sig.get("set_number") or str(sig.get("item_id", "")).split("-")[0]
             pred = scores.get(sn)
             if pred:
                 for key, val in pred.items():

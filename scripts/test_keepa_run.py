@@ -18,7 +18,7 @@ from services.keepa.scraper import scrape_keepa
 
 
 async def main():
-    result = await scrape_keepa("76173", headless=False)
+    result = await scrape_keepa("76173")
     print("---")
     print(f"Success: {result.success}")
     print(f"Error: {result.error}")

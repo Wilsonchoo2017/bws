@@ -252,7 +252,7 @@ class TestScoreMerge:
 
         score_map = {}
         for sig in signals:
-            set_num = sig.get("set_number") or sig["item_id"].removesuffix("-1")
+            set_num = sig.get("set_number") or sig["item_id"].split("-")[0]
             if sig["composite_score"] is not None:
                 score_map[set_num] = sig["composite_score"]
 
@@ -273,7 +273,7 @@ class TestScoreMerge:
 
         score_map = {}
         for sig in signals:
-            set_num = sig.get("set_number") or sig["item_id"].removesuffix("-1")
+            set_num = sig.get("set_number") or sig["item_id"].split("-")[0]
             score = sig["composite_score"]
             if score is not None and not (isinstance(score, float) and math.isnan(score)):
                 score_map[set_num] = score

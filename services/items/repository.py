@@ -424,6 +424,26 @@ def update_buy_rating(
     return rating
 
 
+def update_listing_price(
+    conn: Any, set_number: str, price_cents: int | None, currency: str = "MYR"
+) -> bool:
+    """Set or clear the listing price for a lego_items row.
+
+    Returns True if the item was found and updated, False otherwise.
+    """
+    row = conn.execute(
+        "SELECT 1 FROM lego_items WHERE set_number = ?", [set_number]
+    ).fetchone()
+    if row is None:
+        return False
+    conn.execute(
+        "UPDATE lego_items SET listing_price_cents = ?, listing_currency = ?, "
+        "updated_at = now() WHERE set_number = ?",
+        [price_cents, currency, set_number],
+    )
+    return True
+
+
 def delete_item(conn: Any, set_number: str) -> bool:
     """Delete a lego_items row and all related data across tables.
 

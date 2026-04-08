@@ -109,7 +109,7 @@ def _compute_item_signals(
 
     return {
         "item_id": item_id,
-        "set_number": set_number or item_id.removesuffix("-1"),
+        "set_number": set_number or item_id.split("-")[0],
         "title": title,
         "theme": theme,
         "year_released": year_released,
@@ -206,7 +206,7 @@ def compute_all_signals(
     for item_id, item_sales in grouped:
         item_meta = metadata[metadata["item_id"] == item_id]
         if item_meta.empty:
-            base_id = str(item_id).removesuffix("-1")
+            base_id = str(item_id).split("-")[0]
             item_meta = metadata[metadata["set_number"] == base_id]
 
         result = _compute_item_signals(

@@ -61,7 +61,7 @@ class TestGetItemsNeedingEnrichment:
             "INSERT INTO bricklink_items (id, item_id, item_type) "
             "VALUES (nextval('bricklink_items_id_seq'), ?, 'SET') "
             "ON CONFLICT (item_id) DO NOTHING",
-            [set_number],
+            [f"{set_number}-1"],
         )
 
     def test_finds_items_with_null_fields(self, conn):

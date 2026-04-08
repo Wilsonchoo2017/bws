@@ -70,8 +70,7 @@ def load_item_metadata(conn: Any) -> pd.DataFrame:
             be.rrp_usd_cents
         FROM bricklink_items bi
         LEFT JOIN lego_items li
-            ON REPLACE(bi.item_id, '-1', '') = li.set_number
-            OR bi.item_id = li.set_number || '-1'
+            ON bi.set_number = li.set_number
         LEFT JOIN (
             SELECT set_number, rrp_usd_cents,
                    ROW_NUMBER() OVER (PARTITION BY set_number ORDER BY scraped_at DESC) AS rn
@@ -97,7 +96,7 @@ def load_item_metadata(conn: Any) -> pd.DataFrame:
             be.rrp_usd_cents
         FROM bricklink_monthly_sales ms
         JOIN lego_items li
-            ON REPLACE(ms.item_id, '-1', '') = li.set_number
+            ON ms.set_number = li.set_number
         LEFT JOIN bricklink_items bi ON bi.item_id = ms.item_id
         LEFT JOIN (
             SELECT set_number, rrp_usd_cents,
@@ -128,7 +127,7 @@ def load_minifig_data(conn: Any) -> dict[str, MinifigSetData]:
     try:
         # Count how many sets each minifig appears in
         appearance_query = """
-            SELECT minifig_id, COUNT(DISTINCT set_item_id) AS set_count
+            SELECT minifig_id, COUNT(DISTINCT set_number) AS set_count
             FROM set_minifigures
             GROUP BY minifig_id
         """
@@ -156,7 +155,7 @@ def load_minifig_data(conn: Any) -> dict[str, MinifigSetData]:
 
         # Get all set-minifig links
         links_query = """
-            SELECT set_item_id, minifig_id, quantity
+            SELECT set_number, minifig_id, quantity
             FROM set_minifigures
         """
         links = conn.execute(links_query).df()
@@ -165,27 +164,27 @@ def load_minifig_data(conn: Any) -> dict[str, MinifigSetData]:
 
         # Get latest entry prices for sets (for cheapest alternative calc)
         set_prices_query = """
-            SELECT item_id,
+            SELECT set_number,
                    JSON_EXTRACT(current_new, '$.avg_price.amount')::INTEGER
                        AS price_cents
             FROM (
-                SELECT DISTINCT ON (item_id) item_id, current_new
+                SELECT DISTINCT ON (set_number) set_number, current_new
                 FROM bricklink_price_history
-                ORDER BY item_id, scraped_at DESC
+                ORDER BY set_number, scraped_at DESC
             )
             WHERE price_cents > 0
         """
         try:
             sp_df = conn.execute(set_prices_query).df()
             set_entry_prices: dict[str, int] = dict(
-                zip(sp_df["item_id"], sp_df["price_cents"])
+                zip(sp_df["set_number"], sp_df["price_cents"])
             ) if not sp_df.empty else {}
         except Exception:
             set_entry_prices = {}
 
         # Build per-set data
         result: dict[str, MinifigSetData] = {}
-        grouped = links.groupby("set_item_id")
+        grouped = links.groupby("set_number")
 
         for set_id, group in grouped:
             total_value = 0
@@ -218,8 +217,8 @@ def load_minifig_data(conn: Any) -> dict[str, MinifigSetData]:
             if shared_minifig_ids:
                 alt_sets = links[
                     (links["minifig_id"].isin(shared_minifig_ids))
-                    & (links["set_item_id"] != set_id)
-                ]["set_item_id"].unique()
+                    & (links["set_number"] != set_id)
+                ]["set_number"].unique()
                 for alt_id in alt_sets:
                     alt_price = set_entry_prices.get(str(alt_id))
                     if alt_price and (

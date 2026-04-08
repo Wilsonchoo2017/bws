@@ -65,28 +65,4 @@ def alert_silent_ban(source: str, consecutive_failures: int, cooldown_minutes: f
     ))
 
 
-def alert_cloudflare_blocked(
-    source: str,
-    consecutive_challenges: int,
-    set_number: str | None = None,
-) -> None:
-    """Alert when repeated Cloudflare challenges indicate a block."""
-    key = f"cf_blocked:{source}"
-    if not _should_send(key):
-        return
-
-    context = f" (last set: {set_number})" if set_number else ""
-    send_notification(NtfyMessage(
-        title=f"{source}: Cloudflare Blocking ({consecutive_challenges}x)",
-        message=(
-            f"{source} hit {consecutive_challenges} consecutive "
-            f"Cloudflare challenges{context}.\n"
-            "Browser profile may be flagged or IP is suspect.\n"
-            "Consider clearing the profile or rotating IP."
-        ),
-        priority=4,  # high
-        tags=("warning", "shield"),
-        topic=NTFY_TOPIC_ALERTS,
-    ))
-
 

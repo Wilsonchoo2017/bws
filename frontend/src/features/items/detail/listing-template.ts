@@ -37,6 +37,28 @@ export function parseWeight(weight: string | null): string | null {
 }
 
 /**
+ * Shipping-adjusted dimensions: adds 5cm to each side for the shipping box.
+ */
+export function shippingDimensions(dim: string | null): ParsedDimensions | null {
+  const parsed = parseDimensions(dim);
+  if (!parsed) return null;
+  return {
+    length: (parseFloat(parsed.length) + 5).toFixed(1),
+    width: (parseFloat(parsed.width) + 5).toFixed(1),
+    height: (parseFloat(parsed.height) + 5).toFixed(1),
+  };
+}
+
+/**
+ * Shipping-adjusted weight: adds 20% buffer for packaging materials.
+ */
+export function shippingWeight(weight: string | null): string | null {
+  const kg = parseWeight(weight);
+  if (!kg) return null;
+  return (parseFloat(kg) * 1.2).toFixed(2);
+}
+
+/**
  * Generate a marketplace-optimized listing title.
  */
 export function generateListingTitle(item: ItemDetail): string {
@@ -47,17 +69,19 @@ export function generateListingTitle(item: ItemDetail): string {
   if (item.title) parts.push(item.title);
 
   const extras: string[] = [];
-  if (item.parts_count) extras.push(`${item.parts_count} pcs`);
+  if (item.parts_count) extras.push(`${item.parts_count}pcs`);
   if (item.minifig_count) extras.push(`${item.minifig_count} Minifigures`);
   if (extras.length > 0) parts.push(`(${extras.join(', ')})`);
 
-  parts.push('NEW SEALED');
+  parts.push('MISB NEW SEALED');
+
+  if (item.year_retired) parts.push('RETIRED');
 
   return parts.join(' ');
 }
 
 /**
- * Generate a bullet-point listing description.
+ * Generate a marketplace listing description.
  */
 export function generateListingDescription(
   item: ItemDetail,
@@ -65,17 +89,15 @@ export function generateListingDescription(
 ): string {
   const lines: string[] = [];
 
-  // Header
-  const header = item.theme
-    ? `LEGO ${item.theme} - ${item.title ?? item.set_number} (${item.set_number})`
-    : `LEGO ${item.title ?? item.set_number} (${item.set_number})`;
-  lines.push(header);
+  // Keywords up top
+  lines.push('100% Genuine LEGO Product');
+  lines.push('Brand New | Factory Sealed | MISB');
+  lines.push('Ready Stock');
+  lines.push('Not for fussy buyers or box collectors.');
   lines.push('');
 
   // Specs
-  lines.push(`Set Number: ${item.set_number}`);
   if (item.theme) lines.push(`Theme: ${item.theme}`);
-  if (item.year_released) lines.push(`Year Released: ${item.year_released}`);
   if (item.parts_count)
     lines.push(`Pieces: ${item.parts_count.toLocaleString()}`);
 
@@ -89,15 +111,6 @@ export function generateListingDescription(
   } else if (item.minifig_count) {
     lines.push(`Minifigures: ${item.minifig_count}`);
   }
-
-  if (item.dimensions) lines.push(`Box Dimensions: ${item.dimensions}`);
-
-  const weight = parseWeight(item.weight);
-  if (weight) lines.push(`Weight: ${weight} kg`);
-
-  lines.push(`Condition: Brand New, Factory Sealed`);
-  lines.push('');
-  lines.push('100% genuine LEGO product.');
 
   return lines.join('\n');
 }

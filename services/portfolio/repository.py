@@ -225,7 +225,7 @@ def get_holdings(conn: Any) -> list[dict]:
 
     Holdings are derived by aggregating BUY - SELL quantities.
     Cost basis for remaining units uses FIFO.
-    Market value uses latest price_records (prefer shopee, fallback bricklink_new).
+    Market value uses bricklink_new qty avg from price_records.
     """
     txn_rows = conn.execute(
         """
@@ -279,6 +279,8 @@ def get_holdings(conn: Any) -> list[dict]:
         h["image_url"] = item.get("image_url")
         h["theme"] = item.get("theme")
         h["market_price_cents"] = market_price
+        h["listing_price_cents"] = item.get("listing_price_cents")
+        h["listing_currency"] = item.get("listing_currency")
 
     return sorted(holdings, key=lambda h: abs(h["unrealized_pl_cents"]), reverse=True)
 
@@ -460,31 +462,24 @@ def _latest_prices(
 ) -> dict[str, int]:
     """Get latest market price per set in MYR cents.
 
-    Prefers shopee (already MYR), falls back to bricklink_new (USD -> MYR).
+    Uses bricklink_new (qty avg) as the canonical market value (USD -> MYR).
     """
     if not set_numbers:
         return {}
 
     placeholders = ", ".join(["?"] * len(set_numbers))
 
-    # Prefer shopee (MYR), fallback bricklink_new (USD)
     rows = conn.execute(
         f"""
         WITH ranked AS (
-            SELECT set_number, price_cents, currency, source,
+            SELECT set_number, price_cents, currency,
                    ROW_NUMBER() OVER (
                        PARTITION BY set_number
-                       ORDER BY
-                           CASE source
-                               WHEN 'shopee' THEN 0
-                               WHEN 'bricklink_new' THEN 1
-                               ELSE 2
-                           END,
-                           recorded_at DESC
+                       ORDER BY recorded_at DESC
                    ) AS rn
             FROM price_records
             WHERE set_number IN ({placeholders})
-              AND source IN ('shopee', 'bricklink_new')
+              AND source = 'bricklink_new'
         )
         SELECT set_number, price_cents, currency FROM ranked WHERE rn = 1
         """,  # noqa: S608
@@ -516,7 +511,9 @@ def _item_metadata(
                    WHEN ia.status = 'downloaded' THEN '/api/images/set/' || li.set_number
                    ELSE COALESCE(li.image_url, 'https://img.bricklink.com/ItemImage/SN/0/' || li.set_number || '-1.png')
                END AS image_url,
-               li.theme
+               li.theme,
+               li.listing_price_cents,
+               li.listing_currency
         FROM lego_items li
         LEFT JOIN image_assets ia ON ia.asset_type = 'set' AND ia.item_id = li.set_number
         WHERE li.set_number IN ({placeholders})
@@ -524,6 +521,12 @@ def _item_metadata(
         set_numbers,
     ).fetchall()
     return {
-        row[0]: {"title": row[1], "image_url": row[2], "theme": row[3]}
+        row[0]: {
+            "title": row[1],
+            "image_url": row[2],
+            "theme": row[3],
+            "listing_price_cents": row[4],
+            "listing_currency": row[5],
+        }
         for row in rows
     }

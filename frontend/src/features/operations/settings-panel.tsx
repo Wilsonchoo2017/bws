@@ -1,5 +1,6 @@
 'use client';
 
+import { Loader2 } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import { Button } from '@/components/ui/button';
 
@@ -15,16 +16,24 @@ interface SettingsData {
   workers: Record<string, { concurrency: number; timeout_s: number }>;
   schedulers: Record<string, { interval_minutes: number; batch_size: number }>;
   dispatcher: { poll_interval_s: number; checkpoint_interval_s: number };
+  paused_workers: string[];
+  listing: {
+    shopee: {
+      max_photos: number;
+      category: string;
+    };
+  };
 }
 
 type Section = keyof SettingsData;
 
-const SECTION_LABELS: Record<Section, string> = {
+const SECTION_LABELS: Record<string, string> = {
   rate_limits: 'Rate Limits',
   cooldowns: 'Cooldown Thresholds',
   workers: 'Worker Concurrency',
   schedulers: 'Scheduler Intervals',
   dispatcher: 'Dispatcher',
+  listing: 'Listing Defaults',
 };
 
 const FIELD_LABELS: Record<string, string> = {
@@ -42,6 +51,8 @@ const FIELD_LABELS: Record<string, string> = {
   batch_size: 'Batch Size',
   poll_interval_s: 'Poll Interval (s)',
   checkpoint_interval_s: 'Checkpoint Interval (s)',
+  max_photos: 'Max Photos',
+  category: 'Category',
 };
 
 const SOURCE_LABELS: Record<string, string> = {
@@ -164,6 +175,57 @@ export function SettingsPanel() {
     []
   );
 
+  const updateStringField = useCallback(
+    (section: Section, path: string[], value: string) => {
+      setDraft((prev) => {
+        if (!prev) return prev;
+        const next = structuredClone(prev);
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        let obj: any = next[section];
+        for (let i = 0; i < path.length - 1; i++) {
+          obj = obj[path[i]];
+        }
+        obj[path[path.length - 1]] = value;
+        return next;
+      });
+    },
+    []
+  );
+
+  const [pauseLoading, setPauseLoading] = useState<string | null>(null);
+
+  const togglePause = useCallback(
+    async (workerKey: string) => {
+      if (!settings) return;
+      setPauseLoading(workerKey);
+      const current = settings.paused_workers ?? [];
+      const next = current.includes(workerKey)
+        ? current.filter((k) => k !== workerKey)
+        : [...current, workerKey];
+      try {
+        const res = await fetch('/api/settings/paused_workers', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ values: next }),
+        });
+        const json = await res.json();
+        if (json.success) {
+          setSettings((prev) =>
+            prev ? { ...prev, paused_workers: json.data } : prev
+          );
+          setDraft((prev) =>
+            prev ? { ...prev, paused_workers: json.data } : prev
+          );
+        }
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Network error');
+      } finally {
+        setPauseLoading(null);
+      }
+    },
+    [settings]
+  );
+
   const hasChanges = useCallback(
     (section: Section): boolean => {
       if (!settings || !draft) return false;
@@ -211,6 +273,38 @@ export function SettingsPanel() {
           </button>
         </div>
       )}
+
+      {/* Worker Pause/Resume */}
+      <div className='rounded-lg border border-border p-4'>
+        <h3 className='mb-3 text-sm font-semibold'>Worker Pause / Resume</h3>
+        <div className='grid gap-2 sm:grid-cols-2 lg:grid-cols-3'>
+          {Object.keys(settings.workers).map((workerKey) => {
+            const paused = (settings.paused_workers ?? []).includes(workerKey);
+            const isLoading = pauseLoading === workerKey;
+            return (
+              <button
+                key={workerKey}
+                disabled={isLoading}
+                onClick={() => togglePause(workerKey)}
+                className={`flex items-center justify-between rounded border px-3 py-2 text-sm font-medium transition-colors disabled:opacity-50 ${
+                  paused
+                    ? 'border-red-300 bg-red-50 text-red-700 dark:border-red-700 dark:bg-red-900/30 dark:text-red-300'
+                    : 'border-green-300 bg-green-50 text-green-700 dark:border-green-700 dark:bg-green-900/30 dark:text-green-300'
+                }`}
+              >
+                <span>{SOURCE_LABELS[workerKey] ?? workerKey}</span>
+                {isLoading ? (
+                  <Loader2 className='size-3.5 animate-spin' />
+                ) : (
+                  <span className='text-xs'>
+                    {paused ? 'PAUSED' : 'RUNNING'}
+                  </span>
+                )}
+              </button>
+            );
+          })}
+        </div>
+      </div>
 
       {/* Rate Limits */}
       <SettingsSection
@@ -354,6 +448,36 @@ export function SettingsPanel() {
           ))}
         </div>
       </SettingsSection>
+
+      {/* Listing Defaults */}
+      <SettingsSection
+        title={SECTION_LABELS.listing}
+        section='listing'
+        hasChanges={hasChanges('listing')}
+        isDefault={isDefault('listing')}
+        saving={saving === 'listing'}
+        saved={saved === 'listing'}
+        onSave={() => saveSection('listing')}
+        onReset={() => resetSection('listing')}
+      >
+        <div className='rounded border border-border p-3'>
+          <h4 className='mb-2 text-sm font-medium'>Shopee</h4>
+          <NumberField
+            label={FIELD_LABELS.max_photos}
+            value={draft.listing.shopee.max_photos}
+            onChange={(v) =>
+              updateField('listing', ['shopee', 'max_photos'], v)
+            }
+          />
+          <TextField
+            label={FIELD_LABELS.category}
+            value={draft.listing.shopee.category}
+            onChange={(v) =>
+              updateStringField('listing', ['shopee', 'category'], v)
+            }
+          />
+        </div>
+      </SettingsSection>
     </div>
   );
 }
@@ -450,6 +574,30 @@ function NumberField({
           <span className='text-muted-foreground text-xs'>{suffix}</span>
         )}
       </div>
+    </div>
+  );
+}
+
+function TextField({
+  label,
+  value,
+  onChange,
+}: {
+  readonly label: string;
+  readonly value: string;
+  readonly onChange: (v: string) => void;
+}) {
+  return (
+    <div className='flex items-center justify-between gap-2 py-1'>
+      <label className='text-muted-foreground text-xs whitespace-nowrap'>
+        {label}
+      </label>
+      <input
+        type='text'
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className='border-border bg-background h-7 w-48 rounded border px-2 text-right text-xs'
+      />
     </div>
   );
 }

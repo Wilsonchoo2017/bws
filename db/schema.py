@@ -21,6 +21,7 @@ CREATE TABLE IF NOT EXISTS bricklink_items (
     image_url VARCHAR,
     parts_count INTEGER,
     theme VARCHAR,
+    set_number VARCHAR GENERATED ALWAYS AS (SPLIT_PART(item_id, '-', 1)) STORED,
     watch_status VARCHAR DEFAULT 'active',
     scrape_interval_days INTEGER DEFAULT 7,
     last_scraped_at TIMESTAMPTZ,
@@ -34,6 +35,7 @@ BRICKLINK_PRICE_HISTORY_DDL = """
 CREATE TABLE IF NOT EXISTS bricklink_price_history (
     id INTEGER PRIMARY KEY,
     item_id VARCHAR NOT NULL,
+    set_number VARCHAR GENERATED ALWAYS AS (SPLIT_PART(item_id, '-', 1)) STORED,
     six_month_new JSON,
     six_month_used JSON,
     current_new JSON,
@@ -46,6 +48,7 @@ BRICKLINK_MONTHLY_SALES_DDL = """
 CREATE TABLE IF NOT EXISTS bricklink_monthly_sales (
     id INTEGER PRIMARY KEY,
     item_id VARCHAR NOT NULL,
+    set_number VARCHAR GENERATED ALWAYS AS (SPLIT_PART(item_id, '-', 1)) STORED,
     year INTEGER NOT NULL,
     month INTEGER NOT NULL,
     condition VARCHAR NOT NULL,
@@ -262,6 +265,7 @@ CREATE TABLE IF NOT EXISTS set_minifigures (
     id INTEGER PRIMARY KEY,
     set_item_id VARCHAR NOT NULL,
     minifig_id VARCHAR NOT NULL,
+    set_number VARCHAR GENERATED ALWAYS AS (SPLIT_PART(set_item_id, '-', 1)) STORED,
     quantity INTEGER DEFAULT 1,
     scraped_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(set_item_id, minifig_id)
@@ -412,20 +416,37 @@ CREATE TABLE IF NOT EXISTS brickeconomy_snapshots (
     subtheme VARCHAR,
     year_released INTEGER,
     year_retired INTEGER,
+    release_date DATE,
+    retired_date DATE,
     pieces INTEGER,
     minifigs INTEGER,
+    minifig_value_cents INTEGER,
+    exclusive_minifigs BOOLEAN,
     availability VARCHAR,
     retiring_soon BOOLEAN,
     image_url VARCHAR,
+    packaging VARCHAR,
     brickeconomy_url VARCHAR,
+    upc VARCHAR,
+    ean VARCHAR,
+    designer VARCHAR,
     rrp_usd_cents INTEGER,
     rrp_gbp_cents INTEGER,
     rrp_eur_cents INTEGER,
+    rrp_cad_cents INTEGER,
+    rrp_aud_cents INTEGER,
     value_new_cents INTEGER,
     value_used_cents INTEGER,
+    used_value_low_cents INTEGER,
+    used_value_high_cents INTEGER,
     annual_growth_pct FLOAT,
+    total_growth_pct FLOAT,
+    rolling_growth_pct FLOAT,
+    growth_90d_pct FLOAT,
     rating_value VARCHAR,
     review_count INTEGER,
+    theme_rank INTEGER,
+    subtheme_avg_growth_pct FLOAT,
     future_estimate_cents INTEGER,
     future_estimate_date VARCHAR,
     distribution_mean_cents INTEGER,
@@ -556,6 +577,14 @@ CREATE SEQUENCE IF NOT EXISTS shopee_competition_listings_id_seq;
 
 # Index creation statements
 INDEXES_DDL = """
+CREATE INDEX IF NOT EXISTS idx_bricklink_items_set_number
+    ON bricklink_items(set_number);
+CREATE INDEX IF NOT EXISTS idx_bricklink_price_history_set_number
+    ON bricklink_price_history(set_number);
+CREATE INDEX IF NOT EXISTS idx_bricklink_monthly_sales_set_number
+    ON bricklink_monthly_sales(set_number);
+CREATE INDEX IF NOT EXISTS idx_set_minifigures_set_number
+    ON set_minifigures(set_number);
 CREATE INDEX IF NOT EXISTS idx_bricklink_items_watch_status
     ON bricklink_items(watch_status);
 CREATE INDEX IF NOT EXISTS idx_bricklink_items_next_scrape
@@ -756,6 +785,12 @@ def _migrate_lego_items(conn: Any) -> None:
         )
     if "buy_rating" not in existing:
         conn.execute("ALTER TABLE lego_items ADD COLUMN buy_rating INTEGER")
+    if "listing_price_cents" not in existing:
+        conn.execute("ALTER TABLE lego_items ADD COLUMN listing_price_cents INTEGER")
+    if "listing_currency" not in existing:
+        conn.execute(
+            "ALTER TABLE lego_items ADD COLUMN listing_currency VARCHAR DEFAULT 'MYR'"
+        )
     if "release_date" not in existing:
         conn.execute("ALTER TABLE lego_items ADD COLUMN release_date DATE")
     if "retired_date" not in existing:
@@ -790,6 +825,7 @@ def _migrate_brickeconomy_snapshots(conn: Any) -> None:
         ("growth_90d_pct", "FLOAT"),
         ("theme_rank", "INTEGER"),
         ("subtheme_avg_growth_pct", "FLOAT"),
+        ("packaging", "VARCHAR"),
     ]
     for col_name, col_type in _new_columns:
         if col_name not in existing:
@@ -835,6 +871,37 @@ def _migrate_shopee_products(conn: Any) -> None:
         conn.execute(
             "ALTER TABLE shopee_products ADD COLUMN is_sold_out BOOLEAN DEFAULT FALSE"
         )
+
+
+def _migrate_bricklink_set_number(conn: Any) -> None:
+    """Add set_number generated columns to BrickLink tables and set_minifigures.
+
+    These columns auto-extract the bare set number from item_id (e.g. '75192-1' -> '75192').
+    Safe to run multiple times -- skips if column already exists.
+    """
+    _table_source_map = [
+        ("bricklink_items", "item_id"),
+        ("bricklink_price_history", "item_id"),
+        ("bricklink_monthly_sales", "item_id"),
+        ("set_minifigures", "set_item_id"),
+    ]
+    for table, source_col in _table_source_map:
+        existing = {
+            row[0]
+            for row in conn.execute(
+                "SELECT column_name FROM information_schema.columns "
+                f"WHERE table_name = '{table}'"  # noqa: S608
+            ).fetchall()
+        }
+        if "set_number" not in existing:
+            try:
+                conn.execute(
+                    f"ALTER TABLE {table} ADD COLUMN set_number VARCHAR "  # noqa: S608
+                    f"GENERATED ALWAYS AS (SPLIT_PART({source_col}, '-', 1)) STORED"
+                )
+                logger.info("Added set_number generated column to %s", table)
+            except Exception:  # noqa: BLE001
+                logger.debug("set_number migration skipped for %s", table)
 
 
 def _migrate_date_columns(conn: Any) -> None:
@@ -974,6 +1041,7 @@ def init_schema(conn: Any) -> None:
     for ddl in ALL_DDL:
         conn.execute(ddl)
     _migrate_bricklink_items(conn)
+    _migrate_bricklink_set_number(conn)
     _migrate_lego_items(conn)
     _migrate_brickeconomy_snapshots(conn)
     _migrate_ml_prediction_snapshots(conn)

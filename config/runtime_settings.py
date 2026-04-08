@@ -96,6 +96,13 @@ _DEFAULTS: dict[str, Any] = {
         "poll_interval_s": 3,
         "checkpoint_interval_s": 30,
     },
+    "paused_workers": [],
+    "listing": {
+        "shopee": {
+            "max_photos": 9,
+            "category": "",
+        },
+    },
 }
 
 
@@ -203,6 +210,10 @@ def _apply_runtime(section: str, values: dict[str, Any]) -> None:
         _apply_schedulers(values)
     elif section == "dispatcher":
         _apply_dispatcher(values)
+    elif section == "paused_workers":
+        _apply_paused_workers(values)
+    elif section == "listing":
+        pass  # static config, no live propagation needed
 
 
 def _apply_rate_limits(values: dict[str, Any]) -> None:
@@ -310,3 +321,12 @@ def _apply_dispatcher(values: dict[str, Any]) -> None:
     if "checkpoint_interval_s" in values:
         m._CHECKPOINT_INTERVAL = values["checkpoint_interval_s"]
     logger.info("Applied dispatcher settings")
+
+
+def _apply_paused_workers(values: Any) -> None:
+    """Update the dispatcher's paused worker set."""
+    import services.scrape_queue.dispatcher as m
+
+    paused = set(values) if isinstance(values, list) else set()
+    m._paused_workers = paused
+    logger.info("Applied paused workers: %s", paused or "(none)")

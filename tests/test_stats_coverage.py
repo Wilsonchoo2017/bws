@@ -15,14 +15,14 @@ from api.routes.stats import _SOURCES, router
 
 # Actual Postgres column names per table (ground truth from schema)
 _PG_COLUMNS: dict[str, set[str]] = {
-    "bricklink_items": {"id", "item_id", "item_type", "title", "weight", "year_released", "image_url", "last_scraped_at"},
+    "bricklink_items": {"id", "item_id", "set_number", "item_type", "title", "weight", "year_released", "image_url", "last_scraped_at"},
     "brickeconomy_snapshots": {"id", "set_number", "scraped_at", "title", "theme", "subtheme", "pieces", "minifigs", "rrp_usd_cents", "rrp_gbp_cents", "rating_value", "review_count", "annual_growth_pct", "year_retired"},
     "keepa_snapshots": {"id", "set_number", "scraped_at", "amazon_asin", "amazon_price_cents", "amazon_title"},
     "shopee_products": {"id", "title", "price_display", "price_cents", "sold_count", "rating", "shop_name", "product_url", "image_url", "source_url", "is_sold_out", "scraped_at"},
     "mightyutan_products": {"id", "sku", "name", "price_myr", "original_price_myr", "url", "image_url", "available", "quantity", "total_sold", "rating", "rating_count", "last_scraped_at", "created_at", "updated_at"},
     "toysrus_products": {"id", "sku", "name", "price_myr", "brand", "category", "age_range", "url", "image_url", "available", "last_scraped_at", "created_at", "updated_at"},
     "google_trends_snapshots": {"id", "set_number", "scraped_at"},
-    "set_minifigures": {"id", "set_item_id", "minifig_id", "quantity", "scraped_at"},
+    "set_minifigures": {"id", "set_item_id", "set_number", "minifig_id", "quantity", "scraped_at"},
     "image_assets": {"id", "asset_type", "item_id", "source_url", "local_path", "file_size_bytes", "content_type", "downloaded_at", "status", "error", "retry_count", "created_at"},
     "ml_prediction_snapshots": {"id", "snapshot_date", "set_number", "predicted_growth_pct", "confidence", "tier", "model_version", "actual_growth_pct", "actual_measured_at"},
 }
@@ -67,36 +67,25 @@ class TestSourceColumnMappings:
     """Given _SOURCES config, when compared to actual PG schema, then all columns exist."""
 
     @pytest.mark.parametrize(
-        "label, table, key_col, date_col",
+        "label, table, key_col, date_col, key_expr",
         _SOURCES,
         ids=[s[0] for s in _SOURCES],
     )
-    def test_key_column_exists_in_schema(self, label: str, table: str, key_col: str, date_col: str | None) -> None:
+    def test_key_column_exists_in_schema(self, label: str, table: str, key_col: str, date_col: str | None, key_expr: str | None) -> None:
         assert table in _PG_COLUMNS, f"Unknown table {table}"
         assert key_col in _PG_COLUMNS[table], (
             f"{label}: key_col '{key_col}' not in {table} columns {_PG_COLUMNS[table]}"
         )
 
     @pytest.mark.parametrize(
-        "label, table, key_col, date_col",
+        "label, table, key_col, date_col, key_expr",
         [s for s in _SOURCES if s[3] is not None],
         ids=[s[0] for s in _SOURCES if s[3] is not None],
     )
-    def test_date_column_exists_in_schema(self, label: str, table: str, key_col: str, date_col: str | None) -> None:
+    def test_date_column_exists_in_schema(self, label: str, table: str, key_col: str, date_col: str | None, key_expr: str | None) -> None:
         assert date_col in _PG_COLUMNS[table], (
             f"{label}: date_col '{date_col}' not in {table} columns {_PG_COLUMNS[table]}"
         )
-
-    def test_no_set_number_on_tables_without_it(self) -> None:
-        """Tables that lack a set_number column must not reference it."""
-        tables_without_set_number = {
-            t for t, cols in _PG_COLUMNS.items() if "set_number" not in cols
-        }
-        for label, table, key_col, date_col in _SOURCES:
-            if table in tables_without_set_number:
-                assert key_col != "set_number", (
-                    f"{label}: uses 'set_number' but {table} has no such column"
-                )
 
 
 # ---------------------------------------------------------------------------

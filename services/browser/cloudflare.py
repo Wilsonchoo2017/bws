@@ -11,6 +11,7 @@ import asyncio
 import json
 import logging
 import secrets
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
@@ -167,6 +168,14 @@ async def capture_cf_diagnostics(
         except Exception as exc:
             iframe_info.append({"error": str(exc)})
 
+        # Save full page HTML for post-mortem analysis
+        try:
+            full_html = await page.content()
+            html_path = snap_dir / "page.html"
+            html_path.write_text(full_html, encoding="utf-8")
+        except Exception:
+            pass
+
         # Visible text snippet (first 2000 chars)
         body_text = ""
         try:
@@ -274,6 +283,19 @@ async def capture_cf_diagnostics(
         except Exception as exc:
             antibot_dom = {"error": str(exc)}
 
+        # Enumerate all frames (Playwright frame tree can see frames
+        # that querySelectorAll("iframe") misses, e.g. cross-origin)
+        frame_info: list[dict[str, Any]] = []
+        try:
+            for frame in page.frames:
+                frame_info.append({
+                    "url": frame.url,
+                    "name": frame.name,
+                    "is_main": frame == page.main_frame,
+                })
+        except Exception:
+            pass
+
         record = {
             "timestamp": ts,
             "label": label,
@@ -290,6 +312,7 @@ async def capture_cf_diagnostics(
             "page_title": title,
             "matched_cf_selectors": matched_selectors,
             "iframes": iframe_info,
+            "frames": frame_info,
             "turnstile_inner": turnstile_inner or None,
             "antibot_dom": antibot_dom,
             "body_text_snippet": body_text[:500],
@@ -444,6 +467,45 @@ async def idle_behavior(page: Page) -> None:
 # ---------------------------------------------------------------------------
 
 
+async def _wait_for_turnstile_widget(
+    page: Page, *, timeout_s: int = 15
+) -> bool:
+    """Poll until a Turnstile widget element appears in the DOM.
+
+    The managed challenge page loads Cloudflare JS asynchronously which
+    then injects the Turnstile iframe / container. This function polls
+    every 500ms for any recognisable widget selector or iframe to appear.
+
+    Returns True if a widget was found, False on timeout.
+    """
+    all_selectors = (
+        *CF_WIDGET_SELECTORS,
+        *CF_CHALLENGE_SELECTORS,
+        "[data-sitekey]",
+        'div[class*="turnstile"]',
+    )
+    selector_css = ", ".join(all_selectors)
+
+    deadline = time.monotonic() + timeout_s
+    poll_s = 0.5
+    while time.monotonic() < deadline:
+        try:
+            found = await page.evaluate(
+                "(sel) => !!document.querySelector(sel)", selector_css
+            )
+            if found:
+                elapsed = timeout_s - (deadline - time.monotonic())
+                logger.debug("Turnstile widget appeared after %.1fs", elapsed)
+                # Give it a beat to fully render
+                await human_delay(300, 600)
+                return True
+        except Exception as exc:
+            logger.debug("Turnstile poll evaluate failed: %s", exc)
+        await asyncio.sleep(poll_s)
+
+    return False
+
+
 async def try_click_turnstile(
     page: Page,
     *,
@@ -464,6 +526,14 @@ async def try_click_turnstile(
     """
     if attempt <= 1:
         await pre_click_wander(page)
+
+    # Wait for Turnstile widget to appear in the DOM.
+    # The managed challenge page loads CF JS asynchronously, which then
+    # injects the Turnstile iframe/widget. Without this wait, the click
+    # strategies find nothing because the widget hasn't rendered yet.
+    widget_appeared = await _wait_for_turnstile_widget(page, timeout_s=15)
+    if not widget_appeared:
+        logger.info("[%s] Turnstile widget did not appear within timeout", source)
 
     # Strategy 1: Find the Turnstile container by common attributes.
     turnstile_selectors = (
@@ -700,10 +770,237 @@ async def try_click_turnstile(
             logger.debug("Turnstile iframe click failed for %s: %s", selector, exc)
             continue
 
-    # No widget found at all
+    # Strategy 5: Playwright accessibility tree / frame enumeration.
+    # Closed shadow DOMs hide elements from querySelectorAll but
+    # Playwright's role-based locators use the accessibility tree.
+    try:
+        cb_locator = page.get_by_role("checkbox")
+        if await cb_locator.count() > 0:
+            first_cb = cb_locator.first
+            cb_box = await first_cb.bounding_box()
+            if cb_box:
+                click_x = cb_box["x"] + cb_box["width"] / 2
+                click_y = cb_box["y"] + cb_box["height"] / 2
+                logger.info(
+                    "[%s] Clicking via accessibility checkbox at (%.0f, %.0f), "
+                    "box=%s",
+                    source, click_x, click_y, cb_box,
+                )
+                await capture_cf_diagnostics(
+                    page, "pre_click",
+                    source=source, query=query,
+                    click_coords=(click_x, click_y),
+                    strategy="a11y_checkbox",
+                    attempt=attempt,
+                    extra={"checkbox_box": cb_box},
+                )
+                await human_delay(400, 1000)
+                await human_mouse_move(page, click_x, click_y)
+                await human_delay(50, 200)
+                await page.mouse.click(
+                    click_x + secrets.randbelow(3) - 1,
+                    click_y + secrets.randbelow(3) - 1,
+                )
+                await human_delay(1_500, 2_500)
+                await capture_cf_diagnostics(
+                    page, "post_click",
+                    source=source, query=query,
+                    click_coords=(click_x, click_y),
+                    strategy="a11y_checkbox",
+                    attempt=attempt,
+                )
+                return True
+    except Exception as exc:
+        logger.debug("Accessibility checkbox strategy failed: %s", exc)
+
+    # Strategy 6: Find Turnstile in child frames (Playwright frame tree
+    # can enumerate frames that querySelectorAll("iframe") misses).
+    try:
+        for frame in page.frames:
+            if frame == page.main_frame:
+                continue
+            try:
+                cb = frame.get_by_role("checkbox")
+                if await cb.count() > 0:
+                    cb_box = await cb.first.bounding_box()
+                    if cb_box:
+                        click_x = cb_box["x"] + cb_box["width"] / 2
+                        click_y = cb_box["y"] + cb_box["height"] / 2
+                        logger.info(
+                            "[%s] Clicking via child frame checkbox "
+                            "at (%.0f, %.0f), box=%s",
+                            source, click_x, click_y, cb_box,
+                        )
+                        await human_delay(400, 1000)
+                        await human_mouse_move(page, click_x, click_y)
+                        await human_delay(50, 200)
+                        await page.mouse.click(
+                            click_x + secrets.randbelow(3) - 1,
+                            click_y + secrets.randbelow(3) - 1,
+                        )
+                        await human_delay(1_500, 2_500)
+                        return True
+            except Exception:
+                continue
+    except Exception as exc:
+        logger.debug("Child frame checkbox strategy failed: %s", exc)
+
+    # Strategy 7: Use Playwright's frame tree to find the Turnstile iframe
+    # element. querySelectorAll("iframe") often returns nothing for CF
+    # challenge iframes, but Playwright tracks frames internally and
+    # frame.frame_element() returns the host <iframe> HTMLElement.
+    try:
+        for frame in page.frames:
+            if frame == page.main_frame:
+                continue
+            if "challenges.cloudflare.com" not in frame.url and "turnstile" not in frame.url:
+                continue
+            try:
+                frame_el = await frame.frame_element()
+                box = await frame_el.bounding_box()
+                if box and box["width"] > 10 and box["height"] > 10:
+                    # Checkbox is at left side, vertically centered
+                    click_x = box["x"] + min(28, box["width"] * 0.09)
+                    click_y = box["y"] + box["height"] / 2
+                    logger.info(
+                        "[%s] Clicking Turnstile via frame_element() "
+                        "at (%.0f, %.0f), box=%s",
+                        source, click_x, click_y, box,
+                    )
+                    await capture_cf_diagnostics(
+                        page, "pre_click",
+                        source=source, query=query,
+                        click_coords=(click_x, click_y),
+                        strategy="frame_element_bbox",
+                        attempt=attempt,
+                        extra={"iframe_box": box},
+                    )
+                    await human_delay(400, 1000)
+                    await human_mouse_move(page, click_x, click_y)
+                    await human_delay(50, 200)
+                    await page.mouse.click(
+                        click_x + secrets.randbelow(3) - 1,
+                        click_y + secrets.randbelow(3) - 1,
+                    )
+                    await human_delay(1_500, 2_500)
+                    await capture_cf_diagnostics(
+                        page, "post_click",
+                        source=source, query=query,
+                        click_coords=(click_x, click_y),
+                        strategy="frame_element_bbox",
+                        attempt=attempt,
+                    )
+                    return True
+            except Exception as exc:
+                logger.debug("frame_element() strategy failed for %s: %s", frame.url[:60], exc)
+    except Exception as exc:
+        logger.debug("Frame tree enumeration failed: %s", exc)
+
+    # Strategy 8: Coordinate-based fallback for managed challenge pages.
+    # When the Turnstile widget is in a closed shadow DOM invisible to all
+    # DOM and a11y queries, use visible page text as a positional anchor.
+    # On the CF managed challenge page, the Turnstile widget renders BELOW
+    # the "Performing security verification" heading text.
+    try:
+        title = await page.title()
+        if any(cf in title.lower() for cf in CF_CHALLENGE_TITLES):
+            anchor_box = await page.evaluate("""() => {
+                const walker = document.createTreeWalker(
+                    document.body, NodeFilter.SHOW_TEXT
+                );
+                const anchors = [
+                    'performing security verification',
+                    'checking your browser',
+                    'security service',
+                ];
+                while (walker.nextNode()) {
+                    const text = walker.currentNode.textContent.toLowerCase();
+                    for (const a of anchors) {
+                        if (text.includes(a)) {
+                            const el = walker.currentNode.parentElement;
+                            if (el) {
+                                const r = el.getBoundingClientRect();
+                                if (r.width > 0 && r.height > 0) {
+                                    return {x: r.x, y: r.y, w: r.width, h: r.height};
+                                }
+                            }
+                        }
+                    }
+                }
+                return null;
+            }""")
+
+            if anchor_box:
+                # The Turnstile widget renders BELOW the heading/description
+                # text. The checkbox is ~40px below the "Performing security
+                # verification" heading, at the left edge of the content area.
+                # Standard layout: heading at y~186, widget at y~210-250,
+                # checkbox center at ~(x-127, y+40) relative to anchor.
+                click_x = anchor_box["x"] - 127 + secrets.randbelow(6)
+                click_y = anchor_box["y"] + 40 + secrets.randbelow(10)
+
+                logger.info(
+                    "[%s] Coordinate-based fallback click at (%.0f, %.0f), "
+                    "anchor_box=%s",
+                    source, click_x, click_y, anchor_box,
+                )
+
+                await capture_cf_diagnostics(
+                    page, "pre_click",
+                    source=source, query=query,
+                    click_coords=(click_x, click_y),
+                    strategy="coordinate_fallback",
+                    attempt=attempt,
+                    extra={"anchor_box": anchor_box},
+                )
+                await human_delay(400, 1000)
+                await human_mouse_move(page, click_x, click_y)
+                await human_delay(50, 200)
+                await page.mouse.click(
+                    click_x + secrets.randbelow(3) - 1,
+                    click_y + secrets.randbelow(3) - 1,
+                )
+                await human_delay(1_500, 2_500)
+                await capture_cf_diagnostics(
+                    page, "post_click",
+                    source=source, query=query,
+                    click_coords=(click_x, click_y),
+                    strategy="coordinate_fallback",
+                    attempt=attempt,
+                )
+                return True
+    except Exception as exc:
+        logger.debug("Coordinate-based fallback failed: %s", exc)
+
+    # No widget found by any strategy — capture detailed layout info
+    layout_extra: dict[str, Any] = {}
+    try:
+        layout_extra["frame_count"] = len(page.frames)
+        layout_extra["frame_urls"] = [f.url for f in page.frames[:10]]
+        # Get bounding boxes of all visible block-level elements for debugging
+        layout_extra["content_boxes"] = await page.evaluate("""() => {
+            const boxes = [];
+            const els = document.querySelectorAll('h1,h2,h3,p,div,section,main');
+            for (const el of els) {
+                const r = el.getBoundingClientRect();
+                if (r.width > 10 && r.height > 5) {
+                    boxes.push({
+                        tag: el.tagName, id: el.id,
+                        cls: el.className.substring(0, 60),
+                        text: el.textContent.substring(0, 80).trim(),
+                        rect: {x: r.x, y: r.y, w: r.width, h: r.height},
+                    });
+                }
+            }
+            return boxes.slice(0, 20);
+        }""")
+    except Exception:
+        pass
+
     await capture_cf_diagnostics(
         page, "no_widget_found",
         source=source, query=query, attempt=attempt,
+        extra=layout_extra,
     )
     return False
 

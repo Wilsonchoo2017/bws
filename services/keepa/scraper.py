@@ -2,8 +2,7 @@
 
 Uses Playwright + Camoufox to load Keepa, bypass Cloudflare,
 log in, search for a LEGO set, and intercept price history data
-from internal API responses. Sends ntfy notification when a
-Cloudflare challenge or login CAPTCHA requires human intervention.
+from internal API responses.
 """
 
 import asyncio
@@ -11,7 +10,6 @@ import dataclasses
 import logging
 import re
 import secrets
-import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -34,36 +32,11 @@ from services.browser.cloudflare import (
 from services.keepa.auth import is_logged_in, login
 from services.keepa.parser import click_all_date_range, extract_product_data
 from services.keepa.types import KeepaDataPoint, KeepaProductData, KeepaScrapeResult
-from services.notifications.ntfy import NtfyMessage, send_notification
-from services.notifications.scraper_alerts import alert_cloudflare_blocked
 
 logger = logging.getLogger("bws.keepa.scraper")
 
 KEEPA_BASE = "https://keepa.com"
 
-# Consecutive Cloudflare challenge tracking for preventive alerts
-_cf_challenge_count: int = 0
-_cf_last_challenge: float = 0.0
-_CF_RESET_INTERVAL: float = 3600.0  # reset counter after 1 hour of no challenges
-_CF_ALERT_THRESHOLD: int = 2  # alert after N consecutive challenges
-
-
-def _record_cf_challenge(set_number: str) -> None:
-    """Track a Cloudflare challenge occurrence and alert if pattern detected."""
-    global _cf_challenge_count, _cf_last_challenge
-    now = time.monotonic()
-    if now - _cf_last_challenge > _CF_RESET_INTERVAL:
-        _cf_challenge_count = 0
-    _cf_challenge_count += 1
-    _cf_last_challenge = now
-    if _cf_challenge_count >= _CF_ALERT_THRESHOLD:
-        alert_cloudflare_blocked("Keepa", _cf_challenge_count, set_number)
-
-
-def _record_cf_clear() -> None:
-    """Reset Cloudflare challenge counter after a successful scrape."""
-    global _cf_challenge_count
-    _cf_challenge_count = 0
 
 
 def _keepa_browser() -> AsyncCamoufox:
@@ -86,19 +59,6 @@ def _keepa_browser() -> AsyncCamoufox:
     )
 
 
-def _notify_captcha(query: str) -> None:
-    """Send ntfy notification asking user to solve a Cloudflare challenge."""
-    send_notification(
-        NtfyMessage(
-            title="Keepa: Cloudflare challenge",
-            message=(
-                f"Keepa search for '{query}' hit a Cloudflare challenge. "
-                "Please open the browser window and solve the captcha."
-            ),
-            priority=5,
-            tags=("warning", "robot"),
-        )
-    )
 
 
 async def _detect_cloudflare(page: Page) -> bool:
@@ -455,8 +415,7 @@ async def _wait_for_cloudflare(
 ) -> bool:
     """Wait for a Cloudflare challenge to be solved.
 
-    First attempts to auto-click the Turnstile checkbox. If that
-    doesn't resolve it, sends an ntfy notification and polls until
+    Attempts to auto-click the Turnstile checkbox, then polls until
     the challenge is gone or the timeout is reached.
 
     Returns True if challenge was solved, False on timeout.
@@ -499,8 +458,7 @@ async def _wait_for_cloudflare(
         else:
             break  # Widget not found, no point retrying
 
-    logger.info("Auto-click exhausted, notifying for human help")
-    _notify_captcha(query)
+    logger.info("Auto-click exhausted, waiting for challenge resolution")
 
     elapsed = 0
     poll_interval = 3
@@ -621,7 +579,7 @@ async def scrape_with_page(
 
         # Handle Cloudflare challenge
         if await _detect_cloudflare(page):
-            _record_cf_challenge(set_number)
+
             solved = await _wait_for_cloudflare(page, set_number)
             if not solved:
                 return KeepaScrapeResult(
@@ -648,7 +606,7 @@ async def scrape_with_page(
 
         # Handle Cloudflare after login redirect
         if await _detect_cloudflare(page):
-            _record_cf_challenge(set_number)
+
             solved = await _wait_for_cloudflare(page, set_number)
             if not solved:
                 return KeepaScrapeResult(
@@ -664,7 +622,7 @@ async def scrape_with_page(
         if not result_found:
             # Check if CF widget appeared during/after search load
             if await _detect_cloudflare(page):
-                _record_cf_challenge(set_number)
+    
                 solved = await _wait_for_cloudflare(page, set_number)
                 if solved:
                     await page.goto(search_url, wait_until="domcontentloaded")
@@ -753,7 +711,6 @@ async def scrape_with_page(
             product_data.tracking_users,
         )
 
-        _record_cf_clear()
         return KeepaScrapeResult(
             success=True,
             set_number=set_number,

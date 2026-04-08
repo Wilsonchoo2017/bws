@@ -7,6 +7,8 @@ and extracts all available data via the parser module.
 import asyncio
 import logging
 from dataclasses import dataclass
+from datetime import datetime, timezone
+from pathlib import Path
 
 from config.settings import BRICKECONOMY_CONFIG, BRICKECONOMY_RATE_LIMITER
 from services.brickeconomy.parser import BrickeconomySnapshot, parse_brickeconomy_page
@@ -21,6 +23,10 @@ from services.notifications.ntfy import NtfyMessage, send_notification
 logger = logging.getLogger("bws.brickeconomy.scraper")
 
 BRICKECONOMY_BASE = BRICKECONOMY_CONFIG.base_url
+
+# Directory for saving raw HTML of every successful scrape
+BE_HTML_DIR = Path("logs/brickeconomy_snapshots")
+BE_HTML_DIR.mkdir(parents=True, exist_ok=True)
 
 
 @dataclass(frozen=True)
@@ -151,10 +157,27 @@ async def _resolve_set_url(page, set_number: str) -> list[str]:
     )
     if not has_search:
         # Double-check for CF elements we might have missed
+        title = await page.title()
         if await detect_cloudflare(page):
-            logger.warning("Silent Cloudflare block detected on homepage for %s", set_number)
+            logger.warning(
+                "Silent Cloudflare block on homepage for %s (title=%r)",
+                set_number, title,
+            )
+            await capture_cf_diagnostics(
+                page, "homepage_cf_block",
+                source="brickeconomy", query=set_number,
+            )
         else:
-            logger.warning("Homepage loaded but search input missing for %s -- possible layout change or block", set_number)
+            logger.warning(
+                "Homepage loaded but search input missing for %s "
+                "(title=%r, url=%s)",
+                set_number, title, page.url,
+            )
+            await capture_cf_diagnostics(
+                page, "homepage_no_search",
+                source="brickeconomy", query=set_number,
+                extra={"page_title": title, "page_url": page.url},
+            )
         return []
 
     # Type the set number (just the number part, without -1 suffix)
@@ -284,6 +307,22 @@ async def _scrape_current_page(page, set_number: str) -> BrickeconomyScrapeResul
     html = await page.content()
     title = await page.title()
 
+    # Check for silent Cloudflare block (page loaded but is still a challenge)
+    if await detect_cloudflare(page):
+        logger.warning(
+            "Silent Cloudflare block on %s (title=%r, url=%s)",
+            set_number, title, final_url,
+        )
+        await capture_cf_diagnostics(
+            page, "silent_cf_block",
+            source="brickeconomy", query=set_number,
+        )
+        return BrickeconomyScrapeResult(
+            set_number=set_number,
+            success=False,
+            error=f"Silent Cloudflare block (title={title!r})",
+        )
+
     if _is_not_found(title, final_url):
         return BrickeconomyScrapeResult(
             set_number=set_number,
@@ -294,6 +333,33 @@ async def _scrape_current_page(page, set_number: str) -> BrickeconomyScrapeResul
 
     snapshot = parse_brickeconomy_page(html, set_number, url=final_url)
 
+    # Check if we got an essentially empty snapshot (likely a blocked page
+    # that slipped past CF detection)
+    key_fields = (
+        snapshot.title, snapshot.theme, snapshot.value_new_cents,
+        snapshot.rrp_usd_cents, snapshot.year_released,
+    )
+    if not any(f is not None for f in key_fields):
+        logger.warning(
+            "Empty snapshot for %s -- likely blocked or wrong page "
+            "(title=%r, url=%s, html_len=%d)",
+            set_number, title, final_url, len(html),
+        )
+        await capture_cf_diagnostics(
+            page, "empty_snapshot",
+            source="brickeconomy", query=set_number,
+            extra={
+                "page_title": title,
+                "page_url": final_url,
+                "html_length": len(html),
+            },
+        )
+        return BrickeconomyScrapeResult(
+            set_number=set_number,
+            success=False,
+            error=f"Empty snapshot (title={title!r}, html_len={len(html)})",
+        )
+
     logger.info(
         "Scraped %s: value=%s, chart_points=%d, sales_months=%d",
         set_number,
@@ -301,6 +367,15 @@ async def _scrape_current_page(page, set_number: str) -> BrickeconomyScrapeResul
         len(snapshot.value_chart),
         len(snapshot.sales_trend),
     )
+
+    # Save raw HTML so we can re-parse later with new extraction logic
+    try:
+        ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+        html_path = BE_HTML_DIR / f"{ts}_{set_number}.html"
+        html_path.write_text(html, encoding="utf-8")
+        logger.debug("Saved raw HTML for %s to %s", set_number, html_path)
+    except Exception as exc:
+        logger.warning("Failed to save raw HTML for %s: %s", set_number, exc)
 
     return BrickeconomyScrapeResult(
         set_number=set_number,

@@ -841,12 +841,31 @@ def get_rescrape_candidates(
             WHERE task_type = ?
               AND status = 'completed'
             GROUP BY set_number
+        ),
+        source_data AS (
+            -- Check actual source data timestamps (ground truth)
+            SELECT set_number, MAX(last_scraped_at) AS last_data
+            FROM bricklink_items WHERE ? = 'bricklink_metadata'
+            GROUP BY set_number
+            UNION ALL
+            SELECT set_number, MAX(scraped_at) AS last_data
+            FROM brickeconomy_snapshots WHERE ? = 'brickeconomy'
+            GROUP BY set_number
+            UNION ALL
+            SELECT set_number, MAX(scraped_at) AS last_data
+            FROM keepa_snapshots WHERE ? = 'keepa'
+            GROUP BY set_number
+            UNION ALL
+            SELECT set_number, MAX(scraped_at) AS last_data
+            FROM set_minifigures WHERE ? = 'minifigures'
+            GROUP BY set_number
         )
         SELECT bt.set_number
         FROM best_tier bt
         LEFT JOIN last_scrape ls ON ls.set_number = bt.set_number
-        WHERE (ls.last_completed IS NULL
-               OR ls.last_completed < CURRENT_TIMESTAMP
+        LEFT JOIN source_data sd ON sd.set_number = bt.set_number
+        WHERE (COALESCE(ls.last_completed, sd.last_data) IS NULL
+               OR COALESCE(ls.last_completed, sd.last_data) < CURRENT_TIMESTAMP
                     - CAST(bt.stale_days || ' days' AS INTERVAL))
           AND NOT EXISTS (
               SELECT 1 FROM scrape_tasks st
@@ -864,5 +883,10 @@ def get_rescrape_candidates(
         ORDER BY bt.set_number
     """  # noqa: S608
 
-    rows = conn.execute(sql, [task_type_value, task_type_value, *active_list, task_type_value]).fetchall()
+    rows = conn.execute(sql, [
+        task_type_value,  # last_scrape CTE
+        task_type_value, task_type_value, task_type_value, task_type_value,  # source_data CTE
+        task_type_value, *active_list,  # NOT EXISTS active
+        task_type_value,  # NOT EXISTS failed
+    ]).fetchall()
     return [row[0] for row in rows]

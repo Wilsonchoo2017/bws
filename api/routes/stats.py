@@ -120,11 +120,11 @@ async def reset_cooldown(source: str) -> dict:
 # key_expr_override: SQL expression to normalize key_col to match lego_items.set_number
 # e.g. bricklink_items.item_id stores "75192-1" but lego_items.set_number is "75192"
 _SOURCES = [
-    ("bricklink", "bricklink_items", "item_id", "last_scraped_at", "REGEXP_REPLACE(item_id, '-\\d+$', '')"),
+    ("bricklink", "bricklink_items", "set_number", "last_scraped_at", None),
     ("brickeconomy", "brickeconomy_snapshots", "set_number", "scraped_at", None),
     ("keepa", "keepa_snapshots", "set_number", "scraped_at", None),
     ("google_trends", "google_trends_snapshots", "set_number", "scraped_at", None),
-    ("minifigures", "set_minifigures", "set_item_id", "scraped_at", "REGEXP_REPLACE(set_item_id, '-\\d+$', '')"),
+    ("minifigures", "set_minifigures", "set_number", "scraped_at", None),
 ]
 
 
@@ -187,10 +187,10 @@ async def data_coverage(conn: "DualWriter" = Depends(get_db)) -> dict:
 # Sources used for per-set coverage (exclude google_trends — confirmed non-signal)
 # (label, table, key_col, date_col, key_expr_override)
 _SET_COVERAGE_SOURCES = [
-    ("bricklink", "bricklink_items", "item_id", "last_scraped_at", "REGEXP_REPLACE(item_id, '-\\d+$', '')"),
+    ("bricklink", "bricklink_items", "set_number", "last_scraped_at", None),
     ("brickeconomy", "brickeconomy_snapshots", "set_number", "scraped_at", None),
     ("keepa", "keepa_snapshots", "set_number", "scraped_at", None),
-    ("minifigures", "set_minifigures", "set_item_id", "scraped_at", "REGEXP_REPLACE(set_item_id, '-\\d+$', '')"),
+    ("minifigures", "set_minifigures", "set_number", "scraped_at", None),
 ]
 
 

@@ -58,7 +58,7 @@ def get_items_needing_enrichment(
             )
             OR NOT EXISTS (
                 SELECT 1 FROM bricklink_items bl
-                WHERE bl.item_id = li.set_number
+                WHERE bl.set_number = li.set_number
             )
             OR (
                 li.title IS NOT NULL

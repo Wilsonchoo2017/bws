@@ -28,6 +28,8 @@ export interface Holding {
   title: string | null;
   image_url: string | null;
   theme: string | null;
+  listing_price_cents: number | null;
+  listing_currency: string | null;
 }
 
 export interface HoldingCondition {

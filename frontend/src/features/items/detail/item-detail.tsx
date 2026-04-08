@@ -1,6 +1,6 @@
 'use client';
 
-import { ChevronDownIcon, ExternalLinkIcon, Eye, EyeOff } from 'lucide-react';
+import { ChevronDownIcon, ExternalLinkIcon, Eye, EyeOff, Loader2, Store } from 'lucide-react';
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import {
@@ -107,6 +107,10 @@ export function ItemDetailView({ setNumber }: ItemDetailViewProps) {
   const [enrichStatus, setEnrichStatus] = useState<EnrichStatus>('idle');
   const [enrichMessage, setEnrichMessage] = useState<string | null>(null);
   const [mlPredicting, setMlPredicting] = useState(false);
+  const [watchlistLoading, setWatchlistLoading] = useState(false);
+  const [buyRatingLoading, setBuyRatingLoading] = useState<string | null>(null);
+  const [listingStatus, setListingStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
+  const [listingMessage, setListingMessage] = useState<string | null>(null);
 
   const [priceSorting, setPriceSorting] = useState<SortingState>([{ id: 'date', desc: true }]);
 
@@ -335,6 +339,29 @@ export function ItemDetailView({ setNumber }: ItemDetailViewProps) {
     }
   };
 
+  const handleListOn = async (platform: string) => {
+    setListingStatus('loading');
+    setListingMessage(null);
+    try {
+      const res = await fetch('/api/listing/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ set_number: setNumber, platform }),
+      });
+      const json = await res.json();
+      if (!json.success) {
+        setListingStatus('error');
+        setListingMessage(json.error ?? 'Listing failed');
+        return;
+      }
+      setListingStatus('success');
+      setListingMessage(json.message);
+    } catch (err) {
+      setListingStatus('error');
+      setListingMessage(err instanceof Error ? err.message : 'Failed to open seller portal');
+    }
+  };
+
   const handleMlPredict = async () => {
     setMlPredicting(true);
     try {
@@ -420,24 +447,32 @@ export function ItemDetailView({ setNumber }: ItemDetailViewProps) {
           {/* Watchlist + Buy rating */}
           <div className='mt-3 flex items-center gap-2'>
             <button
+              disabled={watchlistLoading}
               onClick={async () => {
-                const res = await fetch(`/api/items/${setNumber}/watchlist`, {
-                  method: 'PATCH',
-                });
-                const json = await res.json();
-                if (json.success) {
-                  setItem((prev) =>
-                    prev ? { ...prev, watchlist: json.data.watchlist } : prev
-                  );
+                setWatchlistLoading(true);
+                try {
+                  const res = await fetch(`/api/items/${setNumber}/watchlist`, {
+                    method: 'PATCH',
+                  });
+                  const json = await res.json();
+                  if (json.success) {
+                    setItem((prev) =>
+                      prev ? { ...prev, watchlist: json.data.watchlist } : prev
+                    );
+                  }
+                } finally {
+                  setWatchlistLoading(false);
                 }
               }}
-              className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition-all ${
+              className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition-all disabled:opacity-50 ${
                 item.watchlist
                   ? 'border-yellow-300 bg-yellow-100 text-yellow-800 dark:border-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-300'
                   : 'border-border text-muted-foreground hover:border-foreground/30'
               }`}
             >
-              {item.watchlist ? (
+              {watchlistLoading ? (
+                <Loader2 className='size-3.5 animate-spin' />
+              ) : item.watchlist ? (
                 <Eye className='size-3.5' />
               ) : (
                 <EyeOff className='size-3.5' />
@@ -450,27 +485,37 @@ export function ItemDetailView({ setNumber }: ItemDetailViewProps) {
               return (
                 <button
                   key={opt.value}
+                  disabled={buyRatingLoading !== null}
                   onClick={async () => {
                     const newRating = isActive ? null : opt.value;
-                    const res = await fetch(`/api/items/${setNumber}/buy-rating`, {
-                      method: 'PUT',
-                      headers: { 'Content-Type': 'application/json' },
-                      body: JSON.stringify({ rating: newRating }),
-                    });
-                    const json = await res.json();
-                    if (json.success) {
-                      setItem((prev) =>
-                        prev ? { ...prev, buy_rating: newRating } : prev
-                      );
+                    setBuyRatingLoading(opt.value);
+                    try {
+                      const res = await fetch(`/api/items/${setNumber}/buy-rating`, {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ rating: newRating }),
+                      });
+                      const json = await res.json();
+                      if (json.success) {
+                        setItem((prev) =>
+                          prev ? { ...prev, buy_rating: newRating } : prev
+                        );
+                      }
+                    } finally {
+                      setBuyRatingLoading(null);
                     }
                   }}
-                  className={`rounded-full border px-3 py-1 text-xs font-medium transition-all ${
+                  className={`rounded-full border px-3 py-1 text-xs font-medium transition-all disabled:opacity-50 ${
                     isActive
                       ? opt.color
                       : 'border-border text-muted-foreground hover:border-foreground/30'
                   }`}
                 >
-                  {opt.label}
+                  {buyRatingLoading === opt.value ? (
+                    <Loader2 className='size-3 animate-spin' />
+                  ) : (
+                    opt.label
+                  )}
                 </button>
               );
             })}
@@ -519,6 +564,33 @@ export function ItemDetailView({ setNumber }: ItemDetailViewProps) {
                 className={`text-xs ${enrichStatus === 'error' ? 'text-destructive' : 'text-green-600 dark:text-green-400'}`}
               >
                 {enrichMessage}
+              </span>
+            )}
+
+            {/* List on marketplace -- only shown for portfolio items */}
+            {item.in_portfolio && (
+              <DropdownMenu>
+                <DropdownMenuTrigger
+                  disabled={listingStatus === 'loading'}
+                  className='inline-flex items-center gap-1.5 rounded-md border border-green-300 bg-green-50 px-3 py-1.5 text-sm font-medium text-green-700 transition-colors hover:bg-green-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-green-700 dark:bg-green-900/30 dark:text-green-300 dark:hover:bg-green-900/50'
+                >
+                  <Store className='size-3.5' />
+                  {listingStatus === 'loading' ? 'Opening...' : 'List'}
+                  <ChevronDownIcon className='size-3.5' />
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align='start'>
+                  <DropdownMenuItem onClick={() => handleListOn('shopee')}>
+                    Shopee MY
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            )}
+
+            {listingMessage && (
+              <span
+                className={`text-xs ${listingStatus === 'error' ? 'text-destructive' : 'text-green-600 dark:text-green-400'}`}
+              >
+                {listingMessage}
               </span>
             )}
           </div>

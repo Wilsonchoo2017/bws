@@ -13,7 +13,7 @@ import logging
 import numpy as np
 import pandas as pd
 
-from services.ml.helpers import offset_months, safe_float, set_number_to_item_id
+from services.ml.helpers import offset_months, safe_float
 from services.ml.types import FeatureMeta
 from typing import Any
 
@@ -68,13 +68,13 @@ def _load_bricklink_data(conn: Any) -> pd.DataFrame:
     """Load BrickLink monthly sales (new condition)."""
     return conn.execute("""
         SELECT
-            item_id, year, month,
+            set_number, year, month,
             times_sold, total_quantity,
             min_price, max_price, avg_price
         FROM bricklink_monthly_sales
         WHERE condition = 'new'
           AND avg_price IS NOT NULL AND avg_price > 0
-        ORDER BY item_id, year, month
+        ORDER BY set_number, year, month
     """).df()
 
 
@@ -100,12 +100,12 @@ def _compute_bricklink_features(
     base: pd.DataFrame,
 ) -> pd.DataFrame:
     """Pure computation of BrickLink features."""
-    # Build item_id -> set_number mapping and cutoff lookup
-    sn_to_item: dict[str, str] = {}
+    # Build cutoff lookup from base DataFrame
     cutoff_lookup: dict[str, tuple[int, int] | None] = {}
+    base_set_numbers: set[str] = set()
     for _, row in base.iterrows():
         sn = row["set_number"]
-        sn_to_item[sn] = set_number_to_item_id(sn)
+        base_set_numbers.add(sn)
         cy = row.get("cutoff_year")
         cm = row.get("cutoff_month")
         if pd.notna(cy) and pd.notna(cm):
@@ -113,12 +113,10 @@ def _compute_bricklink_features(
         else:
             cutoff_lookup[sn] = None
 
-    item_to_sn = {v: k for k, v in sn_to_item.items()}
-
     rows: list[dict] = []
-    for item_id, group in bl_df.groupby("item_id"):
-        sn = item_to_sn.get(str(item_id))
-        if sn is None:
+    for sn, group in bl_df.groupby("set_number"):
+        sn = str(sn)
+        if sn not in base_set_numbers:
             continue
 
         cutoff = cutoff_lookup.get(sn)

@@ -50,7 +50,7 @@ class MinifigExtractor:
     ) -> pd.DataFrame:
         """Load minifig data and compute set-level features."""
         mappings = conn.execute(
-            "SELECT set_item_id, minifig_id, quantity FROM set_minifigures"
+            "SELECT set_number, minifig_id, quantity FROM set_minifigures"
         ).df()
         prices_raw = conn.execute(
             "SELECT minifig_id, six_month_new, current_new FROM minifig_price_history"
@@ -60,7 +60,7 @@ class MinifigExtractor:
             return pd.DataFrame(columns=["set_number"])
 
         fig_prices = _parse_minifig_prices(prices_raw)
-        fig_set_counts = mappings.groupby("minifig_id")["set_item_id"].nunique().to_dict()
+        fig_set_counts = mappings.groupby("minifig_id")["set_number"].nunique().to_dict()
 
         # RRP may come from base (if enriched) or from BE snapshots
         rrp_lookup: dict[str, float] = {}
@@ -122,8 +122,7 @@ def _compute_minifig_features(
     """Pure computation of set-level minifig features."""
     rows: list[dict] = []
     for sn in set_numbers:
-        set_item_id = f"{sn}-1"
-        set_figs = mappings[mappings["set_item_id"] == set_item_id]
+        set_figs = mappings[mappings["set_number"] == sn]
         if set_figs.empty:
             rows.append({"set_number": sn})
             continue

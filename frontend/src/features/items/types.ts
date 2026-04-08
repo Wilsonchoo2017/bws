@@ -66,6 +66,12 @@ export interface UnifiedItem {
   cohort_price_tier: number | null;
   cohort_piece_group: number | null;
   liquidity_score: number | null;
+  liq_cohort_half_year: number | null;
+  liq_cohort_year: number | null;
+  liq_cohort_theme: number | null;
+  liq_cohort_year_theme: number | null;
+  liq_cohort_price_tier: number | null;
+  liq_cohort_piece_group: number | null;
 }
 
 export interface PriceRecord {
@@ -94,6 +100,9 @@ export interface ItemDetail {
   image_url: string | null;
   buy_rating: BuyRating | null;
   watchlist: boolean;
+  in_portfolio: boolean;
+  listing_price_cents: number | null;
+  listing_currency: string | null;
   prices: PriceRecord[];
   ml_prediction?: {
     growth_pct: number;

@@ -110,10 +110,16 @@ export const FILTER_GROUPS: FilterGroup[] = [
     ],
   },
   {
-    id: 'other',
-    label: 'Other',
+    id: 'watchlist',
+    label: 'Watchlist',
     filters: [
       { key: 'watchlist', label: 'Watchlist' },
+    ],
+  },
+  {
+    id: 'deals',
+    label: 'Deals',
+    filters: [
       { key: 'deal', label: 'Deals' },
     ],
   },

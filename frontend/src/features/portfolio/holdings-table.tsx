@@ -106,6 +106,23 @@ const columns: ColumnDef<Holding>[] = [
     size: 100,
   },
   {
+    accessorKey: 'listing_price_cents',
+    header: ({ column }) => (
+      <DataTableColumnHeader column={column} title='Listing' />
+    ),
+    cell: ({ row }) => {
+      const price = row.getValue('listing_price_cents') as number | null;
+      return price ? (
+        <span className='font-mono text-sm'>
+          {formatPrice(price)}
+        </span>
+      ) : (
+        <span className='text-muted-foreground text-xs'>-</span>
+      );
+    },
+    size: 100,
+  },
+  {
     accessorKey: 'current_value_cents',
     header: ({ column }) => (
       <DataTableColumnHeader column={column} title='Value' />

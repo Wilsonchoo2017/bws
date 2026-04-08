@@ -41,11 +41,11 @@ def fetch_from_bricklink(
             SELECT item_id, item_type, title, weight, year_released, image_url,
                    parts_count, theme, last_scraped_at, minifig_count, dimensions
             FROM bricklink_items
-            WHERE item_id = ? OR item_id = ?
+            WHERE set_number = ?
             ORDER BY last_scraped_at DESC NULLS LAST
             LIMIT 1
             """,
-            [set_number, f"{set_number}-1"],
+            [set_number],
         ).fetchone()
 
         if row and row[8] is not None:

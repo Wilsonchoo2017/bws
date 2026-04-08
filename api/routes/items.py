@@ -22,7 +22,7 @@ from services.backtesting.be_screener import compute_be_signals_with_cohort
 from services.backtesting.screener import (
     compute_all_signals_with_cohort,
 )
-from services.items.repository import get_all_items, get_all_items_lite, get_item_detail, get_or_create_item, item_exists, toggle_watchlist, update_buy_rating
+from services.items.repository import get_all_items, get_all_items_lite, get_item_detail, get_or_create_item, item_exists, toggle_watchlist, update_buy_rating, update_listing_price
 from services.shopee.repository import get_all_products
 from services.shopee.saturation_repository import (
     get_all_latest_saturations,
@@ -41,6 +41,11 @@ class AddItemRequest(BaseModel):
 
 class UpdateBuyRatingRequest(BaseModel):
     rating: int | None = Field(None, ge=1, le=4)
+
+
+class UpdateListingPriceRequest(BaseModel):
+    price_cents: int | None = Field(None, ge=0)
+    currency: str = Field(default="MYR", max_length=3)
 
 
 @router.post("", status_code=201)
@@ -79,6 +84,28 @@ async def set_buy_rating(set_number: str, request: UpdateBuyRatingRequest, conn:
         if row is None:
             raise HTTPException(status_code=404, detail=f"Item {set_number} not found")
     return {"success": True, "data": {"set_number": set_number, "buy_rating": request.rating}}
+
+
+@router.put("/{set_number}/listing-price")
+async def set_listing_price(
+    set_number: str,
+    request: UpdateListingPriceRequest,
+    conn: Any = Depends(get_db),
+):
+    """Set or clear the listing price for an item."""
+    success = update_listing_price(
+        conn, set_number, request.price_cents, request.currency,
+    )
+    if not success:
+        raise HTTPException(status_code=404, detail=f"Item {set_number} not found")
+    return {
+        "success": True,
+        "data": {
+            "set_number": set_number,
+            "listing_price_cents": request.price_cents,
+            "listing_currency": request.currency,
+        },
+    }
 
 
 @router.get("/lite")
@@ -274,15 +301,10 @@ async def get_liquidity_cohorts_bulk(
     conn: Any = Depends(get_db),
 ) -> dict:
     """Return per-cohort liquidity percentiles for every item."""
-    # Trigger per-item cohort build via the single-item endpoint
-    await get_item_liquidity_cohorts("__warmup__", source, condition, conn)
-
-    cache_key = f"{source}:{condition}"
-    cached = _liq_cohort_cache.get(cache_key)
+    cached = await _ensure_liq_cohort_cache(source, condition, conn)
     if not cached:
         return {"success": True, "data": {}}
 
-    # Return only non-empty entries, with composite_pct per strategy
     result: dict[str, dict[str, float | None]] = {}
     for sn, strategies in cached["results"].items():
         if not strategies:
@@ -301,6 +323,17 @@ async def get_item(set_number: str, conn: Any = Depends(get_db)):
     if not item:
         raise HTTPException(status_code=404, detail=f"Item {set_number} not found")
     item["saturation"] = get_latest_saturation(conn, set_number)
+
+    # Check if item is in portfolio (has positive holdings)
+    held = conn.execute(
+        """
+        SELECT COALESCE(SUM(CASE WHEN txn_type = 'BUY' THEN quantity ELSE -quantity END), 0)
+        FROM portfolio_transactions
+        WHERE set_number = ?
+        """,
+        [set_number],
+    ).fetchone()
+    item["in_portfolio"] = (held[0] or 0) > 0
 
     # ML growth prediction
     from services.scoring.provider import enrich_signals
@@ -435,7 +468,7 @@ async def get_item_liquidity(
             from itertools import groupby
             for item_id, group in groupby(rows, key=lambda r: r[0]):
                 records = list(group)
-                sn = item_id.removesuffix("-1")
+                sn = item_id.split("-")[0]
                 txns = [r[3] or 0 for r in records]
                 qtys = [r[4] or 0 for r in records]
                 monthly = [{"label": f"{r[1]}-{r[2]:02d}", "txns": r[3] or 0} for r in records]
@@ -541,14 +574,10 @@ _liq_cohort_cache: dict = {}
 _LIQ_COHORT_TTL = 30 * 24 * 3600
 
 
-@router.get("/{set_number}/liquidity/cohorts")
-async def get_item_liquidity_cohorts(
-    set_number: str,
-    source: str = "bricklink",
-    condition: str = "new",
-    conn: Any = Depends(get_db),
-):
-    """Liquidity percentile rankings within cohort peer groups."""
+async def _ensure_liq_cohort_cache(
+    source: str, condition: str, conn: Any
+) -> dict | None:
+    """Build (or reuse) the liquidity-cohort cache and return it."""
     import time
 
     from services.backtesting.cohort import STRATEGY_NAMES, _assign_bucket, _compute_percentile
@@ -562,22 +591,15 @@ async def get_item_liquidity_cohorts(
 
     cached = _liquidity_cache.get(cache_key)
     if not cached:
-        return {"success": True, "data": None}
+        return None
 
     all_stats = cached["stats"]
     all_ranked = cached["ranked"]
 
-    if set_number not in all_stats:
-        return {"success": True, "data": None}
-
-    # Build or use cohort cache
     if (
         cache_key not in _liq_cohort_cache
         or _liq_cohort_cache[cache_key]["expires"] <= now
     ):
-        # Load item metadata for bucket assignment.
-        # Use brickeconomy_snapshots as primary source (has theme, pieces,
-        # rrp_usd_cents) and enrich with bricklink_items where available.
         be_rows = conn.execute(
             """
             SELECT set_number, year_released, theme, pieces, rrp_usd_cents
@@ -599,12 +621,11 @@ async def get_item_liquidity_cohorts(
                 "parts_count": r[3],
                 "rrp_usd_cents": r[4],
             }
-        # Enrich with bricklink_items (has year_released, parts_count)
         bl_rows = conn.execute(
-            "SELECT item_id, year_released, theme, parts_count FROM bricklink_items"
+            "SELECT set_number, year_released, theme, parts_count FROM bricklink_items"
         ).fetchall()
         for r in bl_rows:
-            sn = r[0].removesuffix("-1")
+            sn = r[0]
             if sn not in meta_map:
                 meta_map[sn] = {
                     "set_number": sn,
@@ -613,12 +634,9 @@ async def get_item_liquidity_cohorts(
                     "parts_count": r[3],
                     "rrp_usd_cents": None,
                 }
-            else:
-                # Prefer bricklink year_released if BE is missing
-                if not meta_map[sn].get("year_released") and r[1]:
-                    meta_map[sn]["year_released"] = r[1]
+            elif not meta_map[sn].get("year_released") and r[1]:
+                meta_map[sn]["year_released"] = r[1]
 
-        # Assign buckets for each strategy
         from collections import defaultdict
 
         buckets: dict[str, dict[str, list[str]]] = {
@@ -631,20 +649,17 @@ async def get_item_liquidity_cohorts(
                 if key is not None:
                     buckets[strategy][key].append(sn)
 
-        # Compute per-cohort percentiles for liquidity metrics
         liq_metrics = ("avg_monthly_txns", "consistency", "trend_ratio", "listing_ratio")
         cohort_results: dict[str, dict[str, dict]] = {sn: {} for sn in all_stats}
 
         for strategy in STRATEGY_NAMES:
             for bucket_key, members in buckets[strategy].items():
-                # Filter to members that have liquidity stats
                 valid = [sn for sn in members if sn in all_ranked]
                 if len(valid) < 3:
                     continue
 
                 cohort_size = len(valid)
 
-                # Collect metric values
                 metric_vals: dict[str, list[float]] = {}
                 for metric in liq_metrics:
                     vals = []
@@ -654,14 +669,12 @@ async def get_item_liquidity_cohorts(
                             vals.append(float(v))
                     metric_vals[metric] = vals
 
-                # Collect composite values for ranking
                 comp_vals = [(sn, all_ranked[sn]["composite_pct"]) for sn in valid]
                 comp_sorted = sorted(comp_vals, key=lambda x: x[1], reverse=True)
                 ordinal: dict[str, int] = {}
                 for pos, (sn, _) in enumerate(comp_sorted, 1):
                     ordinal[sn] = pos
 
-                # Composite percentiles within cohort
                 all_comp = [all_ranked[sn]["composite_pct"] for sn in valid]
 
                 for sn in valid:
@@ -686,7 +699,6 @@ async def get_item_liquidity_cohorts(
                         if v is not None:
                             trend_pct = _compute_percentile(metric_vals["trend_ratio"], float(v))
 
-                    # Listing ratio: lower = better, so invert
                     lr_pct = None
                     if len(metric_vals["listing_ratio"]) >= 3:
                         v = stats.get("listing_ratio")
@@ -714,7 +726,22 @@ async def get_item_liquidity_cohorts(
             "expires": now + _LIQ_COHORT_TTL,
         }
 
-    cohort_data = _liq_cohort_cache[cache_key]["results"].get(set_number, {})
+    return _liq_cohort_cache[cache_key]
+
+
+@router.get("/{set_number}/liquidity/cohorts")
+async def get_item_liquidity_cohorts(
+    set_number: str,
+    source: str = "bricklink",
+    condition: str = "new",
+    conn: Any = Depends(get_db),
+):
+    """Liquidity percentile rankings within cohort peer groups."""
+    cached = await _ensure_liq_cohort_cache(source, condition, conn)
+    if not cached:
+        return {"success": True, "data": None}
+
+    cohort_data = cached["results"].get(set_number, {})
     if not cohort_data:
         return {"success": True, "data": None}
 
@@ -725,8 +752,8 @@ async def get_item_liquidity_cohorts(
 async def get_item_minifigures(set_number: str, conn: Any = Depends(get_db)):
     """Get minifigure inventory and values for a LEGO set."""
     rows = conn.execute(
-        "SELECT item_id FROM bricklink_items WHERE item_id LIKE ?",
-        [f"{set_number}-%"],
+        "SELECT item_id FROM bricklink_items WHERE set_number = ?",
+        [set_number],
     ).fetchall()
 
     if not rows:
@@ -759,8 +786,8 @@ async def get_item_minifigures(set_number: str, conn: Any = Depends(get_db)):
 async def get_minifig_value_history(set_number: str, conn: Any = Depends(get_db)):
     """Get aggregated minifigure value history for a LEGO set."""
     rows = conn.execute(
-        "SELECT item_id FROM bricklink_items WHERE item_id LIKE ?",
-        [f"{set_number}-%"],
+        "SELECT item_id FROM bricklink_items WHERE set_number = ?",
+        [set_number],
     ).fetchall()
 
     if not rows:
@@ -776,8 +803,8 @@ async def get_minifig_value_history(set_number: str, conn: Any = Depends(get_db)
 async def scrape_item_minifigures(set_number: str, conn: Any = Depends(get_db)):
     """Trigger minifigure scraping for a LEGO set."""
     rows = conn.execute(
-        "SELECT item_id FROM bricklink_items WHERE item_id LIKE ?",
-        [f"{set_number}-%"],
+        "SELECT item_id FROM bricklink_items WHERE set_number = ?",
+        [set_number],
     ).fetchall()
 
     if not rows:
@@ -805,8 +832,8 @@ async def scrape_item_minifigures(set_number: str, conn: Any = Depends(get_db)):
 async def get_item_bricklink_prices(set_number: str, conn: Any = Depends(get_db)):
     """Get BrickLink price history and monthly sales for an item."""
     rows = conn.execute(
-        "SELECT item_id FROM bricklink_items WHERE item_id LIKE ?",
-        [f"{set_number}-%"],
+        "SELECT item_id FROM bricklink_items WHERE set_number = ?",
+        [set_number],
     ).fetchall()
 
     if not rows:

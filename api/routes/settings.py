@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
@@ -13,7 +15,7 @@ router = APIRouter(prefix="/settings", tags=["settings"])
 class SectionUpdate(BaseModel):
     """Payload for updating a single settings section."""
 
-    values: dict
+    values: dict | list[Any]
 
 
 @router.get("")

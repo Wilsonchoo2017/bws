@@ -23,6 +23,7 @@ class _FetchContext:
     """Tracks state across the fetch/enrich pipeline without mutation."""
 
     data_miss: bool = False
+    last_error: str | None = None
 
 
 @executor(TaskType.BRICKECONOMY, concurrency=5, timeout=300, browser_profile="brickeconomy-profile")
@@ -69,19 +70,27 @@ def execute_brickeconomy(
         try:
             scrape_result = browser.run(scrape_with_search, sn)
         except TimeoutError:
+            error_msg = f"Browser timed out for {sn}"
             logger.warning("BrickEconomy browser timed out for %s (90s) -- restarting browser", sn)
+            ctx_holder[0] = _FetchContext(last_error=error_msg)
             browser.restart()
-            return make_failed_result(SourceId.BRICKECONOMY, f"Browser timed out for {sn}")
+            return make_failed_result(SourceId.BRICKECONOMY, error_msg)
         except Exception as exc:
+            error_msg = f"Browser error for {sn}: {exc}"
             logger.warning("BrickEconomy unexpected error for %s: %s", sn, exc)
+            ctx_holder[0] = _FetchContext(last_error=error_msg)
             browser.restart()
-            return make_failed_result(SourceId.BRICKECONOMY, f"Browser error for {sn}: {exc}")
+            return make_failed_result(SourceId.BRICKECONOMY, error_msg)
 
         if not scrape_result.success:
-            if scrape_result.not_found:
-                ctx_holder[0] = _FetchContext(data_miss=True)
-            return make_failed_result(SourceId.BRICKECONOMY, scrape_result.error or "Unknown error")
+            error_msg = scrape_result.error or "Unknown error"
+            ctx_holder[0] = _FetchContext(
+                data_miss=scrape_result.not_found,
+                last_error=error_msg,
+            )
+            return make_failed_result(SourceId.BRICKECONOMY, error_msg)
         if scrape_result.snapshot is None:
+            ctx_holder[0] = _FetchContext(last_error="Scrape succeeded but snapshot is None")
             return make_failed_result(SourceId.BRICKECONOMY, "No data returned")
 
         # Delete non-standard packaging sets (foil packs, polybags, etc.)
@@ -104,9 +113,20 @@ def execute_brickeconomy(
         if ctx_holder[0].data_miss:
             logger.info("BrickEconomy for %s: not found, skipping", set_number)
             return ExecutorResult.skip("Not found on BrickEconomy")
+        # Log field-level detail for diagnosis
+        failed_fields = [
+            f"{fr.field.value}={fr.status.value}"
+            for fr in result.field_results
+            if fr.status.value != "found"
+        ]
+        error_detail = ctx_holder[0].last_error or "unknown"
+        logger.warning(
+            "BrickEconomy for %s: 0 fields -- %s (fields: %s) -- restarting browser",
+            set_number, error_detail, ", ".join(failed_fields[:5]),
+        )
         browser.restart()
         return ExecutorResult.fail(
-            "BrickEconomy returned no data (0 fields)",
+            f"BrickEconomy returned no data (0 fields): {error_detail}",
             category=ErrorCategory.BROWSER_CRASH,
         )
 

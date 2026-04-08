@@ -205,7 +205,7 @@ class KeepaSettings:
     """Keepa browser automation configuration."""
 
     base_url: str = "https://keepa.com"
-    headless: bool = False  # visible browser needed for captcha
+    headless: bool = True
     timeout_ms: int = 30_000
     user_data_dir: str = str(Path.home() / ".bws" / "keepa-profile")
     viewport_width: int = 1366

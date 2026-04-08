@@ -58,6 +58,7 @@ TASK_TYPE_CONFIGS = REGISTRY
 # ---------------------------------------------------------------------------
 
 _shutting_down = False
+_paused_workers: set[str] = set()  # task type values, e.g. {"keepa", "brickeconomy"}
 _POLL_INTERVAL = 3
 _CHECKPOINT_INTERVAL = 30  # seconds between WAL flushes
 _schema_initialized = False
@@ -171,6 +172,14 @@ async def _worker_loop(
 ) -> None:
     """Single worker: claim a task, execute it, repeat."""
     while not _shutting_down:
+        # Skip work while this task type is paused
+        if cfg.task_type.value in _paused_workers:
+            try:
+                await asyncio.sleep(_POLL_INTERVAL)
+            except asyncio.CancelledError:
+                return
+            continue
+
         try:
             try:
                 result = await asyncio.wait_for(

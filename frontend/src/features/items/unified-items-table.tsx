@@ -16,6 +16,7 @@ declare module '@tanstack/react-table' {
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   interface TableMeta<TData extends RowData> {
     toggleWatchlist?: (setNumber: string) => void;
+    watchlistLoading?: Set<string>;
     enriching?: boolean;
   }
 }
@@ -61,16 +62,20 @@ const columns: ColumnDef<UnifiedItem>[] = [
     cell: ({ row, table }) => {
       const isWatchlisted = row.original.watchlist;
       const onToggle = table.options.meta?.toggleWatchlist;
+      const isLoading = table.options.meta?.watchlistLoading?.has(row.original.set_number);
       return (
         <button
+          disabled={isLoading}
           onClick={(e) => {
             e.stopPropagation();
             onToggle?.(row.original.set_number);
           }}
-          className={`text-lg hover:scale-110 transition-transform ${
-            isWatchlisted
-              ? 'text-yellow-500'
-              : 'text-muted-foreground/30 hover:text-yellow-400'
+          className={`text-lg transition-transform ${
+            isLoading
+              ? 'animate-pulse text-yellow-300'
+              : isWatchlisted
+                ? 'text-yellow-500 hover:scale-110'
+                : 'text-muted-foreground/30 hover:text-yellow-400 hover:scale-110'
           }`}
           title={isWatchlisted ? 'Remove from watchlist' : 'Add to watchlist'}
         >
@@ -162,6 +167,63 @@ const columns: ColumnDef<UnifiedItem>[] = [
     size: 90
   },
   {
+    accessorKey: 'liquidity_score',
+    header: ({ column }) => (
+      <DataTableColumnHeader column={column} title='Liq' />
+    ),
+    cell: ({ row, table }) => {
+      const score = row.getValue('liquidity_score') as number | null;
+      if (table.options.meta?.enriching && score == null) return <PriceShimmer />;
+      if (score == null) return <span className='text-muted-foreground'>-</span>;
+      const color =
+        score >= 70 ? 'text-emerald-400' :
+        score >= 50 ? 'text-emerald-600 dark:text-emerald-500' :
+        score >= 30 ? 'text-yellow-600 dark:text-yellow-400' :
+        'text-red-500';
+      return (
+        <span
+          className={`font-mono text-sm font-semibold ${color}`}
+          title='vol 50% + consistency 38% + listing ratio 12%'
+        >
+          {score.toFixed(0)}
+        </span>
+      );
+    },
+    size: 55
+  },
+  {
+    accessorKey: 'liq_cohort_half_year',
+    header: ({ column }) => (
+      <DataTableColumnHeader column={column} title='L:HY' />
+    ),
+    cell: ({ row }) => <CohortCell value={row.getValue('liq_cohort_half_year') as number | null} />,
+    size: 55
+  },
+  {
+    accessorKey: 'liq_cohort_theme',
+    header: ({ column }) => (
+      <DataTableColumnHeader column={column} title='L:Thm' />
+    ),
+    cell: ({ row }) => <CohortCell value={row.getValue('liq_cohort_theme') as number | null} />,
+    size: 55
+  },
+  {
+    accessorKey: 'liq_cohort_price_tier',
+    header: ({ column }) => (
+      <DataTableColumnHeader column={column} title='L:$$' />
+    ),
+    cell: ({ row }) => <CohortCell value={row.getValue('liq_cohort_price_tier') as number | null} />,
+    size: 55
+  },
+  {
+    accessorKey: 'liq_cohort_piece_group',
+    header: ({ column }) => (
+      <DataTableColumnHeader column={column} title='L:Pc' />
+    ),
+    cell: ({ row }) => <CohortCell value={row.getValue('liq_cohort_piece_group') as number | null} />,
+    size: 55
+  },
+  {
     accessorKey: 'ml_growth_pct',
     header: ({ column }) => (
       <DataTableColumnHeader column={column} title='ML Growth' />
@@ -245,31 +307,6 @@ const columns: ColumnDef<UnifiedItem>[] = [
       <DataTableColumnHeader column={column} title='C:Pc' />
     ),
     cell: ({ row }) => <CohortCell value={row.getValue('cohort_piece_group') as number | null} />,
-    size: 55
-  },
-  {
-    accessorKey: 'liquidity_score',
-    header: ({ column }) => (
-      <DataTableColumnHeader column={column} title='Liq' />
-    ),
-    cell: ({ row, table }) => {
-      const score = row.getValue('liquidity_score') as number | null;
-      if (table.options.meta?.enriching && score == null) return <PriceShimmer />;
-      if (score == null) return <span className='text-muted-foreground'>-</span>;
-      const color =
-        score >= 70 ? 'text-emerald-400' :
-        score >= 50 ? 'text-emerald-600 dark:text-emerald-500' :
-        score >= 30 ? 'text-yellow-600 dark:text-yellow-400' :
-        'text-red-500';
-      return (
-        <span
-          className={`font-mono text-sm font-semibold ${color}`}
-          title='vol 50% + consistency 38% + listing ratio 12%'
-        >
-          {score.toFixed(0)}
-        </span>
-      );
-    },
     size: 55
   },
   {
@@ -474,7 +511,10 @@ export function UnifiedItemsTable() {
     [filteredData]
   );
 
+  const [watchlistLoading, setWatchlistLoading] = useState<Set<string>>(new Set());
+
   const toggleWatchlist = useCallback(async (setNumber: string) => {
+    setWatchlistLoading((prev) => new Set(prev).add(setNumber));
     try {
       const res = await fetch(`/api/items/${setNumber}/watchlist`, {
         method: 'PATCH',
@@ -492,16 +532,23 @@ export function UnifiedItemsTable() {
       }
     } catch {
       // silent fail for single-user tool
+    } finally {
+      setWatchlistLoading((prev) => {
+        const next = new Set(prev);
+        next.delete(setNumber);
+        return next;
+      });
     }
   }, []);
 
   const enrichItems = useCallback(async () => {
     setEnriching(true);
     try {
-      const [itemsRes, signalsRes, liqRes] = await Promise.all([
+      const [itemsRes, signalsRes, liqRes, liqCohortRes] = await Promise.all([
         fetch('/api/items').then((r) => r.json()),
         fetch('/api/items/signals').then((r) => r.json()).catch(() => null),
         fetch('/api/items/liquidity').then((r) => r.json()).catch(() => null),
+        fetch('/api/items/liquidity/cohorts').then((r) => r.json()).catch(() => null),
       ]);
 
       if (!itemsRes.success) return;
@@ -535,10 +582,13 @@ export function UnifiedItemsTable() {
       }
 
       const liqMap: Record<string, number> = liqRes?.success && liqRes.data ? liqRes.data : {};
+      const liqCohortMap: Record<string, Record<string, number | null>> =
+        liqCohortRes?.success && liqCohortRes.data ? liqCohortRes.data : {};
 
       const merged = (itemsRes.data as UnifiedItem[]).map((item) => {
         const ml = mlMap.get(item.set_number);
         const c = ml?.cohorts;
+        const lc = liqCohortMap[item.set_number];
         return {
           ...item,
           ml_growth_pct: ml?.growth ?? null,
@@ -549,13 +599,19 @@ export function UnifiedItemsTable() {
           ml_avoid: ml?.avoid ?? false,
           ml_kelly_fraction: ml?.kelly_fraction ?? null,
           ml_win_probability: ml?.win_probability ?? null,
-          cohort_half_year: c?.half_year?.composite_pct ?? null,
-          cohort_year: c?.year?.composite_pct ?? null,
-          cohort_theme: c?.theme?.composite_pct ?? null,
-          cohort_year_theme: c?.year_theme?.composite_pct ?? null,
-          cohort_price_tier: c?.price_tier?.composite_pct ?? null,
-          cohort_piece_group: c?.piece_group?.composite_pct ?? null,
+          cohort_half_year: c?.half_year?.composite_score_pct ?? null,
+          cohort_year: c?.year?.composite_score_pct ?? null,
+          cohort_theme: c?.theme?.composite_score_pct ?? null,
+          cohort_year_theme: c?.year_theme?.composite_score_pct ?? null,
+          cohort_price_tier: c?.price_tier?.composite_score_pct ?? null,
+          cohort_piece_group: c?.piece_group?.composite_score_pct ?? null,
           liquidity_score: liqMap[item.set_number] ?? null,
+          liq_cohort_half_year: lc?.half_year ?? null,
+          liq_cohort_year: lc?.year ?? null,
+          liq_cohort_theme: lc?.theme ?? null,
+          liq_cohort_year_theme: lc?.year_theme ?? null,
+          liq_cohort_price_tier: lc?.price_tier ?? null,
+          liq_cohort_piece_group: lc?.piece_group ?? null,
         };
       });
 
@@ -613,6 +669,12 @@ export function UnifiedItemsTable() {
         cohort_price_tier: null,
         cohort_piece_group: null,
         liquidity_score: null,
+        liq_cohort_half_year: null,
+        liq_cohort_year: null,
+        liq_cohort_theme: null,
+        liq_cohort_year_theme: null,
+        liq_cohort_price_tier: null,
+        liq_cohort_piece_group: null,
       } as UnifiedItem));
 
       setData(liteItems);
@@ -676,11 +738,12 @@ export function UnifiedItemsTable() {
     getCoreRowModel: getCoreRowModel(),
     getPaginationRowModel: getPaginationRowModel(),
     getSortedRowModel: getSortedRowModel(),
+    autoResetPageIndex: false,
     initialState: {
       pagination: { pageSize: 10 },
       columnVisibility: { rrp_cents: false },
     },
-    meta: { toggleWatchlist, enriching },
+    meta: { toggleWatchlist, watchlistLoading, enriching },
   });
 
   if (loading) {
