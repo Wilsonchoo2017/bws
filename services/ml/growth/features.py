@@ -13,6 +13,7 @@ import numpy as np
 import pandas as pd
 
 from config.ml import LICENSED_THEMES
+from services.brickeconomy.analysis_scraper import load_analysis_data
 from services.ml.encodings import (
     compute_group_stats,
     group_mean_encode,
@@ -41,6 +42,8 @@ TIER1_FEATURES: tuple[str, ...] = (
     "review_rank_in_theme", "review_rank_in_retire_year",
     # BrickTalk gap analysis signals
     "high_price_barrier", "shelf_life_x_reviews",
+    # BE analysis page aggregate growth (market-level context)
+    "be_theme_avg_growth", "be_year_avg_growth",
     # Feature interactions
     "theme_x_price", "licensed_x_parts", "rating_x_price",
 )
@@ -228,7 +231,11 @@ def engineer_intrinsic_features(
 
     # Lifecycle features (shelf life, retirement timing)
     release_dt = pd.to_datetime(result.get("release_date"), errors="coerce")
-    retired_dt = pd.to_datetime(result.get("retired_date"), errors="coerce")
+    retired_date_col = result.get("retired_date")
+    if retired_date_col is None:
+        retired_dt = pd.Series(pd.NaT, index=result.index)
+    else:
+        retired_dt = pd.to_datetime(retired_date_col, errors="coerce")
     # Fallback: approximate retired_date from year_retired (July 1 of that year)
     yr_retired = pd.to_numeric(result.get("year_retired"), errors="coerce")
     retired_dt_approx = pd.to_datetime(
@@ -294,6 +301,32 @@ def engineer_intrinsic_features(
             result["subtheme"], adapted_sub, alpha=0
         )
         result["sub_size"] = group_size_encode(result["subtheme"], adapted_sub)
+
+    # BE analysis page aggregate growth (market-level context features)
+    be_analysis = load_analysis_data()
+    if be_analysis.get("themes"):
+        theme_growth_lookup = {
+            t["theme"].lower(): t["annual_growth_pct"]
+            for t in be_analysis["themes"]
+        }
+        result["be_theme_avg_growth"] = (
+            result["theme"]
+            .fillna("")
+            .str.lower()
+            .map(theme_growth_lookup)
+        )
+    else:
+        result["be_theme_avg_growth"] = np.nan
+
+    if be_analysis.get("years"):
+        year_growth_lookup = {
+            y["year"]: y["annual_growth_pct"]
+            for y in be_analysis["years"]
+        }
+        yr = pd.to_numeric(result.get("year_released"), errors="coerce")
+        result["be_year_avg_growth"] = yr.map(year_growth_lookup)
+    else:
+        result["be_year_avg_growth"] = np.nan
 
     # BrickTalk gap analysis: high price barrier reduces investor competition
     result["high_price_barrier"] = (rrp_raw > 30000).astype(int)  # >$300

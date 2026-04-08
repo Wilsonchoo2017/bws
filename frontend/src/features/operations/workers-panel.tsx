@@ -8,6 +8,8 @@ import { formatDuration, formatRelativeTime } from './types';
 
 const SCRAPER_LABELS: Record<string, string> = {
   shopee: 'Shopee',
+  shopee_saturation: 'Shopee Saturation',
+  shopee_competition: 'Shopee Competition',
   toysrus: 'ToysRUs',
   mightyutan: 'Mighty Utan',
   enrichment: 'Enrichment',

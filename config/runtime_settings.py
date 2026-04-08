@@ -282,7 +282,6 @@ def _apply_schedulers(values: dict[str, Any]) -> None:
     if "rescrape" in values:
         import services.enrichment.scheduler as m
         m.RESCRAPE_INTERVAL_MINUTES = values["rescrape"].get("interval_minutes", m.RESCRAPE_INTERVAL_MINUTES)
-        m.RESCRAPE_STALE_DAYS = values["rescrape"].get("batch_size", m.RESCRAPE_STALE_DAYS)
 
     if "saturation" in values:
         import services.shopee.saturation_scheduler as m

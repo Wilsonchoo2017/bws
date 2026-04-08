@@ -3,6 +3,7 @@
 import logging
 from typing import Any
 from datetime import datetime
+from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query
 from pydantic import BaseModel, Field
@@ -13,11 +14,13 @@ from services.items.repository import get_or_create_item
 from services.portfolio.repository import (
     create_transaction,
     delete_transaction,
+    delete_transactions_by_bill,
     get_holding_detail,
     get_holdings,
     get_portfolio_summary,
     get_transaction,
     list_transactions,
+    update_transaction,
 )
 
 
@@ -67,6 +70,195 @@ async def add_transaction(request: CreateTransactionRequest, conn: Any = Depends
     return {"success": True, "data": txn}
 
 
+class BillLineItem(BaseModel):
+    set_number: str = Field(
+        ..., min_length=1, max_length=20, pattern=r"^\d{3,6}(-\d+)?$"
+    )
+    quantity: int = Field(..., gt=0)
+    unit_price_cents: int = Field(..., gt=0)
+
+
+class CreateBillRequest(BaseModel):
+    items: list[BillLineItem] = Field(..., min_length=1, max_length=50)
+    final_amount_cents: int = Field(..., gt=0)
+    txn_date: datetime
+    condition: str = Field(default="new", pattern=r"^(new|used)$")
+    currency: str = Field(default="MYR", max_length=3)
+    notes: str | None = None
+
+
+def _compute_effective_prices(
+    items: list[BillLineItem], final_amount_cents: int
+) -> list[int]:
+    """Distribute final_amount proportionally across line items.
+
+    Returns the effective unit price (cents) for each item.
+    Uses the "largest remainder" method to distribute rounding error:
+    each line's total allocation is computed, then unit price = total // qty,
+    with the remainder absorbed by the last line.
+    """
+    subtotal = sum(item.quantity * item.unit_price_cents for item in items)
+    if subtotal <= 0:
+        raise ValueError("Subtotal must be positive")
+
+    # Allocate total cents to each line proportionally
+    line_totals = [
+        round(item.quantity * item.unit_price_cents * final_amount_cents / subtotal)
+        for item in items
+    ]
+
+    # Fix rounding: adjust the largest line's total so everything sums exactly
+    allocated = sum(line_totals)
+    remainder = final_amount_cents - allocated
+    if remainder != 0:
+        largest_idx = max(
+            range(len(items)),
+            key=lambda i: items[i].quantity * items[i].unit_price_cents,
+        )
+        line_totals[largest_idx] += remainder
+
+    # Convert line totals back to unit prices (integer division)
+    return [line_totals[i] // items[i].quantity for i in range(len(items))]
+
+
+@router.post("/transactions/bill", status_code=201)
+async def add_bill(
+    request: CreateBillRequest, conn: Any = Depends(get_db)
+) -> dict:
+    """Record multiple BUY transactions from a single bill/receipt.
+
+    The final_amount_cents is distributed proportionally across line items
+    so that platform discounts, shipping, etc. are reflected in each unit cost.
+    """
+    effective_prices = _compute_effective_prices(
+        request.items, request.final_amount_cents
+    )
+
+    # Validate all effective prices are positive
+    for i, eff in enumerate(effective_prices):
+        if eff <= 0:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Adjustment makes price non-positive for {request.items[i].set_number}",
+            )
+
+    bill_id = f"bill_{uuid4().hex[:8]}"
+    created_txns = []
+
+    for item, eff_price in zip(request.items, effective_prices):
+        # Auto-create lego_items entry and queue enrichment
+        get_or_create_item(conn, item.set_number)
+        row = conn.execute(
+            "SELECT title, theme, image_url FROM lego_items WHERE set_number = ?",
+            [item.set_number],
+        ).fetchone()
+        if row and (row[0] is None or row[1] is None or row[2] is None):
+            job_manager.create_job("enrichment", item.set_number)
+            logger.info("Queued enrichment for set %s", item.set_number)
+
+        txn_id = create_transaction(
+            conn,
+            item.set_number,
+            "BUY",
+            item.quantity,
+            eff_price,
+            request.condition,
+            request.txn_date,
+            currency=request.currency,
+            notes=request.notes,
+            bill_id=bill_id,
+        )
+        txn = get_transaction(conn, txn_id)
+        created_txns.append(txn)
+
+    subtotal = sum(
+        item.quantity * item.unit_price_cents for item in request.items
+    )
+    return {
+        "success": True,
+        "data": {
+            "bill_id": bill_id,
+            "transactions": created_txns,
+            "subtotal_cents": subtotal,
+            "final_amount_cents": request.final_amount_cents,
+            "adjustment_cents": request.final_amount_cents - subtotal,
+        },
+    }
+
+
+@router.put("/transactions/bill/{bill_id}")
+async def update_bill(
+    bill_id: str, request: CreateBillRequest, conn: Any = Depends(get_db)
+) -> dict:
+    """Replace all transactions in a bill with new data.
+
+    Deletes existing transactions for the bill_id, then creates new ones
+    with the adjusted prices.
+    """
+    # Verify the bill exists
+    existing = conn.execute(
+        "SELECT COUNT(*) FROM portfolio_transactions WHERE bill_id = ?",
+        [bill_id],
+    ).fetchone()
+    if not existing or existing[0] == 0:
+        raise HTTPException(status_code=404, detail="Bill not found")
+
+    effective_prices = _compute_effective_prices(
+        request.items, request.final_amount_cents
+    )
+
+    for i, eff in enumerate(effective_prices):
+        if eff <= 0:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Adjustment makes price non-positive for {request.items[i].set_number}",
+            )
+
+    # Delete old transactions
+    delete_transactions_by_bill(conn, bill_id)
+
+    # Create new transactions with the same bill_id
+    created_txns = []
+    for item, eff_price in zip(request.items, effective_prices):
+        get_or_create_item(conn, item.set_number)
+        row = conn.execute(
+            "SELECT title, theme, image_url FROM lego_items WHERE set_number = ?",
+            [item.set_number],
+        ).fetchone()
+        if row and (row[0] is None or row[1] is None or row[2] is None):
+            job_manager.create_job("enrichment", item.set_number)
+            logger.info("Queued enrichment for set %s", item.set_number)
+
+        txn_id = create_transaction(
+            conn,
+            item.set_number,
+            "BUY",
+            item.quantity,
+            eff_price,
+            request.condition,
+            request.txn_date,
+            currency=request.currency,
+            notes=request.notes,
+            bill_id=bill_id,
+        )
+        txn = get_transaction(conn, txn_id)
+        created_txns.append(txn)
+
+    subtotal = sum(
+        item.quantity * item.unit_price_cents for item in request.items
+    )
+    return {
+        "success": True,
+        "data": {
+            "bill_id": bill_id,
+            "transactions": created_txns,
+            "subtotal_cents": subtotal,
+            "final_amount_cents": request.final_amount_cents,
+            "adjustment_cents": request.final_amount_cents - subtotal,
+        },
+    }
+
+
 @router.get("/transactions")
 async def list_txns(
     set_number: str | None = Query(default=None),
@@ -85,6 +277,51 @@ async def get_txn(txn_id: int, conn: Any = Depends(get_db)) -> dict:
     txn = get_transaction(conn, txn_id)
     if not txn:
         raise HTTPException(status_code=404, detail="Transaction not found")
+    return {"success": True, "data": txn}
+
+
+class UpdateTransactionRequest(BaseModel):
+    txn_type: str | None = Field(default=None, pattern=r"^(BUY|SELL)$")
+    quantity: int | None = Field(default=None, gt=0)
+    price_cents: int | None = Field(default=None, gt=0)
+    condition: str | None = Field(default=None, pattern=r"^(new|used)$")
+    txn_date: datetime | None = None
+    notes: str | None = None
+    clear_notes: bool = False
+
+
+@router.put("/transactions/{txn_id}")
+async def edit_transaction(
+    txn_id: int, request: UpdateTransactionRequest, conn: Any = Depends(get_db)
+) -> dict:
+    """Update fields on an existing transaction."""
+    kwargs: dict[str, Any] = {}
+    if request.txn_type is not None:
+        kwargs["txn_type"] = request.txn_type
+    if request.quantity is not None:
+        kwargs["quantity"] = request.quantity
+    if request.price_cents is not None:
+        kwargs["price_cents"] = request.price_cents
+    if request.condition is not None:
+        kwargs["condition"] = request.condition
+    if request.txn_date is not None:
+        kwargs["txn_date"] = request.txn_date
+    if request.clear_notes:
+        kwargs["notes"] = None
+    elif request.notes is not None:
+        kwargs["notes"] = request.notes
+
+    if not kwargs:
+        raise HTTPException(status_code=400, detail="No fields to update")
+
+    try:
+        updated = update_transaction(conn, txn_id, **kwargs)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if not updated:
+        raise HTTPException(status_code=404, detail="Transaction not found")
+
+    txn = get_transaction(conn, txn_id)
     return {"success": True, "data": txn}
 
 

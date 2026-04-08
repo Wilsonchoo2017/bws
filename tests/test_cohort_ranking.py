@@ -62,26 +62,59 @@ class TestBucketAssignment:
     def test_year_theme(self):
         assert _assign_bucket(self._item(), "year_theme") == "2022|Star Wars"
 
-    def test_price_tier_budget(self):
-        assert _assign_bucket(self._item(rrp_usd_cents=2999), "price_tier") == "budget"
+    def test_price_tier_impulse(self):
+        assert _assign_bucket(self._item(rrp_usd_cents=999), "price_tier") == "impulse"
+
+    def test_price_tier_pocket(self):
+        assert _assign_bucket(self._item(rrp_usd_cents=1999), "price_tier") == "pocket"
+
+    def test_price_tier_gift(self):
+        assert _assign_bucket(self._item(rrp_usd_cents=2999), "price_tier") == "gift"
 
     def test_price_tier_mid(self):
-        assert _assign_bucket(self._item(rrp_usd_cents=9999), "price_tier") == "mid"
+        assert _assign_bucket(self._item(rrp_usd_cents=3999), "price_tier") == "mid"
+
+    def test_price_tier_standard(self):
+        assert _assign_bucket(self._item(rrp_usd_cents=5999), "price_tier") == "standard"
 
     def test_price_tier_premium(self):
-        assert _assign_bucket(self._item(rrp_usd_cents=25000), "price_tier") == "premium"
+        assert _assign_bucket(self._item(rrp_usd_cents=7999), "price_tier") == "premium"
 
-    def test_price_tier_ultra(self):
-        assert _assign_bucket(self._item(rrp_usd_cents=50000), "price_tier") == "ultra"
+    def test_price_tier_collector(self):
+        assert _assign_bucket(self._item(rrp_usd_cents=12999), "price_tier") == "collector"
+
+    def test_price_tier_elite(self):
+        assert _assign_bucket(self._item(rrp_usd_cents=16999), "price_tier") == "elite"
+
+    def test_price_tier_luxury(self):
+        assert _assign_bucket(self._item(rrp_usd_cents=24999), "price_tier") == "luxury"
+
+    def test_price_tier_ultimate(self):
+        assert _assign_bucket(self._item(rrp_usd_cents=50000), "price_tier") == "ultimate"
+
+    def test_piece_group_micro(self):
+        assert _assign_bucket(self._item(parts_count=50), "piece_group") == "micro"
+
+    def test_piece_group_tiny(self):
+        assert _assign_bucket(self._item(parts_count=150), "piece_group") == "tiny"
 
     def test_piece_group_small(self):
-        assert _assign_bucket(self._item(parts_count=200), "piece_group") == "small"
+        assert _assign_bucket(self._item(parts_count=300), "piece_group") == "small"
+
+    def test_piece_group_medium(self):
+        assert _assign_bucket(self._item(parts_count=500), "piece_group") == "medium"
 
     def test_piece_group_large(self):
-        assert _assign_bucket(self._item(parts_count=1500), "piece_group") == "large"
+        assert _assign_bucket(self._item(parts_count=900), "piece_group") == "large"
+
+    def test_piece_group_xlarge(self):
+        assert _assign_bucket(self._item(parts_count=1500), "piece_group") == "xlarge"
 
     def test_piece_group_massive(self):
-        assert _assign_bucket(self._item(parts_count=5000), "piece_group") == "massive"
+        assert _assign_bucket(self._item(parts_count=2500), "piece_group") == "massive"
+
+    def test_piece_group_epic(self):
+        assert _assign_bucket(self._item(parts_count=5000), "piece_group") == "epic"
 
     def test_missing_theme(self):
         assert _assign_bucket(self._item(theme=None), "theme") is None
@@ -175,13 +208,13 @@ class TestEnrichWithCohortRanks:
         items = self._make_items(5)
         result = enrich_with_cohort_ranks(items)
         # Highest scorer should have high percentile
-        assert result[4]["cohorts"]["year"]["composite_pct"] >= 80.0
+        assert result[4]["cohorts"]["year"]["composite_score_pct"] >= 80.0
 
     def test_percentile_lowest_is_near_0(self):
         items = self._make_items(5)
         result = enrich_with_cohort_ranks(items)
         # Lowest scorer should have low percentile
-        assert result[0]["cohorts"]["year"]["composite_pct"] <= 20.0
+        assert result[0]["cohorts"]["year"]["composite_score_pct"] <= 20.0
 
     def test_multiple_strategies_present(self):
         items = self._make_items(5)
@@ -218,7 +251,7 @@ class TestEnrichWithCohortRanks:
         items = self._make_items(5)
         result = enrich_with_cohort_ranks(items)
         cohort = result[2]["cohorts"]["year"]
-        assert "popularity_pct" in cohort
-        assert "theme_pct" in cohort
-        assert cohort["popularity_pct"] is not None
-        assert cohort["theme_pct"] is not None
+        assert "demand_pressure_pct" in cohort
+        assert "theme_growth_pct" in cohort
+        assert cohort["demand_pressure_pct"] is not None
+        assert cohort["theme_growth_pct"] is not None

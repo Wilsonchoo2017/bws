@@ -9,6 +9,7 @@ from snapshots (since BrickLink only keeps 6 months of data).
 """
 
 import logging
+from typing import Any
 
 import pandas as pd
 

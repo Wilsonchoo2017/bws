@@ -217,6 +217,37 @@ async def list_needs_enrichment(
     return NeedsEnrichmentResponse(success=True, data=items, count=len(items))
 
 
+@router.post("/sync-retirement")
+async def sync_retirement(conn: Any = Depends(get_db)) -> dict:
+    """Scrape the BrickEconomy retiring-soon list and update lego_items.
+
+    Sets retiring_soon=TRUE for sets on the list (that aren't already retired),
+    and clears retiring_soon for sets no longer on the list.
+    """
+    from services.enrichment.scheduler import _sync_retiring_soon
+
+    try:
+        await _sync_retiring_soon()
+    except Exception as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Failed to sync retirement status: {exc}",
+        ) from exc
+
+    # Return current state for the frontend
+    rows = conn.execute(
+        "SELECT set_number FROM lego_items WHERE retiring_soon = TRUE"
+    ).fetchall()
+    set_numbers = [r[0] for r in rows]
+
+    return {
+        "success": True,
+        "synced": len(set_numbers),
+        "cleared": 0,
+        "set_numbers": set_numbers,
+    }
+
+
 @router.get("/scrape-tasks/{set_number}")
 async def get_scrape_tasks(set_number: str, conn: Any = Depends(get_db)) -> dict:
     """Get scrape task progress for a specific set."""

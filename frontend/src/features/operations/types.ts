@@ -36,6 +36,29 @@ export interface CoverageData {
   sources: SourceCoverage[];
 }
 
+export interface SetSourceStatus {
+  covered: boolean;
+  latest: string | null;
+}
+
+export interface SetCoverageRow {
+  set_number: string;
+  title: string;
+  sources: Record<string, SetSourceStatus>;
+  covered_count: number;
+  total_sources: number;
+}
+
+export interface SetCoverageData {
+  sets: SetCoverageRow[];
+  total_count: number;
+  page: number;
+  page_size: number;
+  source_labels: string[];
+  total_sources: number;
+  distribution: Record<number, number>;
+}
+
 export function formatDuration(
   start: string | null,
   end: string | null

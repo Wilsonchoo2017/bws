@@ -9,6 +9,7 @@ export interface Transaction {
   txn_date: string;
   notes: string | null;
   created_at: string;
+  bill_id: string | null;
   title: string | null;
   image_url: string | null;
   theme: string | null;

@@ -16,18 +16,24 @@ logger = logging.getLogger(__name__)
 @router.get("/health")
 async def ml_health():
     """Check if ML models are loaded and prediction cache is warm."""
-    from services.scoring.growth_provider import _cache, _prediction_cache
+    from services.scoring.growth_provider import _cache, _prediction_cache, _warmup_stage
 
     models_loaded = bool(_cache)
     n_predictions = len(_prediction_cache.get("data", {}))
 
     if not models_loaded:
-        return {"status": "not_loaded", "models_loaded": False, "predictions": 0}
+        return {
+            "status": "not_loaded",
+            "models_loaded": False,
+            "predictions": 0,
+            "stage": _warmup_stage,
+        }
 
     return {
         "status": "ready" if n_predictions > 0 else "no_predictions",
         "models_loaded": True,
         "predictions": n_predictions,
+        "stage": _warmup_stage,
     }
 
 

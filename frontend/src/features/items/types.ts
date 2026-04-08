@@ -59,6 +59,12 @@ export interface UnifiedItem {
   ml_raw_growth_pct: number | null;
   ml_kelly_fraction: number | null;
   ml_win_probability: number | null;
+  cohort_half_year: number | null;
+  cohort_year: number | null;
+  cohort_theme: number | null;
+  cohort_year_theme: number | null;
+  cohort_price_tier: number | null;
+  cohort_piece_group: number | null;
 }
 
 export interface PriceRecord {
@@ -169,10 +175,9 @@ export interface BricklinkPriceData {
 export interface CohortRank {
   key: string;
   size: number;
-  composite_pct: number | null;
-  popularity_pct: number | null;
-  theme_pct: number | null;
   rank: number | null;
+  // Dynamic percentile fields: {signal_name}_pct
+  [key: string]: string | number | null;
 }
 
 export interface ItemSignals {

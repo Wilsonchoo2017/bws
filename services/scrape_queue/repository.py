@@ -701,3 +701,130 @@ def get_priority_rescrape_candidates(
 
     rows = conn.execute(sql, [task_type_value, task_type_value, *active_list]).fetchall()
     return [row[0] for row in rows]
+
+
+# ---------------------------------------------------------------------------
+# Tiered rescrape intervals
+# ---------------------------------------------------------------------------
+
+# Days between rescrapes per tier (lower tier = higher priority).
+TIER_PORTFOLIO_WATCHLIST_DAYS = 30
+TIER_RETIRING_SOON_DAYS = 60
+TIER_GENERAL_DAYS = 150
+RETIREMENT_WINDOW_MONTHS = 48
+
+
+def get_rescrape_candidates(
+    conn: Any,
+    task_type: TaskType,
+) -> list[str]:
+    """Find set_numbers needing a rescrape using tiered intervals.
+
+    Tiers (highest priority wins):
+      1. Portfolio holdings / watchlist  -> every 30 days
+      2. Retiring soon                  -> every 60 days
+      3. General (not retired or retired <= 48 months) -> every 150 days
+      4. Expired (retired > 48 months, not portfolio/watchlist) -> never
+
+    Portfolio/watchlist override the 48-month retirement cutoff.
+
+    Returns a deduplicated list of set_numbers, excluding any with an
+    active (pending/running/blocked) task of the given type.
+    """
+    task_type_value = task_type.value
+    active_list = [s.value for s in ACTIVE_STATUSES]
+    active_placeholders = ", ".join("?" for _ in active_list)
+
+    sql = f"""
+        WITH portfolio_sets AS (
+            SELECT pt.set_number
+            FROM portfolio_transactions pt
+            GROUP BY pt.set_number
+            HAVING SUM(CASE WHEN pt.txn_type = 'BUY' THEN pt.quantity
+                            ELSE -pt.quantity END) > 0
+        ),
+        tiered_sets AS (
+            -- Tier 1: Portfolio or watchlist -> 30 days
+            SELECT li.set_number, {TIER_PORTFOLIO_WATCHLIST_DAYS} AS stale_days
+            FROM lego_items li
+            WHERE li.set_number IN (SELECT set_number FROM portfolio_sets)
+               OR li.watchlist = TRUE
+
+            UNION ALL
+
+            -- Tier 2: Retiring soon -> 60 days
+            SELECT li.set_number, {TIER_RETIRING_SOON_DAYS} AS stale_days
+            FROM lego_items li
+            WHERE li.retiring_soon = TRUE
+              AND li.set_number NOT IN (SELECT set_number FROM portfolio_sets)
+              AND COALESCE(li.watchlist, FALSE) = FALSE
+
+            UNION ALL
+
+            -- Tier 3a: Not retired -> 150 days
+            SELECT li.set_number, {TIER_GENERAL_DAYS} AS stale_days
+            FROM lego_items li
+            WHERE li.retired_date IS NULL
+              AND li.year_retired IS NULL
+              AND COALESCE(li.retiring_soon, FALSE) = FALSE
+              AND li.set_number NOT IN (SELECT set_number FROM portfolio_sets)
+              AND COALESCE(li.watchlist, FALSE) = FALSE
+
+            UNION ALL
+
+            -- Tier 3b: Retired with retired_date, within 48 months -> 150 days
+            SELECT li.set_number, {TIER_GENERAL_DAYS} AS stale_days
+            FROM lego_items li
+            WHERE li.retired_date IS NOT NULL
+              AND li.retired_date ~ '^\\d{{4}}-\\d{{2}}'
+              AND CAST(li.retired_date || '-01' AS DATE)
+                  >= CURRENT_DATE - INTERVAL '{RETIREMENT_WINDOW_MONTHS} months'
+              AND COALESCE(li.retiring_soon, FALSE) = FALSE
+              AND li.set_number NOT IN (SELECT set_number FROM portfolio_sets)
+              AND COALESCE(li.watchlist, FALSE) = FALSE
+
+            UNION ALL
+
+            -- Tier 3c: Retired with year_retired only, use Dec of that year,
+            --          within 48 months -> 150 days
+            SELECT li.set_number, {TIER_GENERAL_DAYS} AS stale_days
+            FROM lego_items li
+            WHERE li.retired_date IS NULL
+              AND li.year_retired IS NOT NULL
+              AND CAST(li.year_retired || '-12-01' AS DATE)
+                  >= CURRENT_DATE - INTERVAL '{RETIREMENT_WINDOW_MONTHS} months'
+              AND COALESCE(li.retiring_soon, FALSE) = FALSE
+              AND li.set_number NOT IN (SELECT set_number FROM portfolio_sets)
+              AND COALESCE(li.watchlist, FALSE) = FALSE
+
+            -- Tier 4 (expired): not selected at all -> never scraped
+        ),
+        best_tier AS (
+            SELECT set_number, MIN(stale_days) AS stale_days
+            FROM tiered_sets
+            GROUP BY set_number
+        ),
+        last_scrape AS (
+            SELECT set_number, MAX(completed_at) AS last_completed
+            FROM scrape_tasks
+            WHERE task_type = ?
+              AND status = 'completed'
+            GROUP BY set_number
+        )
+        SELECT bt.set_number
+        FROM best_tier bt
+        LEFT JOIN last_scrape ls ON ls.set_number = bt.set_number
+        WHERE (ls.last_completed IS NULL
+               OR ls.last_completed < CURRENT_TIMESTAMP
+                    - CAST(bt.stale_days || ' days' AS INTERVAL))
+          AND NOT EXISTS (
+              SELECT 1 FROM scrape_tasks st
+              WHERE st.set_number = bt.set_number
+                AND st.task_type = ?
+                AND st.status IN ({active_placeholders})
+          )
+        ORDER BY bt.set_number
+    """  # noqa: S608
+
+    rows = conn.execute(sql, [task_type_value, task_type_value, *active_list]).fetchall()
+    return [row[0] for row in rows]

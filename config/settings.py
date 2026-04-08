@@ -170,6 +170,19 @@ SATURATION_CONFIG = SaturationSettings()
 
 
 @dataclass(frozen=True)
+class CompetitionSettings:
+    """Shopee competition tracker configuration for portfolio items."""
+
+    own_shop_id: str = os.environ.get("SHOPEE_OWN_SHOP_ID", "392235047")
+    stale_days: int = 7
+    batch_size: int = 20
+    # Reuse saturation timing settings for search delays / session rotation
+
+
+COMPETITION_CONFIG = CompetitionSettings()
+
+
+@dataclass(frozen=True)
 class CarousellSettings:
     """Carousell browser automation configuration."""
 
@@ -272,8 +285,6 @@ class HourlyRateLimiter:
 
     def trip_quota_exceeded(self) -> None:
         """Block requests with escalating cooldown (429 rate limit)."""
-        from services.notifications.scraper_alerts import alert_rate_limited
-
         cooldown = self._escalated_cooldown(self.BASE_COOLDOWN_SECONDS)
         self._blocked_until = time.monotonic() + cooldown
         self._escalation_level += 1
@@ -284,7 +295,6 @@ class HourlyRateLimiter:
             "Quota exceeded (level %d) — pausing %s requests for %.0f min",
             self._escalation_level, self._source_name, cooldown / 60,
         )
-        alert_rate_limited(self._source_name, cooldown / 60, self._escalation_level)
 
     def trip_forbidden(self) -> None:
         """Block requests with long cooldown (403 Forbidden = IP ban)."""
@@ -321,10 +331,8 @@ class HourlyRateLimiter:
 
     def record_success(self) -> None:
         """Reset escalation after a successful scrape."""
-        from services.notifications.scraper_alerts import alert_recovered
-
         if self._was_blocked:
-            alert_recovered(self._source_name)
+            self._logger.info("%s recovered after being blocked", self._source_name)
             self._was_blocked = False
         self._escalation_level = 0
         self._consecutive_failures = 0
@@ -374,8 +382,6 @@ class HourlyRateLimiter:
 
         Returns seconds to rest, or 0.0 if no rest needed.
         """
-        from services.notifications.scraper_alerts import alert_rest_period
-
         if self._scraping_since == 0.0:
             self._scraping_since = now
             return 0.0
@@ -386,11 +392,6 @@ class HourlyRateLimiter:
             self._logger.warning(
                 "Continuous scraping for %.0f min — resting for %.0f min",
                 elapsed / 60, self.REST_PERIOD_SECONDS / 60,
-            )
-            alert_rest_period(
-                self._source_name,
-                self.REST_PERIOD_SECONDS / 60,
-                elapsed / 3600,
             )
             return self.REST_PERIOD_SECONDS
         return 0.0
@@ -484,7 +485,7 @@ class BrickeconomySettings:
     """BrickEconomy browser automation configuration."""
 
     base_url: str = "https://www.brickeconomy.com"
-    headless: bool = True
+    headless: bool = False
     timeout_ms: int = 30_000
     locale: str = "en-US"
     captcha_timeout_s: int = 120

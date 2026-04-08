@@ -226,6 +226,7 @@ CREATE TABLE IF NOT EXISTS portfolio_transactions (
     condition VARCHAR NOT NULL DEFAULT 'new',
     txn_date TIMESTAMP NOT NULL,
     notes VARCHAR,
+    bill_id VARCHAR,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 """
@@ -467,6 +468,44 @@ CREATE TABLE IF NOT EXISTS ml_model_runs (
 );
 """
 
+SHOPEE_COMPETITION_SNAPSHOTS_DDL = """
+CREATE TABLE IF NOT EXISTS shopee_competition_snapshots (
+    id INTEGER PRIMARY KEY,
+    set_number VARCHAR NOT NULL,
+    listings_count INTEGER NOT NULL,
+    unique_sellers INTEGER NOT NULL,
+    total_sold_count INTEGER,
+    min_price_cents INTEGER,
+    max_price_cents INTEGER,
+    avg_price_cents INTEGER,
+    median_price_cents INTEGER,
+    saturation_score FLOAT NOT NULL,
+    saturation_level VARCHAR NOT NULL,
+    scraped_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+"""
+
+SHOPEE_COMPETITION_LISTINGS_DDL = """
+CREATE TABLE IF NOT EXISTS shopee_competition_listings (
+    id INTEGER PRIMARY KEY,
+    snapshot_id INTEGER NOT NULL,
+    set_number VARCHAR NOT NULL,
+    product_url VARCHAR NOT NULL,
+    shop_id VARCHAR NOT NULL,
+    title VARCHAR NOT NULL,
+    price_cents INTEGER,
+    price_display VARCHAR,
+    sold_count_raw VARCHAR,
+    sold_count_numeric INTEGER,
+    rating VARCHAR,
+    image_url VARCHAR,
+    is_sold_out BOOLEAN DEFAULT FALSE,
+    is_delisted BOOLEAN DEFAULT FALSE,
+    discovery_method VARCHAR NOT NULL DEFAULT 'search',
+    scraped_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+"""
+
 ML_PREDICTION_SNAPSHOTS_DDL = """
 CREATE TABLE IF NOT EXISTS ml_prediction_snapshots (
     id INTEGER PRIMARY KEY DEFAULT nextval('ml_prediction_snapshots_id_seq'),
@@ -511,6 +550,8 @@ CREATE SEQUENCE IF NOT EXISTS scrape_task_attempts_id_seq;
 CREATE SEQUENCE IF NOT EXISTS ml_feature_store_id_seq;
 CREATE SEQUENCE IF NOT EXISTS ml_model_runs_id_seq;
 CREATE SEQUENCE IF NOT EXISTS ml_prediction_snapshots_id_seq;
+CREATE SEQUENCE IF NOT EXISTS shopee_competition_snapshots_id_seq;
+CREATE SEQUENCE IF NOT EXISTS shopee_competition_listings_id_seq;
 """
 
 # Index creation statements
@@ -595,6 +636,14 @@ CREATE INDEX IF NOT EXISTS idx_ml_feature_store_set
     ON ml_feature_store(set_number, horizon_months);
 CREATE INDEX IF NOT EXISTS idx_ml_model_runs_trained
     ON ml_model_runs(trained_at);
+CREATE INDEX IF NOT EXISTS idx_competition_snapshots_set
+    ON shopee_competition_snapshots(set_number, scraped_at);
+CREATE INDEX IF NOT EXISTS idx_competition_listings_snapshot
+    ON shopee_competition_listings(snapshot_id);
+CREATE INDEX IF NOT EXISTS idx_competition_listings_set_url
+    ON shopee_competition_listings(set_number, product_url, scraped_at);
+CREATE INDEX IF NOT EXISTS idx_competition_listings_set_shop
+    ON shopee_competition_listings(set_number, shop_id);
 """
 
 ALL_DDL = [
@@ -627,6 +676,8 @@ ALL_DDL = [
     ML_FEATURE_STORE_DDL,
     ML_MODEL_RUNS_DDL,
     ML_PREDICTION_SNAPSHOTS_DDL,
+    SHOPEE_COMPETITION_SNAPSHOTS_DDL,
+    SHOPEE_COMPETITION_LISTINGS_DDL,
     INDEXES_DDL,
 ]
 
@@ -798,6 +849,8 @@ _SEQUENCE_TABLE_MAP = [
     ("scrape_task_attempts_id_seq", "scrape_task_attempts"),
     ("ml_feature_store_id_seq", "ml_feature_store"),
     ("ml_model_runs_id_seq", "ml_model_runs"),
+    ("shopee_competition_snapshots_id_seq", "shopee_competition_snapshots"),
+    ("shopee_competition_listings_id_seq", "shopee_competition_listings"),
 ]
 
 
@@ -894,6 +947,8 @@ def get_table_stats(conn: Any) -> dict[str, int]:
         "google_trends_snapshots",
         "google_trends_theme_snapshots",
         "scrape_tasks",
+        "shopee_competition_snapshots",
+        "shopee_competition_listings",
     ]
     stats = {}
     for table in tables:

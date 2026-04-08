@@ -43,12 +43,13 @@ Thumbs.db
 # Logs
 logs/
 
+# Captcha snapshots (local debugging)
+captcha_snapshots/
+
 # ML model artifacts
 models/
 
 # Database
-*.duckdb
-*.duckdb.wal
 
 # Claude Code
 .claude/settings.local.json

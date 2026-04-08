@@ -1,60 +1,35 @@
 """Tests for PgConnection SQL translation and compatibility API."""
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
-from db.pg.pg_connection import PgConnection, PgCursorResult, _duck_to_pg_sql
+from db.pg.pg_connection import PgConnection, PgCursorResult, _normalize_sql
 
 
 # ---------------------------------------------------------------------------
-# _duck_to_pg_sql translation
+# _normalize_sql translation
 # ---------------------------------------------------------------------------
 
 
-class TestDuckToPgSql:
-    """Given legacy-flavoured SQL, when translated, then Postgres-compatible."""
+class TestNormalizeSql:
+    """Given parameterised SQL, when translated, then psycopg2-compatible."""
 
     def test_no_placeholders_unchanged(self) -> None:
         sql = "SELECT * FROM lego_items WHERE set_number = '75192'"
-        assert _duck_to_pg_sql(sql) == sql
+        assert _normalize_sql(sql) == sql
 
     def test_question_mark_to_percent_s(self) -> None:
         sql = "SELECT * FROM lego_items WHERE set_number = ? AND theme = ?"
-        assert _duck_to_pg_sql(sql) == (
+        assert _normalize_sql(sql) == (
             "SELECT * FROM lego_items WHERE set_number = %s AND theme = %s"
         )
 
     def test_literal_percent_escaped(self) -> None:
         sql = "SELECT * FROM lego_items WHERE title LIKE '%Star%' AND id = ?"
-        result = _duck_to_pg_sql(sql)
+        result = _normalize_sql(sql)
         assert "%%Star%%" in result
         assert result.endswith("%s")
-
-    def test_try_cast_replaced_with_cast(self) -> None:
-        sql = "SELECT TRY_CAST(LEFT(retired_date, 4) AS INTEGER) FROM t"
-        result = _duck_to_pg_sql(sql)
-        assert "TRY_CAST" not in result
-        assert "CAST(LEFT(retired_date, 4) AS INTEGER)" in result
-
-    def test_try_cast_case_insensitive(self) -> None:
-        sql = "SELECT try_cast(x AS INT) FROM t"
-        result = _duck_to_pg_sql(sql)
-        assert "try_cast" not in result
-        assert "CAST(x AS INT)" in result
-
-    def test_try_cast_with_placeholders(self) -> None:
-        sql = "SELECT TRY_CAST(col AS INT) FROM t WHERE id = ?"
-        result = _duck_to_pg_sql(sql)
-        assert "TRY_CAST" not in result
-        assert "CAST(col AS INT)" in result
-        assert result.endswith("%s")
-
-    def test_multiple_try_casts(self) -> None:
-        sql = "SELECT TRY_CAST(a AS INT), TRY_CAST(b AS TEXT) FROM t"
-        result = _duck_to_pg_sql(sql)
-        assert result.count("CAST(") == 2
-        assert "TRY_CAST" not in result
 
 
 # ---------------------------------------------------------------------------
@@ -127,11 +102,6 @@ class TestPgConnection:
         cursor.execute.assert_called_once_with(
             "SELECT * FROM t WHERE id = %s", (42,)
         )
-
-    def test_execute_translates_try_cast(self) -> None:
-        conn, cursor = self._make_conn()
-        conn.execute("SELECT TRY_CAST(x AS INT) FROM t")
-        cursor.execute.assert_called_once_with("SELECT CAST(x AS INT) FROM t")
 
     def test_execute_returns_pg_cursor_result(self) -> None:
         conn, _ = self._make_conn()

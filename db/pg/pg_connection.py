@@ -6,7 +6,6 @@ conn.execute(sql, params).fetchall() / .df()) work against Postgres.
 Key translations:
 - ``?`` placeholders -> ``%s`` (psycopg2 format)
 - ``.df()`` on result -> pandas DataFrame via column descriptions
-- ``nextval('seq')`` -> works natively in Postgres
 """
 
 import logging
@@ -16,22 +15,11 @@ from typing import Any
 logger = logging.getLogger("bws.pg.connection")
 
 # Matches ``?`` that is NOT inside a single-quoted string literal.
-# Good enough for the parameterised queries used in this codebase.
 _PARAM_RE = re.compile(r"\?")
 
 
-_TRY_CAST_RE = re.compile(r"TRY_CAST\(", re.IGNORECASE)
-
-
-def _duck_to_pg_sql(sql: str) -> str:
-    """Translate SQL placeholders from ? to %s format.
-
-    Translations:
-    - ``?`` placeholders -> ``%s``
-    - ``TRY_CAST(`` -> ``CAST(`` (Postgres has no TRY_CAST; callers
-      should ensure data is clean or wrap in a CASE expression)
-    """
-    sql = _TRY_CAST_RE.sub("CAST(", sql)
+def _normalize_sql(sql: str) -> str:
+    """Translate SQL placeholders from ? to %s format for psycopg2."""
     if "?" not in sql:
         return sql
     # Escape literal % first (e.g. LIKE '%foo%')
@@ -84,7 +72,7 @@ class PgConnection:
         self._cursor: Any = None
 
     def execute(self, query: str, params: Any = None) -> "PgCursorResult":
-        pg_sql = _duck_to_pg_sql(query)
+        pg_sql = _normalize_sql(query)
         cursor = self._conn.cursor()
         self._cursor = cursor
         try:

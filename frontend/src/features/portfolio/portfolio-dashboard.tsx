@@ -6,7 +6,7 @@ import { useCallback, useState } from 'react';
 import { EnrichPortfolioButton } from './enrich-portfolio-button';
 import { PortfolioSummaryCards } from './portfolio-summary-cards';
 import { HoldingsTable } from './holdings-table';
-import { AddTransactionForm } from './add-transaction-form';
+import { AddBillForm } from './add-bill-form';
 
 export function PortfolioDashboard() {
   const router = useRouter();
@@ -32,7 +32,7 @@ export function PortfolioDashboard() {
         </div>
         <div className='flex items-center gap-2'>
           <EnrichPortfolioButton />
-          <AddTransactionForm onSuccess={handleTxnAdded} />
+          <AddBillForm onSuccess={handleTxnAdded} />
         </div>
       </div>
       <HoldingsTable />

@@ -10,6 +10,7 @@ from api.workers.keepa import KeepaWorker
 
 from api.workers.mightyutan import MightyutanWorker
 from api.workers.shopee import ShopeeWorker
+from api.workers.shopee_competition import ShopeeCompetitionWorker
 from api.workers.shopee_saturation import ShopeeSaturationWorker
 from api.workers.toysrus import ToysrusWorker
 
@@ -20,6 +21,7 @@ WORKER_REGISTRY = {
         ToysrusWorker(),
         MightyutanWorker(),
         ShopeeSaturationWorker(),
+        ShopeeCompetitionWorker(),
         BricklinkCatalogWorker(),
         EnrichmentWorker(),
         CarousellWorker(),

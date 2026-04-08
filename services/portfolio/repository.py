@@ -6,6 +6,11 @@ from datetime import datetime
 
 from typing import Any
 
+_SENTINEL = object()
+
+# Conversion rate for non-MYR prices
+MYR_PER_USD: float = 4.50
+
 
 def create_transaction(
     conn: Any,
@@ -18,6 +23,7 @@ def create_transaction(
     *,
     currency: str = "MYR",
     notes: str | None = None,
+    bill_id: str | None = None,
 ) -> int:
     """Insert a BUY or SELL transaction. Returns the new transaction ID.
 
@@ -42,13 +48,13 @@ def create_transaction(
         """
         INSERT INTO portfolio_transactions (
             id, set_number, txn_type, quantity, price_cents,
-            currency, condition, txn_date, notes
+            currency, condition, txn_date, notes, bill_id
         ) VALUES (
             nextval('portfolio_transactions_id_seq'),
-            ?, ?, ?, ?, ?, ?, ?, ?
+            ?, ?, ?, ?, ?, ?, ?, ?, ?
         ) RETURNING id
         """,
-        [set_number, txn_type, quantity, price_cents, currency, condition, txn_date, notes],
+        [set_number, txn_type, quantity, price_cents, currency, condition, txn_date, notes, bill_id],
     ).fetchone()
 
     return row[0]
@@ -73,7 +79,7 @@ def list_transactions(
         f"""
         SELECT pt.id, pt.set_number, pt.txn_type, pt.quantity,
                pt.price_cents, pt.currency, pt.condition, pt.txn_date,
-               pt.notes, pt.created_at,
+               pt.notes, pt.created_at, pt.bill_id,
                li.title,
                CASE
                    WHEN ia.status = 'downloaded' THEN '/api/images/set/' || pt.set_number
@@ -92,7 +98,7 @@ def list_transactions(
 
     columns = [
         "id", "set_number", "txn_type", "quantity", "price_cents",
-        "currency", "condition", "txn_date", "notes", "created_at",
+        "currency", "condition", "txn_date", "notes", "created_at", "bill_id",
         "title", "image_url", "theme",
     ]
     return [dict(zip(columns, row)) for row in rows]
@@ -104,7 +110,7 @@ def get_transaction(conn: Any, txn_id: int) -> dict | None:
         """
         SELECT pt.id, pt.set_number, pt.txn_type, pt.quantity,
                pt.price_cents, pt.currency, pt.condition, pt.txn_date,
-               pt.notes, pt.created_at,
+               pt.notes, pt.created_at, pt.bill_id,
                li.title,
                CASE
                    WHEN ia.status = 'downloaded' THEN '/api/images/set/' || pt.set_number
@@ -123,10 +129,77 @@ def get_transaction(conn: Any, txn_id: int) -> dict | None:
 
     columns = [
         "id", "set_number", "txn_type", "quantity", "price_cents",
-        "currency", "condition", "txn_date", "notes", "created_at",
+        "currency", "condition", "txn_date", "notes", "created_at", "bill_id",
         "title", "image_url", "theme",
     ]
     return dict(zip(columns, row))
+
+
+def update_transaction(
+    conn: Any,
+    txn_id: int,
+    *,
+    txn_type: str | None = None,
+    quantity: int | None = None,
+    price_cents: int | None = None,
+    condition: str | None = None,
+    txn_date: datetime | None = None,
+    notes: str | None = _SENTINEL,
+) -> bool:
+    """Update a transaction. Returns True if a row was updated.
+
+    Only provided fields are changed; None means keep current value.
+    For notes, pass explicitly (even None) to clear; omit to keep.
+    """
+    existing = get_transaction(conn, txn_id)
+    if not existing:
+        return False
+
+    new_type = txn_type or existing["txn_type"]
+    new_qty = quantity or existing["quantity"]
+    new_cond = condition or existing["condition"]
+
+    if new_type == "SELL":
+        held = _held_quantity(conn, existing["set_number"], new_cond)
+        # Add back the existing quantity before checking
+        if existing["txn_type"] == "SELL" and existing["condition"] == new_cond:
+            held += existing["quantity"]
+        if new_qty > held:
+            raise ValueError(
+                f"Cannot sell {new_qty} units of {existing['set_number']} ({new_cond}) "
+                f"-- only {held} held"
+            )
+
+    fields: list[str] = []
+    params: list[Any] = []
+    if txn_type is not None:
+        fields.append("txn_type = ?")
+        params.append(txn_type)
+    if quantity is not None:
+        fields.append("quantity = ?")
+        params.append(quantity)
+    if price_cents is not None:
+        fields.append("price_cents = ?")
+        params.append(price_cents)
+    if condition is not None:
+        fields.append("condition = ?")
+        params.append(condition)
+    if txn_date is not None:
+        fields.append("txn_date = ?")
+        params.append(txn_date)
+    if notes is not _SENTINEL:
+        fields.append("notes = ?")
+        params.append(notes)
+
+    if not fields:
+        return True
+
+    params.append(txn_id)
+    conn.execute(
+        f"UPDATE portfolio_transactions SET {', '.join(fields)} WHERE id = ?",  # noqa: S608
+        params,
+    )
+    return True
 
 
 def delete_transaction(conn: Any, txn_id: int) -> bool:
@@ -136,6 +209,15 @@ def delete_transaction(conn: Any, txn_id: int) -> bool:
     ).fetchone()
 
     return row is not None
+
+
+def delete_transactions_by_bill(conn: Any, bill_id: str) -> int:
+    """Delete all transactions with the given bill_id. Returns count deleted."""
+    rows = conn.execute(
+        "DELETE FROM portfolio_transactions WHERE bill_id = ? RETURNING id",
+        [bill_id],
+    ).fetchall()
+    return len(rows)
 
 
 def get_holdings(conn: Any) -> list[dict]:
@@ -376,28 +458,47 @@ def _total_realized_pl(conn: Any) -> int:
 def _latest_prices(
     conn: Any, set_numbers: list[str]
 ) -> dict[str, int]:
-    """Get latest BrickLink new market price per set from price_records."""
+    """Get latest market price per set in MYR cents.
+
+    Prefers shopee (already MYR), falls back to bricklink_new (USD -> MYR).
+    """
     if not set_numbers:
         return {}
 
     placeholders = ", ".join(["?"] * len(set_numbers))
+
+    # Prefer shopee (MYR), fallback bricklink_new (USD)
     rows = conn.execute(
         f"""
         WITH ranked AS (
-            SELECT set_number, price_cents,
+            SELECT set_number, price_cents, currency, source,
                    ROW_NUMBER() OVER (
                        PARTITION BY set_number
-                       ORDER BY recorded_at DESC
+                       ORDER BY
+                           CASE source
+                               WHEN 'shopee' THEN 0
+                               WHEN 'bricklink_new' THEN 1
+                               ELSE 2
+                           END,
+                           recorded_at DESC
                    ) AS rn
             FROM price_records
             WHERE set_number IN ({placeholders})
-              AND source = 'bricklink_new'
+              AND source IN ('shopee', 'bricklink_new')
         )
-        SELECT set_number, price_cents FROM ranked WHERE rn = 1
+        SELECT set_number, price_cents, currency FROM ranked WHERE rn = 1
         """,  # noqa: S608
         set_numbers,
     ).fetchall()
-    return {row[0]: row[1] for row in rows}
+
+    result: dict[str, int] = {}
+    for set_number, price_cents, currency in rows:
+        if currency == "MYR":
+            result[set_number] = price_cents
+        else:
+            # Convert USD cents to MYR cents
+            result[set_number] = round(price_cents * MYR_PER_USD)
+    return result
 
 
 def _item_metadata(

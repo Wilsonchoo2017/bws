@@ -53,7 +53,12 @@ def select_features(
     X_filled = X_filled.fillna(X_filled.median())
 
     # Step 2: Mutual information scores
-    mi_scores = mutual_info_regression(X_filled, y, random_state=42, n_neighbors=5)
+    n_samples = len(X_filled)
+    if n_samples <= 1:
+        logger.warning("Only %d sample(s) — skipping feature selection, returning all candidates", n_samples)
+        return candidates
+    n_neighbors = min(5, n_samples - 1)
+    mi_scores = mutual_info_regression(X_filled, y, random_state=42, n_neighbors=n_neighbors)
     mi_df = pd.DataFrame({
         "feature": candidates,
         "mi_score": mi_scores,

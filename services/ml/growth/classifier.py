@@ -15,6 +15,7 @@ from dataclasses import dataclass
 from typing import Any
 
 import numpy as np
+import pandas as pd
 from sklearn.metrics import f1_score, recall_score, roc_auc_score
 from sklearn.model_selection import RepeatedStratifiedKFold
 from sklearn.preprocessing import StandardScaler
@@ -237,7 +238,7 @@ def train_classifier(
 
 
 def predict_avoid_proba(
-    X: np.ndarray,
+    X: np.ndarray | pd.DataFrame,
     classifier: TrainedClassifier,
 ) -> np.ndarray:
     """P(avoid) for each row. Shape (n,).
@@ -245,7 +246,11 @@ def predict_avoid_proba(
     Applies isotonic calibration if available (fixes overconfidence at low
     probabilities, e.g. raw P=0.15 calibrated to actual 0.06).
     """
-    X_s = classifier.scaler.transform(X)
+    X_scaled = classifier.scaler.transform(X)
+    if isinstance(X, pd.DataFrame):
+        X_s = pd.DataFrame(X_scaled, columns=X.columns, index=X.index)
+    else:
+        X_s = X_scaled
     raw_probs = classifier.model.predict_proba(X_s)[:, 1]
     if classifier.prob_calibrator is not None:
         return np.clip(classifier.prob_calibrator.predict(raw_probs), 0.0, 1.0)

@@ -440,7 +440,7 @@ def load_growth_training_data(conn: Any) -> pd.DataFrame:
             COALESCE(
                 li.year_retired,
                 be.year_retired,
-                TRY_CAST(LEFT(COALESCE(li.retired_date, be.retired_date), 4) AS INTEGER)
+                CAST(LEFT(COALESCE(li.retired_date, be.retired_date), 4) AS INTEGER)
             ) AS year_retired,
             COALESCE(li.release_date, be.release_date) AS release_date
         FROM lego_items li

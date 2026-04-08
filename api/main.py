@@ -13,10 +13,12 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from api.routes import enrichment, images, items, ml, portfolio, scrape, settings, stats
 from api.worker import run_worker
-from services.enrichment.scheduler import run_enrichment_sweep, run_priority_rescrape_sweep
+from services.brickeconomy.analysis_scheduler import run_analysis_sweep
+from services.enrichment.scheduler import run_enrichment_sweep, run_priority_rescrape_sweep, run_retiring_soon_sweep
 from services.images.sweep import run_image_download_sweep
 from services.keepa.scheduler import run_keepa_sweep
 from services.scrape_queue.dispatcher import recover_scrape_queue, run_scrape_dispatcher, shutdown_scrape_dispatcher
+from services.shopee.competition_scheduler import run_competition_sweep
 from services.shopee.saturation_scheduler import run_saturation_sweep
 
 _LOG_DIR = Path(__file__).resolve().parent.parent / "logs"
@@ -173,11 +175,14 @@ async def lifespan(app: FastAPI):
     worker_task = asyncio.create_task(run_worker())
     sweep_task = asyncio.create_task(run_enrichment_sweep(job_manager))
     saturation_task = asyncio.create_task(run_saturation_sweep(job_manager))
+    competition_task = asyncio.create_task(run_competition_sweep(job_manager))
     image_task = asyncio.create_task(run_image_download_sweep())
     scrape_dispatcher_task = asyncio.create_task(run_scrape_dispatcher())
     prediction_task = asyncio.create_task(_run_daily_prediction_snapshot())
     keepa_task = asyncio.create_task(run_keepa_sweep(job_manager))
     rescrape_task = asyncio.create_task(run_priority_rescrape_sweep())
+    retiring_soon_task = asyncio.create_task(run_retiring_soon_sweep())
+    analysis_sweep_task = asyncio.create_task(run_analysis_sweep())
 
     # Eagerly warm growth models in a background thread so scraping isn't
     # blocked when the first score_all() call arrives.
@@ -200,7 +205,7 @@ async def lifespan(app: FastAPI):
     except Exception:
         logger.warning("Failed to save cooldown state", exc_info=True)
     # Everything inside _shutdown has a hard 10s ceiling
-    all_tasks = [worker_task, sweep_task, saturation_task, image_task, scrape_dispatcher_task, keepa_task, rescrape_task, prediction_task]
+    all_tasks = [worker_task, sweep_task, saturation_task, image_task, scrape_dispatcher_task, keepa_task, rescrape_task, prediction_task, retiring_soon_task, analysis_sweep_task]
     try:
         await asyncio.wait_for(_shutdown(all_tasks), timeout=10)
     except (asyncio.TimeoutError, asyncio.CancelledError):

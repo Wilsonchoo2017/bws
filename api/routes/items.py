@@ -18,6 +18,7 @@ from services.backtesting.position_sizing import (
     compute_position_sizing,
     kelly_to_dict,
 )
+from services.backtesting.be_screener import compute_be_signals_with_cohort
 from services.backtesting.screener import (
     compute_all_signals_with_cohort,
 )
@@ -144,6 +145,32 @@ async def get_item_saturation(set_number: str, conn: Any = Depends(get_db)):
     return {"success": True, "data": data}
 
 
+@router.get("/{set_number}/competition")
+async def get_item_competition(set_number: str, conn: Any = Depends(get_db)):
+    """Get Shopee competition data with history and current listings."""
+    from services.shopee.competition_repository import (
+        get_competition_history,
+        get_latest_competition_listings,
+        get_listing_sold_deltas,
+    )
+
+    history = get_competition_history(conn, set_number)
+    listings = get_latest_competition_listings(conn, set_number)
+    deltas = get_listing_sold_deltas(conn, set_number)
+
+    # Attach sold delta to each listing
+    for listing in listings:
+        listing["sold_delta"] = deltas.get(listing["product_url"])
+
+    return {
+        "success": True,
+        "data": {
+            "history": history,
+            "listings": listings,
+        },
+    }
+
+
 @router.get("/{set_number}/kelly")
 async def get_item_kelly(
     set_number: str,
@@ -185,6 +212,32 @@ async def get_item_signals(set_number: str, condition: str = "new", conn: Any = 
     return {"success": True, "data": match}
 
 
+_be_signals_cache: dict = {}
+
+
+@router.get("/{set_number}/signals/be")
+async def get_item_signals_be(set_number: str, conn: Any = Depends(get_db)):
+    """BrickEconomy-based signals and cohort ranks for a single item."""
+    import time
+
+    now = time.time()
+    cache_key = "be"
+
+    if cache_key not in _be_signals_cache or _be_signals_cache[cache_key]["expires"] <= now:
+        signals = compute_be_signals_with_cohort(conn)
+        result = sanitize_nan(signals)
+        _be_signals_cache[cache_key] = {"data": result, "expires": now + _SIGNALS_TTL}
+
+    cached = _be_signals_cache[cache_key]["data"]
+    match = next(
+        (s for s in cached if s.get("set_number") == set_number),
+        None,
+    )
+    if not match:
+        return {"success": True, "data": None}
+    return {"success": True, "data": match}
+
+
 @router.get("/{set_number}")
 async def get_item(set_number: str, conn: Any = Depends(get_db)):
     """Get a single item with full price history from all sources."""
@@ -204,6 +257,228 @@ async def get_item(set_number: str, conn: Any = Depends(get_db)):
         item["ml_prediction"] = sanitize_nan(stripped)
 
     return {"success": True, "data": item}
+
+
+def _item_volume_stats(txn_counts: list[int], qty_counts: list[int] | None = None) -> dict:
+    """Compute volume metrics for a single item from monthly counts."""
+    total_months = len(txn_counts)
+    if total_months == 0:
+        return {}
+    months_with_sales = sum(1 for c in txn_counts if c > 0)
+    total_txns = sum(txn_counts)
+    consistency = months_with_sales / total_months
+    avg_monthly_txns = total_txns / total_months
+
+    recent = txn_counts[-6:] if len(txn_counts) >= 6 else txn_counts
+    older = txn_counts[:-6] if len(txn_counts) > 6 else []
+    recent_avg = sum(recent) / len(recent) if recent else 0
+    older_avg = sum(older) / len(older) if older else 0
+    trend_ratio = (recent_avg / older_avg) if older_avg > 0 else None
+
+    total_qty = sum(qty_counts) if qty_counts else None
+    avg_monthly_qty = round(total_qty / total_months, 1) if total_qty is not None else None
+
+    return {
+        "total_months": total_months,
+        "months_with_sales": months_with_sales,
+        "consistency": round(consistency, 3),
+        "total_txns": total_txns,
+        "total_qty": total_qty,
+        "avg_monthly_txns": round(avg_monthly_txns, 1),
+        "avg_monthly_qty": avg_monthly_qty,
+        "recent_avg_txns": round(recent_avg, 1),
+        "trend_ratio": round(trend_ratio, 2) if trend_ratio is not None else None,
+    }
+
+
+def _percentile(all_values: list[float], target: float) -> float:
+    """Percentile rank of target within all_values (0-100)."""
+    n = len(all_values)
+    if n <= 1:
+        return 50.0
+    below = sum(1 for v in all_values if v < target)
+    equal = sum(1 for v in all_values if v == target)
+    return round((below + 0.5 * equal) / n * 100.0, 1)
+
+
+
+_liquidity_cache: dict = {}
+_LIQUIDITY_TTL = 30 * 24 * 3600
+
+
+@router.get("/{set_number}/liquidity")
+async def get_item_liquidity(
+    set_number: str,
+    source: str = "bricklink",
+    condition: str = "new",
+    refresh: bool = False,
+    conn: Any = Depends(get_db),
+):
+    """Liquidity percentile rankings based on sales volume."""
+    import json as json_mod
+    import time
+
+    cache_key = f"{source}:{condition}"
+    now = time.time()
+
+    # Build or use cached per-item stats for all items
+    if refresh or cache_key not in _liquidity_cache or _liquidity_cache[cache_key]["expires"] <= now:
+        all_stats: dict[str, dict] = {}
+
+        if source == "brickeconomy":
+            rows = conn.execute(
+                """
+                SELECT DISTINCT ON (set_number) set_number, sales_trend_json
+                FROM brickeconomy_snapshots
+                WHERE sales_trend_json IS NOT NULL
+                ORDER BY set_number, scraped_at DESC
+                """,
+            ).fetchall()
+            for r in rows:
+                sn = r[0]
+                raw = json_mod.loads(r[1]) if isinstance(r[1], str) else r[1]
+                if not raw:
+                    continue
+                txns = [int(entry[1]) for entry in raw]
+                if txns:
+                    monthly = [{"label": entry[0], "txns": int(entry[1])} for entry in raw]
+                    stats = _item_volume_stats(txns)
+                    if stats:
+                        stats["monthly"] = monthly
+                        all_stats[sn] = stats
+        else:
+            rows = conn.execute(
+                """
+                SELECT item_id, year, month, times_sold, total_quantity
+                FROM bricklink_monthly_sales
+                WHERE condition = ?
+                ORDER BY item_id, year, month
+                """,
+                [condition],
+            ).fetchall()
+
+            # Load latest listing snapshot per item for listing ratio
+            listing_map: dict[str, tuple[int, int]] = {}  # item_id -> (lots, qty)
+            try:
+                snap_rows = conn.execute(
+                    """
+                    SELECT DISTINCT ON (item_id) item_id, current_new
+                    FROM bricklink_price_history
+                    WHERE current_new IS NOT NULL
+                    ORDER BY item_id, scraped_at DESC
+                    """,
+                ).fetchall()
+                for sr in snap_rows:
+                    raw_box = sr[1]
+                    if isinstance(raw_box, str):
+                        raw_box = json_mod.loads(raw_box)
+                    if isinstance(raw_box, dict):
+                        lots = raw_box.get("total_lots")
+                        qty = raw_box.get("total_qty")
+                        if lots is not None or qty is not None:
+                            listing_map[sr[0]] = (int(lots or 0), int(qty or 0))
+            except Exception:
+                logger.debug("Could not load listing snapshots", exc_info=True)
+
+            from itertools import groupby
+            for item_id, group in groupby(rows, key=lambda r: r[0]):
+                records = list(group)
+                sn = item_id.removesuffix("-1")
+                txns = [r[3] or 0 for r in records]
+                qtys = [r[4] or 0 for r in records]
+                monthly = [{"label": f"{r[1]}-{r[2]:02d}", "txns": r[3] or 0} for r in records]
+                stats = _item_volume_stats(txns, qtys)
+                if stats:
+                    stats["monthly"] = monthly
+                    # Listing ratio: current listings / avg monthly sold (last 6mo)
+                    listing = listing_map.get(item_id)
+                    if listing and stats["recent_avg_txns"] > 0:
+                        stats["listing_lots"] = listing[0]
+                        stats["listing_qty"] = listing[1]
+                        stats["listing_ratio"] = round(listing[0] / stats["recent_avg_txns"], 2)
+                    all_stats[sn] = stats
+
+        # Precompute percentiles and ranks for all items
+        vol_vals = [v["avg_monthly_txns"] for v in all_stats.values()]
+        con_vals = [v["consistency"] for v in all_stats.values()]
+        trend_vals = [v["trend_ratio"] for v in all_stats.values() if v.get("trend_ratio") is not None]
+        qty_vals = [v["avg_monthly_qty"] for v in all_stats.values() if v.get("avg_monthly_qty") is not None]
+        # Listing ratio: lower = tighter supply = better, so invert for percentile
+        lr_vals = [v["listing_ratio"] for v in all_stats.values() if v.get("listing_ratio") is not None]
+
+        ranked: dict[str, dict] = {}
+        composites: list[tuple[str, float]] = []
+        for k, v in all_stats.items():
+            v_pct = _percentile(vol_vals, v["avg_monthly_txns"])
+            c_pct = _percentile(con_vals, v["consistency"])
+            t_pct = _percentile(trend_vals, v["trend_ratio"]) if v.get("trend_ratio") is not None and trend_vals else None
+            q_pct = _percentile(qty_vals, v["avg_monthly_qty"]) if v.get("avg_monthly_qty") is not None and qty_vals else None
+            # Invert listing ratio: lower ratio = higher percentile (better)
+            lr_pct = None
+            if v.get("listing_ratio") is not None and lr_vals:
+                lr_pct = round(100.0 - _percentile(lr_vals, v["listing_ratio"]), 1)
+
+            comp = round(v_pct * 0.5 + c_pct * 0.3 + t_pct * 0.2, 1) if t_pct is not None else round(v_pct * 0.6 + c_pct * 0.4, 1)
+            composites.append((k, comp))
+
+            ranked[k] = {
+                "volume_pct": v_pct,
+                "consistency_pct": c_pct,
+                "trend_pct": t_pct,
+                "qty_pct": q_pct,
+                "listing_ratio_pct": lr_pct,
+                "composite_pct": comp,
+            }
+
+        # Ordinal ranks by composite (1 = best)
+        sorted_comp = sorted(composites, key=lambda x: x[1], reverse=True)
+        total_size = len(sorted_comp)
+        for pos, (k, _) in enumerate(sorted_comp, 1):
+            ranked[k]["rank"] = pos
+            ranked[k]["size"] = total_size
+
+        _liquidity_cache[cache_key] = {
+            "stats": all_stats,
+            "ranked": ranked,
+            "expires": now + _LIQUIDITY_TTL,
+        }
+
+    cached = _liquidity_cache[cache_key]
+    all_stats = cached["stats"]
+    all_ranked = cached["ranked"]
+
+    if set_number not in all_stats:
+        return {"success": True, "data": None}
+
+    target = all_stats[set_number]
+    r = all_ranked[set_number]
+
+    metrics: dict = {
+        "volume": {"value": target["avg_monthly_txns"], "pct": r["volume_pct"], "label": "Avg txns/mo"},
+        "consistency": {"value": target["consistency"], "pct": r["consistency_pct"], "label": "Consistency"},
+    }
+    if r.get("qty_pct") is not None:
+        metrics["quantity"] = {"value": target["avg_monthly_qty"], "pct": r["qty_pct"], "label": "Avg qty/mo"}
+    if r.get("trend_pct") is not None:
+        metrics["trend"] = {"value": target["trend_ratio"], "pct": r["trend_pct"], "label": "Recent trend"}
+    if r.get("listing_ratio_pct") is not None:
+        metrics["listing_ratio"] = {
+            "value": target["listing_ratio"],
+            "pct": r["listing_ratio_pct"],
+            "label": "Listing ratio",
+            "detail": f"{target.get('listing_lots', 0)} lots vs {target['recent_avg_txns']}/mo sold",
+        }
+
+    data = {
+        "set_number": set_number,
+        "source": source,
+        **target,
+        "metrics": metrics,
+        "composite_pct": r["composite_pct"],
+        "rank": r["rank"],
+        "size": r["size"],
+    }
+    return {"success": True, "data": sanitize_nan(data)}
 
 
 @router.get("/{set_number}/minifigures")

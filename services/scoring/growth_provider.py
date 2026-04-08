@@ -19,6 +19,7 @@ _cache: dict = {}
 _cache_lock = threading.Lock()
 _prediction_cache: dict = {}  # cached score_all results
 _PREDICTION_TTL = 30 * 24 * 3600  # 30 days
+_warmup_stage: str = "idle"  # idle | loading_models | scoring | ready | failed
 
 
 class GrowthScoringProvider:
@@ -222,12 +223,21 @@ class GrowthScoringProvider:
 
     def warm_cache(self) -> None:
         """Eagerly load models and pre-compute predictions."""
-        self._get_models()
+        global _warmup_stage
+        _warmup_stage = "loading_models"
+        try:
+            self._get_models()
+        except Exception:
+            _warmup_stage = "failed"
+            raise
+        _warmup_stage = "scoring"
         # Pre-fill prediction cache so first request is instant
         try:
             self.score_all()
+            _warmup_stage = "ready"
             logger.info("Prediction cache warmed (%d sets)", len(_prediction_cache.get("data", {})))
         except Exception:
+            _warmup_stage = "failed"
             logger.warning("Prediction cache warmup failed", exc_info=True)
 
     def _get_models(self) -> tuple:

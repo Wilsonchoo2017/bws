@@ -27,10 +27,22 @@ SCRAPERS: list[ScraperInfo] = [
         targets=[
             ScrapeTargetInfo(
                 id="legoshopmy",
-                label="LEGO Shop MY - Full Collection",
-                url="https://shopee.com.my/legoshopmy?page=0&shopCollection=258084132",
-                description="Official LEGO Shop Malaysia collection on Shopee",
-            )
+                label="LEGO Shop MY",
+                url="https://shopee.com.my/legoshopmy",
+                description="Official LEGO Shop Malaysia on Shopee",
+            ),
+            ScrapeTargetInfo(
+                id="brickssmart",
+                label="Bricks Smart",
+                url="https://shopee.com.my/brickssmart",
+                description="Bricks Smart LEGO shop on Shopee",
+            ),
+            ScrapeTargetInfo(
+                id="brickandblock",
+                label="Brick and Block",
+                url="https://shopee.com.my/brick.and.block",
+                description="Brick and Block LEGO shop on Shopee",
+            ),
         ],
     ),
     ScraperInfo(
@@ -69,6 +81,19 @@ SCRAPERS: list[ScraperInfo] = [
                 label="All Items (Batch)",
                 url="batch",
                 description="Check all items with RRP that haven't been checked recently",
+            )
+        ],
+    ),
+    ScraperInfo(
+        id="shopee_competition",
+        name="Shopee Competition Tracker",
+        description="Track competing sellers on Shopee for portfolio items",
+        targets=[
+            ScrapeTargetInfo(
+                id="batch",
+                label="All Portfolio Items (Batch)",
+                url="batch",
+                description="Check all portfolio holdings that haven't been checked recently",
             )
         ],
     ),
@@ -184,6 +209,14 @@ async def start_scrape(request: ScrapeRequest):
         )
 
     if request.scraper_id == "shopee_saturation" and not (
+        request.url == "batch" or request.url.replace("-", "").isalnum()
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail='URL must be "batch" or a LEGO set number',
+        )
+
+    if request.scraper_id == "shopee_competition" and not (
         request.url == "batch" or request.url.replace("-", "").isalnum()
     ):
         raise HTTPException(

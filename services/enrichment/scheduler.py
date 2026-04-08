@@ -10,7 +10,6 @@ logger = logging.getLogger("bws.enrichment.scheduler")
 DEFAULT_INTERVAL_MINUTES = 30
 DEFAULT_BATCH_SIZE = 10
 RESCRAPE_INTERVAL_MINUTES = 60
-RESCRAPE_STALE_DAYS = 30
 
 
 async def run_enrichment_sweep(
@@ -73,6 +72,95 @@ async def run_enrichment_sweep(
             logger.exception("Enrichment sweep failed")
 
 
+RETIRING_SOON_INTERVAL_DAYS = 150  # ~5 months
+
+
+async def run_retiring_soon_sweep(
+    *,
+    interval_days: int = RETIRING_SOON_INTERVAL_DAYS,
+) -> None:
+    """Periodically scrape the BrickEconomy retiring-soon list page.
+
+    Runs on startup, then every ~5 months. Updates lego_items.retiring_soon
+    based on the scraped list.
+    """
+    logger.info("Retiring-soon sweep started (interval=%dd)", interval_days)
+
+    first_run = True
+    while True:
+        if first_run:
+            first_run = False
+            # Small delay to let other sweeps start first
+            await asyncio.sleep(60)
+        else:
+            await asyncio.sleep(interval_days * 86400)
+
+        try:
+            await _sync_retiring_soon()
+        except Exception:
+            logger.exception("Retiring-soon sweep failed")
+
+
+async def _sync_retiring_soon() -> None:
+    """Scrape the retiring-soon page and update the database."""
+    from services.brickeconomy.retiring_soon_scraper import (
+        scrape_retiring_soon,
+    )
+
+    result = await scrape_retiring_soon()
+    if not result.success:
+        logger.error("Retiring-soon scrape failed: %s", result.error)
+        return
+
+    if not result.set_numbers:
+        logger.info("Retiring-soon sweep: no sets found on page")
+        return
+
+    from db.connection import get_connection
+    from db.schema import init_schema
+
+    retiring_list = list(result.set_numbers)
+    placeholders = ", ".join(["?"] * len(retiring_list))
+
+    conn = get_connection()
+    try:
+        init_schema(conn)
+        conn.execute("BEGIN")
+        try:
+            # Mark sets on the retiring-soon page (skip already retired)
+            mark_result = conn.execute(
+                f"""UPDATE lego_items SET retiring_soon = TRUE
+                    WHERE set_number IN ({placeholders})
+                      AND year_retired IS NULL
+                      AND (retiring_soon IS NULL OR retiring_soon = FALSE)""",  # noqa: S608
+                retiring_list,
+            )
+            marked = mark_result.rowcount
+
+            # Clear sets no longer on the list
+            clear_result = conn.execute(
+                f"""UPDATE lego_items SET retiring_soon = FALSE
+                    WHERE retiring_soon = TRUE
+                      AND set_number NOT IN ({placeholders})""",  # noqa: S608
+                retiring_list,
+            )
+            cleared = clear_result.rowcount
+
+            conn.execute("COMMIT")
+        except Exception:
+            conn.execute("ROLLBACK")
+            raise
+
+        logger.info(
+            "Retiring-soon sweep: marked %d, cleared %d (total on page: %d)",
+            marked,
+            cleared,
+            len(retiring_list),
+        )
+    finally:
+        conn.close()
+
+
 _RESCRAPE_TASK_TYPES = (
     "BRICKLINK_METADATA",
     "BRICKECONOMY",
@@ -84,13 +172,14 @@ _RESCRAPE_TASK_TYPES = (
 async def run_priority_rescrape_sweep(
     *,
     interval_minutes: int = RESCRAPE_INTERVAL_MINUTES,
-    stale_days: int = RESCRAPE_STALE_DAYS,
 ) -> None:
-    """Periodically enqueue rescrapes for priority sets across all pricing sources.
+    """Periodically enqueue rescrapes using tiered intervals.
 
-    Targets sets that are retiring soon, recently retired (last 6 months),
-    or held in the portfolio -- but only when the last scrape for each
-    source is older than ``stale_days``.
+    Tiers (highest priority wins):
+      1. Portfolio / watchlist  -> every 30 days
+      2. Retiring soon          -> every 60 days
+      3. General (not retired or retired <= 48 months) -> every 150 days
+      4. Expired (retired > 48 months, not portfolio/watchlist) -> never
 
     Sources: BrickLink, BrickEconomy, Keepa, Minifigures.
     """
@@ -99,9 +188,8 @@ async def run_priority_rescrape_sweep(
     task_types = [TaskType[t] for t in _RESCRAPE_TASK_TYPES]
 
     logger.info(
-        "Priority rescrape sweep started (interval=%dm, stale_days=%d, sources=%s)",
+        "Tiered rescrape sweep started (interval=%dm, sources=%s)",
         interval_minutes,
-        stale_days,
         ", ".join(t.value for t in task_types),
     )
 
@@ -119,7 +207,7 @@ async def run_priority_rescrape_sweep(
             from db.schema import init_schema
             from services.scrape_queue.repository import (
                 create_task,
-                get_priority_rescrape_candidates,
+                get_rescrape_candidates,
             )
 
             conn = get_connection()
@@ -128,9 +216,7 @@ async def run_priority_rescrape_sweep(
                 total_queued = 0
 
                 for task_type in task_types:
-                    candidates = get_priority_rescrape_candidates(
-                        conn, task_type, stale_days=stale_days,
-                    )
+                    candidates = get_rescrape_candidates(conn, task_type)
                     if not candidates:
                         continue
 
@@ -141,7 +227,7 @@ async def run_priority_rescrape_sweep(
                             queued += 1
 
                     logger.info(
-                        "Priority rescrape [%s]: %d candidates, queued %d",
+                        "Tiered rescrape [%s]: %d candidates, queued %d",
                         task_type.value,
                         len(candidates),
                         queued,
@@ -149,10 +235,10 @@ async def run_priority_rescrape_sweep(
                     total_queued += queued
 
                 if total_queued == 0:
-                    logger.debug("Priority rescrape sweep: nothing to enqueue")
+                    logger.debug("Tiered rescrape sweep: nothing to enqueue")
 
             finally:
                 conn.close()
 
         except Exception:
-            logger.exception("Priority rescrape sweep failed")
+            logger.exception("Tiered rescrape sweep failed")

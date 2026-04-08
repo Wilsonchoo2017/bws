@@ -84,8 +84,6 @@ def _is_on_cooldown(set_number: str) -> bool:
 
 def record_keepa_failure(set_number: str) -> None:
     """Record a Keepa scrape failure for cooldown tracking."""
-    from services.notifications.scraper_alerts import alert_keepa_cooldown
-
     entry = _failure_tracker.get(set_number)
     now = datetime.now(tz=timezone.utc)
     if entry:
@@ -100,17 +98,14 @@ def record_keepa_failure(set_number: str) -> None:
             "Keepa: %s has failed %d times, cooling down for %dh",
             set_number, count, cooldown_hours,
         )
-        alert_keepa_cooldown(set_number, count, cooldown_hours)
 
 
 def record_keepa_success(set_number: str) -> None:
     """Clear failure tracking for a successfully scraped set."""
-    from services.notifications.scraper_alerts import alert_keepa_recovered
-
     had_failures = set_number in _failure_tracker
     _failure_tracker.pop(set_number, None)
     if had_failures:
-        alert_keepa_recovered(set_number)
+        logger.info("Keepa: %s recovered after previous failures", set_number)
 
 
 def queue_keepa_batch(manager: JobManager, set_numbers: list[str]) -> int:

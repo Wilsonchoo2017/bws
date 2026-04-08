@@ -1,9 +1,31 @@
 """Extract product data from Shopee search results page."""
 
-
+import re
 from dataclasses import dataclass
 
 from playwright.async_api import Page
+
+_SOLD_RE = re.compile(r"([\d.]+)\s*([kK])?\s*sold", re.IGNORECASE)
+
+
+def parse_sold_count(raw: str | None) -> int | None:
+    """Parse sold count text to integer.
+
+    Examples:
+        '1.2k sold' -> 1200
+        '563 sold'  -> 563
+        '8 sold'    -> 8
+        None        -> None
+    """
+    if not raw:
+        return None
+    match = _SOLD_RE.search(raw)
+    if not match:
+        return None
+    num = float(match.group(1))
+    if match.group(2):
+        num *= 1000
+    return int(num)
 
 
 @dataclass(frozen=True)

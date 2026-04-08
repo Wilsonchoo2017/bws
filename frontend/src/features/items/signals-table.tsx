@@ -73,18 +73,28 @@ const COHORT_LABELS: Record<string, { label: string; desc: string }> = {
   piece_group: { label: 'Piece Group', desc: 'vs similar piece count' },
 };
 
-const PCT_TOOLTIPS: Record<string, string> = {
-  Overall: 'Combined score percentile vs peers',
-  Pop: 'Sales volume percentile — how well it sells vs peers',
-  Theme: 'Theme appreciation percentile — how well this theme grows vs peers',
+const PCT_LABELS: Record<string, { short: string; tooltip: string }> = {
+  composite_score_pct: { short: 'Overall', tooltip: 'Combined score percentile vs peers' },
+  demand_pressure_pct: { short: 'Demand', tooltip: 'Sales volume percentile vs peers' },
+  theme_growth_pct: { short: 'Theme', tooltip: 'Theme appreciation percentile vs peers' },
+  supply_velocity_pct: { short: 'Supply', tooltip: 'Supply velocity percentile vs peers' },
+  price_trend_pct: { short: 'Trend', tooltip: 'Price trend percentile vs peers' },
+  price_vs_rrp_pct: { short: 'vs RRP', tooltip: 'Price vs RRP percentile vs peers' },
+  lifecycle_position_pct: { short: 'Lifecycle', tooltip: 'Lifecycle position percentile vs peers' },
+  stock_level_pct: { short: 'Stock', tooltip: 'Stock scarcity percentile vs peers' },
+  collector_premium_pct: { short: 'Collector', tooltip: 'Collector premium percentile vs peers' },
+  value_opportunity_pct: { short: 'Value', tooltip: 'Value opportunity percentile vs peers' },
+  price_wall_pct: { short: 'Wall', tooltip: 'Price wall support percentile vs peers' },
+  listing_ratio_pct: { short: 'Listing', tooltip: 'Listing ratio percentile vs peers' },
+  new_used_spread_pct: { short: 'N/U', tooltip: 'New-used spread percentile vs peers' },
 };
 
-function PctInline({ label, value }: { label: string; value: number | null }) {
+function PctInline({ label, value, tooltip }: { label: string; value: number | null; tooltip?: string }) {
   if (value === null) return null;
   return (
     <span
       className="inline-flex items-center gap-1 cursor-help"
-      title={PCT_TOOLTIPS[label] ?? label}
+      title={tooltip ?? label}
     >
       <span className="text-muted-foreground text-xs">{label}</span>
       <span className={`font-mono text-xs font-semibold ${scoreColor(value)}`}>
@@ -94,10 +104,23 @@ function PctInline({ label, value }: { label: string; value: number | null }) {
   );
 }
 
+function extractPctFields(cohort: CohortRank): { key: string; short: string; tooltip: string; value: number }[] {
+  const results: { key: string; short: string; tooltip: string; value: number }[] = [];
+  for (const [field, meta] of Object.entries(PCT_LABELS)) {
+    const val = cohort[field];
+    if (typeof val === 'number') {
+      results.push({ key: field, short: meta.short, tooltip: meta.tooltip, value: val });
+    }
+  }
+  return results;
+}
+
 export function CohortSection({
   cohorts,
+  sourceLabel,
 }: {
   cohorts: Record<string, CohortRank>;
+  sourceLabel?: string;
 }) {
   const entries = Object.entries(cohorts).filter(
     ([key]) => key in COHORT_LABELS
@@ -106,37 +129,41 @@ export function CohortSection({
 
   return (
     <div className="rounded-lg border">
-      <div className="bg-muted/50 border-b px-4 py-2">
-        <span className="text-xs font-medium">Cohort Rankings</span>
-        <span className="text-muted-foreground ml-2 text-xs">
-          Percentile vs peer group (higher = better)
-        </span>
+      <div className="bg-muted/50 border-b px-4 py-2 flex items-center justify-between">
+        <div>
+          {sourceLabel && (
+            <span className="text-xs font-medium mr-2">{sourceLabel}</span>
+          )}
+          <span className="text-muted-foreground text-xs">
+            percentile vs peer group (higher = better)
+          </span>
+        </div>
       </div>
       <div className="divide-y">
         {entries.map(([strategy, cohort]) => {
           const meta = COHORT_LABELS[strategy];
-          const overall = cohort.composite_pct;
-          const popularity = cohort.popularity_pct ?? (cohort as any).demand_pct ?? null;
-          const theme = cohort.theme_pct ?? (cohort as any).price_perf_pct ?? null;
+          const pctFields = extractPctFields(cohort);
+          const overall = typeof cohort.composite_score_pct === 'number' ? cohort.composite_score_pct : null;
           return (
-            <div key={strategy} className="flex items-center justify-between px-4 py-1.5">
-              <div className="flex items-center gap-2">
-                <span className="text-xs font-medium">{meta.label}</span>
-                <span className="text-muted-foreground text-xs">
-                  {meta.desc}
-                </span>
-              </div>
-              <div className="flex items-center gap-3">
-                <div className="flex items-center gap-2.5">
-                  <PctInline label="Overall" value={overall} />
-                  <PctInline label="Pop" value={popularity} />
-                  <PctInline label="Theme" value={theme} />
+            <div key={strategy} className="px-4 py-2">
+              <div className="flex items-center justify-between mb-1">
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-medium">{meta.label}</span>
+                  <span className="text-muted-foreground text-xs">{meta.desc}</span>
+                  <span className="text-muted-foreground text-xs">
+                    ({cohort.key})
+                  </span>
                 </div>
                 {cohort.rank != null && (
-                  <span className={`rounded px-1.5 py-0.5 text-xs font-semibold ${scoreColor(overall)} ${scoreBg(overall)}`}>
+                  <span className={`rounded px-1.5 py-0.5 text-xs font-semibold ${scoreColor(overall as number | null)} ${scoreBg(overall as number | null)}`}>
                     #{cohort.rank}/{cohort.size}
                   </span>
                 )}
+              </div>
+              <div className="flex flex-wrap items-center gap-2.5">
+                {pctFields.map(({ key, short, tooltip, value }) => (
+                  <PctInline key={key} label={short} value={value} tooltip={tooltip} />
+                ))}
               </div>
             </div>
           );

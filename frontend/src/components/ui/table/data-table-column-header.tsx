@@ -59,7 +59,7 @@ export function DataTableColumnHeader<TData, TValue>({
             <DropdownMenuCheckboxItem
               className='[&_svg]:text-muted-foreground relative pr-8 pl-2 [&>span:first-child]:right-2 [&>span:first-child]:left-auto'
               checked={column.getIsSorted() === 'asc'}
-              onClick={() => column.toggleSorting(false)}
+              onClick={() => column.toggleSorting(false, true)}
             >
               <ChevronUpIcon />
               Asc
@@ -67,7 +67,7 @@ export function DataTableColumnHeader<TData, TValue>({
             <DropdownMenuCheckboxItem
               className='[&_svg]:text-muted-foreground relative pr-8 pl-2 [&>span:first-child]:right-2 [&>span:first-child]:left-auto'
               checked={column.getIsSorted() === 'desc'}
-              onClick={() => column.toggleSorting(true)}
+              onClick={() => column.toggleSorting(true, true)}
             >
               <ChevronDownIcon />
               Desc

@@ -1,8 +1,15 @@
 'use client';
 
-import { ArrowDownIcon, ArrowUpIcon, ChevronDownIcon, ExternalLinkIcon } from 'lucide-react';
+import { ChevronDownIcon, ExternalLinkIcon, Eye, EyeOff } from 'lucide-react';
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
+import {
+  useReactTable,
+  getCoreRowModel,
+  getPaginationRowModel,
+  getSortedRowModel,
+  type SortingState,
+} from '@tanstack/react-table';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -10,16 +17,20 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import { DataTable } from '@/components/ui/table/data-table';
 import type { BuyRating, ItemDetail, PriceRecord } from '../types';
 import { formatPrice, getLatestPriceBySource } from '../types';
-import { KellyPanel } from '../kelly-panel';
+import { priceColumns } from './price-columns';
 import { InvestmentPanel } from './investment-panel';
 import { BrickeconomyPanel } from './brickeconomy-panel';
 import { BricklinkPriceChart } from './bricklink-price-chart';
 import { CohortPanel } from './cohort-panel';
+import { LiquidityPanel } from './liquidity-panel';
+import { MLPredictionPanel } from './ml-prediction-panel';
 import { KeepaPanel } from './keepa-panel';
 import { MinifiguresPanel } from './minifigures-panel';
 import { ListingPanel } from './listing-panel';
+import { CompetitionPanel } from './competition-panel';
 import { MinifigureValueChart } from './minifigure-value-chart';
 
 export interface ChartDateRange {
@@ -47,7 +58,7 @@ const ENRICH_SOURCES = [
   { id: 'bricklink', label: 'Bricklink' },
 ] as const;
 
-const SOURCE_LABELS: Record<string, string> = {
+export const SOURCE_LABELS: Record<string, string> = {
   shopee: 'Shopee MY',
   bricklink_new: 'Bricklink (New)',
   bricklink_used: 'Bricklink (Used)',
@@ -67,7 +78,7 @@ function getSourceUrl(source: string, record: PriceRecord, setNumber: string): s
   return null;
 }
 
-const SOURCE_COLORS: Record<string, string> = {
+export const SOURCE_COLORS: Record<string, string> = {
   shopee: 'bg-orange-100 text-orange-800 dark:bg-orange-900/30 dark:text-orange-300',
   bricklink_new:
     'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300',
@@ -83,58 +94,6 @@ const SOURCE_COLORS: Record<string, string> = {
     'bg-gray-100 text-gray-800 dark:bg-gray-900/30 dark:text-gray-300',
 };
 
-type PriceSortKey = 'source' | 'price' | 'seller' | 'date';
-type SortDir = 'asc' | 'desc';
-interface SortEntry { key: PriceSortKey; dir: SortDir }
-
-const PRICE_SORT_EXTRACTORS: Record<PriceSortKey, (r: PriceRecord) => string | number> = {
-  source: (r) => (SOURCE_LABELS[r.source] ?? r.source).toLowerCase(),
-  price: (r) => r.price_cents,
-  seller: (r) => (r.shop_name ?? '').toLowerCase(),
-  date: (r) => r.recorded_at,
-};
-
-function multiSort(records: readonly PriceRecord[], sorts: readonly SortEntry[]): PriceRecord[] {
-  if (sorts.length === 0) return [...records].reverse();
-  return [...records].sort((a, b) => {
-    for (const { key, dir } of sorts) {
-      const extract = PRICE_SORT_EXTRACTORS[key];
-      const va = extract(a);
-      const vb = extract(b);
-      const cmp = va < vb ? -1 : va > vb ? 1 : 0;
-      if (cmp !== 0) return dir === 'asc' ? cmp : -cmp;
-    }
-    return 0;
-  });
-}
-
-function toggleSort(sorts: readonly SortEntry[], key: PriceSortKey, multi: boolean): SortEntry[] {
-  const existing = sorts.find((s) => s.key === key);
-  if (existing) {
-    if (existing.dir === 'asc') {
-      return sorts.map((s) => (s.key === key ? { ...s, dir: 'desc' as const } : s));
-    }
-    // Already desc -> remove this sort
-    return sorts.filter((s) => s.key !== key);
-  }
-  const entry: SortEntry = { key, dir: 'asc' };
-  return multi ? [...sorts, entry] : [entry];
-}
-
-function SortIndicator({ sorts, sortKey }: { sorts: readonly SortEntry[]; sortKey: PriceSortKey }) {
-  const idx = sorts.findIndex((s) => s.key === sortKey);
-  if (idx === -1) return null;
-  const { dir } = sorts[idx];
-  return (
-    <span className='ml-1 inline-flex items-center gap-0.5'>
-      {dir === 'asc' ? <ArrowUpIcon className='size-3' /> : <ArrowDownIcon className='size-3' />}
-      {sorts.length > 1 && (
-        <span className='text-[10px] opacity-60'>{idx + 1}</span>
-      )}
-    </span>
-  );
-}
-
 interface ItemDetailViewProps {
   setNumber: string;
 }
@@ -149,7 +108,18 @@ export function ItemDetailView({ setNumber }: ItemDetailViewProps) {
   const [enrichMessage, setEnrichMessage] = useState<string | null>(null);
   const [mlPredicting, setMlPredicting] = useState(false);
 
-  const [priceSorts, setPriceSorts] = useState<SortEntry[]>([{ key: 'date', dir: 'desc' }]);
+  const [priceSorting, setPriceSorting] = useState<SortingState>([{ id: 'date', desc: true }]);
+
+  const priceTable = useReactTable({
+    data: item?.prices ?? [],
+    columns: priceColumns,
+    state: { sorting: priceSorting },
+    onSortingChange: setPriceSorting,
+    getCoreRowModel: getCoreRowModel(),
+    getPaginationRowModel: getPaginationRowModel(),
+    getSortedRowModel: getSortedRowModel(),
+    initialState: { pagination: { pageSize: 25 } },
+  });
 
   // Shared date range across all charts
   const [chartRanges, setChartRanges] = useState<Record<string, ChartDateRange>>({});
@@ -299,6 +269,72 @@ export function ItemDetailView({ setNumber }: ItemDetailViewProps) {
     }
   };
 
+  const handleShopeeSaturation = async () => {
+    setEnrichStatus('loading');
+    setEnrichMessage(null);
+
+    try {
+      const res = await fetch('/api/scrape/run', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          scraperId: 'shopee_saturation',
+          url: setNumber,
+        }),
+      });
+      const json = await res.json();
+
+      if (!json.success && !json.job_id) {
+        setEnrichStatus('error');
+        setEnrichMessage(json.error ?? json.detail ?? 'Shopee saturation check failed');
+        return;
+      }
+
+      setEnrichStatus('success');
+      setEnrichMessage(
+        `Shopee saturation queued (${json.job_id})`
+      );
+    } catch (err) {
+      setEnrichStatus('error');
+      setEnrichMessage(
+        err instanceof Error ? err.message : 'Failed to start Shopee saturation check'
+      );
+    }
+  };
+
+  const handleShopeeCompetition = async () => {
+    setEnrichStatus('loading');
+    setEnrichMessage(null);
+
+    try {
+      const res = await fetch('/api/scrape/run', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          scraperId: 'shopee_competition',
+          url: setNumber,
+        }),
+      });
+      const json = await res.json();
+
+      if (!json.success && !json.job_id) {
+        setEnrichStatus('error');
+        setEnrichMessage(json.error ?? json.detail ?? 'Shopee competition scan failed');
+        return;
+      }
+
+      setEnrichStatus('success');
+      setEnrichMessage(
+        `Shopee competition scan queued (${json.job_id})`
+      );
+    } catch (err) {
+      setEnrichStatus('error');
+      setEnrichMessage(
+        err instanceof Error ? err.message : 'Failed to start Shopee competition scan'
+      );
+    }
+  };
+
   const handleMlPredict = async () => {
     setMlPredicting(true);
     try {
@@ -381,8 +417,34 @@ export function ItemDetailView({ setNumber }: ItemDetailViewProps) {
             {item.dimensions && <span>{item.dimensions}</span>}
           </div>
 
-          {/* Buy rating */}
+          {/* Watchlist + Buy rating */}
           <div className='mt-3 flex items-center gap-2'>
+            <button
+              onClick={async () => {
+                const res = await fetch(`/api/items/${setNumber}/watchlist`, {
+                  method: 'PATCH',
+                });
+                const json = await res.json();
+                if (json.success) {
+                  setItem((prev) =>
+                    prev ? { ...prev, watchlist: json.data.watchlist } : prev
+                  );
+                }
+              }}
+              className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition-all ${
+                item.watchlist
+                  ? 'border-yellow-300 bg-yellow-100 text-yellow-800 dark:border-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-300'
+                  : 'border-border text-muted-foreground hover:border-foreground/30'
+              }`}
+            >
+              {item.watchlist ? (
+                <Eye className='size-3.5' />
+              ) : (
+                <EyeOff className='size-3.5' />
+              )}
+              {item.watchlist ? 'Watching' : 'Watch'}
+            </button>
+            <span className='border-border mx-1 h-4 border-l' />
             {BUY_RATING_OPTIONS.map((opt) => {
               const isActive = item.buy_rating === opt.value;
               return (
@@ -443,6 +505,12 @@ export function ItemDetailView({ setNumber }: ItemDetailViewProps) {
                 </DropdownMenuItem>
                 <DropdownMenuItem onClick={handleKeepaScrape}>
                   Keepa
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={handleShopeeSaturation}>
+                  Find Shopee Saturation
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={handleShopeeCompetition}>
+                  Scan Shopee Competition
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
@@ -535,9 +603,12 @@ export function ItemDetailView({ setNumber }: ItemDetailViewProps) {
       {/* Investment analysis: buy signal, returns, discount scenarios */}
       <InvestmentPanel setNumber={setNumber} />
 
-      {/* Cohort rankings & position sizing */}
+      {/* ML growth prediction */}
+      <MLPredictionPanel setNumber={setNumber} />
+
+      {/* Cohort rankings */}
       <CohortPanel setNumber={setNumber} />
-      <KellyPanel setNumber={setNumber} />
+      <LiquidityPanel setNumber={setNumber} />
 
       {/* Minifigures */}
       <MinifiguresPanel setNumber={setNumber} />
@@ -563,6 +634,13 @@ export function ItemDetailView({ setNumber }: ItemDetailViewProps) {
         onDateRange={(r) => reportDateRange('brickeconomy', r)}
       />
 
+      {/* Shopee competition tracker */}
+      <CompetitionPanel
+        setNumber={setNumber}
+        globalDateRange={globalDateRange}
+        onDateRange={(r) => reportDateRange('competition', r)}
+      />
+
       {/* BrickLink price analysis charts */}
       <BricklinkPriceChart
         setNumber={setNumber}
@@ -578,68 +656,8 @@ export function ItemDetailView({ setNumber }: ItemDetailViewProps) {
             No price records yet.
           </p>
         ) : (
-          <div className='max-h-[500px] overflow-auto rounded border'>
-            <table className='w-full text-sm'>
-              <thead className='bg-muted/50 sticky top-0'>
-                <tr>
-                  {([
-                    { key: 'source' as const, label: 'Source', align: 'text-left' },
-                    { key: 'price' as const, label: 'Price', align: 'text-right' },
-                    { key: null, label: 'Listing', align: 'text-left' },
-                    { key: 'seller' as const, label: 'Seller', align: 'text-left' },
-                    { key: 'date' as const, label: 'Date', align: 'text-left' },
-                  ] as const).map(({ key, label, align }) => (
-                    <th
-                      key={label}
-                      className={`px-3 py-2 font-medium ${align} ${key ? 'cursor-pointer select-none hover:bg-muted/80' : ''}`}
-                      onClick={key ? (e) => setPriceSorts((prev) => toggleSort(prev, key, e.shiftKey)) : undefined}
-                      title={key ? 'Click to sort, Shift+click for multi-sort' : undefined}
-                    >
-                      {label}
-                      {key && <SortIndicator sorts={priceSorts} sortKey={key} />}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {multiSort(item.prices, priceSorts).map((record, i) => (
-                  <tr key={i} className='border-border border-t'>
-                    <td className='px-3 py-2'>
-                      <span
-                        className={`rounded-full px-2 py-0.5 text-xs font-medium ${SOURCE_COLORS[record.source] ?? ''}`}
-                      >
-                        {SOURCE_LABELS[record.source] ?? record.source}
-                      </span>
-                    </td>
-                    <td className='whitespace-nowrap px-3 py-2 text-right font-mono'>
-                      {formatPrice(record.price_cents, record.currency)}
-                    </td>
-                    <td className='max-w-xs truncate px-3 py-2'>
-                      {record.url ? (
-                        <a
-                          href={record.url}
-                          target='_blank'
-                          rel='noopener noreferrer'
-                          className='text-primary hover:underline'
-                        >
-                          {record.title ?? 'View'}
-                        </a>
-                      ) : (
-                        <span className='text-muted-foreground'>
-                          {record.title ?? '-'}
-                        </span>
-                      )}
-                    </td>
-                    <td className='text-muted-foreground px-3 py-2'>
-                      {record.shop_name ?? '-'}
-                    </td>
-                    <td className='text-muted-foreground whitespace-nowrap px-3 py-2 text-xs'>
-                      {new Date(record.recorded_at).toLocaleString()}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+          <div className='h-[500px]'>
+            <DataTable table={priceTable} />
           </div>
         )}
       </div>

@@ -22,24 +22,36 @@ declare module '@tanstack/react-table' {
 import { DataTable } from '@/components/ui/table/data-table';
 import { DataTableColumnHeader } from '@/components/ui/table/data-table-column-header';
 import { Button } from '@/components/ui/button';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue
-} from '@/components/ui/select';
 import { EnrichMissingButton } from './enrich-missing-button';
 import { ScrapeMissingMinifigsButton } from './scrape-missing-minifigs-button';
 import { EnrichMissingDimensionsButton } from './enrich-missing-dimensions-button';
 import { SyncRetirementButton } from './sync-retirement-button';
 import { ScrapeMissingMetadataButton } from './scrape-missing-metadata-button';
-import { PriceDealFilter } from './price-deal-filter';
+import { FilterBar } from './filter-bar';
+import { applyFilters, type FilterKey } from './filter-utils';
 import type { UnifiedItem } from './types';
 import { formatPrice } from './types';
 
 function PriceShimmer() {
   return <div className='bg-muted/50 h-4 w-14 animate-pulse rounded' />;
+}
+
+function cohortColor(v: number | null): string {
+  if (v === null) return 'text-muted-foreground';
+  if (v >= 80) return 'text-emerald-400';
+  if (v >= 65) return 'text-emerald-600 dark:text-emerald-500';
+  if (v >= 50) return 'text-yellow-600 dark:text-yellow-400';
+  if (v >= 35) return 'text-orange-500';
+  return 'text-red-500';
+}
+
+function CohortCell({ value }: { value: number | null }) {
+  if (value == null) return <span className='text-muted-foreground'>-</span>;
+  return (
+    <span className={`font-mono text-sm font-semibold ${cohortColor(value)}`}>
+      {value.toFixed(0)}
+    </span>
+  );
 }
 
 const columns: ColumnDef<UnifiedItem>[] = [
@@ -188,6 +200,54 @@ const columns: ColumnDef<UnifiedItem>[] = [
     size: 95
   },
   {
+    accessorKey: 'cohort_half_year',
+    header: ({ column }) => (
+      <DataTableColumnHeader column={column} title='C:HY' />
+    ),
+    cell: ({ row }) => <CohortCell value={row.getValue('cohort_half_year') as number | null} />,
+    size: 55
+  },
+  {
+    accessorKey: 'cohort_year',
+    header: ({ column }) => (
+      <DataTableColumnHeader column={column} title='C:Yr' />
+    ),
+    cell: ({ row }) => <CohortCell value={row.getValue('cohort_year') as number | null} />,
+    size: 55
+  },
+  {
+    accessorKey: 'cohort_theme',
+    header: ({ column }) => (
+      <DataTableColumnHeader column={column} title='C:Thm' />
+    ),
+    cell: ({ row }) => <CohortCell value={row.getValue('cohort_theme') as number | null} />,
+    size: 55
+  },
+  {
+    accessorKey: 'cohort_year_theme',
+    header: ({ column }) => (
+      <DataTableColumnHeader column={column} title='C:YT' />
+    ),
+    cell: ({ row }) => <CohortCell value={row.getValue('cohort_year_theme') as number | null} />,
+    size: 55
+  },
+  {
+    accessorKey: 'cohort_price_tier',
+    header: ({ column }) => (
+      <DataTableColumnHeader column={column} title='C:$$' />
+    ),
+    cell: ({ row }) => <CohortCell value={row.getValue('cohort_price_tier') as number | null} />,
+    size: 55
+  },
+  {
+    accessorKey: 'cohort_piece_group',
+    header: ({ column }) => (
+      <DataTableColumnHeader column={column} title='C:Pc' />
+    ),
+    cell: ({ row }) => <CohortCell value={row.getValue('cohort_piece_group') as number | null} />,
+    size: 55
+  },
+  {
     accessorKey: 'rrp_cents',
     header: ({ column }) => (
       <DataTableColumnHeader column={column} title='RRP' />
@@ -312,22 +372,6 @@ const columns: ColumnDef<UnifiedItem>[] = [
     size: 100
   },
   {
-    accessorKey: 'bricklink_used_cents',
-    header: ({ column }) => (
-      <DataTableColumnHeader column={column} title='BL Used' />
-    ),
-    cell: ({ row, table }) => {
-      const cents = row.getValue('bricklink_used_cents') as number | null;
-      if (table.options.meta?.enriching && cents == null) return <PriceShimmer />;
-      return (
-        <span className='font-mono text-sm'>
-          {formatPrice(cents, row.original.bricklink_used_currency)}
-        </span>
-      );
-    },
-    size: 100
-  },
-  {
     accessorKey: 'updated_at',
     header: ({ column }) => (
       <DataTableColumnHeader column={column} title='Updated' />
@@ -352,24 +396,31 @@ export function UnifiedItemsTable() {
   const [error, setError] = useState<string | null>(null);
   const [sorting, setSorting] = useState<SortingState>([]);
   const [searchQuery, setSearchQuery] = useState('');
-  const [dealFilter, setDealFilter] = useState<
-    ((items: UnifiedItem[]) => UnifiedItem[]) | null
-  >(null);
-  const [hideNoRetail, setHideNoRetail] = useState(false);
-  const [retirementFilter, setRetirementFilter] = useState<'all' | 'retired' | 'active' | 'retiring_soon'>('all');
+  const [activeFilters, setActiveFilters] = useState<Set<FilterKey>>(new Set());
+  const [dealThreshold, setDealThreshold] = useState(0);
+  const [cohortThreshold, setCohortThreshold] = useState(65);
   const [newSetNumber, setNewSetNumber] = useState('');
   const [adding, setAdding] = useState(false);
   const [addError, setAddError] = useState<string | null>(null);
-  const [growthFilter, setGrowthFilter] = useState<'all' | 'strong' | 'buy' | 'hold' | 'avoid' | 'no_pred'>('all');
-  const [tierFilter, setTierFilter] = useState<'all' | 'buy' | 'hold' | 'avoid'>('all');
-  const [confidenceFilter, setConfidenceFilter] = useState<'all' | 'high' | 'moderate' | 'low'>('all');
-  const [showWatchlistOnly, setShowWatchlistOnly] = useState(false);
+
+  const handleToggleFilter = useCallback((key: FilterKey) => {
+    setActiveFilters((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) {
+        next.delete(key);
+      } else {
+        next.add(key);
+      }
+      return next;
+    });
+  }, []);
+
+  const handleClearFilters = useCallback(() => {
+    setActiveFilters(new Set());
+  }, []);
 
   const filteredData = useMemo(() => {
     let result = data;
-    if (showWatchlistOnly) {
-      result = result.filter((item) => item.watchlist);
-    }
     if (searchQuery.trim()) {
       const q = searchQuery.trim().toLowerCase();
       result = result.filter(
@@ -378,58 +429,8 @@ export function UnifiedItemsTable() {
           (item.title?.toLowerCase().includes(q) ?? false)
       );
     }
-    if (hideNoRetail) {
-      result = result.filter(
-        (item) =>
-          item.toysrus_price_cents !== null ||
-          item.shopee_price_cents !== null ||
-          item.mightyutan_price_cents !== null
-      );
-    }
-    if (retirementFilter === 'retired') {
-      result = result.filter((item) => item.year_retired !== null || item.availability?.toLowerCase() === 'retired');
-    } else if (retirementFilter === 'active') {
-      result = result.filter((item) => item.year_retired === null && item.availability?.toLowerCase() !== 'retired');
-    } else if (retirementFilter === 'retiring_soon') {
-      result = result.filter((item) => item.retiring_soon === true && item.year_retired === null);
-    }
-    if (growthFilter === 'strong') {
-      result = result.filter((item) => item.ml_growth_pct != null && item.ml_growth_pct >= 15);
-    } else if (growthFilter === 'buy') {
-      result = result.filter((item) => item.ml_growth_pct != null && item.ml_growth_pct >= 10);
-    } else if (growthFilter === 'hold') {
-      result = result.filter((item) => item.ml_growth_pct != null && item.ml_growth_pct >= 5);
-    } else if (growthFilter === 'avoid') {
-      result = result.filter((item) => item.ml_growth_pct != null && item.ml_growth_pct < 5);
-    } else if (growthFilter === 'no_pred') {
-      result = result.filter((item) => item.ml_growth_pct == null);
-    }
-    if (tierFilter !== 'all') {
-      // tierFilter now acts as signal filter: buy/hold/avoid
-      if (tierFilter === 'buy') {
-        result = result.filter((item) => {
-          const avoid = item.ml_avoid_probability;
-          const isAvoid = avoid != null && avoid >= 0.5;
-          return !isAvoid && item.ml_growth_pct != null && item.ml_growth_pct >= 8;
-        });
-      } else if (tierFilter === 'avoid') {
-        result = result.filter((item) => item.ml_avoid_probability != null && item.ml_avoid_probability >= 0.5);
-      } else if (tierFilter === 'hold') {
-        result = result.filter((item) => {
-          const avoid = item.ml_avoid_probability;
-          const isAvoid = avoid != null && avoid >= 0.5;
-          return !isAvoid && item.ml_growth_pct != null && item.ml_growth_pct < 8;
-        });
-      }
-    }
-    if (confidenceFilter !== 'all') {
-      result = result.filter((item) => item.ml_confidence === confidenceFilter);
-    }
-    if (dealFilter) {
-      result = dealFilter(result);
-    }
-    return result;
-  }, [data, searchQuery, dealFilter, hideNoRetail, retirementFilter, growthFilter, tierFilter, confidenceFilter, showWatchlistOnly]);
+    return applyFilters(result, activeFilters, dealThreshold, cohortThreshold);
+  }, [data, searchQuery, activeFilters, dealThreshold, cohortThreshold]);
 
   const minifigMissing = useMemo(
     () => filteredData.filter(i => i.minifig_count === null).map(i => i.set_number),
@@ -487,6 +488,7 @@ export function UnifiedItemsTable() {
         avoid: boolean;
         kelly_fraction: number | null;
         win_probability: number | null;
+        cohorts: Record<string, { composite_pct: number | null }> | null;
       }>();
       if (signalsRes?.success && Array.isArray(signalsRes.data)) {
         for (const sig of signalsRes.data) {
@@ -500,6 +502,7 @@ export function UnifiedItemsTable() {
               avoid: sig.ml_avoid ?? false,
               kelly_fraction: sig.ml_kelly_fraction ?? null,
               win_probability: sig.ml_win_probability ?? null,
+              cohorts: sig.cohorts ?? null,
             });
           }
         }
@@ -507,6 +510,7 @@ export function UnifiedItemsTable() {
 
       const merged = (itemsRes.data as UnifiedItem[]).map((item) => {
         const ml = mlMap.get(item.set_number);
+        const c = ml?.cohorts;
         return {
           ...item,
           ml_growth_pct: ml?.growth ?? null,
@@ -517,6 +521,12 @@ export function UnifiedItemsTable() {
           ml_avoid: ml?.avoid ?? false,
           ml_kelly_fraction: ml?.kelly_fraction ?? null,
           ml_win_probability: ml?.win_probability ?? null,
+          cohort_half_year: c?.half_year?.composite_pct ?? null,
+          cohort_year: c?.year?.composite_pct ?? null,
+          cohort_theme: c?.theme?.composite_pct ?? null,
+          cohort_year_theme: c?.year_theme?.composite_pct ?? null,
+          cohort_price_tier: c?.price_tier?.composite_pct ?? null,
+          cohort_piece_group: c?.piece_group?.composite_pct ?? null,
         };
       });
 
@@ -567,6 +577,12 @@ export function UnifiedItemsTable() {
         ml_raw_growth_pct: null,
         ml_kelly_fraction: null,
         ml_win_probability: null,
+        cohort_half_year: null,
+        cohort_year: null,
+        cohort_theme: null,
+        cohort_year_theme: null,
+        cohort_price_tier: null,
+        cohort_piece_group: null,
       } as UnifiedItem));
 
       setData(liteItems);
@@ -670,7 +686,7 @@ export function UnifiedItemsTable() {
   return (
     <div className='flex flex-1 flex-col gap-3 overflow-hidden'>
       <div className='flex flex-col gap-2'>
-        {/* Row 1: General filters */}
+        {/* Row 1: Search + filter chips */}
         <div className='flex items-center gap-3'>
           <input
             type='text'
@@ -679,99 +695,18 @@ export function UnifiedItemsTable() {
             onChange={(e) => setSearchQuery(e.target.value)}
             className='border-input bg-transparent rounded-md border px-3 py-2 text-sm shadow-xs w-64 h-9 placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] outline-none'
           />
-          <Select
-            value={retirementFilter}
-            onValueChange={(val) => setRetirementFilter(val as 'all' | 'retired' | 'active' | 'retiring_soon')}
-          >
-            <SelectTrigger className='w-[160px]'>
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value='all'>All sets</SelectItem>
-              <SelectItem value='retired'>Retired only</SelectItem>
-              <SelectItem value='active'>Active only</SelectItem>
-              <SelectItem value='retiring_soon'>Retiring soon</SelectItem>
-            </SelectContent>
-          </Select>
-          <Button
-            variant={showWatchlistOnly ? 'default' : 'outline'}
-            size='default'
-            onClick={() => setShowWatchlistOnly((prev) => !prev)}
-          >
-            {showWatchlistOnly ? '\u2605 Watchlist' : '\u2606 Watchlist'}
-          </Button>
-          <Button
-            variant={hideNoRetail ? 'default' : 'outline'}
-            size='default'
-            onClick={() => setHideNoRetail((prev) => !prev)}
-          >
-            Has retail price
-          </Button>
-          <PriceDealFilter onFilterChange={(fn) => setDealFilter(() => fn)} />
         </div>
 
-        {/* Row 2: ML prediction filters */}
-        <div className='flex items-center gap-3'>
-          <span className='text-muted-foreground text-xs font-medium'>ML</span>
-          <Select
-            value={growthFilter}
-            onValueChange={(val) => setGrowthFilter(val as typeof growthFilter)}
-          >
-            <SelectTrigger className='w-[155px]'>
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value='all'>All growth</SelectItem>
-              <SelectItem value='strong'>Strong Buy (&ge;15%)</SelectItem>
-              <SelectItem value='buy'>Buy (&ge;10%)</SelectItem>
-              <SelectItem value='hold'>Hold (&ge;5%)</SelectItem>
-              <SelectItem value='avoid'>Avoid (&lt;5%)</SelectItem>
-              <SelectItem value='no_pred'>No prediction</SelectItem>
-            </SelectContent>
-          </Select>
-          <Select
-            value={tierFilter}
-            onValueChange={(val) => setTierFilter(val as typeof tierFilter)}
-          >
-            <SelectTrigger className='w-[155px]'>
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value='all'>All signals</SelectItem>
-              <SelectItem value='buy'>BUY only</SelectItem>
-              <SelectItem value='hold'>HOLD only</SelectItem>
-              <SelectItem value='avoid'>AVOID only</SelectItem>
-            </SelectContent>
-          </Select>
-          <Select
-            value={confidenceFilter}
-            onValueChange={(val) => setConfidenceFilter(val as typeof confidenceFilter)}
-          >
-            <SelectTrigger className='w-[155px]'>
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value='all'>All confidence</SelectItem>
-              <SelectItem value='high'>High</SelectItem>
-              <SelectItem value='moderate'>Moderate</SelectItem>
-              <SelectItem value='low'>Low</SelectItem>
-            </SelectContent>
-          </Select>
-          {(growthFilter !== 'all' || tierFilter !== 'all' || confidenceFilter !== 'all') && (
-            <Button
-              variant='ghost'
-              size='sm'
-              onClick={() => {
-                setGrowthFilter('all');
-                setTierFilter('all');
-                setConfidenceFilter('all');
-              }}
-              className='text-muted-foreground text-xs'
-            >
-              Clear ML filters
-            </Button>
-          )}
-        </div>
+        {/* Row 2: Filter chips */}
+        <FilterBar
+          activeFilters={activeFilters}
+          onToggle={handleToggleFilter}
+          onClearAll={handleClearFilters}
+          dealThreshold={dealThreshold}
+          onDealThresholdChange={setDealThreshold}
+          cohortThreshold={cohortThreshold}
+          onCohortThresholdChange={setCohortThreshold}
+        />
 
         {/* Row 3: Actions + Add Item */}
         <div className='flex items-center gap-2'>

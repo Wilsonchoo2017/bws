@@ -157,12 +157,11 @@ class TestPostScrapeEnrichment:
         init_schema(mem_conn)
 
         proxy = _NoCloseProxy(mem_conn)
-        try:
-            with (
-                patch("db.connection.get_connection", return_value=proxy),
-                patch("db.schema.init_schema"),
-            ):
-                set_numbers = ["75192", "42151", "75192"]  # dupe
-                queued = queue_enrichment_batch(manager, set_numbers)
+        with (
+            patch("db.connection.get_connection", return_value=proxy),
+            patch("db.schema.init_schema"),
+        ):
+            set_numbers = ["75192", "42151", "75192"]  # dupe
+            queued = queue_enrichment_batch(manager, set_numbers)
 
-            assert queued == 2
+        assert queued == 2

@@ -19,26 +19,51 @@ logger = logging.getLogger(__name__)
 
 MIN_COHORT_SIZE = 3
 
-RANKED_METRICS: tuple[str, ...] = (
-    "composite_score",
+# Metrics to compute cohort percentiles for.
+# "composite_score" is always included; additional signal names are
+# auto-detected from item dicts so both BrickLink and BrickEconomy
+# sources get percentiles for every signal they provide.
+ALWAYS_RANKED: tuple[str, ...] = ("composite_score",)
+
+# Known signal names that should be ranked when present in items.
+KNOWN_SIGNALS: tuple[str, ...] = (
     "demand_pressure",
+    "supply_velocity",
+    "price_trend",
+    "price_vs_rrp",
+    "lifecycle_position",
+    "stock_level",
+    "collector_premium",
     "theme_growth",
+    "value_opportunity",
+    "price_wall",
+    "listing_ratio",
+    "new_used_spread",
 )
 
 PIECE_GROUPS: tuple[tuple[str, int, int], ...] = (
-    ("small", 0, 500),
-    ("medium", 500, 1000),
-    ("large", 1000, 2000),
-    ("xlarge", 2000, 3000),
-    ("massive", 3000, 999_999),
+    ("micro", 0, 100),        # polybags, keychains
+    ("tiny", 100, 200),       # small builds
+    ("small", 200, 400),      # standard small sets
+    ("medium", 400, 700),     # mid-range
+    ("large", 700, 1200),     # big sets
+    ("xlarge", 1200, 2000),   # premium large
+    ("massive", 2000, 3500),  # collector flagship
+    ("epic", 3500, 999_999),  # record-breaking
 )
 
-# USD cents thresholds
+# USD cents thresholds — aligned to LEGO's standard RRP price points
 PRICE_TIERS: tuple[tuple[str, int, int], ...] = (
-    ("budget", 0, 5_000),        # < $50
-    ("mid", 5_000, 15_000),      # $50-$149
-    ("premium", 15_000, 35_000), # $150-$349
-    ("ultra", 35_000, 999_999),  # $350+
+    ("impulse", 0, 1_000),           # < $10
+    ("pocket", 1_000, 2_000),        # $10-$19
+    ("gift", 2_000, 3_500),          # $20-$34
+    ("mid", 3_500, 5_000),           # $35-$49
+    ("standard", 5_000, 7_000),      # $50-$69
+    ("premium", 7_000, 10_000),      # $70-$99
+    ("collector", 10_000, 15_000),   # $100-$149
+    ("elite", 15_000, 20_000),       # $150-$199
+    ("luxury", 20_000, 30_000),      # $200-$299
+    ("ultimate", 30_000, 999_999),   # $300+
 )
 
 STRATEGY_NAMES: tuple[str, ...] = (
@@ -165,9 +190,9 @@ def enrich_with_cohort_ranks(
                 "year": {
                     "key": "2022",
                     "size": 42,
-                    "composite_pct": 85.4,
-                    "popularity_pct": 71.2,
-                    "theme_pct": 90.1,
+                    "composite_score_pct": 85.4,
+                    "demand_pressure_pct": 71.2,
+                    "theme_growth_pct": 90.1,
                     "rank": 5,
                 },
                 "theme": { ... },
@@ -177,6 +202,12 @@ def enrich_with_cohort_ranks(
     """
     if not items:
         return []
+
+    # Detect which metrics are present across all items
+    ranked_metrics = list(ALWAYS_RANKED)
+    for signal in KNOWN_SIGNALS:
+        if any(item.get(signal) is not None for item in items):
+            ranked_metrics.append(signal)
 
     # Phase 1: assign buckets for each strategy
     # strategy -> bucket_key -> [item_index, ...]
@@ -203,7 +234,7 @@ def enrich_with_cohort_ranks(
 
             # Extract metric values for this cohort
             metric_values: dict[str, list[tuple[int, float]]] = {}
-            for metric in RANKED_METRICS:
+            for metric in ranked_metrics:
                 vals = []
                 for idx in member_indices:
                     v = items[idx].get(metric)
@@ -228,12 +259,8 @@ def enrich_with_cohort_ranks(
                 }
 
                 # Percentile for each ranked metric
-                pct_keys = {
-                    "composite_score": "composite_pct",
-                    "demand_pressure": "popularity_pct",
-                    "theme_growth": "theme_pct",
-                }
-                for metric, pct_key in pct_keys.items():
+                for metric in ranked_metrics:
+                    pct_key = f"{metric}_pct"
                     vals_list = metric_values.get(metric, [])
                     item_val = items[idx].get(metric)
                     if item_val is not None and len(vals_list) >= min_cohort_size:

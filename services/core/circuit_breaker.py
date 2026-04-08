@@ -199,8 +199,6 @@ class EscalatingBreaker:
         try:
             from services.notifications.scraper_alerts import (
                 alert_forbidden,
-                alert_rate_limited,
-                alert_rest_period,
                 alert_silent_ban,
             )
 
@@ -210,21 +208,12 @@ class EscalatingBreaker:
                 alert_silent_ban(
                     self._cfg.source_name, self._consecutive_failures, cooldown / 60,
                 )
-            elif reason == "rest_period":
-                alert_rest_period(
-                    self._cfg.source_name, cooldown / 60, self._scraping_since / 3600,
-                )
-            else:
-                alert_rate_limited(self._cfg.source_name, cooldown / 60, self._escalation_level)
+            # rate_limited and rest_period are expected behavior — log only
         except ImportError:
             pass
 
     def _notify_recovered(self) -> None:
-        try:
-            from services.notifications.scraper_alerts import alert_recovered
-            alert_recovered(self._cfg.source_name)
-        except ImportError:
-            pass
+        pass
 
 
 # ---------------------------------------------------------------------------

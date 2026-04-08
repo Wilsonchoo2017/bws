@@ -16,7 +16,11 @@ if TYPE_CHECKING:
 logger = logging.getLogger("bws.worker")
 
 # Hard timeout per job -- prevents a single hung browser from blocking the worker forever.
+# Shopee gets extra time because captcha resolution requires human intervention (up to 3 min).
 _JOB_TIMEOUT_SECONDS = 300
+_JOB_TIMEOUT_OVERRIDES: dict[str, int] = {
+    "shopee": 600,
+}
 
 
 def _build_semaphores() -> dict[str, asyncio.Semaphore]:
@@ -66,11 +70,12 @@ async def _process_job(
         log_prefix = (
             f"[{job.scraper_id} #{worker_no}]" if multi else f"[{job.scraper_id}]"
         )
+        timeout = _JOB_TIMEOUT_OVERRIDES.get(job.scraper_id, _JOB_TIMEOUT_SECONDS)
         logger.info("%s Job %s started: %s", log_prefix, job.job_id, job.url)
         try:
             result = await asyncio.wait_for(
                 worker.run(job, mgr),
-                timeout=_JOB_TIMEOUT_SECONDS,
+                timeout=timeout,
             )
             mgr.mark_completed(
                 job.job_id,
@@ -79,8 +84,8 @@ async def _process_job(
             )
             logger.info("%s Job %s completed: %s", log_prefix, job.job_id, result.log_summary)
         except asyncio.TimeoutError:
-            logger.error("%s Job %s timed out after %ds", log_prefix, job.job_id, _JOB_TIMEOUT_SECONDS)
-            mgr.mark_failed(job.job_id, f"Timed out after {_JOB_TIMEOUT_SECONDS}s")
+            logger.error("%s Job %s timed out after %ds", log_prefix, job.job_id, timeout)
+            mgr.mark_failed(job.job_id, f"Timed out after {timeout}s")
         except Exception as e:
             logger.exception("%s Job %s failed", log_prefix, job.job_id)
             mgr.mark_failed(job.job_id, str(e))

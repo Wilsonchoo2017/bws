@@ -2,6 +2,7 @@ import { type Table as TanstackTable, flexRender } from '@tanstack/react-table';
 import type * as React from 'react';
 
 import { DataTablePagination } from '@/components/ui/table/data-table-pagination';
+import { DataTableSortBar } from '@/components/ui/table/data-table-sort-bar';
 import {
   Table,
   TableBody,
@@ -24,10 +25,10 @@ export function DataTable<TData>({
   children
 }: DataTableProps<TData>) {
   return (
-    <div className='flex flex-1 flex-col space-y-4'>
+    <div className='flex h-full min-h-0 flex-1 flex-col space-y-4'>
       {children}
-      <div className='relative flex flex-1'>
-        <div className='absolute inset-0 flex overflow-hidden rounded-lg border'>
+      <DataTableSortBar table={table} />
+      <div className='min-h-0 flex-1 basis-0 overflow-hidden rounded-lg border'>
           <ScrollArea className='h-full w-full'>
             <Table>
               <TableHeader className='bg-muted sticky top-0 z-10'>
@@ -88,7 +89,6 @@ export function DataTable<TData>({
             </Table>
             <ScrollBar orientation='horizontal' />
           </ScrollArea>
-        </div>
       </div>
       <div className='flex flex-col gap-2.5'>
         <DataTablePagination table={table} />

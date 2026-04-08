@@ -78,7 +78,36 @@ def load_item_metadata(conn: Any) -> pd.DataFrame:
             FROM brickeconomy_snapshots
             WHERE rrp_usd_cents IS NOT NULL
         ) be ON be.set_number = li.set_number AND be.rn = 1
-        ORDER BY bi.item_id
+
+        UNION ALL
+
+        -- Items with sales data in bricklink_monthly_sales but no bricklink_items entry
+        SELECT DISTINCT
+            ms.item_id,
+            li.set_number,
+            li.title,
+            li.theme,
+            li.year_released,
+            li.year_retired,
+            COALESCE(li.retiring_soon, FALSE) AS retiring_soon,
+            li.parts_count,
+            li.rrp_cents,
+            li.rrp_currency,
+            li.release_date,
+            be.rrp_usd_cents
+        FROM bricklink_monthly_sales ms
+        JOIN lego_items li
+            ON REPLACE(ms.item_id, '-1', '') = li.set_number
+        LEFT JOIN bricklink_items bi ON bi.item_id = ms.item_id
+        LEFT JOIN (
+            SELECT set_number, rrp_usd_cents,
+                   ROW_NUMBER() OVER (PARTITION BY set_number ORDER BY scraped_at DESC) AS rn
+            FROM brickeconomy_snapshots
+            WHERE rrp_usd_cents IS NOT NULL
+        ) be ON be.set_number = li.set_number AND be.rn = 1
+        WHERE bi.item_id IS NULL
+
+        ORDER BY item_id
     """
     return conn.execute(query).df()
 

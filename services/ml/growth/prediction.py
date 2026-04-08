@@ -96,7 +96,14 @@ def _predict_batch(
             X_batch[f] = fill_map.get(f, 0)
 
     X_batch = X_batch[list(model_obj.feature_names)]
-    X_scaled = model_obj.scaler.transform(X_batch) if model_obj.scaler else X_batch.values
+    if model_obj.scaler:
+        X_scaled = pd.DataFrame(
+            model_obj.scaler.transform(X_batch),
+            columns=model_obj.feature_names,
+            index=X_batch.index,
+        )
+    else:
+        X_scaled = X_batch
     preds = model_obj.model.predict(X_scaled)
 
     if model_obj.target_transformer is not None:
@@ -129,7 +136,7 @@ def _predict_batch(
                 X_clf[f] = clf_fill.get(f, 0)
         X_clf = X_clf[list(classifier.feature_names)]
 
-        avoid_probs = predict_avoid_proba(X_clf.values, classifier)
+        avoid_probs = predict_avoid_proba(X_clf, classifier)
 
     # Conformal intervals
     intervals: list | None = None

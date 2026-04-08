@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import type { ItemSignals } from '../types';
+import type { CohortRank } from '../types';
 import { CohortSection } from '../signals-table';
 
 interface CohortPanelProps {
@@ -9,50 +9,113 @@ interface CohortPanelProps {
 }
 
 export function CohortPanel({ setNumber }: CohortPanelProps) {
-  const [data, setData] = useState<ItemSignals | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [bl, setBl] = useState<Record<string, CohortRank> | null | undefined>(undefined);
+  const [be, setBe] = useState<Record<string, CohortRank> | null | undefined>(undefined);
+  const [blLoading, setBlLoading] = useState(true);
+  const [beLoading, setBeLoading] = useState(true);
 
   useEffect(() => {
-    const controller = new AbortController();
-    fetch(`/api/items/${setNumber}/signals`, { signal: controller.signal })
+    const controllers: AbortController[] = [];
+
+    // Fetch BrickLink
+    const blCtrl = new AbortController();
+    controllers.push(blCtrl);
+    fetch(`/api/items/${setNumber}/signals`, { signal: blCtrl.signal })
       .then((res) => res.json())
       .then((json) => {
-        if (json.success) {
-          setData(json.data);
+        if (json.success && json.data?.cohorts) {
+          setBl(json.data.cohorts);
+        } else {
+          setBl(null);
         }
       })
-      .catch((err) => {
-        if (err.name !== 'AbortError') {
-          // silently degrade - cohort is supplementary info
+      .catch((err) => { if (err.name !== 'AbortError') setBl(null); })
+      .finally(() => setBlLoading(false));
+
+    // Fetch BrickEconomy
+    const beCtrl = new AbortController();
+    controllers.push(beCtrl);
+    fetch(`/api/items/${setNumber}/signals/be`, { signal: beCtrl.signal })
+      .then((res) => res.json())
+      .then((json) => {
+        if (json.success && json.data?.cohorts) {
+          setBe(json.data.cohorts);
+        } else {
+          setBe(null);
         }
       })
-      .finally(() => setLoading(false));
-    return () => controller.abort();
+      .catch((err) => { if (err.name !== 'AbortError') setBe(null); })
+      .finally(() => setBeLoading(false));
+
+    return () => controllers.forEach((c) => c.abort());
   }, [setNumber]);
 
-  if (loading) {
+  const bothEmpty = !blLoading && !beLoading && bl == null && be == null;
+
+  if (blLoading && beLoading) {
     return (
-      <p className="text-sm text-muted-foreground">Loading cohort data...</p>
+      <div className="rounded-lg border px-4 py-6 text-center">
+        <p className="text-sm text-muted-foreground">Loading cohort data...</p>
+      </div>
     );
   }
 
-  if (!data?.cohorts || Object.keys(data.cohorts).length === 0) {
+  if (bothEmpty) {
     return (
-      <div className="rounded-lg border">
+      <div className="rounded-lg border px-4 py-6 text-center">
+        <p className="text-sm text-muted-foreground">
+          No cohort data available from either source.
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex gap-4">
+      <CohortSource label="BrickLink" data={bl} loading={blLoading} />
+      <CohortSource label="BrickEconomy" data={be} loading={beLoading} />
+    </div>
+  );
+}
+
+function CohortSource({
+  label,
+  data,
+  loading,
+}: {
+  label: string;
+  data: Record<string, CohortRank> | null | undefined;
+  loading: boolean;
+}) {
+  if (loading) {
+    return (
+      <div className="flex-1 rounded-lg border">
         <div className="bg-muted/50 border-b px-4 py-2">
-          <span className="text-xs font-medium">Cohort Rankings</span>
-          <span className="text-muted-foreground ml-2 text-xs">
-            Percentile rank within peer group
-          </span>
+          <span className="text-xs font-medium">{label}</span>
         </div>
         <div className="px-4 py-6 text-center">
-          <p className="text-sm text-muted-foreground">
-            No cohort data available. Requires BrickLink sales history and at least 3 peer items.
-          </p>
+          <p className="text-xs text-muted-foreground">Loading...</p>
         </div>
       </div>
     );
   }
 
-  return <CohortSection cohorts={data.cohorts} />;
+  if (data == null || Object.keys(data).length === 0) {
+    return (
+      <div className="flex-1 rounded-lg border">
+        <div className="bg-muted/50 border-b px-4 py-2">
+          <span className="text-xs font-medium">{label}</span>
+        </div>
+        <div className="px-4 py-6 text-center">
+          <p className="text-xs text-muted-foreground">No data available.</p>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex-1">
+      <CohortSection cohorts={data} sourceLabel={label} />
+    </div>
+  );
 }

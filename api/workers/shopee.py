@@ -19,7 +19,10 @@ class ShopeeWorker:
     async def run(self, job: Job, mgr: JobManager) -> WorkResult:
         from services.shopee.scraper import scrape_shop_page
 
-        result = await scrape_shop_page(job.url, max_items=200)
+        def _progress(msg: str) -> None:
+            mgr.update_progress(job.job_id, msg)
+
+        result = await scrape_shop_page(job.url, max_items=10_000, on_progress=_progress)
 
         if not result.success:
             raise RuntimeError(result.error or "Scrape failed")
