@@ -15,11 +15,29 @@ logger = logging.getLogger(__name__)
 
 @router.get("/health")
 async def ml_health():
-    """Check if ML models are loaded and prediction cache is warm."""
+    """Check if ML models are loaded and all caches are warm."""
+    import time
+
     from services.scoring.growth_provider import _cache, _prediction_cache, _warmup_stage
 
     models_loaded = bool(_cache)
     n_predictions = len(_prediction_cache.get("data", {}))
+
+    # Check data cache warmth from items module
+    from api.routes.items import (
+        _be_signals_cache,
+        _liquidity_cache,
+        _signals_cache,
+    )
+
+    now = time.time()
+    caches = {
+        "signals": "new" in _signals_cache and _signals_cache["new"]["expires"] > now,
+        "signals_be": "be" in _be_signals_cache and _be_signals_cache["be"]["expires"] > now,
+        "liquidity_bl": "bricklink:new" in _liquidity_cache and _liquidity_cache["bricklink:new"]["expires"] > now,
+        "liquidity_be": "brickeconomy:new" in _liquidity_cache and _liquidity_cache["brickeconomy:new"]["expires"] > now,
+    }
+    all_warm = models_loaded and n_predictions > 0 and all(caches.values())
 
     if not models_loaded:
         return {
@@ -27,13 +45,17 @@ async def ml_health():
             "models_loaded": False,
             "predictions": 0,
             "stage": _warmup_stage,
+            "caches": caches,
+            "all_warm": False,
         }
 
     return {
-        "status": "ready" if n_predictions > 0 else "no_predictions",
+        "status": "ready" if all_warm else ("warming" if n_predictions > 0 else "no_predictions"),
         "models_loaded": True,
         "predictions": n_predictions,
         "stage": _warmup_stage,
+        "caches": caches,
+        "all_warm": all_warm,
     }
 
 
