@@ -4,6 +4,7 @@ import { ExternalLinkIcon } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import type { SetMinifigureData } from '../types';
 import { formatPrice } from '../types';
+import { useDetailBundle } from './detail-bundle-context';
 
 interface MinifiguresPanelProps {
   setNumber: string;
@@ -12,6 +13,7 @@ interface MinifiguresPanelProps {
 type ScrapeStatus = 'idle' | 'loading' | 'success' | 'error';
 
 export function MinifiguresPanel({ setNumber }: MinifiguresPanelProps) {
+  const { bundle, loading: bundleLoading } = useDetailBundle();
   const [data, setData] = useState<SetMinifigureData | null>(null);
   const [loading, setLoading] = useState(true);
   const [scrapeStatus, setScrapeStatus] = useState<ScrapeStatus>('idle');
@@ -30,8 +32,10 @@ export function MinifiguresPanel({ setNumber }: MinifiguresPanelProps) {
   };
 
   useEffect(() => {
+    if (bundleLoading) return;
+    if (bundle?.minifigures) { setData(bundle.minifigures as unknown as SetMinifigureData); setLoading(false); return; }
     fetchMinifigures();
-  }, [setNumber]);
+  }, [setNumber, bundle, bundleLoading]);
 
   const handleScrape = async () => {
     setScrapeStatus('loading');

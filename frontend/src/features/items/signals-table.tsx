@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import type { CohortRank, ItemSignals } from './types';
-import { scoreColor, scoreBg, rankToPercentile } from './percentile-utils';
+import { scoreColor, scoreBg, rankToPercentile, getSignalWeight } from './percentile-utils';
 
 const SIGNALS = [
   { key: 'demand_pressure', label: 'Demand', desc: '3-month average sales volume' },
@@ -26,22 +26,23 @@ const MODIFIERS = [
 ] as const;
 
 
-function ScoreBar({ value }: { value: number | null }) {
+function ScoreBar({ value, weight }: { value: number | null; weight?: number }) {
   if (value === null) return null;
+  // Derive bar color from the same weight-aware logic as scoreColor
+  const colorClass = scoreColor(value, weight);
+  const barColor = colorClass.includes('emerald-400')
+    ? 'bg-emerald-500'
+    : colorClass.includes('emerald-6') || colorClass.includes('emerald-5')
+      ? 'bg-emerald-600'
+      : colorClass.includes('yellow')
+        ? 'bg-yellow-500'
+        : colorClass.includes('orange')
+          ? 'bg-orange-500'
+          : 'bg-red-500';
   return (
     <div className="bg-muted h-1.5 w-full rounded-full">
       <div
-        className={`h-1.5 rounded-full transition-all ${
-          value >= 80
-            ? 'bg-emerald-500'
-            : value >= 65
-              ? 'bg-emerald-600'
-              : value >= 50
-                ? 'bg-yellow-500'
-                : value >= 35
-                  ? 'bg-orange-500'
-                  : 'bg-red-500'
-        }`}
+        className={`h-1.5 rounded-full transition-all ${barColor}`}
         style={{ width: `${Math.min(100, value)}%` }}
       />
     </div>
@@ -73,7 +74,7 @@ const PCT_LABELS: Record<string, { short: string; tooltip: string }> = {
   new_used_spread_pct: { short: 'N/U', tooltip: 'New-used spread percentile vs peers' },
 };
 
-function PctInline({ label, value, tooltip }: { label: string; value: number | null; tooltip?: string }) {
+function PctInline({ label, value, tooltip, weight }: { label: string; value: number | null; tooltip?: string; weight?: number }) {
   if (value === null) return null;
   return (
     <span
@@ -81,19 +82,42 @@ function PctInline({ label, value, tooltip }: { label: string; value: number | n
       title={tooltip ?? label}
     >
       <span className="text-muted-foreground text-xs">{label}</span>
-      <span className={`font-mono text-xs font-semibold ${scoreColor(value)}`}>
+      <span className={`font-mono text-xs font-semibold ${scoreColor(value, weight)}`}>
         P{value.toFixed(0)}
       </span>
     </span>
   );
 }
 
-function extractPctFields(cohort: CohortRank): { key: string; short: string; tooltip: string; value: number }[] {
-  const results: { key: string; short: string; tooltip: string; value: number }[] = [];
+/** Map pct field name back to signal key for weight lookup */
+const PCT_TO_SIGNAL: Record<string, string> = {
+  demand_pressure_pct: 'demand_pressure',
+  theme_growth_pct: 'theme_growth',
+  supply_velocity_pct: 'supply_velocity',
+  price_trend_pct: 'price_trend',
+  price_vs_rrp_pct: 'price_vs_rrp',
+  lifecycle_position_pct: 'lifecycle_position',
+  stock_level_pct: 'stock_level',
+  collector_premium_pct: 'collector_premium',
+  value_opportunity_pct: 'value_opportunity',
+  price_wall_pct: 'price_wall',
+  listing_ratio_pct: 'listing_ratio',
+  new_used_spread_pct: 'new_used_spread',
+};
+
+function extractPctFields(cohort: CohortRank): { key: string; short: string; tooltip: string; value: number; weight: number }[] {
+  const results: { key: string; short: string; tooltip: string; value: number; weight: number }[] = [];
   for (const [field, meta] of Object.entries(PCT_LABELS)) {
     const val = cohort[field];
     if (typeof val === 'number') {
-      results.push({ key: field, short: meta.short, tooltip: meta.tooltip, value: val });
+      const signalKey = PCT_TO_SIGNAL[field];
+      results.push({
+        key: field,
+        short: meta.short,
+        tooltip: meta.tooltip,
+        value: val,
+        weight: signalKey ? getSignalWeight(signalKey) : 1.0,
+      });
     }
   }
   return results;
@@ -146,8 +170,8 @@ export function CohortSection({
                 )}
               </div>
               <div className="flex flex-wrap items-center gap-2.5">
-                {pctFields.map(({ key, short, tooltip, value }) => (
-                  <PctInline key={key} label={short} value={value} tooltip={tooltip} />
+                {pctFields.map(({ key, short, tooltip, value, weight }) => (
+                  <PctInline key={key} label={short} value={value} tooltip={tooltip} weight={weight} />
                 ))}
               </div>
             </div>
@@ -267,18 +291,26 @@ export function SignalsPanel({ setNumber }: SignalsPanelProps) {
           <tbody>
             {SIGNALS.map(({ key, label, desc }) => {
               const value = data[key as keyof ItemSignals] as number | null;
+              const weight = getSignalWeight(key);
               return (
                 <tr key={key} className="border-b last:border-b-0">
-                  <td className="px-4 py-2.5 text-sm font-medium">{label}</td>
+                  <td className="px-4 py-2.5 text-sm font-medium">
+                    {label}
+                    {weight !== 1.0 && (
+                      <span className="ml-1.5 text-xs text-muted-foreground" title={`ML weight: ${weight}x`}>
+                        {weight}x
+                      </span>
+                    )}
+                  </td>
                   <td className="px-4 py-2.5 text-right">
                     <span
-                      className={`rounded px-2 py-0.5 font-mono text-sm font-semibold ${scoreColor(value)} ${scoreBg(value)}`}
+                      className={`rounded px-2 py-0.5 font-mono text-sm font-semibold ${scoreColor(value, weight)} ${scoreBg(value, weight)}`}
                     >
                       {value != null ? value.toFixed(0) : '--'}
                     </span>
                   </td>
                   <td className="px-4 py-2.5">
-                    <ScoreBar value={value} />
+                    <ScoreBar value={value} weight={weight} />
                   </td>
                   <td className="text-muted-foreground px-4 py-2.5 text-xs">
                     {desc}

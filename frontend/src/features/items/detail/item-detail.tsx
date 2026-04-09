@@ -21,6 +21,7 @@ import { DataTable } from '@/components/ui/table/data-table';
 import type { BuyRating, ItemDetail, PriceRecord } from '../types';
 import { formatPrice, getLatestPriceBySource } from '../types';
 import { priceColumns } from './price-columns';
+import { DetailBundleProvider } from './detail-bundle-context';
 import { InvestmentPanel } from './investment-panel';
 import { BrickeconomyPanel } from './brickeconomy-panel';
 import { BricklinkPriceChart } from './bricklink-price-chart';
@@ -108,7 +109,7 @@ export function ItemDetailView({ setNumber }: ItemDetailViewProps) {
   const [enrichMessage, setEnrichMessage] = useState<string | null>(null);
   const [mlPredicting, setMlPredicting] = useState(false);
   const [watchlistLoading, setWatchlistLoading] = useState(false);
-  const [buyRatingLoading, setBuyRatingLoading] = useState<string | null>(null);
+  const [buyRatingLoading, setBuyRatingLoading] = useState<BuyRating | null>(null);
   const [listingStatus, setListingStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
   const [listingMessage, setListingMessage] = useState<string | null>(null);
 
@@ -409,6 +410,7 @@ export function ItemDetailView({ setNumber }: ItemDetailViewProps) {
   const latestBySource = getLatestPriceBySource(item.prices);
 
   return (
+    <DetailBundleProvider setNumber={setNumber}>
     <div className='flex flex-col gap-6'>
       {/* Header */}
       <div className='flex items-start gap-4'>
@@ -425,7 +427,11 @@ export function ItemDetailView({ setNumber }: ItemDetailViewProps) {
           <img
             src={item.image_url}
             alt={item.title ?? ''}
-            className='h-32 w-32 rounded-lg object-cover'
+            className='h-32 w-32 cursor-pointer rounded-lg object-cover transition-opacity hover:opacity-80'
+            title='Click to open images in Finder'
+            onClick={() => {
+              fetch(`/api/images/open/${item.set_number}`, { method: 'POST' });
+            }}
           />
         )}
         <div>
@@ -582,6 +588,12 @@ export function ItemDetailView({ setNumber }: ItemDetailViewProps) {
                   <DropdownMenuItem onClick={() => handleListOn('shopee')}>
                     Shopee MY
                   </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => handleListOn('carousell')}>
+                    Carousell MY
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => handleListOn('facebook')}>
+                    Facebook Marketplace
+                  </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
             )}
@@ -734,5 +746,6 @@ export function ItemDetailView({ setNumber }: ItemDetailViewProps) {
         )}
       </div>
     </div>
+    </DetailBundleProvider>
   );
 }

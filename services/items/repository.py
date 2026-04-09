@@ -154,10 +154,9 @@ def record_price(
     conn.execute(
         """
         INSERT INTO price_records (
-            id, set_number, source, price_cents, currency,
+            set_number, source, price_cents, currency,
             title, url, shop_name, condition, recorded_at
         ) VALUES (
-            nextval('price_records_id_seq'),
             ?, ?, ?, ?, ?, ?, ?, ?, now()
         )
         """,

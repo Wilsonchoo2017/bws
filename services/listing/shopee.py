@@ -64,13 +64,16 @@ async def _create_listing(page: Page, set_number: str) -> bool:
     weight = shipping_weight_kg(item.get("weight"))
     dims = shipping_dimensions_cm(item.get("dimensions"))
 
-    listing_price = item.get("listing_price_cents")
-    if not listing_price:
+    base_price = item.get("listing_price_cents")
+    if not base_price:
         logger.error(
             "No listing price set for %s -- set it in the item detail page first",
             set_number,
         )
         return False
+
+    # Shopee price is 5% above the base listing price
+    listing_price = round(base_price * 1.05)
 
     if weight is None:
         logger.warning("No weight data for %s, using 1.0 kg", set_number)

@@ -3,52 +3,74 @@
 import { useEffect, useState } from 'react';
 import type { CohortRank } from '../types';
 import { CohortSection } from '../signals-table';
+import { useDetailBundle } from './detail-bundle-context';
 
 interface CohortPanelProps {
   setNumber: string;
 }
 
 export function CohortPanel({ setNumber }: CohortPanelProps) {
+  const { bundle, loading: bundleLoading } = useDetailBundle();
+
   const [bl, setBl] = useState<Record<string, CohortRank> | null | undefined>(undefined);
   const [be, setBe] = useState<Record<string, CohortRank> | null | undefined>(undefined);
   const [blLoading, setBlLoading] = useState(true);
   const [beLoading, setBeLoading] = useState(true);
 
   useEffect(() => {
+    if (bundleLoading) return;
+
+    // Use bundle data if present (non-null means cache was warm)
+    if (bundle?.signals) {
+      const blCohorts = (bundle.signals as Record<string, unknown>)?.cohorts as Record<string, CohortRank> | undefined;
+      setBl(blCohorts ?? null);
+      setBlLoading(false);
+    }
+    if (bundle?.signals_be) {
+      const beCohorts = (bundle.signals_be as Record<string, unknown>)?.cohorts as Record<string, CohortRank> | undefined;
+      setBe(beCohorts ?? null);
+      setBeLoading(false);
+    }
+    // If both came from bundle, done
+    if (bundle?.signals && bundle?.signals_be) return;
+
+    // Fetch individually for any missing data
     const controllers: AbortController[] = [];
 
-    // Fetch BrickLink
-    const blCtrl = new AbortController();
-    controllers.push(blCtrl);
-    fetch(`/api/items/${setNumber}/signals`, { signal: blCtrl.signal })
-      .then((res) => res.json())
-      .then((json) => {
-        if (json.success && json.data?.cohorts) {
-          setBl(json.data.cohorts);
-        } else {
-          setBl(null);
-        }
-      })
-      .catch((err) => { if (err.name !== 'AbortError') setBl(null); })
-      .finally(() => setBlLoading(false));
+    if (!bundle?.signals) {
+      const blCtrl = new AbortController();
+      controllers.push(blCtrl);
+      fetch(`/api/items/${setNumber}/signals`, { signal: blCtrl.signal })
+        .then((res) => res.json())
+        .then((json) => {
+          if (json.success && json.data?.cohorts) {
+            setBl(json.data.cohorts);
+          } else {
+            setBl(null);
+          }
+        })
+        .catch((err) => { if (err.name !== 'AbortError') setBl(null); })
+        .finally(() => setBlLoading(false));
+    }
 
-    // Fetch BrickEconomy
-    const beCtrl = new AbortController();
-    controllers.push(beCtrl);
-    fetch(`/api/items/${setNumber}/signals/be`, { signal: beCtrl.signal })
-      .then((res) => res.json())
-      .then((json) => {
-        if (json.success && json.data?.cohorts) {
-          setBe(json.data.cohorts);
-        } else {
-          setBe(null);
-        }
-      })
-      .catch((err) => { if (err.name !== 'AbortError') setBe(null); })
-      .finally(() => setBeLoading(false));
+    if (!bundle?.signals_be) {
+      const beCtrl = new AbortController();
+      controllers.push(beCtrl);
+      fetch(`/api/items/${setNumber}/signals/be`, { signal: beCtrl.signal })
+        .then((res) => res.json())
+        .then((json) => {
+          if (json.success && json.data?.cohorts) {
+            setBe(json.data.cohorts);
+          } else {
+            setBe(null);
+          }
+        })
+        .catch((err) => { if (err.name !== 'AbortError') setBe(null); })
+        .finally(() => setBeLoading(false));
+    }
 
     return () => controllers.forEach((c) => c.abort());
-  }, [setNumber]);
+  }, [setNumber, bundle, bundleLoading]);
 
   const bothEmpty = !blLoading && !beLoading && bl == null && be == null;
 

@@ -343,7 +343,7 @@ def _handle_result(
         return result.cooldown_seconds
 
     # Regular or permanent failure
-    error_msg = result.error or "Unknown error"
+    error_msg = result.error or f"Unknown error (success={result.success}, cat={result.error_category})"
     if result.permanent:
         force_fail_task(conn, task.task_id, error_msg)
     else:

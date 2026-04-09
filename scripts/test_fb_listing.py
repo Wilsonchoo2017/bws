@@ -86,12 +86,6 @@ async def run(set_number: str) -> None:
         logger.info("Images: %d", len(image_paths))
         logger.info("Description:\n%s", description)
 
-        # Groups to cross-post to
-        groups = [
-            "Malaysia Lego Garage Sales",
-            "Great Malaysia Marketplace",
-        ]
-
         # Step 3: Fill the form (no submit)
         result = await create_product(
             page,
@@ -99,7 +93,6 @@ async def run(set_number: str) -> None:
             title=title,
             description=description,
             listing_price_cents=listing_price,
-            groups=groups,
             submit=False,
         )
 

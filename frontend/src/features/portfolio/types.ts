@@ -11,6 +11,7 @@ export interface Transaction {
   created_at: string;
   bill_id: string | null;
   supplier: string | null;
+  platform: string | null;
   title: string | null;
   image_url: string | null;
   theme: string | null;
@@ -61,4 +62,26 @@ export interface PortfolioSummary {
   realized_pl_cents: number;
   holdings_count: number;
   unique_sets: number;
+}
+
+export interface ForwardReturn {
+  set_number: string;
+  forward_annual_return: number | null;
+  expected_future_price_cents: number | null;
+  current_price_cents: number;
+  expected_time_years: number;
+  price_source: 'bricklink' | 'be_estimate' | 'ml_growth' | 'none';
+  decision: 'BUY' | 'SELL' | 'HOLD' | 'SKIP';
+  exceeds_target: boolean;
+  exceeds_hurdle: boolean;
+}
+
+export interface WBRMetrics {
+  avg_buy_discount_pct: number;
+  avg_expected_return_new_buys: number;
+  inventory_turnover: number;
+  pct_capital_above_hurdle: number;
+  total_forward_return_weighted: number;
+  worst_holding: { set_number: string; forward_annual_return: number } | null;
+  best_candidate: { set_number: string; forward_annual_return: number } | null;
 }

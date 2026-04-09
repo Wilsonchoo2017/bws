@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { useDetailBundle } from './detail-bundle-context';
 
 interface GrowthPrediction {
   growth_pct: number;
@@ -14,16 +15,20 @@ interface InvestmentPanelProps {
 }
 
 export function InvestmentPanel({ setNumber }: InvestmentPanelProps) {
+  const { bundle, loading: bundleLoading } = useDetailBundle();
   const [prediction, setPrediction] = useState<GrowthPrediction | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    if (bundleLoading) return;
+    const bundleMl = bundle?.ml_growth as GrowthPrediction | null;
+    if (bundleMl?.growth_pct != null) { setPrediction(bundleMl); setLoading(false); return; }
     fetch(`/api/ml/growth/predictions/${setNumber}`)
       .then((res) => res.json())
       .then((json) => { if (json.growth_pct != null) setPrediction(json); })
       .catch(() => {})
       .finally(() => setLoading(false));
-  }, [setNumber]);
+  }, [setNumber, bundle, bundleLoading]);
 
   if (loading) {
     return (

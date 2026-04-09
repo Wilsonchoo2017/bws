@@ -2,6 +2,7 @@
 
 import { useRef, useState, useMemo } from 'react';
 import { Button } from '@/components/ui/button';
+import { useSuppliers } from '@/features/settings/use-suppliers';
 import type { Transaction } from './types';
 
 interface LineItem {
@@ -65,6 +66,9 @@ export function AddBillForm({ onSuccess, editData, onCancel }: AddBillFormProps)
       ? new Date(editData.transactions[0].txn_date).toISOString().split('T')[0]
       : new Date().toISOString().split('T')[0]
   );
+  const [txnType, setTxnType] = useState<'BUY' | 'SELL'>(
+    isEdit ? editData.transactions[0].txn_type : 'BUY'
+  );
   const [condition, setCondition] = useState<'new' | 'used'>(
     isEdit ? editData.transactions[0].condition : 'new'
   );
@@ -74,11 +78,13 @@ export function AddBillForm({ onSuccess, editData, onCancel }: AddBillFormProps)
   const [supplier, setSupplier] = useState(
     isEdit ? editData.transactions[0].supplier ?? '' : ''
   );
+  const { suppliers: supplierOptions } = useSuppliers();
 
   const resetForm = () => {
     setItems([emptyLine()]);
     setFinalAmount('');
     setTxnDate(new Date().toISOString().split('T')[0]);
+    setTxnType('BUY');
     setCondition('new');
     setNotes('');
     setSupplier('');
@@ -207,6 +213,7 @@ export function AddBillForm({ onSuccess, editData, onCancel }: AddBillFormProps)
       items: parsedItems,
       final_amount_cents: submitFinalCents,
       txn_date: new Date(txnDate).toISOString(),
+      txn_type: txnType,
       condition,
       notes: notes.trim() || null,
       supplier: supplier.trim() || null,
@@ -272,7 +279,18 @@ export function AddBillForm({ onSuccess, editData, onCancel }: AddBillFormProps)
       {error && <p className='text-destructive text-sm'>{error}</p>}
 
       {/* Shared fields */}
-      <div className='grid grid-cols-2 gap-3 sm:grid-cols-4'>
+      <div className='grid grid-cols-2 gap-3 sm:grid-cols-5'>
+        <div>
+          <label className='text-muted-foreground text-xs'>Type</label>
+          <select
+            value={txnType}
+            onChange={(e) => setTxnType(e.target.value as 'BUY' | 'SELL')}
+            className='border-input bg-background mt-1 w-full rounded border px-2 py-1.5 text-sm'
+          >
+            <option value='BUY'>BUY</option>
+            <option value='SELL'>SELL</option>
+          </select>
+        </div>
         <div>
           <label className='text-muted-foreground text-xs'>Date</label>
           <input
@@ -296,13 +314,19 @@ export function AddBillForm({ onSuccess, editData, onCancel }: AddBillFormProps)
         </div>
         <div>
           <label className='text-muted-foreground text-xs'>Supplier</label>
-          <input
-            type='text'
+          <select
             value={supplier}
             onChange={(e) => setSupplier(e.target.value)}
-            placeholder='Shopee, Lazada...'
             className='border-input bg-background mt-1 w-full rounded border px-2 py-1.5 text-sm'
-          />
+          >
+            <option value=''>Select supplier...</option>
+            {supplier && !supplierOptions.includes(supplier) && (
+              <option value={supplier}>{supplier}</option>
+            )}
+            {supplierOptions.map((s) => (
+              <option key={s} value={s}>{s}</option>
+            ))}
+          </select>
         </div>
         <div>
           <label className='text-muted-foreground text-xs'>Notes</label>

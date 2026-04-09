@@ -1052,6 +1052,22 @@ _SEQUENCE_TABLE_MAP = [
 ]
 
 
+def _set_sequence_defaults(conn: Any) -> None:
+    """Ensure id columns use sequence defaults for auto-generation.
+
+    Without DEFAULT, omitting id from INSERT causes a NOT NULL violation,
+    and concurrent nextval() calls can produce PK collisions.
+    """
+    for seq_name, table_name in _SEQUENCE_TABLE_MAP:
+        try:
+            conn.execute(
+                f"ALTER TABLE {table_name} "  # noqa: S608
+                f"ALTER COLUMN id SET DEFAULT nextval('{seq_name}')"
+            )
+        except Exception:  # noqa: BLE001
+            logger.debug("Could not set default for %s.id", table_name)
+
+
 def _sync_sequences(conn: Any) -> None:
     """Sync all sequences to max(id) + 1 of their tables.
 
@@ -1090,7 +1106,8 @@ def init_schema(conn: Any) -> None:
     _migrate_timestamp_to_timestamptz(conn)
     _migrate_date_columns(conn)
     _drop_redundant_indexes(conn)
-    # Sequences are auto-synced by Postgres via nextval() in INSERT statements.
+    _set_sequence_defaults(conn)
+    _sync_sequences(conn)
 
 
 def drop_all_tables(conn: Any) -> None:

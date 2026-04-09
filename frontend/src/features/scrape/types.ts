@@ -11,6 +11,7 @@ export interface ScraperConfig {
   id: string;
   name: string;
   description: string;
+  category: string;
   targets: ScrapeTarget[];
 }
 

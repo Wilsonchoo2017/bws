@@ -1,7 +1,8 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { scoreColor, scoreBg, rankToPercentile, formatMetricValue as fmtMetric } from '../percentile-utils';
+import { scoreColor, scoreBg, rankToPercentile, formatMetricValue as fmtMetric, getLiquidityWeight } from '../percentile-utils';
+import { useDetailBundle } from './detail-bundle-context';
 
 interface LiquidityMetric {
   value: number;
@@ -38,10 +39,10 @@ interface LiquidityData {
 }
 
 
-function PctBadge({ value }: { value: number }) {
+function PctBadge({ value, weight }: { value: number; weight?: number }) {
   return (
     <span
-      className={`rounded px-1.5 py-0.5 font-mono text-xs font-semibold ${scoreColor(value)} ${scoreBg(value)}`}
+      className={`rounded px-1.5 py-0.5 font-mono text-xs font-semibold ${scoreColor(value, weight)} ${scoreBg(value, weight)}`}
     >
       P{value.toFixed(0)}
     </span>
@@ -148,22 +149,25 @@ function LiquiditySource({
 
       {/* Individual metric rows */}
       <div className="divide-y">
-        {metricEntries.map(({ key, metric }) => (
-          <div key={key} className="flex items-center justify-between px-4 py-1.5">
-            <div className="flex items-center gap-2">
-              <span className="text-xs font-medium">{metric.label}</span>
-              <span className="text-muted-foreground text-xs">
-                <MetricDesc metricKey={key} data={data} />
-              </span>
+        {metricEntries.map(({ key, metric }) => {
+          const w = getLiquidityWeight(key);
+          return (
+            <div key={key} className="flex items-center justify-between px-4 py-1.5">
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-medium">{metric.label}</span>
+                <span className="text-muted-foreground text-xs">
+                  <MetricDesc metricKey={key} data={data} />
+                </span>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className={`font-mono text-xs ${scoreColor(metric.pct, w)}`}>
+                  {fmtMetric(key, metric.value)}
+                </span>
+                <PctBadge value={metric.pct} weight={w} />
+              </div>
             </div>
-            <div className="flex items-center gap-2">
-              <span className={`font-mono text-xs ${scoreColor(metric.pct)}`}>
-                {fmtMetric(key, metric.value)}
-              </span>
-              <PctBadge value={metric.pct} />
-            </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
 
       {/* Sales trend bar chart */}
@@ -197,12 +201,12 @@ const COHORT_LABELS: Record<string, { label: string; desc: string }> = {
   piece_group: { label: 'Piece Group', desc: 'vs similar piece count' },
 };
 
-const LIQ_PCT_FIELDS: { key: keyof LiquidityCohort; label: string }[] = [
-  { key: 'composite_pct', label: 'Overall' },
-  { key: 'volume_pct', label: 'Volume' },
-  { key: 'consistency_pct', label: 'Consistency' },
-  { key: 'trend_pct', label: 'Trend' },
-  { key: 'listing_ratio_pct', label: 'Listing' },
+const LIQ_PCT_FIELDS: { key: keyof LiquidityCohort; label: string; liqKey: string }[] = [
+  { key: 'composite_pct', label: 'Overall', liqKey: '' },
+  { key: 'volume_pct', label: 'Volume', liqKey: 'volume' },
+  { key: 'consistency_pct', label: 'Consistency', liqKey: 'consistency' },
+  { key: 'trend_pct', label: 'Trend', liqKey: 'trend' },
+  { key: 'listing_ratio_pct', label: 'Listing', liqKey: 'listing_ratio' },
 ];
 
 function LiquidityCohortGrid({ cohorts }: { cohorts: Record<string, LiquidityCohort> }) {
@@ -242,9 +246,10 @@ function LiquidityCohortGrid({ cohorts }: { cohorts: Record<string, LiquidityCoh
                 )}
               </div>
               <div className="flex flex-wrap items-center gap-2.5">
-                {LIQ_PCT_FIELDS.map(({ key, label }) => {
+                {LIQ_PCT_FIELDS.map(({ key, label, liqKey }) => {
                   const value = cohort[key];
                   const numVal = typeof value === 'number' ? value : null;
+                  const w = liqKey ? getLiquidityWeight(liqKey) : undefined;
                   return (
                     <span
                       key={key}
@@ -252,7 +257,7 @@ function LiquidityCohortGrid({ cohorts }: { cohorts: Record<string, LiquidityCoh
                       title={label}
                     >
                       <span className="text-muted-foreground text-xs">{label}</span>
-                      <span className={`font-mono text-xs font-semibold ${scoreColor(numVal)}`}>
+                      <span className={`font-mono text-xs font-semibold ${scoreColor(numVal, w)}`}>
                         {numVal !== null ? `P${numVal.toFixed(0)}` : '--'}
                       </span>
                     </span>
@@ -272,6 +277,7 @@ interface LiquidityPanelProps {
 }
 
 export function LiquidityPanel({ setNumber }: LiquidityPanelProps) {
+  const { bundle, loading: bundleLoading } = useDetailBundle();
   const [bl, setBl] = useState<LiquidityData | null | undefined>(undefined);
   const [be, setBe] = useState<LiquidityData | null | undefined>(undefined);
   const [blLoading, setBlLoading] = useState(true);
@@ -279,40 +285,59 @@ export function LiquidityPanel({ setNumber }: LiquidityPanelProps) {
   const [cohorts, setCohorts] = useState<Record<string, LiquidityCohort> | null>(null);
 
   useEffect(() => {
+    if (bundleLoading) return;
+
+    // Use bundle data if present (non-null means cache was warm)
+    if (bundle?.liquidity_bricklink) {
+      setBl(bundle.liquidity_bricklink as unknown as LiquidityData);
+      setBlLoading(false);
+    }
+    if (bundle?.liquidity_brickeconomy) {
+      setBe(bundle.liquidity_brickeconomy as unknown as LiquidityData);
+      setBeLoading(false);
+    }
+    if (bundle?.liquidity_cohorts) {
+      setCohorts(bundle.liquidity_cohorts as Record<string, LiquidityCohort>);
+    }
+    // If both came from bundle, done
+    if (bundle?.liquidity_bricklink && bundle?.liquidity_brickeconomy) return;
+
+    // Fetch individually for any missing data
     const controllers: AbortController[] = [];
 
-    // Fetch BrickLink liquidity
-    const blCtrl = new AbortController();
-    controllers.push(blCtrl);
-    fetch(`/api/items/${setNumber}/liquidity?source=bricklink`, { signal: blCtrl.signal })
-      .then((res) => res.json())
-      .then((json) => setBl(json.success ? json.data : null))
-      .catch((err) => { if (err.name !== 'AbortError') setBl(null); })
-      .finally(() => setBlLoading(false));
+    if (!bundle?.liquidity_bricklink) {
+      const blCtrl = new AbortController();
+      controllers.push(blCtrl);
+      fetch(`/api/items/${setNumber}/liquidity?source=bricklink`, { signal: blCtrl.signal })
+        .then((res) => res.json())
+        .then((json) => setBl(json.success ? json.data : null))
+        .catch((err) => { if (err.name !== 'AbortError') setBl(null); })
+        .finally(() => setBlLoading(false));
+    }
 
-    // Fetch BrickEconomy liquidity
-    const beCtrl = new AbortController();
-    controllers.push(beCtrl);
-    fetch(`/api/items/${setNumber}/liquidity?source=brickeconomy`, { signal: beCtrl.signal })
-      .then((res) => res.json())
-      .then((json) => setBe(json.success ? json.data : null))
-      .catch((err) => { if (err.name !== 'AbortError') setBe(null); })
-      .finally(() => setBeLoading(false));
+    if (!bundle?.liquidity_brickeconomy) {
+      const beCtrl = new AbortController();
+      controllers.push(beCtrl);
+      fetch(`/api/items/${setNumber}/liquidity?source=brickeconomy`, { signal: beCtrl.signal })
+        .then((res) => res.json())
+        .then((json) => setBe(json.success ? json.data : null))
+        .catch((err) => { if (err.name !== 'AbortError') setBe(null); })
+        .finally(() => setBeLoading(false));
+    }
 
-    // Fetch liquidity cohort percentiles
-    const cohortCtrl = new AbortController();
-    controllers.push(cohortCtrl);
-    fetch(`/api/items/${setNumber}/liquidity/cohorts`, { signal: cohortCtrl.signal })
-      .then((res) => res.json())
-      .then((json) => {
-        if (json.success && json.data) {
-          setCohorts(json.data);
-        }
-      })
-      .catch(() => {});
+    if (!bundle?.liquidity_cohorts) {
+      const cohortCtrl = new AbortController();
+      controllers.push(cohortCtrl);
+      fetch(`/api/items/${setNumber}/liquidity/cohorts`, { signal: cohortCtrl.signal })
+        .then((res) => res.json())
+        .then((json) => {
+          if (json.success && json.data) { setCohorts(json.data); }
+        })
+        .catch(() => {});
+    }
 
     return () => controllers.forEach((c) => c.abort());
-  }, [setNumber]);
+  }, [setNumber, bundle, bundleLoading]);
 
   const bothEmpty = !blLoading && !beLoading && bl == null && be == null;
 

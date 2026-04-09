@@ -47,15 +47,12 @@ async def _click_tab(page: Page, tab_name: str) -> None:
 async def _clear_and_type(
     page: Page, selector: str, value: str,
 ) -> None:
-    """Click an input, clear it, then type the new value."""
+    """Click an input, clear via JS native setter (React-safe), then type."""
     el = await page.wait_for_selector(selector, timeout=10_000)
     if el:
         await el.click()
-        await page.keyboard.press("Control+a")
-        await human_delay(100, 300)
-        await page.keyboard.press("Backspace")
-        await human_delay(200, 500)
-        await page.keyboard.type(value, delay=60)
+        await human_delay(200, 400)
+        await _clear_focused_and_type(page, value, delay=60)
 
 
 # ---------------------------------------------------------------------------
@@ -100,6 +97,30 @@ async def _upload_images(page: Page, image_paths: list[Path]) -> None:
     )
 
 
+async def _clear_focused_and_type(
+    page: Page, text: str, *, delay: int = 40,
+) -> None:
+    """Clear the currently focused field via JS native setter, then type."""
+    await page.evaluate("""() => {
+        const el = document.activeElement;
+        if (el && ('value' in el)) {
+            const desc = Object.getOwnPropertyDescriptor(
+                el.tagName === 'TEXTAREA'
+                    ? HTMLTextAreaElement.prototype
+                    : HTMLInputElement.prototype,
+                'value'
+            );
+            if (desc && desc.set) {
+                desc.set.call(el, '');
+                el.dispatchEvent(new Event('input', { bubbles: true }));
+                el.dispatchEvent(new Event('change', { bubbles: true }));
+            }
+        }
+    }""")
+    await human_delay(300, 500)
+    await page.keyboard.type(text, delay=delay)
+
+
 async def _fill_product_name(page: Page, title: str) -> None:
     """Fill the Product Name field on Basic Information tab."""
     try:
@@ -112,11 +133,8 @@ async def _fill_product_name(page: Page, title: str) -> None:
         ).first
 
         await name_input.click(timeout=10_000)
-        await page.keyboard.press("Control+a")
-        await human_delay(100, 200)
-        await page.keyboard.press("Backspace")
         await human_delay(200, 400)
-        await page.keyboard.type(title, delay=40)
+        await _clear_focused_and_type(page, title, delay=40)
         await human_delay(500, 1_000)
         await capture_listing_snapshot(page, "title_filled")
     except Exception as exc:
@@ -133,6 +151,20 @@ async def _set_category(page: Page) -> None:
     # Scroll back to top for category
     await page.evaluate("window.scrollTo(0, 0)")
     await human_delay(500, 1_000)
+
+    # Check if category is already set (shows path like "Hobbies...> Toys & Games")
+    already_set = await page.evaluate("""() => {
+        const el = document.querySelector(
+            '[data-product-edit-field-unique-id="category"]'
+        );
+        if (!el) return false;
+        const text = el.textContent || '';
+        return text.includes('Toys & Games') || text.includes('Toys &amp; Games');
+    }""")
+    if already_set:
+        logger.info("Category already set to Toys & Games, skipping")
+        await capture_listing_snapshot(page, "category_already_set")
+        return
 
     # Click the category edit/select button
     try:
@@ -213,6 +245,16 @@ async def _set_brand(page: Page) -> None:
     await _click_tab(page, "Specification")
     await human_delay(500, 1_000)
 
+    # Check if brand is already set to LEGO
+    brand_text = await page.evaluate("""() => {
+        const el = document.querySelector('.product-brand-item .eds-selector');
+        return el ? el.textContent.trim() : '';
+    }""")
+    if "LEGO" in brand_text:
+        logger.info("Brand already set to LEGO, skipping")
+        await capture_listing_snapshot(page, "brand_already_set")
+        return
+
     # Step 1: Click the Brand dropdown trigger to open it
     try:
         brand_trigger = page.locator('.product-brand-item .eds-selector').first
@@ -288,7 +330,7 @@ async def _fill_description(page: Page, description: str) -> None:
         if await textarea.count() > 0:
             await textarea.first.click()
             await human_delay(200, 500)
-            await page.keyboard.type(description, delay=15)
+            await _clear_focused_and_type(page, description, delay=15)
             await human_delay(500, 1_000)
     except Exception as exc:
         logger.warning("Description fill failed: %s", exc)
@@ -311,11 +353,8 @@ async def _set_price_and_stock(
             '[data-product-edit-field-unique-id="price"] input'
         ).first
         await price_input.click(timeout=10_000)
-        await page.keyboard.press("Control+a")
-        await human_delay(100, 200)
-        await page.keyboard.press("Backspace")
         await human_delay(200, 400)
-        await page.keyboard.type(price_str, delay=60)
+        await _clear_focused_and_type(page, price_str, delay=60)
         await human_delay(300, 600)
     except Exception as exc:
         logger.warning("Price input failed: %s", exc)
@@ -328,9 +367,8 @@ async def _set_price_and_stock(
             page.locator('[data-auto-correct-key="stock"] input')
         ).first
         await stock_input.click(timeout=10_000)
-        await page.keyboard.press("Control+a")
-        await human_delay(100, 200)
-        await page.keyboard.type("1", delay=60)
+        await human_delay(200, 400)
+        await _clear_focused_and_type(page, "1", delay=60)
         await human_delay(300, 600)
     except Exception as exc:
         logger.warning("Stock input failed: %s", exc)
@@ -357,9 +395,8 @@ async def _set_shipping(
             page.locator('[data-auto-correct-key="weight"] input')
         ).first
         await weight_input.click(timeout=10_000)
-        await page.keyboard.press("Control+a")
-        await human_delay(100, 200)
-        await page.keyboard.type(str(weight_kg), delay=60)
+        await human_delay(200, 400)
+        await _clear_focused_and_type(page, str(weight_kg), delay=60)
         await human_delay(500, 1_000)
     except Exception as exc:
         logger.warning("Weight input failed: %s", exc)
@@ -373,18 +410,16 @@ async def _set_shipping(
         if count >= 3:
             for i, val in enumerate([w, l, h]):
                 await dim_inputs.nth(i).click()
-                await page.keyboard.press("Control+a")
-                await human_delay(100, 200)
-                await page.keyboard.type(str(val), delay=60)
+                await human_delay(200, 400)
+                await _clear_focused_and_type(page, str(val), delay=60)
                 await human_delay(200, 400)
         else:
             # Fallback: find by placeholder patterns
             for placeholder, val in [("W", w), ("L", l), ("H", h)]:
                 inp = page.locator(f'input[placeholder*="{placeholder}"]').first
                 await inp.click(timeout=5_000)
-                await page.keyboard.press("Control+a")
-                await human_delay(100, 200)
-                await page.keyboard.type(str(val), delay=60)
+                await human_delay(200, 400)
+                await _clear_focused_and_type(page, str(val), delay=60)
                 await human_delay(200, 400)
     except Exception as exc:
         logger.warning("Parcel size input failed: %s", exc)
@@ -396,8 +431,25 @@ async def _set_shipping(
     await page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
     await human_delay(1_000, 2_000)
 
-    # Dangerous Goods -- select "No" radio button
+    # Dangerous Goods -- select "No" radio button (skip if already selected)
     try:
+        dg_already_no = await page.evaluate("""() => {
+            const spans = [...document.querySelectorAll('span, label')];
+            const dg = spans.find(s => s.textContent.trim() === 'Dangerous Goods');
+            if (!dg) return false;
+            const section = dg.closest('div[class]');
+            if (!section) return false;
+            const radios = section.querySelectorAll('input[type="radio"]');
+            for (const r of radios) {
+                const label = r.closest('label');
+                if (label && label.textContent.trim() === 'No' && r.checked) return true;
+            }
+            return false;
+        }""")
+        if dg_already_no:
+            logger.info("Dangerous Goods already set to No, skipping")
+            return
+
         # The radio is inside a section with "Dangerous Goods" text
         dg_section = page.locator('div:has(> :text("Dangerous Goods"))').or_(
             page.locator('[class*="dangerous"]')
@@ -478,6 +530,85 @@ async def _enable_delivery_options(page: Page) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Validation
+# ---------------------------------------------------------------------------
+
+
+async def _validate_form(page: Page) -> list[str]:
+    """Validate required fields before save. Returns list of failed field IDs.
+
+    Field IDs: "title", "price", "stock", "category", "weight".
+    Empty list means all checks passed.
+    """
+    errors: list[str] = []
+
+    # 1. Title
+    try:
+        title_val = await page.locator(
+            '[data-product-edit-field-unique-id="name"] input'
+        ).first.input_value()
+        if not title_val.strip():
+            errors.append("title")
+    except Exception:
+        errors.append("title")
+
+    # 2. Category (should not show "Please set category")
+    try:
+        no_cat = await page.evaluate("""() => {
+            const el = document.querySelector(
+                '[data-product-edit-field-unique-id="category"]'
+            );
+            if (!el) return true;
+            const text = el.textContent || '';
+            return text.includes('Please set category') || text.includes('Edit Category');
+        }""")
+        if no_cat:
+            errors.append("category")
+    except Exception:
+        errors.append("category")
+
+    # 3. Price
+    try:
+        await _click_tab(page, "Sales Information")
+        await human_delay(500, 1_000)
+        price_val = await page.locator(
+            '[data-product-edit-field-unique-id="price"] input'
+        ).first.input_value()
+        if not price_val.strip():
+            errors.append("price")
+    except Exception:
+        errors.append("price")
+
+    # 4. Stock
+    try:
+        stock_val = await page.locator(
+            '[data-product-edit-field-unique-id="stock"] input'
+        ).or_(
+            page.locator('[data-auto-correct-key="stock"] input')
+        ).first.input_value()
+        if not stock_val.strip() or stock_val.strip() == "0":
+            errors.append("stock")
+    except Exception:
+        errors.append("stock")
+
+    # 5. Weight
+    try:
+        await _click_tab(page, "Shipping")
+        await human_delay(500, 1_000)
+        weight_val = await page.locator(
+            '[data-product-edit-field-unique-id="weight"] input'
+        ).or_(
+            page.locator('[data-auto-correct-key="weight"] input')
+        ).first.input_value()
+        if not weight_val.strip():
+            errors.append("weight")
+    except Exception:
+        errors.append("weight")
+
+    return errors
+
+
+# ---------------------------------------------------------------------------
 # Main orchestration
 # ---------------------------------------------------------------------------
 
@@ -551,7 +682,55 @@ async def create_product(
     # Step 9: Enable delivery options
     await _enable_delivery_options(page)
 
-    # Step 10: Click "Save and Delist"
+    # Step 10: Validate form before save
+    validation_errors = await _validate_form(page)
+    if validation_errors:
+        for field in validation_errors:
+            logger.warning("Validation failed: %s -- retrying", field)
+        await capture_listing_snapshot(
+            page, "validation_failed_retry",
+            extra={"errors": validation_errors},
+        )
+
+        # Retry each failed field (dedupe price/stock since they share a step)
+        retried: set[str] = set()
+        for field in validation_errors:
+            if field in retried:
+                continue
+            if field == "title":
+                await _click_tab(page, "Basic Information")
+                await human_delay(500, 1_000)
+                await _fill_product_name(page, title)
+            elif field == "category":
+                await _click_tab(page, "Basic Information")
+                await human_delay(500, 1_000)
+                await _set_category(page)
+            elif field in ("price", "stock"):
+                await _set_price_and_stock(page, listing_price_cents)
+                retried.add("price")
+                retried.add("stock")
+            elif field == "weight":
+                await _set_shipping(page, weight_kg, dims)
+            retried.add(field)
+
+        # Re-validate
+        validation_errors = await _validate_form(page)
+        if validation_errors:
+            for field in validation_errors:
+                logger.error("Validation still failed after retry: %s", field)
+            await capture_listing_snapshot(
+                page, "validation_failed_final",
+                extra={"errors": validation_errors},
+            )
+            logger.error(
+                "Form validation failed with %d error(s) after retry -- aborting",
+                len(validation_errors),
+            )
+            return False
+
+        logger.info("Validation passed after retry")
+
+    # Step 11: Click "Save and Delist"
     try:
         # Dismiss any leftover modals first
         await page.keyboard.press("Escape")

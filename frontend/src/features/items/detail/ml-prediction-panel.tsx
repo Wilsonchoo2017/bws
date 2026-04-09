@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { useDetailBundle } from './detail-bundle-context';
 import { PredictionHistoryChart } from './prediction-history-chart';
 
 interface Driver {
@@ -127,11 +128,20 @@ interface MLPredictionPanelProps {
 }
 
 export function MLPredictionPanel({ setNumber }: MLPredictionPanelProps) {
+  const { bundle, loading: bundleLoading } = useDetailBundle();
   const [prediction, setPrediction] = useState<GrowthPrediction | null>(null);
   const [missingData, setMissingData] = useState<MissingDataResponse | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    if (bundleLoading) return;
+    const bundleMl = bundle?.ml_growth as GrowthPrediction | null;
+    if (bundleMl) {
+      if (bundleMl.growth_pct != null) { setPrediction(bundleMl); }
+      else if ((bundleMl as unknown as MissingDataResponse).missing) { setMissingData(bundleMl as unknown as MissingDataResponse); }
+      setLoading(false);
+      return;
+    }
     fetch(`/api/ml/growth/predictions/${setNumber}`)
       .then((res) => res.json())
       .then((json) => {
@@ -143,7 +153,7 @@ export function MLPredictionPanel({ setNumber }: MLPredictionPanelProps) {
       })
       .catch(() => {})
       .finally(() => setLoading(false));
-  }, [setNumber]);
+  }, [setNumber, bundle, bundleLoading]);
 
   if (loading) {
     return (

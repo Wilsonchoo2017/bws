@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import {
   useReactTable,
   getCoreRowModel,
@@ -15,9 +15,28 @@ import { DataTableColumnHeader } from '@/components/ui/table/data-table-column-h
 import { Badge } from '@/components/ui/badge';
 import { formatPrice } from '@/lib/formatting';
 import { useFetchData } from '@/lib/hooks/use-fetch-data';
-import type { Holding } from './types';
+import type { Holding, ForwardReturn } from './types';
 
-const columns: ColumnDef<Holding>[] = [
+type HoldingWithFR = Holding & {
+  forward_annual_return?: number | null;
+  decision?: string;
+  price_source?: string;
+  exceeds_target?: boolean;
+  exceeds_hurdle?: boolean;
+};
+
+function ReturnBadge({ decision }: { decision?: string }) {
+  if (!decision) return <span className='text-muted-foreground text-xs'>-</span>;
+  const variant =
+    decision === 'SELL'
+      ? 'destructive'
+      : decision === 'BUY'
+        ? 'default'
+        : 'secondary';
+  return <Badge variant={variant}>{decision}</Badge>;
+}
+
+const columns: ColumnDef<HoldingWithFR>[] = [
   {
     accessorKey: 'image_url',
     header: '',
@@ -58,18 +77,6 @@ const columns: ColumnDef<Holding>[] = [
       </span>
     ),
     size: 200,
-  },
-  {
-    accessorKey: 'condition',
-    header: ({ column }) => (
-      <DataTableColumnHeader column={column} title='Cond.' />
-    ),
-    cell: ({ row }) => (
-      <Badge variant={row.getValue('condition') === 'new' ? 'default' : 'secondary'}>
-        {row.getValue('condition')}
-      </Badge>
-    ),
-    size: 70,
   },
   {
     accessorKey: 'quantity',
@@ -154,11 +161,59 @@ const columns: ColumnDef<Holding>[] = [
     },
     size: 110,
   },
+  {
+    accessorKey: 'forward_annual_return',
+    header: ({ column }) => (
+      <DataTableColumnHeader column={column} title='Fwd Return' />
+    ),
+    cell: ({ row }) => {
+      const ret = row.getValue('forward_annual_return') as number | null | undefined;
+      if (ret == null) return <span className='text-muted-foreground text-xs'>-</span>;
+      const pct = (ret * 100).toFixed(1);
+      const color =
+        ret >= 0.5 ? 'text-green-600' : ret >= 0.2 ? 'text-yellow-600' : 'text-red-600';
+      const sign = ret > 0 ? '+' : '';
+      return (
+        <div className={`font-mono text-sm ${color}`}>
+          {sign}{pct}%
+          <div className='text-muted-foreground text-xs'>
+            {row.original.price_source ?? ''}
+          </div>
+        </div>
+      );
+    },
+    size: 100,
+  },
+  {
+    accessorKey: 'decision',
+    header: ({ column }) => (
+      <DataTableColumnHeader column={column} title='Action' />
+    ),
+    cell: ({ row }) => <ReturnBadge decision={row.getValue('decision') as string | undefined} />,
+    size: 80,
+  },
 ];
 
 export function HoldingsTable() {
-  const { data, loading } = useFetchData<Holding>('/api/portfolio/holdings');
+  const { data: holdings, loading } = useFetchData<Holding>('/api/portfolio/holdings');
+  const { data: forwardReturns } = useFetchData<ForwardReturn>('/api/portfolio/forward-returns');
   const [sorting, setSorting] = useState<SortingState>([]);
+
+  const data = useMemo(() => {
+    if (!forwardReturns.length) return holdings as HoldingWithFR[];
+    const frMap = new Map(forwardReturns.map((fr) => [fr.set_number, fr]));
+    return holdings.map((h) => {
+      const fr = frMap.get(h.set_number);
+      return {
+        ...h,
+        forward_annual_return: fr?.forward_annual_return,
+        decision: fr?.decision,
+        price_source: fr?.price_source,
+        exceeds_target: fr?.exceeds_target,
+        exceeds_hurdle: fr?.exceeds_hurdle,
+      } as HoldingWithFR;
+    });
+  }, [holdings, forwardReturns]);
 
   const table = useReactTable({
     data,

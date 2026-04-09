@@ -5,6 +5,7 @@ import { CopyButton } from '@/components/ui/copy-button';
 import { formatPrice } from '@/lib/formatting';
 import type { ItemDetail, KeepaData, MinifigurePrice } from '../types';
 import { getLatestPriceBySource } from '../types';
+import { useDetailBundle } from './detail-bundle-context';
 import {
   generateListingDescription,
   generateListingTitle,
@@ -117,30 +118,41 @@ export function ListingPanel({ item }: ListingPanelProps) {
   const [priceSaved, setPriceSaved] = useState(false);
   const hasFetched = useRef(false);
 
+  const { bundle } = useDetailBundle();
+
   useEffect(() => {
     if (collapsed || hasFetched.current) return;
     hasFetched.current = true;
 
-    // Fetch minifigures
-    fetch(`/api/items/${item.set_number}/minifigures`)
-      .then((res) => res.json())
-      .then((json) => {
-        if (json.success && json.data?.minifigures) {
-          setMinifigures(json.data.minifigures);
-        }
-      })
-      .catch(() => {});
+    // Use bundle data if available, else fetch individually
+    if (bundle?.minifigures) {
+      const mf = bundle.minifigures as { minifigures?: MinifigurePrice[] };
+      if (mf.minifigures) setMinifigures(mf.minifigures);
+    } else {
+      fetch(`/api/items/${item.set_number}/minifigures`)
+        .then((res) => res.json())
+        .then((json) => {
+          if (json.success && json.data?.minifigures) {
+            setMinifigures(json.data.minifigures);
+          }
+        })
+        .catch(() => {});
+    }
 
-    // Fetch Keepa Amazon title
-    fetch(`/api/items/${item.set_number}/keepa`)
-      .then((res) => res.json())
-      .then((json) => {
-        if (json.success && json.data) {
-          const keepa = json.data as KeepaData;
-          if (keepa.title) setKeepaTitle(keepa.title);
-        }
-      })
-      .catch(() => {});
+    if (bundle?.keepa) {
+      const keepa = bundle.keepa as unknown as KeepaData;
+      if (keepa.title) setKeepaTitle(keepa.title);
+    } else {
+      fetch(`/api/items/${item.set_number}/keepa`)
+        .then((res) => res.json())
+        .then((json) => {
+          if (json.success && json.data) {
+            const keepa = json.data as KeepaData;
+            if (keepa.title) setKeepaTitle(keepa.title);
+          }
+        })
+        .catch(() => {});
+    }
 
     // Fetch listing settings
     fetch('/api/settings')

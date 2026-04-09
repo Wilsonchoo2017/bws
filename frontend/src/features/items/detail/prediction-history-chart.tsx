@@ -11,6 +11,7 @@ import {
   XAxis,
   YAxis,
 } from 'recharts';
+import { useDetailBundle } from './detail-bundle-context';
 
 interface PredictionPoint {
   date: string;
@@ -64,10 +65,14 @@ function ChartTooltip({ active, payload, label }: any) {
 }
 
 export function PredictionHistoryChart({ setNumber }: PredictionHistoryChartProps) {
+  const { bundle, loading: bundleLoading } = useDetailBundle();
   const [data, setData] = useState<PredictionPoint[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    if (bundleLoading) return;
+    const bundleTracking = bundle?.ml_tracking as PredictionPoint[] | null;
+    if (bundleTracking) { setData(bundleTracking); setLoading(false); return; }
     const controller = new AbortController();
     fetch(`/api/ml/tracking/${setNumber}`, { signal: controller.signal })
       .then((res) => res.json())
@@ -83,7 +88,7 @@ export function PredictionHistoryChart({ setNumber }: PredictionHistoryChartProp
       })
       .finally(() => setLoading(false));
     return () => controller.abort();
-  }, [setNumber]);
+  }, [setNumber, bundle, bundleLoading]);
 
   if (loading) {
     return (

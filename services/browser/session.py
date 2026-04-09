@@ -67,7 +67,7 @@ class BrowserSession:
                 geoip=True,
                 locale=cfg.locale,
                 os="macos",
-                humanize=True,
+                humanize=0.5,
                 persistent_context=True,
                 user_data_dir=str(user_data_path),
                 window=cfg.window,

@@ -97,6 +97,8 @@ _DEFAULTS: dict[str, Any] = {
         "checkpoint_interval_s": 30,
     },
     "paused_workers": [],
+    "suppliers": [],
+    "platforms": [],
     "listing": {
         "shopee": {
             "max_photos": 9,
@@ -112,6 +114,14 @@ _DEFAULTS: dict[str, Any] = {
         "min_confidence": "high",
         "max_avoid_probability": 0.5,
         "min_growth_pct": 8,
+    },
+    "forward_return": {
+        "min_return": 0.20,
+        "target_return": 0.50,
+        "default_horizon_years": 2.0,
+        "retired_horizon_years": 1.0,
+        "post_retirement_bonus_years": 1.5,
+        "min_time_years": 0.25,
     },
 }
 
@@ -225,6 +235,10 @@ def _apply_runtime(section: str, values: dict[str, Any]) -> None:
     elif section == "listing":
         pass  # static config, no live propagation needed
     elif section == "cart":
+        pass  # static config, no live propagation needed
+    elif section == "suppliers":
+        pass  # static config, no live propagation needed
+    elif section == "platforms":
         pass  # static config, no live propagation needed
 
 

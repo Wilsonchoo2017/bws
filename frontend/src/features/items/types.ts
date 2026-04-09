@@ -221,6 +221,7 @@ export interface ItemSignals {
   release_date: string | null;
   parts_count: number | null;
   rrp_usd_cents: number | null;
+  composite_score: number | null;
   cohorts: Record<string, CohortRank> | null;
 }
 

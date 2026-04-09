@@ -22,8 +22,8 @@ def get_engine() -> Engine:
 
         _engine = create_engine(
             POSTGRES_URL,
-            pool_size=5,
-            max_overflow=10,
+            pool_size=10,
+            max_overflow=20,
             pool_pre_ping=True,
         )
     return _engine

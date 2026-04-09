@@ -20,9 +20,11 @@ router = APIRouter(prefix="/scrape", tags=["scrape"])
 
 # Registry of available scrapers
 SCRAPERS: list[ScraperInfo] = [
+    # -- Retail --
     ScraperInfo(
         id="shopee",
         name="Shopee Malaysia",
+        category="retail",
         description="Scrape LEGO products from Shopee.com.my shops and collections",
         targets=[
             ScrapeTargetInfo(
@@ -48,6 +50,7 @@ SCRAPERS: list[ScraperInfo] = [
     ScraperInfo(
         id="toysrus",
         name='Toys"R"Us Malaysia',
+        category="retail",
         description="Scrape LEGO catalog from toysrus.com.my via Demandware API",
         targets=[
             ScrapeTargetInfo(
@@ -61,6 +64,7 @@ SCRAPERS: list[ScraperInfo] = [
     ScraperInfo(
         id="mightyutan",
         name="Mighty Utan Malaysia",
+        category="retail",
         description="Scrape LEGO catalog from mightyutan.com.my via SiteGiant storefront",
         targets=[
             ScrapeTargetInfo(
@@ -74,6 +78,7 @@ SCRAPERS: list[ScraperInfo] = [
     ScraperInfo(
         id="hobbydigi",
         name="HobbyDigi Malaysia",
+        category="retail",
         description="Scrape LEGO catalog from hobbydigi.com/my via Camoufox browser (Magento)",
         targets=[
             ScrapeTargetInfo(
@@ -84,9 +89,11 @@ SCRAPERS: list[ScraperInfo] = [
             )
         ],
     ),
+    # -- Market Analysis --
     ScraperInfo(
         id="shopee_saturation",
         name="Shopee Saturation Checker",
+        category="market",
         description="Check market saturation on Shopee for items with retail pricing",
         targets=[
             ScrapeTargetInfo(
@@ -100,6 +107,7 @@ SCRAPERS: list[ScraperInfo] = [
     ScraperInfo(
         id="shopee_competition",
         name="Shopee Competition Tracker",
+        category="market",
         description="Track competing sellers on Shopee for portfolio items",
         targets=[
             ScrapeTargetInfo(
@@ -111,8 +119,24 @@ SCRAPERS: list[ScraperInfo] = [
         ],
     ),
     ScraperInfo(
+        id="carousell",
+        name="Carousell Malaysia",
+        category="marketplace",
+        description="Search Carousell.com.my for LEGO listings -- seller count, prices, conditions",
+        targets=[
+            ScrapeTargetInfo(
+                id="search-example",
+                label="Search by Set Number",
+                url="40346",
+                description="Search Carousell for a LEGO set number (e.g. 40346)",
+            ),
+        ],
+    ),
+    # -- Reference Data --
+    ScraperInfo(
         id="bricklink_catalog",
         name="BrickLink Catalog List",
+        category="reference",
         description="Discover items from a BrickLink catalog list page with full pagination",
         targets=[
             ScrapeTargetInfo(
@@ -124,21 +148,9 @@ SCRAPERS: list[ScraperInfo] = [
         ],
     ),
     ScraperInfo(
-        id="carousell",
-        name="Carousell Malaysia",
-        description="Search Carousell.com.my for LEGO listings -- seller count, prices, conditions",
-        targets=[
-            ScrapeTargetInfo(
-                id="search-example",
-                label="Search by Set Number",
-                url="40346",
-                description="Search Carousell for a LEGO set number (e.g. 40346)",
-            ),
-        ],
-    ),
-    ScraperInfo(
         id="brickeconomy",
         name="BrickEconomy",
+        category="reference",
         description="Scrape set value history, sale trends, and metadata from BrickEconomy.com",
         targets=[
             ScrapeTargetInfo(
@@ -158,6 +170,7 @@ SCRAPERS: list[ScraperInfo] = [
     ScraperInfo(
         id="keepa",
         name="Keepa",
+        category="reference",
         description="Scrape Amazon price history from Keepa.com -- Buy Box, New, 3P FBA/FBM, Used prices",
         targets=[
             ScrapeTargetInfo(
@@ -219,6 +232,14 @@ async def start_scrape(request: ScrapeRequest):
         raise HTTPException(
             status_code=400,
             detail="URL must be a mightyutan.com.my URL",
+        )
+
+    if request.scraper_id == "hobbydigi" and not request.url.startswith(
+        "https://www.hobbydigi.com/my/"
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail="URL must be a hobbydigi.com/my URL",
         )
 
     if request.scraper_id == "shopee_saturation" and not (

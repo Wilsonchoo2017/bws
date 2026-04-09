@@ -64,10 +64,11 @@ class PgConnection:
     """Connection wrapper over a raw psycopg2 connection.
 
     Provides execute/fetchone/fetchall/description/df so that repository
-    code works unchanged.
+    code works unchanged.  When backed by a pool, .close() returns the
+    connection instead of destroying it.
     """
 
-    def __init__(self, raw_conn: Any) -> None:
+    def __init__(self, raw_conn: Any, **_kwargs: Any) -> None:
         self._conn = raw_conn
         self._cursor: Any = None
 

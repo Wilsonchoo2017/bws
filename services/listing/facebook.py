@@ -70,15 +70,20 @@ async def _create_listing(page: Page, set_number: str) -> bool:
         len(image_paths),
     )
 
-    # Step 4: Fill the create-item form (does NOT publish by default)
-    result = await create_product(
+    # Step 4: Fill the create-item form and publish
+    success = await create_product(
         page,
         image_paths=image_paths,
         title=title,
         description=description,
         listing_price_cents=listing_price,
-        submit=False,
+        submit=True,
     )
+
+    # Step 5: Record listing in database
+    if success:
+        from services.listing.repository import record_listing
+        record_listing(conn, set_number, "facebook", listing_price)
 
     await capture_listing_snapshot(
         page,
@@ -91,7 +96,7 @@ async def _create_listing(page: Page, set_number: str) -> bool:
         },
     )
 
-    return result
+    return success
 
 
 def create_listing(set_number: str) -> bool:

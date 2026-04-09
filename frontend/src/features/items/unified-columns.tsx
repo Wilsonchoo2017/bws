@@ -7,6 +7,12 @@ declare module '@tanstack/react-table' {
     toggleWatchlist?: (setNumber: string) => void;
     watchlistLoading?: Set<string>;
     enriching?: boolean;
+    addToCart?: (setNumber: string) => void;
+    cartLoading?: Set<string>;
+    cartSetNumbers?: Set<string>;
+    cartEntries?: Map<string, { set_number: string; source: string; added_at: string }>;
+    removeFromCart?: (setNumber: string) => void;
+    banFromCart?: (setNumber: string) => void;
   }
 }
 
@@ -65,6 +71,45 @@ export const unifiedColumns: ColumnDef<UnifiedItem>[] = [
       );
     },
     size: 40,
+    enableSorting: false,
+  },
+  {
+    id: 'add_to_cart',
+    header: '',
+    cell: ({ row, table }) => {
+      const setNumber = row.original.set_number;
+      const inCart = table.options.meta?.cartSetNumbers?.has(setNumber);
+      const isLoading = table.options.meta?.cartLoading?.has(setNumber);
+      const onAdd = table.options.meta?.addToCart;
+      if (inCart) {
+        return (
+          <span
+            className='text-emerald-600 dark:text-emerald-400 text-xs font-semibold'
+            title='In cart'
+          >
+            In Cart
+          </span>
+        );
+      }
+      return (
+        <button
+          disabled={isLoading}
+          onClick={(e) => {
+            e.stopPropagation();
+            onAdd?.(setNumber);
+          }}
+          className={`text-xs px-1.5 py-0.5 rounded transition-colors ${
+            isLoading
+              ? 'animate-pulse text-muted-foreground'
+              : 'text-muted-foreground hover:text-primary hover:bg-primary/10'
+          }`}
+          title='Add to cart'
+        >
+          {isLoading ? '...' : '+ Cart'}
+        </button>
+      );
+    },
+    size: 65,
     enableSorting: false,
   },
   {
@@ -307,23 +352,27 @@ export const unifiedColumns: ColumnDef<UnifiedItem>[] = [
     size: 100
   },
   {
+    id: 'best_price',
     accessorKey: 'shopee_price_cents',
     header: ({ column }) => (
-      <DataTableColumnHeader column={column} title='Shopee' />
+      <DataTableColumnHeader column={column} title='Best Price' />
     ),
     cell: ({ row, table }) => {
-      const cents = row.getValue('shopee_price_cents') as number | null;
-      if (table.options.meta?.enriching && cents == null) return <PriceShimmer />;
-      const url = row.original.shopee_url;
-      const shopName = row.original.shopee_shop_name;
-      const shopCount = row.original.shopee_shop_count ?? 0;
-      const formatted = formatPrice(cents, 'MYR');
-      if (!cents) return <span className='text-muted-foreground'>-</span>;
+      const sources: { label: string; cents: number | null; currency: string; url: string | null }[] = [
+        { label: 'Shopee', cents: row.original.shopee_price_cents, currency: row.original.shopee_currency ?? 'MYR', url: row.original.shopee_url },
+        { label: 'TRU', cents: row.original.toysrus_price_cents, currency: row.original.toysrus_currency ?? 'MYR', url: row.original.toysrus_url },
+        { label: 'MU', cents: row.original.mightyutan_price_cents, currency: row.original.mightyutan_currency ?? 'MYR', url: row.original.mightyutan_url },
+      ];
+      const available = sources.filter((s) => s.cents != null && s.cents > 0) as { label: string; cents: number; currency: string; url: string | null }[];
+      if (table.options.meta?.enriching && available.length === 0) return <PriceShimmer />;
+      if (available.length === 0) return <span className='text-muted-foreground'>-</span>;
+      const best = available.reduce((a, b) => (a.cents <= b.cents ? a : b));
+      const formatted = formatPrice(best.cents, best.currency);
       return (
         <div className='flex flex-col gap-0.5'>
-          {url ? (
+          {best.url ? (
             <a
-              href={url}
+              href={best.url}
               target='_blank'
               rel='noopener noreferrer'
               className='text-primary font-mono text-sm hover:underline'
@@ -333,70 +382,26 @@ export const unifiedColumns: ColumnDef<UnifiedItem>[] = [
           ) : (
             <span className='font-mono text-sm'>{formatted}</span>
           )}
-          {shopName && (
-            <span className='text-muted-foreground truncate text-[10px] leading-tight max-w-[120px]'>
-              {shopName}
-              {shopCount > 1 && (
-                <span className='ml-0.5 text-[9px]'>+{shopCount - 1}</span>
-              )}
-            </span>
-          )}
+          <span className='text-muted-foreground text-[10px] leading-tight'>
+            {best.label}
+            {available.length > 1 && (
+              <span className='ml-0.5 text-[9px]'>
+                ({available.length} sources)
+              </span>
+            )}
+          </span>
         </div>
       );
     },
+    sortingFn: (rowA, rowB) => {
+      const getMin = (row: typeof rowA) => {
+        const vals = [row.original.shopee_price_cents, row.original.toysrus_price_cents, row.original.mightyutan_price_cents]
+          .filter((v): v is number => v != null && v > 0);
+        return vals.length > 0 ? Math.min(...vals) : Infinity;
+      };
+      return getMin(rowA) - getMin(rowB);
+    },
     size: 130
-  },
-  {
-    accessorKey: 'toysrus_price_cents',
-    header: ({ column }) => (
-      <DataTableColumnHeader column={column} title='TRU' />
-    ),
-    cell: ({ row, table }) => {
-      const cents = row.getValue('toysrus_price_cents') as number | null;
-      if (table.options.meta?.enriching && cents == null) return <PriceShimmer />;
-      const url = row.original.toysrus_url;
-      const formatted = formatPrice(cents, 'MYR');
-      if (!cents) return <span className='text-muted-foreground'>-</span>;
-      return url ? (
-        <a
-          href={url}
-          target='_blank'
-          rel='noopener noreferrer'
-          className='text-primary font-mono text-sm hover:underline'
-        >
-          {formatted}
-        </a>
-      ) : (
-        <span className='font-mono text-sm'>{formatted}</span>
-      );
-    },
-    size: 110
-  },
-  {
-    accessorKey: 'mightyutan_price_cents',
-    header: ({ column }) => (
-      <DataTableColumnHeader column={column} title='MU' />
-    ),
-    cell: ({ row, table }) => {
-      const cents = row.getValue('mightyutan_price_cents') as number | null;
-      if (table.options.meta?.enriching && cents == null) return <PriceShimmer />;
-      const url = row.original.mightyutan_url;
-      const formatted = formatPrice(cents, 'MYR');
-      if (!cents) return <span className='text-muted-foreground'>-</span>;
-      return url ? (
-        <a
-          href={url}
-          target='_blank'
-          rel='noopener noreferrer'
-          className='text-primary font-mono text-sm hover:underline'
-        >
-          {formatted}
-        </a>
-      ) : (
-        <span className='font-mono text-sm'>{formatted}</span>
-      );
-    },
-    size: 110
   },
   {
     accessorKey: 'bricklink_new_cents',

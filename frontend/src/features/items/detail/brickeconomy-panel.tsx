@@ -17,6 +17,7 @@ import {
   YAxis,
 } from 'recharts';
 import type { BrickeconomyData } from '../types';
+import { useDetailBundle } from './detail-bundle-context';
 import type { ChartDateRange } from './item-detail';
 
 interface BrickeconomyPanelProps {
@@ -416,11 +417,19 @@ function ValueScatterChart({
 // ---------------------------------------------------------------------------
 
 export function BrickeconomyPanel({ setNumber, globalDateRange, onDateRange }: BrickeconomyPanelProps) {
+  const { bundle, loading: bundleLoading } = useDetailBundle();
   const [data, setData] = useState<BrickeconomyData | null>(null);
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState<ChartTab>('value');
 
   useEffect(() => {
+    if (bundleLoading) return;
+    if (bundle?.brickeconomy) {
+      setData(bundle.brickeconomy as unknown as BrickeconomyData);
+      setLoading(false);
+      return;
+    }
+    // Fallback: fetch individually (bundle loaded without BE data, or no bundle)
     fetch(`/api/items/${setNumber}/brickeconomy`)
       .then((res) => res.json())
       .then((json) => {
@@ -430,7 +439,7 @@ export function BrickeconomyPanel({ setNumber, globalDateRange, onDateRange }: B
       })
       .catch(() => {})
       .finally(() => setLoading(false));
-  }, [setNumber]);
+  }, [setNumber, bundle, bundleLoading]);
 
   const { points: valuePoints, trend: valueTrend } = data
     ? buildValueData(data)

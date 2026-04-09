@@ -28,6 +28,30 @@ async def _snap(page: Page, step: str) -> None:
     await capture_listing_snapshot(page, step)
 
 
+async def _clear_focused_and_type(
+    page: Page, text: str, *, delay: int = 40,
+) -> None:
+    """Clear the currently focused field via JS native setter (React-safe), then type."""
+    await page.evaluate("""() => {
+        const el = document.activeElement;
+        if (el && ('value' in el)) {
+            const desc = Object.getOwnPropertyDescriptor(
+                el.tagName === 'TEXTAREA'
+                    ? HTMLTextAreaElement.prototype
+                    : HTMLInputElement.prototype,
+                'value'
+            );
+            if (desc && desc.set) {
+                desc.set.call(el, '');
+                el.dispatchEvent(new Event('input', { bubbles: true }));
+                el.dispatchEvent(new Event('change', { bubbles: true }));
+            }
+        }
+    }""")
+    await human_delay(300, 500)
+    await page.keyboard.type(text, delay=delay)
+
+
 # ---------------------------------------------------------------------------
 # Individual form field functions
 # ---------------------------------------------------------------------------
@@ -82,8 +106,9 @@ async def _fill_title(page: Page, title: str) -> None:
 
     el = await _find_field_by_label(page, "Title")
     if el:
-        await el.evaluate("el => { el.focus(); el.value = ''; }")
-        await page.keyboard.type(title, delay=40)
+        await el.evaluate("el => el.focus()")
+        await human_delay(200, 400)
+        await _clear_focused_and_type(page, title, delay=40)
         logger.info("Filled title: %s", title[:60])
     else:
         logger.warning("Title field not found")
@@ -100,8 +125,9 @@ async def _fill_price(page: Page, price_cents: int) -> None:
 
     el = await _find_field_by_label(page, "Price")
     if el:
-        await el.evaluate("el => { el.focus(); el.value = ''; }")
-        await page.keyboard.type(price_str, delay=40)
+        await el.evaluate("el => el.focus()")
+        await human_delay(200, 400)
+        await _clear_focused_and_type(page, price_str, delay=40)
         logger.info("Filled price: RM%s", price_str)
     else:
         logger.warning("Price field not found")
@@ -114,7 +140,25 @@ async def _select_category(page: Page) -> None:
     """Select the Category dropdown -- choose 'Toys & games'."""
     await _snap(page, "fb_before_category")
 
-    # Find the Category combobox by its label
+    # Check if category is already set to "Toys & games"
+    already_set = await page.evaluate("""() => {
+        const spans = [...document.querySelectorAll('span')];
+        const cat = spans.find(
+            s => s.textContent.trim() === 'Category'
+              && s.closest('label[role="combobox"]')
+        );
+        if (!cat) return false;
+        const container = cat.closest('label[role="combobox"]');
+        const text = container ? container.textContent : '';
+        const norm = text.toLowerCase().replace(/[^a-z0-9& ]/g, '').trim();
+        return norm.includes('toys & games');
+    }""")
+    if already_set:
+        logger.info("Category already set to Toys & games, skipping")
+        await _snap(page, "fb_category_already_set")
+        return
+
+    # Find the Category combobox by its label and click it
     clicked = await page.evaluate("""() => {
         const spans = [...document.querySelectorAll('span')];
         const cat = spans.find(
@@ -131,34 +175,71 @@ async def _select_category(page: Page) -> None:
         await _snap(page, "fb_category_not_found")
         return
 
-    await human_delay(min_ms=1_000, max_ms=2_000)
+    await human_delay(min_ms=1_500, max_ms=2_500)
+    await _snap(page, "fb_category_dropdown_open")
 
-    # Select "Toys & games" from the dropdown list
+    # Select "Toys & games" -- must be an exact match to avoid
+    # picking "Tools" or other partial hits.  The dropdown uses
+    # role="option" elements or visible spans inside a listbox.
     selected = await page.evaluate("""() => {
-        const items = [...document.querySelectorAll(
-            '[role="option"], [role="menuitem"], [role="listbox"] span'
-        )];
-        const target = items.find(
-            el => el.textContent.trim().toLowerCase().includes('toys')
-               && el.textContent.trim().toLowerCase().includes('game')
-        );
-        if (target) { target.click(); return true; }
+        const normalize = s => s.toLowerCase().replace(/[^a-z0-9& ]/g, '').trim();
+        const target = 'toys & games';
 
-        // Fallback: try all visible spans
-        const spans = [...document.querySelectorAll('span')];
-        const match = spans.find(
-            s => s.textContent.trim().toLowerCase().includes('toys')
-              && s.textContent.trim().toLowerCase().includes('game')
-              && s.offsetParent !== null
+        // First try role="option" elements (standard listbox items)
+        const options = [...document.querySelectorAll('[role="option"]')];
+        for (const opt of options) {
+            if (normalize(opt.textContent) === target) {
+                opt.click();
+                return 'option';
+            }
+        }
+
+        // Try all visible spans with exact match
+        const spans = [...document.querySelectorAll('span')].filter(
+            s => s.offsetParent !== null
         );
-        if (match) { match.click(); return true; }
-        return false;
+        for (const s of spans) {
+            if (normalize(s.textContent) === target) {
+                s.click();
+                return 'span_exact';
+            }
+        }
+
+        // Fallback: scroll through the dropdown to find it
+        const listbox = document.querySelector('[role="listbox"]');
+        if (listbox) {
+            // Scroll to bottom to load all items
+            listbox.scrollTop = listbox.scrollHeight;
+        }
+
+        return null;
     }""")
 
     if selected:
-        logger.info("Selected category: Toys & games")
+        logger.info("Selected category: Toys & games (via %s)", selected)
     else:
-        logger.warning("Could not select 'Toys & games' category")
+        # Dropdown may need scrolling -- wait and retry
+        await human_delay(min_ms=1_000, max_ms=1_500)
+        retry = await page.evaluate("""() => {
+            const normalize = s => s.toLowerCase().replace(/[^a-z0-9& ]/g, '').trim();
+            const target = 'toys & games';
+
+            const spans = [...document.querySelectorAll('span')].filter(
+                s => s.offsetParent !== null
+            );
+            for (const s of spans) {
+                if (normalize(s.textContent) === target) {
+                    s.scrollIntoView({block: 'center'});
+                    s.click();
+                    return true;
+                }
+            }
+            return false;
+        }""")
+        if retry:
+            logger.info("Selected category: Toys & games (after scroll)")
+        else:
+            logger.warning("Could not select 'Toys & games' category")
 
     await human_delay(min_ms=500, max_ms=1_000)
     await _snap(page, "fb_category_selected")
@@ -167,6 +248,26 @@ async def _select_category(page: Page) -> None:
 async def _select_condition(page: Page) -> None:
     """Select the Condition dropdown -- choose 'New'."""
     await _snap(page, "fb_before_condition")
+
+    # Check if condition is already set to "New" (exact match to avoid
+    # false positives from group names or other text containing "New")
+    already_set = await page.evaluate("""() => {
+        const spans = [...document.querySelectorAll('span')];
+        const cond = spans.find(
+            s => s.textContent.trim() === 'Condition'
+              && s.closest('label[role="combobox"]')
+        );
+        if (!cond) return false;
+        const container = cond.closest('label[role="combobox"]');
+        if (!container) return false;
+        // Check all child spans for exact "New" match
+        const children = [...container.querySelectorAll('span')];
+        return children.some(s => s.textContent.trim() === 'New');
+    }""")
+    if already_set:
+        logger.info("Condition already set to New, skipping")
+        await _snap(page, "fb_condition_already_set")
+        return
 
     # Find the Condition combobox by its label
     clicked = await page.evaluate("""() => {
@@ -220,47 +321,67 @@ async def _fill_description(page: Page, description: str) -> None:
     """Fill the Description field via 'More details' expansion."""
     await _snap(page, "fb_before_description")
 
-    # Click "More details" to expand the description section
-    expanded = await page.evaluate("""() => {
-        const spans = [...document.querySelectorAll('span')];
-        const more = spans.find(
-            s => s.textContent.trim() === 'More details'
-              && s.offsetParent !== null
-        );
-        if (more) { more.click(); return true; }
-        return false;
-    }""")
+    # Expand "More details" to reveal Description, SKU, Location, etc.
+    # The disclosure is a React component.  We use Playwright locator
+    # click which properly dispatches React synthetic events.
+    try:
+        more_details = page.locator('span:text-is("More details")')
+        if await more_details.count() > 0:
+            await more_details.first.scroll_into_view_if_needed()
+            await human_delay(min_ms=500, max_ms=1_000)
+            await more_details.first.click(timeout=5_000)
+            logger.info("Clicked 'More details' (attempt 1)")
+            await human_delay(min_ms=2_000, max_ms=3_000)
 
-    if expanded:
-        logger.info("Expanded 'More details' section")
-        await human_delay(min_ms=1_000, max_ms=2_000)
-    else:
-        logger.info("'More details' not found -- description may already be visible")
+            # Check if textarea appeared
+            textarea = await page.query_selector("textarea")
+            if not textarea or not await textarea.is_visible():
+                # Try clicking the subtitle text instead
+                subtitle = page.locator(
+                    'span:text-is("Attract more interest by including more details.")'
+                )
+                if await subtitle.count() > 0:
+                    await subtitle.first.click(timeout=5_000)
+                    logger.info("Clicked subtitle text (attempt 2)")
+                    await human_delay(min_ms=2_000, max_ms=3_000)
+        else:
+            logger.info("'More details' not found")
+    except Exception as exc:
+        logger.warning("Could not click 'More details': %s", exc)
 
-    # Find and fill the description textarea or contenteditable
-    el = await _find_field_by_label(page, "Description")
-    if el:
-        await el.evaluate("el => { el.focus(); el.value = ''; }")
-        await page.keyboard.type(description, delay=15)
-        logger.info("Filled description (%d chars)", len(description))
+    await _snap(page, "fb_more_details_expanded")
+
+    # Wait for the textarea to appear after expansion
+    # The Description field is a <textarea> with a dynamic id
+    textarea = None
+    for _ in range(5):
+        textarea = await page.query_selector("textarea")
+        if textarea and await textarea.is_visible():
+            break
+        await page.wait_for_timeout(500)
+        textarea = None
+
+    if textarea:
+        await textarea.evaluate("el => el.focus()")
+        await human_delay(200, 400)
+        await _clear_focused_and_type(page, description, delay=15)
+        logger.info("Filled description via textarea (%d chars)", len(description))
     else:
-        # Try contenteditable div as fallback
-        filled = await page.evaluate("""(text) => {
-            const editables = [...document.querySelectorAll(
-                '[contenteditable="true"]'
-            )].filter(el => el.offsetParent !== null);
-            // Pick the one near "Description" label
-            if (editables.length > 0) {
-                const target = editables[editables.length - 1];
-                target.focus();
-                target.textContent = text;
-                target.dispatchEvent(new Event('input', {bubbles: true}));
-                return true;
-            }
-            return false;
-        }""", description)
-        if filled:
-            logger.info("Filled description via contenteditable (%d chars)", len(description))
+        # Fallback: try finding by label
+        el = await _find_field_by_label(page, "Description")
+        el_is_null = True
+        if el:
+            try:
+                val = await el.json_value()
+                el_is_null = val is None
+            except Exception:
+                el_is_null = False
+
+        if not el_is_null:
+            await el.evaluate("el => el.focus()")
+            await human_delay(200, 400)
+            await _clear_focused_and_type(page, description, delay=15)
+            logger.info("Filled description via label (%d chars)", len(description))
         else:
             logger.warning("Description field not found")
 
@@ -366,126 +487,66 @@ async def _click_next(page: Page) -> bool:
 
 
 async def _add_groups(page: Page, group_names: list[str]) -> None:
-    """On the step-2 page, search and add groups to list in.
+    """On the step-2 page, tick checkboxes next to target groups.
 
-    Facebook's step 2 may show 'List in more places' with group search.
+    The "List in more places" page shows the user's groups as a
+    checkbox list under "List in your groups".  Just click the row
+    for each matching group to toggle it on.
     """
-    await _snap(page, "fb_step2_page")
-
-    # Look for a "List in more places" or group-related section
-    # Try clicking it to expand
-    expanded = await page.evaluate("""() => {
-        const spans = [...document.querySelectorAll('span')];
-        const more = spans.find(
-            s => (s.textContent.trim().toLowerCase().includes('list in more places')
-              || s.textContent.trim().toLowerCase().includes('more places'))
-              && s.offsetParent !== null
-        );
-        if (more) { more.click(); return true; }
-
-        // Also try any checkbox/toggle near group text
-        const group = spans.find(
-            s => s.textContent.trim().toLowerCase().includes('group')
-              && s.offsetParent !== null
-        );
-        if (group) { group.click(); return true; }
-
-        return false;
-    }""")
-
-    if expanded:
-        logger.info("Found 'List in more places' / groups section")
-        await human_delay(min_ms=2_000, max_ms=3_000)
-        await _snap(page, "fb_groups_section_expanded")
-    else:
-        logger.info("No 'List in more places' found -- taking snapshot for inspection")
-        await _snap(page, "fb_no_groups_section")
+    await _snap(page, "fb_step2_groups")
 
     for group_name in group_names:
-        logger.info("Searching for group: %s", group_name)
+        logger.info("Looking for group checkbox: %s", group_name)
 
-        # Try to find a search input for groups
-        search_filled = await page.evaluate("""(name) => {
-            // Look for search inputs in the groups section
-            const inputs = [...document.querySelectorAll(
-                'input[type="search"], input[placeholder*="earch"], input[placeholder*="roup"]'
-            )].filter(el => el.offsetParent !== null);
+        selected = await page.evaluate("""(name) => {
+            const normalize = s => s.toLowerCase().replace(/[^a-z0-9 ]/g, '').trim();
+            const target = normalize(name);
 
-            if (inputs.length > 0) {
-                const input = inputs[inputs.length - 1];
-                input.focus();
-                input.value = '';
-                return true;
+            // Each group row is a clickable container with the group
+            // name in a span and a checkbox/radio.  Find the span
+            // matching the name and click its nearest row ancestor.
+            const spans = [...document.querySelectorAll('span')].filter(
+                s => s.offsetParent !== null
+                  && normalize(s.textContent).includes(target)
+            );
+
+            for (const span of spans) {
+                // Walk up to find a clickable row (role=checkbox, role=row,
+                // or a div with an input[type=checkbox] inside)
+                let el = span;
+                for (let i = 0; i < 10 && el; i++) {
+                    const cb = el.querySelector('input[type="checkbox"]');
+                    if (cb && !cb.checked) {
+                        cb.click();
+                        return 'checkbox';
+                    }
+
+                    if (el.getAttribute('role') === 'checkbox'
+                        || el.getAttribute('role') === 'option') {
+                        el.click();
+                        return 'role_click';
+                    }
+
+                    el = el.parentElement;
+                }
+
+                // Fallback: just click the span's closest large container
+                const row = span.closest('[class]');
+                if (row) {
+                    row.click();
+                    return 'row_click';
+                }
             }
-            return false;
+            return null;
         }""", group_name)
 
-        if search_filled:
-            await page.keyboard.type(group_name, delay=40)
-            await human_delay(min_ms=2_000, max_ms=3_000)
-            await _snap(page, f"fb_group_search_{group_name[:20]}")
-
-            # Try to click the matching group result (fuzzy: strip special chars)
-            selected = await page.evaluate("""(name) => {
-                const normalize = s => s.toLowerCase().replace(/[^a-z0-9 ]/g, '').trim();
-                const target = normalize(name);
-
-                // Check visible candidates near the search area
-                const candidates = [...document.querySelectorAll(
-                    '[role="option"], [role="checkbox"], [role="menuitem"], label, div[role="button"]'
-                )].filter(el => el.offsetParent !== null);
-
-                const match = candidates.find(
-                    el => normalize(el.textContent).includes(target)
-                );
-                if (match) {
-                    match.click();
-                    return true;
-                }
-
-                // Fallback: visible spans with fuzzy match
-                const spans = [...document.querySelectorAll('span')].filter(
-                    s => normalize(s.textContent).includes(target)
-                      && s.offsetParent !== null
-                );
-                if (spans.length > 0) {
-                    spans[0].click();
-                    return true;
-                }
-
-                return false;
-            }""", group_name)
-
-            if selected:
-                logger.info("Selected group: %s", group_name)
-            else:
-                logger.warning("Could not select group: %s", group_name)
-
-            await human_delay(min_ms=1_000, max_ms=2_000)
+        if selected:
+            logger.info("Toggled group: %s (via %s)", group_name, selected)
         else:
-            # No search input -- try clicking group names directly (fuzzy)
-            clicked = await page.evaluate("""(name) => {
-                const normalize = s => s.toLowerCase().replace(/[^a-z0-9 ]/g, '').trim();
-                const target = normalize(name);
-                const spans = [...document.querySelectorAll('span')].filter(
-                    s => normalize(s.textContent).includes(target)
-                      && s.offsetParent !== null
-                );
-                if (spans.length > 0) {
-                    spans[0].click();
-                    return true;
-                }
-                return false;
-            }""", group_name)
+            logger.warning("Could not find group: %s", group_name)
 
-            if clicked:
-                logger.info("Clicked group: %s", group_name)
-            else:
-                logger.warning("Could not find group: %s", group_name)
-
-            await human_delay(min_ms=1_000, max_ms=2_000)
-
-        await _snap(page, f"fb_group_added_{group_name[:20]}")
+        await human_delay(min_ms=500, max_ms=1_000)
+        await _snap(page, f"fb_group_toggled_{group_name[:20]}")
 
     await _snap(page, "fb_groups_complete")
 
@@ -515,6 +576,94 @@ async def _locate_next_button(page: Page) -> None:
         logger.warning("'Next' button not found")
 
     await _snap(page, "fb_form_complete")
+
+
+# ---------------------------------------------------------------------------
+# Validation
+# ---------------------------------------------------------------------------
+
+
+async def _validate_form(page: Page) -> list[str]:
+    """Validate required fields before submission. Returns failed field IDs.
+
+    Field IDs: "title", "price", "category", "condition", "description".
+    Empty list means all checks passed.
+    """
+    errors: list[str] = []
+
+    # 1. Title
+    try:
+        el = await _find_field_by_label(page, "Title")
+        if el:
+            val = await el.evaluate("el => el.value || ''")
+            if not val.strip():
+                errors.append("title")
+        else:
+            errors.append("title")
+    except Exception:
+        errors.append("title")
+
+    # 2. Price
+    try:
+        el = await _find_field_by_label(page, "Price")
+        if el:
+            val = await el.evaluate("el => el.value || ''")
+            if not val.strip():
+                errors.append("price")
+        else:
+            errors.append("price")
+    except Exception:
+        errors.append("price")
+
+    # 3. Category (combobox should not just show "Category")
+    try:
+        cat_set = await page.evaluate("""() => {
+            const spans = [...document.querySelectorAll('span')];
+            const cat = spans.find(
+                s => s.textContent.trim() === 'Category'
+                  && s.closest('label[role="combobox"]')
+            );
+            if (!cat) return false;
+            const container = cat.closest('label[role="combobox"]');
+            const text = container ? container.textContent : '';
+            // If it only shows "Category" with no selection, it's not set
+            return text.trim() !== 'Category';
+        }""")
+        if not cat_set:
+            errors.append("category")
+    except Exception:
+        errors.append("category")
+
+    # 4. Condition (combobox should not just show "Condition")
+    try:
+        cond_set = await page.evaluate("""() => {
+            const spans = [...document.querySelectorAll('span')];
+            const cond = spans.find(
+                s => s.textContent.trim() === 'Condition'
+                  && s.closest('label[role="combobox"]')
+            );
+            if (!cond) return false;
+            const container = cond.closest('label[role="combobox"]');
+            const text = container ? container.textContent : '';
+            return text.trim() !== 'Condition';
+        }""")
+        if not cond_set:
+            errors.append("condition")
+    except Exception:
+        errors.append("condition")
+
+    # 5. Description (textarea should have content)
+    try:
+        textarea = await page.query_selector("textarea")
+        if textarea and await textarea.is_visible():
+            val = await textarea.evaluate("el => el.value || ''")
+            if not val.strip():
+                errors.append("description")
+        # If textarea not visible, description might not be expanded -- skip check
+    except Exception:
+        pass
+
+    return errors
 
 
 # ---------------------------------------------------------------------------
@@ -560,19 +709,103 @@ async def create_product(
     await _select_category(page)
     await _select_condition(page)
     await _fill_description(page, description)
+
+    # Hide-from-friends and group settings persist from previous listings,
+    # so we only toggle if explicitly needed (the function already checks state).
     await _enable_hide_from_friends(page)
 
-    # Step 2: Click Next to go to the groups/publish page
+    # Step 2: Validate form before proceeding
+    validation_errors = await _validate_form(page)
+    if validation_errors:
+        for field in validation_errors:
+            logger.warning("Validation failed: %s -- retrying", field)
+        await _snap(page, "fb_validation_failed_retry")
+
+        # Retry each failed field
+        for field in validation_errors:
+            if field == "title":
+                await _fill_title(page, title)
+            elif field == "price":
+                await _fill_price(page, listing_price_cents)
+            elif field == "category":
+                await _select_category(page)
+            elif field == "condition":
+                await _select_condition(page)
+            elif field == "description":
+                await _fill_description(page, description)
+
+        # Re-validate
+        validation_errors = await _validate_form(page)
+        if validation_errors:
+            for field in validation_errors:
+                logger.error("Validation still failed after retry: %s", field)
+            await _snap(page, "fb_validation_failed_final")
+            logger.error(
+                "Form validation failed with %d error(s) after retry -- aborting",
+                len(validation_errors),
+            )
+            return False
+
+        logger.info("Validation passed after retry")
+
+    # Step 3: Click Next to go to the publish page
     if not await _click_next(page):
         logger.warning("Could not proceed to step 2")
         await _locate_next_button(page)
         return True
 
-    # Step 2 page: add groups if requested
-    if groups:
-        await _add_groups(page, groups)
+    # Group settings persist from previous listings -- skip group selection
+    # and go straight to publish.
 
-    if not submit:
+    if submit:
+        # Click Publish using Playwright locators (JS .click() doesn't
+        # dispatch React synthetic events on Facebook's obfuscated DOM)
+        await _snap(page, "fb_before_publish")
+
+        published = False
+        try:
+            # Try aria-label="Publish" first
+            pub_btn = page.locator('[aria-label="Publish"]')
+            if await pub_btn.count() > 0:
+                await pub_btn.first.click(timeout=10_000)
+                published = True
+                logger.info("Clicked Publish via aria-label")
+            else:
+                # Try text-based match on div[role="button"]
+                pub_text = page.locator(
+                    'div[role="button"]:has-text("Publish")'
+                )
+                if await pub_text.count() > 0:
+                    await pub_text.first.click(timeout=10_000)
+                    published = True
+                    logger.info("Clicked Publish via text match")
+                else:
+                    # Fallback: try any span containing "Publish" inside
+                    # a clickable ancestor (Facebook wraps buttons in divs)
+                    pub_span = page.locator('span:text-is("Publish")')
+                    if await pub_span.count() > 0:
+                        await pub_span.first.click(timeout=10_000)
+                        published = True
+                        logger.info("Clicked Publish via span text")
+                    else:
+                        # Last resort: try Next button
+                        next_btn = page.locator('[aria-label="Next"]').or_(
+                            page.locator('div[role="button"]:has-text("Next")')
+                        )
+                        if await next_btn.count() > 0:
+                            await next_btn.first.click(timeout=10_000)
+                            published = True
+                            logger.info("Clicked Next on step 2 (Publish not found)")
+        except Exception as exc:
+            logger.warning("Publish button click failed: %s", exc)
+
+        if published:
+            await human_delay(min_ms=3_000, max_ms=5_000)
+            await _snap(page, "fb_after_publish")
+        else:
+            logger.warning("Could not find Publish/Next button on step 2")
+            await _snap(page, "fb_publish_not_found")
+    else:
         logger.info("Form complete -- left open for user review (not publishing)")
         await _snap(page, "fb_ready_for_review")
 

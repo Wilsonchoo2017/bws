@@ -1062,7 +1062,13 @@ async def wait_for_cloudflare(
                 source=source, query=query, attempt=attempt,
             )
         else:
-            break  # Widget not found, no point retrying
+            await capture_cf_diagnostics(
+                page, "no_widget_found",
+                source=source, query=query, attempt=attempt,
+            )
+            # Widget may not have rendered yet; continue to next
+            # attempt after a longer wait rather than giving up.
+            await human_delay(2_000, 4_000)
 
     # Fall back to human intervention
     logger.info("[%s] Auto-click exhausted, notifying for human help", source)

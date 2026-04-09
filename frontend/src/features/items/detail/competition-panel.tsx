@@ -14,6 +14,7 @@ import {
   XAxis,
   YAxis,
 } from 'recharts';
+import { useDetailBundle } from './detail-bundle-context';
 import type { ChartDateRange } from './item-detail';
 
 interface CompetitionPanelProps {
@@ -234,12 +235,15 @@ export function CompetitionPanel({
   globalDateRange,
   onDateRange,
 }: CompetitionPanelProps) {
+  const { bundle, loading: bundleLoading } = useDetailBundle();
   const [data, setData] = useState<CompetitionData | null>(null);
   const [loading, setLoading] = useState(true);
   const [fetchError, setFetchError] = useState<string | null>(null);
   const [tab, setTab] = useState<ChartTab>('saturation');
 
   useEffect(() => {
+    if (bundleLoading) return;
+    if (bundle?.competition) { setData(bundle.competition as unknown as CompetitionData); setLoading(false); return; }
     fetch(`/api/items/${setNumber}/competition`)
       .then((res) => {
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -254,7 +258,7 @@ export function CompetitionPanel({
         setFetchError(err instanceof Error ? err.message : 'Failed to load competition data');
       })
       .finally(() => setLoading(false));
-  }, [setNumber]);
+  }, [setNumber, bundle, bundleLoading]);
 
   const chartData = data ? buildChartData(data.history) : [];
 

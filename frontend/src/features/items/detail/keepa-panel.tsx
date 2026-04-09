@@ -14,6 +14,7 @@ import {
   YAxis,
 } from 'recharts';
 import type { KeepaData } from '../types';
+import { useDetailBundle } from './detail-bundle-context';
 import type { ChartDateRange } from './item-detail';
 
 interface KeepaDataPanelProps {
@@ -200,11 +201,14 @@ const TAB_SERIES: Record<ChartTab, { key: string; name: string; color: string }[
 };
 
 export function KeepaPanel({ setNumber, globalDateRange, onDateRange }: KeepaDataPanelProps) {
+  const { bundle, loading: bundleLoading } = useDetailBundle();
   const [data, setData] = useState<KeepaData | null>(null);
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState<ChartTab>('all');
 
   useEffect(() => {
+    if (bundleLoading) return;
+    if (bundle?.keepa) { setData(bundle.keepa as unknown as KeepaData); setLoading(false); return; }
     fetch(`/api/items/${setNumber}/keepa`)
       .then((res) => res.json())
       .then((json) => {
@@ -214,7 +218,7 @@ export function KeepaPanel({ setNumber, globalDateRange, onDateRange }: KeepaDat
       })
       .catch(() => {})
       .finally(() => setLoading(false));
-  }, [setNumber]);
+  }, [setNumber, bundle, bundleLoading]);
 
   const chartData = data ? buildChartData(data) : [];
 

@@ -26,7 +26,7 @@ class _FetchContext:
     last_error: str | None = None
 
 
-@executor(TaskType.BRICKECONOMY, concurrency=5, timeout=300, browser_profile="brickeconomy-profile")
+@executor(TaskType.BRICKECONOMY, concurrency=3, timeout=300, browser_profile="brickeconomy-profile")
 def execute_brickeconomy(
     conn: Any,
     set_number: str,
@@ -92,6 +92,17 @@ def execute_brickeconomy(
         if scrape_result.snapshot is None:
             ctx_holder[0] = _FetchContext(last_error="Scrape succeeded but snapshot is None")
             return make_failed_result(SourceId.BRICKECONOMY, "No data returned")
+
+        # Track that scrape succeeded so we can report a useful error if
+        # enrichment later finds 0 fields (instead of "unknown").
+        snap = scrape_result.snapshot
+        ctx_holder[0] = _FetchContext(
+            last_error=(
+                f"Scrape OK but metadata empty "
+                f"(title={snap.title!r}, theme={snap.theme!r}, "
+                f"year={snap.year_released}, pieces={snap.pieces})"
+            ),
+        )
 
         # Delete non-standard packaging sets (foil packs, polybags, etc.)
         if is_excluded_packaging(scrape_result.snapshot.packaging):

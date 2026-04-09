@@ -2,6 +2,8 @@
 
 import { useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
+import { usePlatforms } from '@/features/settings/use-platforms';
+import { useSuppliers } from '@/features/settings/use-suppliers';
 import type { Transaction } from './types';
 
 interface EditTransactionFormProps {
@@ -31,6 +33,9 @@ export function EditTransactionForm({
   );
   const [notes, setNotes] = useState(transaction.notes ?? '');
   const [supplier, setSupplier] = useState(transaction.supplier ?? '');
+  const [platform, setPlatform] = useState(transaction.platform ?? '');
+  const { suppliers: supplierOptions } = useSuppliers();
+  const { platforms: platformOptions } = usePlatforms();
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -69,6 +74,14 @@ export function EditTransactionForm({
         body.clear_supplier = true;
       } else {
         body.supplier = trimmedSupplier;
+      }
+    }
+    const trimmedPlatform = platform.trim() || null;
+    if (trimmedPlatform !== (transaction.platform ?? null)) {
+      if (trimmedPlatform === null) {
+        body.clear_platform = true;
+      } else {
+        body.platform = trimmedPlatform;
       }
     }
 
@@ -163,13 +176,35 @@ export function EditTransactionForm({
         </div>
         <div>
           <label className='text-muted-foreground text-xs'>Supplier</label>
-          <input
-            type='text'
+          <select
             value={supplier}
             onChange={(e) => setSupplier(e.target.value)}
-            placeholder='Shopee, Lazada...'
             className='border-input bg-background mt-1 w-full rounded border px-2 py-1.5 text-sm'
-          />
+          >
+            <option value=''>Select supplier...</option>
+            {supplier && !supplierOptions.includes(supplier) && (
+              <option value={supplier}>{supplier}</option>
+            )}
+            {supplierOptions.map((s) => (
+              <option key={s} value={s}>{s}</option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <label className='text-muted-foreground text-xs'>Platform</label>
+          <select
+            value={platform}
+            onChange={(e) => setPlatform(e.target.value)}
+            className='border-input bg-background mt-1 w-full rounded border px-2 py-1.5 text-sm'
+          >
+            <option value=''>Select platform...</option>
+            {platform && !platformOptions.includes(platform) && (
+              <option value={platform}>{platform}</option>
+            )}
+            {platformOptions.map((s) => (
+              <option key={s} value={s}>{s}</option>
+            ))}
+          </select>
         </div>
         <div>
           <label className='text-muted-foreground text-xs'>Notes</label>

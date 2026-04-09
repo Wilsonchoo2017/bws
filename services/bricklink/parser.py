@@ -284,6 +284,44 @@ def _normalize_image_url(url: str) -> str:
     return url
 
 
+def extract_gallery_image_urls(html: str) -> list[str]:
+    """Extract all set gallery image URLs from BrickLink catalog page HTML.
+
+    Returns full-size URLs in listing order:
+    1. SN  -- Box/catalog image (primary)
+    2. ON  -- Original/alternate angle
+    3. EXTN -- Additional user-submitted images (ordered as on page)
+
+    Skips thumbnails (ST/OT/EXTT), instruction images (IN), and
+    duplicate SL entries.
+    """
+    import re as _re
+
+    # Extract full-size URLs from JS gallery objects: { url: '//img...' }
+    raw_urls = _re.findall(r"url:\s*'(//img\.bricklink\.com/ItemImage/[^']+)'", html)
+
+    seen: set[str] = set()
+    sn_urls: list[str] = []
+    on_urls: list[str] = []
+    ext_urls: list[str] = []
+
+    for raw in raw_urls:
+        url = f"https:{raw}" if raw.startswith("//") else raw
+        if url in seen:
+            continue
+        seen.add(url)
+
+        if "/ItemImage/SN/" in url:
+            sn_urls.append(url)
+        elif "/ItemImage/ON/" in url:
+            on_urls.append(url)
+        elif "/ItemImage/EXTN/" in url:
+            ext_urls.append(url)
+        # Skip ST, SL, IT, IN, OT, EXTT (thumbnails, instructions, dupes)
+
+    return [*sn_urls, *on_urls, *ext_urls]
+
+
 def _extract_image_url(soup: BeautifulSoup) -> str | None:
     """Extract image URL from parsed HTML."""
     # Try various selectors

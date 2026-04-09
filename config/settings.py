@@ -8,6 +8,7 @@ import asyncio
 import logging
 import os
 import secrets
+import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -267,6 +268,7 @@ class HourlyRateLimiter:
         self._logger = logging.getLogger(f"bws.ratelimit.{source_name.lower()}")
         self._timestamps: list[float] = []
         self._lock: asyncio.Lock | None = None
+        self._thread_lock = threading.Lock()  # protects _lock creation and shared state
         self._blocked_until: float = 0.0
         self._escalation_level: int = 0
         self._consecutive_failures: int = 0
@@ -274,10 +276,16 @@ class HourlyRateLimiter:
         self._was_blocked: bool = False  # track recovery
 
     def _get_lock(self) -> asyncio.Lock:
-        """Return a lock bound to the current event loop, recreating if needed."""
+        """Return a lock bound to the current event loop, recreating if needed.
+
+        Thread-safe: uses a threading.Lock to protect against concurrent
+        calls from different threads (e.g. minifigures executor running
+        asyncio.run() in a dispatcher thread).
+        """
         loop = asyncio.get_running_loop()
-        if self._lock is None or self._lock._loop is not loop:  # type: ignore[attr-defined]
-            self._lock = asyncio.Lock()
+        with self._thread_lock:
+            if self._lock is None or self._lock._loop is not loop:  # type: ignore[attr-defined]
+                self._lock = asyncio.Lock()
         return self._lock
 
     def _prune(self, now: float) -> None:
@@ -293,12 +301,13 @@ class HourlyRateLimiter:
 
     def trip_quota_exceeded(self) -> None:
         """Block requests with escalating cooldown (429 rate limit)."""
-        cooldown = self._escalated_cooldown(self.BASE_COOLDOWN_SECONDS)
-        self._blocked_until = time.monotonic() + cooldown
-        self._escalation_level += 1
-        self._consecutive_failures += 1
-        self._was_blocked = True
-        self._scraping_since = 0.0
+        with self._thread_lock:
+            cooldown = self._escalated_cooldown(self.BASE_COOLDOWN_SECONDS)
+            self._blocked_until = time.monotonic() + cooldown
+            self._escalation_level += 1
+            self._consecutive_failures += 1
+            self._was_blocked = True
+            self._scraping_since = 0.0
         self._logger.warning(
             "Quota exceeded (level %d) — pausing %s requests for %.0f min",
             self._escalation_level, self._source_name, cooldown / 60,
@@ -308,12 +317,13 @@ class HourlyRateLimiter:
         """Block requests with long cooldown (403 Forbidden = IP ban)."""
         from services.notifications.scraper_alerts import alert_forbidden
 
-        cooldown = self._escalated_cooldown(self.FORBIDDEN_COOLDOWN_SECONDS)
-        self._blocked_until = time.monotonic() + cooldown
-        self._escalation_level += 1
-        self._consecutive_failures += 1
-        self._was_blocked = True
-        self._scraping_since = 0.0
+        with self._thread_lock:
+            cooldown = self._escalated_cooldown(self.FORBIDDEN_COOLDOWN_SECONDS)
+            self._blocked_until = time.monotonic() + cooldown
+            self._escalation_level += 1
+            self._consecutive_failures += 1
+            self._was_blocked = True
+            self._scraping_since = 0.0
         self._logger.warning(
             "403 Forbidden / IP banned (level %d) — pausing %s requests for %.0f min",
             self._escalation_level, self._source_name, cooldown / 60,
@@ -324,12 +334,13 @@ class HourlyRateLimiter:
         """Block requests when consecutive 0-field responses suggest a silent ban."""
         from services.notifications.scraper_alerts import alert_silent_ban
 
-        cooldown = self._escalated_cooldown(self.FORBIDDEN_COOLDOWN_SECONDS)
-        self._blocked_until = time.monotonic() + cooldown
-        self._escalation_level += 1
-        self._consecutive_failures += 1
-        self._was_blocked = True
-        self._scraping_since = 0.0
+        with self._thread_lock:
+            cooldown = self._escalated_cooldown(self.FORBIDDEN_COOLDOWN_SECONDS)
+            self._blocked_until = time.monotonic() + cooldown
+            self._escalation_level += 1
+            self._consecutive_failures += 1
+            self._was_blocked = True
+            self._scraping_since = 0.0
         self._logger.warning(
             "Silent ban detected (consecutive 0-field responses, level %d) "
             "— pausing %s requests for %.0f min",
@@ -339,11 +350,12 @@ class HourlyRateLimiter:
 
     def record_success(self) -> None:
         """Reset escalation after a successful scrape."""
-        if self._was_blocked:
-            self._logger.info("%s recovered after being blocked", self._source_name)
-            self._was_blocked = False
-        self._escalation_level = 0
-        self._consecutive_failures = 0
+        with self._thread_lock:
+            if self._was_blocked:
+                self._logger.info("%s recovered after being blocked", self._source_name)
+                self._was_blocked = False
+            self._escalation_level = 0
+            self._consecutive_failures = 0
 
     def is_blocked(self) -> bool:
         """Check if the limiter is currently in cooldown."""
@@ -493,7 +505,7 @@ class BrickeconomySettings:
     """BrickEconomy browser automation configuration."""
 
     base_url: str = "https://www.brickeconomy.com"
-    headless: bool = False
+    headless: bool = True
     timeout_ms: int = 30_000
     locale: str = "en-US"
     captcha_timeout_s: int = 120

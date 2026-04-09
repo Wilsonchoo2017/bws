@@ -669,6 +669,56 @@ def _parse_value_from_meta(soup: BeautifulSoup) -> int | None:
 
 
 # ---------------------------------------------------------------------------
+# Gallery image extraction
+# ---------------------------------------------------------------------------
+
+
+def extract_gallery_image_urls(html: str) -> list[str]:
+    """Extract all product gallery image URLs from a BrickEconomy set page.
+
+    Parses the ``#setmediagallery`` thumbnail list and extracts the
+    large-size URLs from ``onclick`` attributes. Falls back to the
+    JSON-LD primary image if no gallery is found.
+
+    Returns full URLs in display order (primary first, then angles).
+    """
+    soup = BeautifulSoup(html, "html.parser")
+    base = "https://www.brickeconomy.com"
+    urls: list[str] = []
+    seen: set[str] = set()
+
+    gallery = soup.find(id="setmediagallery")
+    if gallery:
+        for li in gallery.find_all("li"):
+            img = li.find("img")
+            if not img:
+                continue
+            onclick = img.get("onclick", "")
+            # onclick="$('#setimagesimage').attr('src', '/resources/images/sets/..._large-1.jpg');"
+            m = re.search(r"attr\('src',\s*'([^']+)'\)", onclick)
+            if m:
+                path = m.group(1)
+                # Upgrade primary image to _xlarge (angles only have _large)
+                if "_large." in path and "-" not in path.split("_large")[1]:
+                    path = path.replace("_large", "_xlarge")
+                url = f"{base}{path}" if path.startswith("/") else path
+                if url not in seen:
+                    seen.add(url)
+                    urls.append(url)
+
+    # Fallback: JSON-LD primary image
+    if not urls:
+        ld = _parse_json_ld(soup)
+        image_raw = ld.get("image")
+        if isinstance(image_raw, list):
+            urls = [u for u in image_raw if u]
+        elif image_raw:
+            urls = [image_raw]
+
+    return urls
+
+
+# ---------------------------------------------------------------------------
 # Main entry point
 # ---------------------------------------------------------------------------
 

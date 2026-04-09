@@ -334,10 +334,13 @@ async def _scrape_current_page(page, set_number: str) -> BrickeconomyScrapeResul
     snapshot = parse_brickeconomy_page(html, set_number, url=final_url)
 
     # Check if we got an essentially empty snapshot (likely a blocked page
-    # that slipped past CF detection)
+    # that slipped past CF detection).  Only check fields that the enrichment
+    # adapter actually maps -- value_new_cents / rrp_usd_cents are stored
+    # separately via save_snapshot/record_current_value, so a snapshot with
+    # *only* those fields is still useless for enrichment.
     key_fields = (
-        snapshot.title, snapshot.theme, snapshot.value_new_cents,
-        snapshot.rrp_usd_cents, snapshot.year_released,
+        snapshot.title, snapshot.theme, snapshot.year_released,
+        snapshot.year_retired, snapshot.pieces, snapshot.image_url,
     )
     if not any(f is not None for f in key_fields):
         logger.warning(

@@ -466,9 +466,9 @@ def record_attempt(
     conn.execute(
         """
         INSERT INTO scrape_task_attempts
-            (id, task_id, attempt_number, error_category, error_message,
+            (task_id, attempt_number, error_category, error_message,
              duration_seconds, created_at)
-        VALUES (nextval('scrape_task_attempts_id_seq'), ?, ?, ?, ?, ?, now())
+        VALUES (?, ?, ?, ?, ?, now())
         """,
         [
             task_id,

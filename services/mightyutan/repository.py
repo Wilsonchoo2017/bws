@@ -137,8 +137,8 @@ def _create_price_history(
 
     row = conn.execute(
         """
-        INSERT INTO mightyutan_price_history (id, sku, price_myr, available, scraped_at)
-        VALUES (nextval('mightyutan_price_history_id_seq'), ?, ?, ?, ?)
+        INSERT INTO mightyutan_price_history (sku, price_myr, available, scraped_at)
+        VALUES (?, ?, ?, ?)
         RETURNING id
         """,
         [sku, price_myr, available, now],

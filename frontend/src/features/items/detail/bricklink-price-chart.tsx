@@ -15,6 +15,7 @@ import {
 } from 'recharts';
 import type { BricklinkPriceData, MonthlySaleRecord } from '../types';
 import { formatPrice } from '../types';
+import { useDetailBundle } from './detail-bundle-context';
 import type { ChartDateRange } from './item-detail';
 
 interface BricklinkPriceChartProps {
@@ -152,11 +153,14 @@ function VolumeTooltip({ active, payload, label }: any) {
 }
 
 export function BricklinkPriceChart({ setNumber, globalDateRange, onDateRange }: BricklinkPriceChartProps) {
+  const { bundle, loading: bundleLoading } = useDetailBundle();
   const [data, setData] = useState<BricklinkPriceData | null>(null);
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState<ChartTab>('monthly-price');
 
   useEffect(() => {
+    if (bundleLoading) return;
+    if (bundle?.bricklink_prices) { setData(bundle.bricklink_prices as unknown as BricklinkPriceData); setLoading(false); return; }
     fetch(`/api/items/${setNumber}/bricklink-prices`)
       .then((res) => res.json())
       .then((json) => {
@@ -166,7 +170,7 @@ export function BricklinkPriceChart({ setNumber, globalDateRange, onDateRange }:
       })
       .catch(() => {})
       .finally(() => setLoading(false));
-  }, [setNumber]);
+  }, [setNumber, bundle, bundleLoading]);
 
   const monthlyChart = data ? buildMonthlySalesChart(data.monthly_sales) : [];
   const snapshotChart = data ? buildSnapshotChart(data.price_history) : [];

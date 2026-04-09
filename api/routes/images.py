@@ -79,6 +79,38 @@ async def serve_keepa_chart(set_number: str):
     )
 
 
+@router.post("/open/{set_number}")
+async def open_in_finder(set_number: str):
+    """Open all listing images for a set in Finder (macOS).
+
+    Collects the same images that would be used in a listing,
+    then reveals them in Finder via 'open -R'.
+    """
+    import subprocess
+    from pathlib import Path
+
+    from services.listing.templates import collect_image_paths
+
+    conn = get_connection()
+    paths = collect_image_paths(conn, set_number, max_photos=10, brand_border=False)
+    conn.close()
+
+    if not paths:
+        return JSONResponse(
+            status_code=404,
+            content={"detail": f"No images found for {set_number}"},
+        )
+
+    # Reveal the first image in Finder (selects it, shows the folder)
+    first = paths[0]
+    subprocess.Popen(["open", "-R", str(first)])
+
+    return {
+        "message": f"Opened {len(paths)} images in Finder",
+        "images": [str(p) for p in paths],
+    }
+
+
 @router.post("/download")
 async def trigger_download(
     background_tasks: BackgroundTasks,

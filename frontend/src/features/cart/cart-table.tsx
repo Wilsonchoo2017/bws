@@ -34,7 +34,11 @@ const removeColumn: ColumnDef<UnifiedItem> = {
   id: 'cart_source',
   header: 'Source',
   cell: ({ row, table }) => {
-    const meta = table.options.meta as { cartEntries?: Map<string, CartEntry>; removeFromCart?: (sn: string) => void };
+    const meta = table.options.meta as {
+      cartEntries?: Map<string, CartEntry>;
+      removeFromCart?: (sn: string) => void;
+      banFromCart?: (sn: string) => void;
+    };
     const entry = meta?.cartEntries?.get(row.original.set_number);
     const source = entry?.source ?? 'auto';
     return (
@@ -50,21 +54,32 @@ const removeColumn: ColumnDef<UnifiedItem> = {
         </span>
         <button
           onClick={() => meta?.removeFromCart?.(row.original.set_number)}
-          className='text-muted-foreground hover:text-destructive text-sm transition-colors'
+          className='flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors'
           title='Remove from cart'
         >
-          x
+          <svg xmlns='http://www.w3.org/2000/svg' width='18' height='18' viewBox='0 0 24 24' fill='none' stroke='currentColor' strokeWidth='2' strokeLinecap='round' strokeLinejoin='round'>
+            <path d='M3 6h18' /><path d='M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6' /><path d='M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2' /><line x1='10' y1='11' x2='10' y2='17' /><line x1='14' y1='11' x2='14' y2='17' />
+          </svg>
+        </button>
+        <button
+          onClick={() => meta?.banFromCart?.(row.original.set_number)}
+          className='flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-red-100 hover:text-red-600 dark:hover:bg-red-900/30 transition-colors'
+          title='Ban from auto-cart (prevents auto-add)'
+        >
+          <svg xmlns='http://www.w3.org/2000/svg' width='18' height='18' viewBox='0 0 24 24' fill='none' stroke='currentColor' strokeWidth='2' strokeLinecap='round' strokeLinejoin='round'>
+            <circle cx='12' cy='12' r='10' /><line x1='4.93' y1='4.93' x2='19.07' y2='19.07' />
+          </svg>
         </button>
       </div>
     );
   },
-  size: 100,
+  size: 130,
   enableSorting: false,
 };
 
 const cartColumns: ColumnDef<UnifiedItem>[] = [
   removeColumn,
-  ...unifiedColumns,
+  ...unifiedColumns.filter((col) => col.id !== 'add_to_cart'),
 ];
 
 export function CartTable() {
@@ -125,21 +140,22 @@ export function CartTable() {
       if (!itemsRes.success) return;
 
       const mlMap = new Map<string, {
-        growth: number;
+        growth: number | null;
         confidence: string | null;
         avoid_probability: number | null;
         buy_signal: boolean;
         avoid: boolean;
         kelly_fraction: number | null;
         win_probability: number | null;
-        cohorts: Record<string, { composite_pct: number | null }> | null;
+        cohorts: Record<string, { composite_score_pct: number | null }> | null;
       }>();
       if (signalsRes?.success && Array.isArray(signalsRes.data)) {
         for (const sig of signalsRes.data) {
           const setNum = (sig.set_number ?? sig.item_id?.replace(/-\d+$/, '')) as string | undefined;
-          if (setNum && sig.ml_growth_pct != null && !Number.isNaN(sig.ml_growth_pct)) {
+          if (setNum) {
+            const hasML = sig.ml_growth_pct != null && !Number.isNaN(sig.ml_growth_pct);
             mlMap.set(setNum, {
-              growth: sig.ml_growth_pct,
+              growth: hasML ? sig.ml_growth_pct : null,
               confidence: sig.ml_confidence ?? null,
               avoid_probability: sig.ml_avoid_probability ?? null,
               buy_signal: sig.ml_buy_signal ?? false,
@@ -304,6 +320,32 @@ export function CartTable() {
     }
   }, []);
 
+  const banFromCart = useCallback(async (setNumber: string) => {
+    try {
+      const res = await fetch(`/api/cart/ban/${setNumber}`, { method: 'POST' });
+      const json = await res.json();
+      if (json.success) {
+        // Update cart entries from returned data
+        if (Array.isArray(json.data)) {
+          const map = new Map<string, CartEntry>();
+          for (const entry of json.data as CartEntry[]) {
+            map.set(entry.set_number, entry);
+          }
+          setCartEntries(map);
+        } else {
+          // Fallback: just remove from local state
+          setCartEntries((prev) => {
+            const next = new Map(prev);
+            next.delete(setNumber);
+            return next;
+          });
+        }
+      }
+    } catch {
+      // silent
+    }
+  }, []);
+
   const SET_NUMBER_PATTERN = /^\d{3,6}(-\d+)?$/;
 
   const handleAddToCart = async () => {
@@ -349,7 +391,7 @@ export function CartTable() {
       pagination: { pageSize: 10 },
       columnVisibility: { rrp_cents: false },
     },
-    meta: { cartEntries, removeFromCart, enriching },
+    meta: { cartEntries, removeFromCart, banFromCart, enriching },
   });
 
   if (loading) {

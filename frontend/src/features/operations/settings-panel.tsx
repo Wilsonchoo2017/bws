@@ -3,6 +3,8 @@
 import { Loader2 } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import { Button } from '@/components/ui/button';
+import { SuppliersManager } from '@/features/settings/suppliers-manager';
+import { PlatformsManager } from '@/features/settings/platforms-manager';
 
 interface SettingsData {
   rate_limits: Record<string, { min_delay_ms: number; max_delay_ms: number; max_requests_per_hour: number }>;
@@ -275,6 +277,10 @@ export function SettingsPanel() {
 
   return (
     <div className='flex flex-col gap-6'>
+      {/* Suppliers & Platforms */}
+      <SuppliersManager />
+      <PlatformsManager />
+
       {error && (
         <div className='rounded border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-800 dark:bg-red-950/20 dark:text-red-400'>
           {error}

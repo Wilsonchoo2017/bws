@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { scoreColor, scoreBg, rankToPercentile, formatMetricValue } from './percentile-utils';
+import { scoreColor, scoreBg, rankToPercentile, formatMetricValue, getSignalWeight, getLiquidityWeight, SIGNAL_WEIGHTS } from './percentile-utils';
 
 describe('scoreColor', () => {
   it('given null score, when rendering, then returns muted foreground', () => {
@@ -161,5 +161,68 @@ describe('consistency: all metrics are higher = better', () => {
     const rankPct = rankToPercentile(23, 184);
     const overall = compositePct ?? rankPct;
     expect(overall).toBe(88);
+  });
+});
+
+describe('weight-aware scoring', () => {
+  it('given high weight (1.8), score 82 is NOT strong green (thresholds shift up)', () => {
+    // Base strong threshold is 80, but at weight 1.8 it shifts to 88
+    expect(scoreColor(82, 1.8)).toBe('text-emerald-600 dark:text-emerald-500');
+  });
+
+  it('given high weight (1.8), score 90 IS strong green', () => {
+    expect(scoreColor(90, 1.8)).toBe('text-emerald-400');
+  });
+
+  it('given low weight (0.3), score 73 IS strong green (thresholds shift down)', () => {
+    // Base strong threshold is 80, but at weight 0.3 it shifts to 73
+    expect(scoreColor(73, 0.3)).toBe('text-emerald-400');
+  });
+
+  it('given low weight (0.3), score 60 is good green (more lenient)', () => {
+    // At weight 0.3, good threshold shifts from 65 to 58
+    expect(scoreColor(60, 0.3)).toBe('text-emerald-600 dark:text-emerald-500');
+  });
+
+  it('given default weight (1.0), thresholds match original behavior', () => {
+    expect(scoreColor(80, 1.0)).toBe('text-emerald-400');
+    expect(scoreColor(65, 1.0)).toBe('text-emerald-600 dark:text-emerald-500');
+    expect(scoreColor(50, 1.0)).toBe('text-yellow-600 dark:text-yellow-400');
+    expect(scoreColor(35, 1.0)).toBe('text-orange-500');
+    expect(scoreColor(34, 1.0)).toBe('text-red-500');
+  });
+
+  it('given no weight, thresholds match default (1.0) behavior', () => {
+    expect(scoreColor(80)).toBe(scoreColor(80, 1.0));
+    expect(scoreColor(50)).toBe(scoreColor(50, 1.0));
+  });
+
+  it('scoreBg respects weight too', () => {
+    // At weight 1.8, 82 is "good" not "strong"
+    expect(scoreBg(82, 1.8)).toBe('bg-emerald-500/5');
+    expect(scoreBg(90, 1.8)).toBe('bg-emerald-500/10');
+  });
+});
+
+describe('signal weight lookups', () => {
+  it('returns correct weight for known signals', () => {
+    expect(getSignalWeight('value_opportunity')).toBe(1.8);
+    expect(getSignalWeight('lifecycle_position')).toBe(1.5);
+    expect(getSignalWeight('price_trend')).toBe(0.3);
+    expect(getSignalWeight('demand_pressure')).toBe(1.0);
+  });
+
+  it('returns default 1.0 for unknown signals', () => {
+    expect(getSignalWeight('unknown_signal')).toBe(1.0);
+  });
+
+  it('returns correct liquidity weights', () => {
+    expect(getLiquidityWeight('volume')).toBe(1.4);
+    expect(getLiquidityWeight('consistency')).toBe(1.1);
+    expect(getLiquidityWeight('listing_ratio')).toBe(0.6);
+  });
+
+  it('SIGNAL_WEIGHTS mirrors config/kelly.py', () => {
+    expect(Object.keys(SIGNAL_WEIGHTS)).toHaveLength(12);
   });
 });

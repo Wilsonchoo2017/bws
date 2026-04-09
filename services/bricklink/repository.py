@@ -377,35 +377,24 @@ def upsert_monthly_sales(
             now,
         ]
 
-        # Check-then-insert/update to avoid two failure modes:
-        #  1. nextval producing a duplicate PK after WAL recovery
-        #  2. Unqualified sequence name not resolving across schemas
-        exists = conn.execute(
-            "SELECT id FROM bricklink_monthly_sales "
-            "WHERE item_id = ? AND year = ? AND month = ? AND condition = ?",
-            [item_id, sale.year, sale.month, sale.condition.value],
-        ).fetchone()
-
-        if exists:
-            conn.execute(
-                """UPDATE bricklink_monthly_sales SET
-                       times_sold = ?, total_quantity = ?,
-                       min_price = ?, max_price = ?, avg_price = ?,
-                       currency = ?, scraped_at = ?
-                   WHERE id = ?""",
-                [*params, exists[0]],
-            )
-        else:
-            conn.execute(
-                """INSERT INTO bricklink_monthly_sales (
-                       item_id, year, month, condition, times_sold,
-                       total_quantity, min_price, max_price, avg_price,
-                       currency, scraped_at
-                   ) VALUES (
-                       ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
-                   )""",
-                [item_id, sale.year, sale.month, sale.condition.value, *params],
-            )
+        conn.execute(
+            """INSERT INTO bricklink_monthly_sales (
+                   item_id, year, month, condition, times_sold,
+                   total_quantity, min_price, max_price, avg_price,
+                   currency, scraped_at
+               ) VALUES (
+                   ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+               )
+               ON CONFLICT (item_id, year, month, condition) DO UPDATE SET
+                   times_sold = EXCLUDED.times_sold,
+                   total_quantity = EXCLUDED.total_quantity,
+                   min_price = EXCLUDED.min_price,
+                   max_price = EXCLUDED.max_price,
+                   avg_price = EXCLUDED.avg_price,
+                   currency = EXCLUDED.currency,
+                   scraped_at = EXCLUDED.scraped_at""",
+            [item_id, sale.year, sale.month, sale.condition.value, *params],
+        )
 
         count += 1
 
@@ -603,28 +592,16 @@ def upsert_set_minifigures(
     count = 0
 
     for mf in minifigs:
-        existing = conn.execute(
-            "SELECT id FROM set_minifigures WHERE set_item_id = ? AND minifig_id = ?",
-            [set_item_id, mf.minifig_id],
-        ).fetchone()
-
-        if existing:
-            conn.execute(
-                """
-                UPDATE set_minifigures
-                SET quantity = ?, scraped_at = ?
-                WHERE id = ?
-                """,
-                [mf.quantity, now, existing[0]],
-            )
-        else:
-            conn.execute(
-                """
-                INSERT INTO set_minifigures (id, set_item_id, minifig_id, quantity, scraped_at)
-                VALUES (nextval('set_minifigures_id_seq'), ?, ?, ?, ?)
-                """,
-                [set_item_id, mf.minifig_id, mf.quantity, now],
-            )
+        conn.execute(
+            """
+            INSERT INTO set_minifigures (set_item_id, minifig_id, quantity, scraped_at)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT (set_item_id, minifig_id) DO UPDATE SET
+                quantity = EXCLUDED.quantity,
+                scraped_at = EXCLUDED.scraped_at
+            """,
+            [set_item_id, mf.minifig_id, mf.quantity, now],
+        )
 
         count += 1
 

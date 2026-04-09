@@ -7,6 +7,7 @@ import { EnrichPortfolioButton } from './enrich-portfolio-button';
 import { PortfolioSummaryCards } from './portfolio-summary-cards';
 import { HoldingsTable } from './holdings-table';
 import { AddBillForm } from './add-bill-form';
+import { SellBillForm } from './sell-bill-form';
 
 export function PortfolioDashboard() {
   const router = useRouter();
@@ -22,7 +23,6 @@ export function PortfolioDashboard() {
       <PortfolioSummaryCards />
       <div className='flex items-center justify-between'>
         <div className='flex items-center gap-4'>
-          <h2 className='text-lg font-semibold'>Holdings</h2>
           <Link
             href='/portfolio/transactions'
             className='text-muted-foreground text-sm hover:underline'
@@ -32,6 +32,7 @@ export function PortfolioDashboard() {
         </div>
         <div className='flex items-center gap-2'>
           <EnrichPortfolioButton />
+          <SellBillForm onSuccess={handleTxnAdded} />
           <AddBillForm onSuccess={handleTxnAdded} />
         </div>
       </div>

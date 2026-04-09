@@ -25,6 +25,7 @@ def create_transaction(
     notes: str | None = None,
     bill_id: str | None = None,
     supplier: str | None = None,
+    platform: str | None = None,
 ) -> int:
     """Insert a BUY or SELL transaction. Returns the new transaction ID.
 
@@ -49,13 +50,13 @@ def create_transaction(
         """
         INSERT INTO portfolio_transactions (
             id, set_number, txn_type, quantity, price_cents,
-            currency, condition, txn_date, notes, bill_id, supplier
+            currency, condition, txn_date, notes, bill_id, supplier, platform
         ) VALUES (
             nextval('portfolio_transactions_id_seq'),
-            ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+            ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
         ) RETURNING id
         """,
-        [set_number, txn_type, quantity, price_cents, currency, condition, txn_date, notes, bill_id, supplier],
+        [set_number, txn_type, quantity, price_cents, currency, condition, txn_date, notes, bill_id, supplier, platform],
     ).fetchone()
 
     return row[0]
@@ -80,7 +81,7 @@ def list_transactions(
         f"""
         SELECT pt.id, pt.set_number, pt.txn_type, pt.quantity,
                pt.price_cents, pt.currency, pt.condition, pt.txn_date,
-               pt.notes, pt.created_at, pt.bill_id, pt.supplier,
+               pt.notes, pt.created_at, pt.bill_id, pt.supplier, pt.platform,
                li.title,
                CASE
                    WHEN ia.status = 'downloaded' THEN '/api/images/set/' || pt.set_number
@@ -100,7 +101,7 @@ def list_transactions(
     columns = [
         "id", "set_number", "txn_type", "quantity", "price_cents",
         "currency", "condition", "txn_date", "notes", "created_at", "bill_id",
-        "supplier", "title", "image_url", "theme",
+        "supplier", "platform", "title", "image_url", "theme",
     ]
     return [dict(zip(columns, row)) for row in rows]
 
@@ -111,7 +112,7 @@ def get_transaction(conn: Any, txn_id: int) -> dict | None:
         """
         SELECT pt.id, pt.set_number, pt.txn_type, pt.quantity,
                pt.price_cents, pt.currency, pt.condition, pt.txn_date,
-               pt.notes, pt.created_at, pt.bill_id, pt.supplier,
+               pt.notes, pt.created_at, pt.bill_id, pt.supplier, pt.platform,
                li.title,
                CASE
                    WHEN ia.status = 'downloaded' THEN '/api/images/set/' || pt.set_number
@@ -131,7 +132,7 @@ def get_transaction(conn: Any, txn_id: int) -> dict | None:
     columns = [
         "id", "set_number", "txn_type", "quantity", "price_cents",
         "currency", "condition", "txn_date", "notes", "created_at", "bill_id",
-        "supplier", "title", "image_url", "theme",
+        "supplier", "platform", "title", "image_url", "theme",
     ]
     return dict(zip(columns, row))
 
@@ -147,6 +148,7 @@ def update_transaction(
     txn_date: datetime | None = None,
     notes: str | None = _SENTINEL,
     supplier: str | None = _SENTINEL,
+    platform: str | None = _SENTINEL,
 ) -> bool:
     """Update a transaction. Returns True if a row was updated.
 
@@ -195,6 +197,9 @@ def update_transaction(
     if supplier is not _SENTINEL:
         fields.append("supplier = ?")
         params.append(supplier)
+    if platform is not _SENTINEL:
+        fields.append("platform = ?")
+        params.append(platform)
 
     if not fields:
         return True

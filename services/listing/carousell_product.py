@@ -33,6 +33,31 @@ async def _snap(page: Page, step: str, **extra: Any) -> None:
     )
 
 
+async def _clear_and_type(page: Page, text: str, *, delay: int = 40) -> None:
+    """Clear the focused field via JS, then type the new text.
+
+    Carousell auto-populates fields from image detection, so we must
+    clear before typing. Uses JS to set value to empty and dispatch
+    input event (works with React), then types the new text.
+    """
+    await page.evaluate("""() => {
+        const el = document.activeElement;
+        if (el && ('value' in el)) {
+            const nativeSetter = Object.getOwnPropertyDescriptor(
+                el.tagName === 'TEXTAREA'
+                    ? HTMLTextAreaElement.prototype
+                    : HTMLInputElement.prototype,
+                'value'
+            ).set;
+            nativeSetter.call(el, '');
+            el.dispatchEvent(new Event('input', { bubbles: true }));
+            el.dispatchEvent(new Event('change', { bubbles: true }));
+        }
+    }""")
+    await human_delay(300, 500)
+    await page.keyboard.type(text, delay=delay)
+
+
 # ---------------------------------------------------------------------------
 # Step functions
 # ---------------------------------------------------------------------------
@@ -60,6 +85,18 @@ async def _upload_photos(page: Page, image_paths: list[Path]) -> None:
         image_count=len(image_paths),
         paths=[str(p) for p in image_paths[:10]],
     )
+
+    # Carousell shows "Processing your photos" with AI detection.
+    # Click "Fill in manually instead" to skip and get the form immediately.
+    try:
+        manual_link = page.get_by_text("Fill in manually", exact=False)
+        if await manual_link.count() > 0:
+            await manual_link.first.click(timeout=10_000)
+            await human_delay(2_000, 4_000)
+            logger.info("Clicked 'Fill in manually instead' to skip photo processing")
+            await _snap(page, "manual_fill_clicked")
+    except Exception as exc:
+        logger.warning("Manual fill link not found or click failed: %s", exc)
 
 
 async def _click_category_item(page: Page, text: str) -> bool:
@@ -107,6 +144,24 @@ async def _select_category(page: Page) -> None:
     """
     await _snap(page, "before_category")
 
+    # Check if category is already set to Toys & Games
+    already_set = await page.evaluate("""() => {
+        // Look for category display text outside the navbar
+        const spans = [...document.querySelectorAll('span, p')];
+        for (const s of spans) {
+            if (s.textContent.trim() !== 'Toys & Games') continue;
+            if (s.closest('nav') || s.closest('a[href*="top_navigation_bar"]')) continue;
+            // Must be visible
+            const r = s.getBoundingClientRect();
+            if (r.width > 0 && r.height > 0) return true;
+        }
+        return false;
+    }""")
+    if already_set:
+        logger.info("Category already set to Toys & Games, skipping")
+        await _snap(page, "category_already_set")
+        return
+
     # Ensure the category panel is open/visible
     try:
         cat_header = page.locator('text="Select a category"')
@@ -144,6 +199,27 @@ async def _set_condition(page: Page) -> None:
     await _snap(page, "before_condition")
 
     try:
+        already_selected = await page.evaluate("""() => {
+            const chips = [...document.querySelectorAll('span, p, div')];
+            for (const chip of chips) {
+                if (chip.textContent.trim() !== 'Brand new') continue;
+                const parent = chip.closest('[class]');
+                if (!parent) continue;
+                const cls = parent.className || '';
+                if (cls.includes('active') || cls.includes('selected')
+                    || cls.includes('checked')
+                    || parent.getAttribute('aria-selected') === 'true'
+                    || parent.getAttribute('aria-pressed') === 'true') {
+                    return true;
+                }
+            }
+            return false;
+        }""")
+        if already_selected:
+            logger.info("Condition already set to Brand new, skipping")
+            await _snap(page, "condition_already_set")
+            return
+
         brand_new = page.get_by_text("Brand new", exact=True).first
         await brand_new.click(timeout=10_000)
         await human_delay(500, 1_000)
@@ -168,7 +244,7 @@ async def _fill_title(page: Page, title: str) -> None:
         )
         await title_input.first.click(timeout=10_000)
         await human_delay(200, 400)
-        await page.keyboard.type(title, delay=40)
+        await _clear_and_type(page, title, delay=40)
         await human_delay(500, 1_000)
         logger.info("Title filled: %s", title[:60])
     except Exception as exc:
@@ -184,27 +260,37 @@ async def _fill_item_details(page: Page) -> None:
     # Type dropdown -- custom dropdown with role="listbox" trigger button
     # Container: id="FieldSetField-Container-field_type_enum"
     try:
-        type_btn = page.locator(
-            '#FieldSetField-Container-field_type_enum button[role="listbox"]'
-        ).or_(
-            page.locator('button[role="listbox"]:has(span:text-is("Type"))')
-        )
-        if await type_btn.count() > 0:
-            await type_btn.first.click(timeout=10_000)
-            await human_delay(800, 1_500)
-            logger.info("Type dropdown opened")
-            await _snap(page, "type_dropdown_opened")
-
-            # Select "Bricks & Building Blocks" from the list
-            option = page.get_by_text("Bricks & Building Blocks", exact=True)
-            if await option.count() > 0:
-                await option.first.click(timeout=5_000)
-                await human_delay(500, 1_000)
-                logger.info("Type set to: Bricks & Building Blocks")
-            else:
-                logger.warning("'Bricks & Building Blocks' option not found")
+        current_type = await page.evaluate("""() => {
+            const container = document.querySelector(
+                '#FieldSetField-Container-field_type_enum'
+            );
+            if (!container) return '';
+            const btn = container.querySelector('button[role="listbox"]');
+            return btn ? btn.textContent.trim() : '';
+        }""")
+        if "Bricks & Building Blocks" in current_type:
+            logger.info("Type already set to Bricks & Building Blocks, skipping")
         else:
-            logger.warning("Type dropdown button not found")
+            type_btn = page.locator(
+                '#FieldSetField-Container-field_type_enum button[role="listbox"]'
+            ).or_(
+                page.locator('button[role="listbox"]:has(span:text-is("Type"))')
+            )
+            if await type_btn.count() > 0:
+                await type_btn.first.click(timeout=10_000)
+                await human_delay(800, 1_500)
+                logger.info("Type dropdown opened")
+                await _snap(page, "type_dropdown_opened")
+
+                option = page.get_by_text("Bricks & Building Blocks", exact=True)
+                if await option.count() > 0:
+                    await option.first.click(timeout=5_000)
+                    await human_delay(500, 1_000)
+                    logger.info("Type set to: Bricks & Building Blocks")
+                else:
+                    logger.warning("'Bricks & Building Blocks' option not found")
+            else:
+                logger.warning("Type dropdown button not found")
     except Exception as exc:
         logger.warning("Type dropdown interaction failed: %s", exc)
 
@@ -212,17 +298,37 @@ async def _fill_item_details(page: Page) -> None:
 
     # Age Range -- select "Adults" or "older than 12"
     try:
-        adults = page.get_by_text("Adults", exact=True)
-        if await adults.count() > 0:
-            await adults.first.click(timeout=5_000)
-            await human_delay(500, 1_000)
-            logger.info("Age Range set to: Adults")
+        age_already = await page.evaluate("""() => {
+            const els = [...document.querySelectorAll('span, p, div')];
+            for (const el of els) {
+                const t = el.textContent.trim();
+                if (t !== 'Adults' && t !== 'older than 12') continue;
+                const parent = el.closest('[class]');
+                if (!parent) continue;
+                const cls = parent.className || '';
+                if (cls.includes('active') || cls.includes('selected')
+                    || cls.includes('checked')
+                    || parent.getAttribute('aria-selected') === 'true'
+                    || parent.getAttribute('aria-pressed') === 'true') {
+                    return t;
+                }
+            }
+            return null;
+        }""")
+        if age_already:
+            logger.info("Age Range already set to %s, skipping", age_already)
         else:
-            older = page.get_by_text("older than 12", exact=True)
-            if await older.count() > 0:
-                await older.first.click(timeout=5_000)
+            adults = page.get_by_text("Adults", exact=True)
+            if await adults.count() > 0:
+                await adults.first.click(timeout=5_000)
                 await human_delay(500, 1_000)
-                logger.info("Age Range set to: older than 12")
+                logger.info("Age Range set to: Adults")
+            else:
+                older = page.get_by_text("older than 12", exact=True)
+                if await older.count() > 0:
+                    await older.first.click(timeout=5_000)
+                    await human_delay(500, 1_000)
+                    logger.info("Age Range set to: older than 12")
     except Exception as exc:
         logger.warning("Age Range selection failed: %s", exc)
 
@@ -241,9 +347,11 @@ async def _fill_description(page: Page, description: str) -> None:
         ).or_(
             page.locator('textarea')
         )
+        await desc_input.first.scroll_into_view_if_needed()
+        await human_delay(500, 1_000)
         await desc_input.first.click(timeout=10_000)
         await human_delay(200, 500)
-        await page.keyboard.type(description, delay=15)
+        await _clear_and_type(page, description, delay=15)
         await human_delay(500, 1_000)
         logger.info("Description filled (%d chars)", len(description))
     except Exception as exc:
@@ -272,7 +380,7 @@ async def _set_price(page: Page, price_cents: int) -> None:
         await human_delay(500, 1_000)
         await price_input.first.click(timeout=10_000)
         await human_delay(200, 400)
-        await page.keyboard.type(price_str, delay=60)
+        await _clear_and_type(page, price_str, delay=60)
         await human_delay(500, 1_000)
         logger.info("Price set to RM %s", price_str)
     except Exception as exc:
@@ -282,45 +390,80 @@ async def _set_price(page: Page, price_cents: int) -> None:
 
 
 async def _disable_buy_button(page: Page) -> None:
-    """Select 'Disable Buy button' radio and confirm the dialog."""
+    """Disable the 'Buy' button via toggle or radio, then confirm dialog."""
     await _snap(page, "before_buy_button")
 
-    # The Buy button section has two radio inputs:
-    #   value="true" (Enable) and value="false" (Disable)
-    # Click the "Disable 'Buy' button" radio via JS to avoid visibility issues
+    # Check current state: toggle (aria-checked), radio, or text "Disabled"
+    state = await page.evaluate("""() => {
+        const elems = [...document.querySelectorAll('p, span, label')];
+        for (const el of elems) {
+            const t = el.textContent.trim();
+            if (!t.includes('Buy') || t.length > 30) continue;
+            const section = el.closest('div[class]');
+            if (!section) continue;
+            // Check for toggle switch
+            const toggle = section.querySelector('[role="switch"]');
+            if (toggle) {
+                const on = toggle.getAttribute('aria-checked') === 'true';
+                return { type: 'toggle', enabled: on };
+            }
+            // Check for radio
+            const radios = section.querySelectorAll('input[type="radio"]');
+            if (radios.length > 0) {
+                for (const r of radios) {
+                    if (r.value === 'false' && r.checked) return { type: 'radio', enabled: false };
+                }
+                return { type: 'radio', enabled: true };
+            }
+            // Check for "Disabled" text nearby
+            const nearby = section.querySelectorAll('p, span');
+            for (const n of nearby) {
+                if (n.textContent.trim() === 'Disabled') return { type: 'text', enabled: false };
+            }
+        }
+        return null;
+    }""")
+
+    if state and not state.get("enabled", True):
+        logger.info("Buy button already disabled (via %s), skipping", state.get("type"))
+        await _snap(page, "buy_button_already_disabled")
+        return
+
+    # Click the toggle/radio to disable
     try:
         clicked = await page.evaluate("""() => {
-            // Find the radio with value="false" (Disable)
-            const radios = document.querySelectorAll('input[type="radio"]');
-            for (const radio of radios) {
-                if (radio.value === 'false') {
-                    radio.click();
-                    return true;
+            const elems = [...document.querySelectorAll('p, span, label')];
+            for (const el of elems) {
+                const t = el.textContent.trim();
+                if (!t.includes('Buy') || t.length > 30) continue;
+                const section = el.closest('div[class]');
+                if (!section) continue;
+                // Toggle switch
+                const toggle = section.querySelector('[role="switch"]');
+                if (toggle) { toggle.click(); return 'toggle'; }
+                // Radio with value="false"
+                const radios = section.querySelectorAll('input[type="radio"]');
+                for (const r of radios) {
+                    if (r.value === 'false') { r.click(); return 'radio'; }
                 }
+                // Fallback: click section
+                section.click();
+                return 'section';
             }
-            // Fallback: find by text
-            const labels = [...document.querySelectorAll('span, p, label')];
-            for (const el of labels) {
-                if (el.textContent.includes("Disable") && el.textContent.includes("Buy")) {
-                    el.click();
-                    return true;
-                }
-            }
-            return false;
+            return null;
         }""")
 
         if clicked:
-            logger.info("Clicked Disable Buy button radio")
+            logger.info("Buy button disabled via %s", clicked)
             await human_delay(1_000, 2_000)
         else:
-            logger.warning("Disable Buy button radio not found")
+            logger.warning("Buy button toggle/radio not found")
     except Exception as exc:
-        logger.warning("Disable Buy button click failed: %s", exc)
+        logger.warning("Buy button disable failed: %s", exc)
 
     await _snap(page, "buy_button_clicked")
 
-    # Handle the confirmation dialog: "Disable the 'Buy' button and remove
-    # delivery options?" with "Disable anyway" button
+    # Handle confirmation dialog: "Disable anyway"
     try:
         clicked = await page.evaluate("""() => {
             const buttons = [...document.querySelectorAll('button')];
@@ -353,7 +496,7 @@ async def _set_deal_methods(page: Page) -> None:
     """
     await _snap(page, "before_deal_methods")
 
-    # Enable Meet-up toggle
+    # Enable Meet-up toggle (check state first to avoid toggling off)
     try:
         clicked = await page.evaluate("""() => {
             const elems = [...document.querySelectorAll('p, span, label')];
@@ -361,12 +504,25 @@ async def _set_deal_methods(page: Page) -> None:
                 if (el.textContent.trim() !== 'Meet-up') continue;
                 const row = el.closest('div[class]');
                 if (!row) continue;
-                const toggle = row.querySelector(
-                    '[class*="toggle"], [class*="switch"], [role="switch"]'
+                // Check role="switch" state
+                const toggle = row.querySelector('[role="switch"]');
+                if (toggle) {
+                    const checked = toggle.getAttribute('aria-checked') === 'true'
+                        || toggle.classList.toString().includes('active')
+                        || toggle.classList.toString().includes('checked');
+                    if (checked) return 'already_enabled';
+                    toggle.click();
+                    return 'toggle';
+                }
+                // Check generic toggle/switch classes
+                const swEl = row.querySelector(
+                    '[class*="toggle"], [class*="switch"]'
                 );
-                if (toggle) { toggle.click(); return 'toggle'; }
+                if (swEl) { swEl.click(); return 'toggle'; }
+                // Check checkbox state
                 const checkbox = row.querySelector('input[type="checkbox"]');
-                if (checkbox && !checkbox.checked) {
+                if (checkbox) {
+                    if (checkbox.checked) return 'already_enabled';
                     (checkbox.closest('label') || row).click();
                     return 'checkbox';
                 }
@@ -375,7 +531,9 @@ async def _set_deal_methods(page: Page) -> None:
             }
             return null;
         }""")
-        if clicked:
+        if clicked == "already_enabled":
+            logger.info("Meet-up toggle already enabled, skipping")
+        elif clicked:
             await human_delay(1_000, 2_000)
             logger.info("Meet-up toggled via %s", clicked)
         else:
@@ -385,51 +543,203 @@ async def _set_deal_methods(page: Page) -> None:
 
     await _snap(page, "deal_meet_up_toggled")
 
-    # Fill Meet-up location: search for MRT Surian and select first result
+    # Fill Meet-up location: check if already set (as chip/tag), otherwise search
     try:
-        location_input = page.locator(
-            'input[placeholder*="Add location" i]'
-        ).or_(
-            page.locator('input[aria-label*="location" i]')
-        ).or_(
-            page.get_by_placeholder("Add location")
-        )
-        await location_input.first.scroll_into_view_if_needed()
-        await human_delay(500, 1_000)
-        await location_input.first.click(timeout=10_000)
-        await human_delay(300, 600)
         from config.settings import CAROUSELL_CONFIG
-        await page.keyboard.type(
-            CAROUSELL_CONFIG.meetup_location_query, delay=60,
-        )
-        await human_delay(2_000, 3_000)
 
-        await _snap(page, "meetup_location_searched")
+        # Location persists from previous listing as a chip/tag -- the input
+        # field itself stays empty, so we check for location metadata nearby.
+        location_exists = await page.evaluate("""() => {
+            // Look for location chip: a close/remove button (x) near text
+            // containing "MRT", "Station", "RapidKL", or any address-like text
+            const elems = [...document.querySelectorAll('p, span, div')];
+            for (const el of elems) {
+                const t = el.textContent.trim();
+                if (t.length < 5 || t.length > 200) continue;
+                if (t.includes('MRT') || t.includes('Station')
+                    || t.includes('RapidKL') || t.includes('Surian')) {
+                    // Confirm it's in the meet-up / deal section
+                    const section = el.closest('div[class]');
+                    if (!section) continue;
+                    // Look for a remove/close button nearby (the x on the chip)
+                    const closeBtn = section.querySelector(
+                        'button[aria-label*="remove" i], button[aria-label*="close" i], '
+                        + 'svg, [class*="close"], [class*="remove"]'
+                    );
+                    if (closeBtn) return t;
+                }
+            }
+            return null;
+        }""")
 
-        # Select the first search result
-        result = page.get_by_text(
-            CAROUSELL_CONFIG.meetup_location_label, exact=False,
-        ).or_(
-            page.locator('[class*="search"] [class*="result"]').first
-        ).or_(
-            page.locator('text="Search result" + div >> nth=0')
-        )
-        if await result.count() > 0:
-            await result.first.click(timeout=5_000)
-            await human_delay(1_000, 2_000)
-            logger.info("Meet-up location selected: MRT Surian KG07")
+        if location_exists:
+            logger.info(
+                "Meet-up location already set: '%s', skipping",
+                str(location_exists)[:40],
+            )
         else:
-            # Fallback: click first item after "Search result" text via JS
-            await page.evaluate("""() => {
-                const items = document.querySelectorAll('[class*="result"] p, [class*="Result"] p');
-                if (items.length > 0) items[0].closest('div[class]').click();
-            }""")
-            await human_delay(1_000, 2_000)
-            logger.info("Meet-up location selected (fallback)")
+            location_input = page.locator(
+                'input[placeholder*="Add location" i]'
+            ).or_(
+                page.locator('input[aria-label*="location" i]')
+            ).or_(
+                page.get_by_placeholder("Add location")
+            )
+            await location_input.first.scroll_into_view_if_needed()
+            await human_delay(500, 1_000)
+            await location_input.first.click(timeout=10_000)
+            await human_delay(300, 600)
+            await _clear_and_type(
+                page, CAROUSELL_CONFIG.meetup_location_query, delay=60,
+            )
+            await human_delay(2_000, 3_000)
+
+            await _snap(page, "meetup_location_searched")
+
+            # Select the first search result
+            result = page.get_by_text(
+                CAROUSELL_CONFIG.meetup_location_label, exact=False,
+            ).or_(
+                page.locator('[class*="search"] [class*="result"]').first
+            ).or_(
+                page.locator('text="Search result" + div >> nth=0')
+            )
+            if await result.count() > 0:
+                await result.first.click(timeout=5_000)
+                await human_delay(1_000, 2_000)
+                logger.info("Meet-up location selected: MRT Surian KG07")
+            else:
+                # Fallback: click first item via JS
+                await page.evaluate("""() => {
+                    const items = document.querySelectorAll(
+                        '[class*="result"] p, [class*="Result"] p'
+                    );
+                    if (items.length > 0) items[0].closest('div[class]').click();
+                }""")
+                await human_delay(1_000, 2_000)
+                logger.info("Meet-up location selected (fallback)")
     except Exception as exc:
         logger.warning("Meet-up location failed: %s", exc)
 
     await _snap(page, "deal_methods_set")
+
+
+async def _validate_form(
+    page: Page,
+    title: str,
+    description: str,
+    price_cents: int,
+) -> list[str]:
+    """Validate all required fields before submission.
+
+    Returns a list of field identifiers that failed validation.
+    Field IDs: "title", "description", "price", "category", "condition",
+    "meetup". Empty list means all checks passed.
+    """
+    errors: list[str] = []
+
+    # 1. Title
+    try:
+        title_val = await page.locator('input#title').or_(
+            page.locator('input[name="field_title"]')
+        ).first.input_value()
+        if not title_val.strip():
+            errors.append("title")
+    except Exception:
+        errors.append("title")
+
+    # 2. Description
+    try:
+        desc_val = await page.locator(
+            'textarea[name="field_description"]'
+        ).or_(
+            page.locator('textarea')
+        ).first.input_value()
+        if not desc_val.strip():
+            errors.append("description")
+    except Exception:
+        errors.append("description")
+
+    # 3. Price
+    try:
+        price_val = await page.locator('input#price').or_(
+            page.locator('input[name="field_price"]')
+        ).first.input_value()
+        if not price_val.strip():
+            errors.append("price")
+    except Exception:
+        errors.append("price")
+
+    # 4. Category (should NOT show "Select a category")
+    try:
+        no_category = await page.evaluate("""() => {
+            const els = [...document.querySelectorAll('span, p')];
+            return els.some(e => e.textContent.trim() === 'Select a category');
+        }""")
+        if no_category:
+            errors.append("category")
+    except Exception:
+        errors.append("category")
+
+    # 5. Condition -- check that "Brand new" chip is visually distinct
+    # (highlighted/active). Carousell uses teal background on selected chips.
+    try:
+        has_condition = await page.evaluate("""() => {
+            const spans = [...document.querySelectorAll('span, p, div')];
+            for (const el of spans) {
+                if (el.textContent.trim() !== 'Brand new') continue;
+                // Walk up to the clickable chip wrapper
+                let node = el;
+                for (let i = 0; i < 4; i++) {
+                    node = node.parentElement;
+                    if (!node) break;
+                    const cls = (node.className || '').toLowerCase();
+                    const style = getComputedStyle(node);
+                    // Selected chip has colored background (not transparent)
+                    const bg = style.backgroundColor;
+                    if (bg && bg !== 'rgba(0, 0, 0, 0)' && bg !== 'transparent') {
+                        return true;
+                    }
+                    if (cls.includes('active') || cls.includes('selected')
+                        || cls.includes('checked')
+                        || node.getAttribute('aria-selected') === 'true'
+                        || node.getAttribute('aria-pressed') === 'true') {
+                        return true;
+                    }
+                }
+            }
+            return false;
+        }""")
+        if not has_condition:
+            errors.append("condition")
+    except Exception:
+        errors.append("condition")
+
+    # 6. Meet-up toggle enabled
+    try:
+        meetup_on = await page.evaluate("""() => {
+            const elems = [...document.querySelectorAll('p, span, label')];
+            for (const el of elems) {
+                if (el.textContent.trim() !== 'Meet-up') continue;
+                const row = el.closest('div[class]');
+                if (!row) continue;
+                const toggle = row.querySelector('[role="switch"]');
+                if (toggle) {
+                    return toggle.getAttribute('aria-checked') === 'true'
+                        || toggle.classList.toString().includes('active')
+                        || toggle.classList.toString().includes('checked');
+                }
+                const cb = row.querySelector('input[type="checkbox"]');
+                if (cb) return cb.checked;
+            }
+            return false;
+        }""")
+        if not meetup_on:
+            errors.append("meetup")
+    except Exception:
+        errors.append("meetup")
+
+    return errors
 
 
 async def _click_list_now(page: Page, *, submit: bool) -> None:
@@ -553,7 +863,47 @@ async def create_product(
     # Step 9: Set deal methods (AFTER disabling Buy button, which resets them)
     await _set_deal_methods(page)
 
-    # Step 10: List now button
+    # Step 10: Validate all fields before submission
+    validation_errors = await _validate_form(
+        page, title, description, listing_price_cents,
+    )
+    if validation_errors:
+        for field in validation_errors:
+            logger.warning("Validation failed: %s -- retrying", field)
+        await _snap(page, "validation_failed_retry", errors=validation_errors)
+
+        # Retry each failed field
+        for field in validation_errors:
+            if field == "title":
+                await _fill_title(page, title)
+            elif field == "description":
+                await _fill_description(page, description)
+            elif field == "price":
+                await _set_price(page, listing_price_cents)
+            elif field == "category":
+                await _select_category(page)
+            elif field == "condition":
+                await _set_condition(page)
+            elif field == "meetup":
+                await _set_deal_methods(page)
+
+        # Re-validate after retry
+        validation_errors = await _validate_form(
+            page, title, description, listing_price_cents,
+        )
+        if validation_errors:
+            for field in validation_errors:
+                logger.error("Validation still failed after retry: %s", field)
+            await _snap(page, "validation_failed_final", errors=validation_errors)
+            logger.error(
+                "Form validation failed with %d error(s) after retry -- aborting",
+                len(validation_errors),
+            )
+            return False
+
+        logger.info("Validation passed after retry")
+
+    # Step 11: List now button
     await _click_list_now(page, submit=submit)
 
     # Final comprehensive snapshot

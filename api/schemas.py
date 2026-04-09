@@ -65,6 +65,7 @@ class ScraperInfo(BaseModel):
     id: str
     name: str
     description: str
+    category: str
     targets: list["ScrapeTargetInfo"]
 
 

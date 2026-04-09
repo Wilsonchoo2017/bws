@@ -7,7 +7,8 @@ import {
   getCoreRowModel,
   getPaginationRowModel,
   getSortedRowModel,
-  type SortingState
+  type SortingState,
+  type PaginationState,
 } from '@tanstack/react-table';
 import { DataTable } from '@/components/ui/table/data-table';
 import { Button } from '@/components/ui/button';
@@ -18,6 +19,7 @@ import { SyncRetirementButton } from './sync-retirement-button';
 import { ScrapeMissingMetadataButton } from './scrape-missing-metadata-button';
 import { FilterBar } from './filter-bar';
 import { applyFilters, type FilterKey } from './filter-utils';
+import { QueryBuilder, createEmptyGroup, applyAdvancedQuery, type QueryGroup } from './query-builder';
 import type { UnifiedItem } from './types';
 import { unifiedColumns } from './unified-columns';
 
@@ -27,10 +29,13 @@ export function UnifiedItemsTable() {
   const [enriching, setEnriching] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [sorting, setSorting] = useState<SortingState>([]);
+  const [pagination, setPagination] = useState<PaginationState>({ pageIndex: 0, pageSize: 10 });
   const [searchQuery, setSearchQuery] = useState('');
   const [activeFilters, setActiveFilters] = useState<Set<FilterKey>>(new Set());
   const [dealThreshold, setDealThreshold] = useState(0);
   const [cohortThreshold, setCohortThreshold] = useState(65);
+  const [showAdvanced, setShowAdvanced] = useState(false);
+  const [advancedQuery, setAdvancedQuery] = useState<QueryGroup>(createEmptyGroup);
   const [newSetNumber, setNewSetNumber] = useState('');
   const [adding, setAdding] = useState(false);
   const [addError, setAddError] = useState<string | null>(null);
@@ -45,10 +50,12 @@ export function UnifiedItemsTable() {
       }
       return next;
     });
+    setPagination((prev) => ({ ...prev, pageIndex: 0 }));
   }, []);
 
   const handleClearFilters = useCallback(() => {
     setActiveFilters(new Set());
+    setPagination((prev) => ({ ...prev, pageIndex: 0 }));
   }, []);
 
   const filteredData = useMemo(() => {
@@ -61,8 +68,12 @@ export function UnifiedItemsTable() {
           (item.title?.toLowerCase().includes(q) ?? false)
       );
     }
-    return applyFilters(result, activeFilters, dealThreshold, cohortThreshold);
-  }, [data, searchQuery, activeFilters, dealThreshold, cohortThreshold]);
+    result = applyFilters(result, activeFilters, dealThreshold, cohortThreshold);
+    if (showAdvanced) {
+      result = applyAdvancedQuery(result, advancedQuery);
+    }
+    return result;
+  }, [data, searchQuery, activeFilters, dealThreshold, cohortThreshold, showAdvanced, advancedQuery]);
 
   const minifigMissing = useMemo(
     () => filteredData.filter(i => i.minifig_count === null).map(i => i.set_number),
@@ -82,6 +93,8 @@ export function UnifiedItemsTable() {
   );
 
   const [watchlistLoading, setWatchlistLoading] = useState<Set<string>>(new Set());
+  const [cartSetNumbers, setCartSetNumbers] = useState<Set<string>>(new Set());
+  const [cartLoading, setCartLoading] = useState<Set<string>>(new Set());
 
   const toggleWatchlist = useCallback(async (setNumber: string) => {
     setWatchlistLoading((prev) => new Set(prev).add(setNumber));
@@ -111,6 +124,46 @@ export function UnifiedItemsTable() {
     }
   }, []);
 
+  const fetchCartEntries = useCallback(async () => {
+    try {
+      const res = await fetch('/api/cart');
+      const json = await res.json();
+      if (json.success && Array.isArray(json.data)) {
+        setCartSetNumbers(new Set(json.data.map((e: { set_number: string }) => e.set_number)));
+      }
+    } catch {
+      // silent
+    }
+  }, []);
+
+  const addToCart = useCallback(async (setNumber: string) => {
+    setCartLoading((prev) => new Set(prev).add(setNumber));
+    try {
+      const res = await fetch('/api/cart', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ set_number: setNumber }),
+      });
+      const json = await res.json();
+      if (json.success) {
+        setCartSetNumbers((prev) => new Set(prev).add(setNumber));
+        setData((prev) =>
+          prev.map((item) =>
+            item.set_number === setNumber ? { ...item, watchlist: false } : item
+          )
+        );
+      }
+    } catch {
+      // silent
+    } finally {
+      setCartLoading((prev) => {
+        const next = new Set(prev);
+        next.delete(setNumber);
+        return next;
+      });
+    }
+  }, []);
+
   const enrichItems = useCallback(async () => {
     setEnriching(true);
     try {
@@ -124,21 +177,22 @@ export function UnifiedItemsTable() {
       if (!itemsRes.success) return;
 
       const mlMap = new Map<string, {
-        growth: number;
+        growth: number | null;
         confidence: string | null;
         avoid_probability: number | null;
         buy_signal: boolean;
         avoid: boolean;
         kelly_fraction: number | null;
         win_probability: number | null;
-        cohorts: Record<string, { composite_pct: number | null }> | null;
+        cohorts: Record<string, { composite_score_pct: number | null }> | null;
       }>();
       if (signalsRes?.success && Array.isArray(signalsRes.data)) {
         for (const sig of signalsRes.data) {
           const setNum = (sig.set_number ?? sig.item_id?.replace(/-\d+$/, '')) as string | undefined;
-          if (setNum && sig.ml_growth_pct != null && !Number.isNaN(sig.ml_growth_pct)) {
+          if (setNum) {
+            const hasML = sig.ml_growth_pct != null && !Number.isNaN(sig.ml_growth_pct);
             mlMap.set(setNum, {
-              growth: sig.ml_growth_pct,
+              growth: hasML ? sig.ml_growth_pct : null,
               confidence: sig.ml_confidence ?? null,
               avoid_probability: sig.ml_avoid_probability ?? null,
               buy_signal: sig.ml_buy_signal ?? false,
@@ -260,7 +314,8 @@ export function UnifiedItemsTable() {
 
   useEffect(() => {
     fetchItems();
-  }, [fetchItems]);
+    fetchCartEntries();
+  }, [fetchItems, fetchCartEntries]);
 
   const SET_NUMBER_PATTERN = /^\d{3,6}(-\d+)?$/;
 
@@ -303,17 +358,17 @@ export function UnifiedItemsTable() {
   const table = useReactTable({
     data: filteredData,
     columns: unifiedColumns,
-    state: { sorting },
+    state: { sorting, pagination },
     onSortingChange: setSorting,
+    onPaginationChange: setPagination,
     getCoreRowModel: getCoreRowModel(),
     getPaginationRowModel: getPaginationRowModel(),
     getSortedRowModel: getSortedRowModel(),
     autoResetPageIndex: false,
     initialState: {
-      pagination: { pageSize: 10 },
       columnVisibility: { rrp_cents: false },
     },
-    meta: { toggleWatchlist, watchlistLoading, enriching },
+    meta: { toggleWatchlist, watchlistLoading, enriching, addToCart, cartLoading, cartSetNumbers },
   });
 
   if (loading) {
@@ -360,16 +415,33 @@ export function UnifiedItemsTable() {
           />
         </div>
 
-        {/* Row 2: Filter chips */}
-        <FilterBar
-          activeFilters={activeFilters}
-          onToggle={handleToggleFilter}
-          onClearAll={handleClearFilters}
-          dealThreshold={dealThreshold}
-          onDealThresholdChange={setDealThreshold}
-          cohortThreshold={cohortThreshold}
-          onCohortThresholdChange={setCohortThreshold}
-        />
+        {/* Row 2: Filter chips + Advanced toggle */}
+        <div className="flex items-start gap-3">
+          <div className="flex-1">
+            <FilterBar
+              activeFilters={activeFilters}
+              onToggle={handleToggleFilter}
+              onClearAll={handleClearFilters}
+              dealThreshold={dealThreshold}
+              onDealThresholdChange={setDealThreshold}
+              cohortThreshold={cohortThreshold}
+              onCohortThresholdChange={setCohortThreshold}
+            />
+          </div>
+          <Button
+            variant={showAdvanced ? 'default' : 'outline'}
+            size="sm"
+            onClick={() => setShowAdvanced((prev) => !prev)}
+            className="shrink-0 text-xs"
+          >
+            Advanced
+          </Button>
+        </div>
+
+        {/* Row 2b: Advanced query builder */}
+        {showAdvanced && (
+          <QueryBuilder query={advancedQuery} onChange={setAdvancedQuery} />
+        )}
 
         {/* Row 3: Actions + Add Item */}
         <div className='flex items-center gap-2'>

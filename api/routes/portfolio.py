@@ -1,6 +1,7 @@
 """Portfolio API routes -- transactions, holdings, and summary."""
 
 import logging
+import time
 from typing import Any
 from datetime import datetime
 from uuid import uuid4
@@ -22,6 +23,10 @@ from services.portfolio.repository import (
     list_transactions,
     update_transaction,
 )
+from services.portfolio.forward_return_query import (
+    get_holdings_forward_returns,
+)
+from services.portfolio.wbr_metrics import calculate_wbr
 
 
 logger = logging.getLogger("bws.api.portfolio")
@@ -41,6 +46,7 @@ class CreateTransactionRequest(BaseModel):
     currency: str = Field(default="MYR", max_length=3)
     notes: str | None = None
     supplier: str | None = Field(default=None, max_length=100)
+    platform: str | None = Field(default=None, max_length=100)
 
 
 @router.post("/transactions", status_code=201)
@@ -67,6 +73,7 @@ async def add_transaction(request: CreateTransactionRequest, conn: Any = Depends
         currency=request.currency,
         notes=request.notes,
         supplier=request.supplier,
+        platform=request.platform,
     )
     txn = get_transaction(conn, txn_id)
     return {"success": True, "data": txn}
@@ -84,10 +91,12 @@ class CreateBillRequest(BaseModel):
     items: list[BillLineItem] = Field(..., min_length=1, max_length=50)
     final_amount_cents: int = Field(..., gt=0)
     txn_date: datetime
+    txn_type: str = Field(default="BUY", pattern=r"^(BUY|SELL)$")
     condition: str = Field(default="new", pattern=r"^(new|used)$")
     currency: str = Field(default="MYR", max_length=3)
     notes: str | None = None
     supplier: str | None = Field(default=None, max_length=100)
+    platform: str | None = Field(default=None, max_length=100)
 
 
 def _compute_effective_prices(
@@ -162,7 +171,7 @@ async def add_bill(
         txn_id = create_transaction(
             conn,
             item.set_number,
-            "BUY",
+            request.txn_type,
             item.quantity,
             eff_price,
             request.condition,
@@ -170,6 +179,8 @@ async def add_bill(
             currency=request.currency,
             notes=request.notes,
             bill_id=bill_id,
+            supplier=request.supplier,
+            platform=request.platform,
         )
         txn = get_transaction(conn, txn_id)
         created_txns.append(txn)
@@ -235,7 +246,7 @@ async def update_bill(
         txn_id = create_transaction(
             conn,
             item.set_number,
-            "BUY",
+            request.txn_type,
             item.quantity,
             eff_price,
             request.condition,
@@ -244,6 +255,7 @@ async def update_bill(
             notes=request.notes,
             bill_id=bill_id,
             supplier=request.supplier,
+            platform=request.platform,
         )
         txn = get_transaction(conn, txn_id)
         created_txns.append(txn)
@@ -294,6 +306,8 @@ class UpdateTransactionRequest(BaseModel):
     clear_notes: bool = False
     supplier: str | None = None
     clear_supplier: bool = False
+    platform: str | None = None
+    clear_platform: bool = False
 
 
 @router.put("/transactions/{txn_id}")
@@ -320,6 +334,10 @@ async def edit_transaction(
         kwargs["supplier"] = None
     elif request.supplier is not None:
         kwargs["supplier"] = request.supplier
+    if request.clear_platform:
+        kwargs["platform"] = None
+    elif request.platform is not None:
+        kwargs["platform"] = request.platform
 
     if not kwargs:
         raise HTTPException(status_code=400, detail="No fields to update")
@@ -412,3 +430,44 @@ async def portfolio_summary(conn: Any = Depends(get_db)) -> dict:
     """Get portfolio-wide summary totals."""
     summary = get_portfolio_summary(conn)
     return {"success": True, "data": summary}
+
+
+# ---------------------------------------------------------------------------
+# Forward Return & Decision Engine
+# ---------------------------------------------------------------------------
+
+_fr_cache: dict = {}
+_FR_TTL = 600  # 10 minutes
+
+
+@router.get("/forward-returns")
+async def forward_returns(
+    refresh: bool = Query(default=False),
+    conn: Any = Depends(get_db),
+) -> dict:
+    """Holdings with forward annual return calculations and decisions."""
+    now = time.time()
+    cache_key = "holdings_fr"
+
+    if not refresh and cache_key in _fr_cache and _fr_cache[cache_key]["expires"] > now:
+        cached = _fr_cache[cache_key]["data"]
+        return {"success": True, "data": cached, "count": len(cached), "cached": True}
+
+    data = get_holdings_forward_returns(conn)
+    _fr_cache[cache_key] = {"data": data, "expires": now + _FR_TTL}
+    return {"success": True, "data": data, "count": len(data)}
+
+
+
+@router.get("/wbr")
+async def wbr_metrics(conn: Any = Depends(get_db)) -> dict:
+    """Weekly Business Review metrics for capital allocation."""
+    now = time.time()
+    cache_key = "wbr"
+
+    if cache_key in _fr_cache and _fr_cache[cache_key]["expires"] > now:
+        return {"success": True, "data": _fr_cache[cache_key]["data"], "cached": True}
+
+    data = calculate_wbr(conn)
+    _fr_cache[cache_key] = {"data": data, "expires": now + _FR_TTL}
+    return {"success": True, "data": data}

@@ -182,4 +182,29 @@ def register_existing_images(conn: Any) -> int:
         )
         registered += 1
 
+    # Backfill sets with no image_url using predictable BrickLink SN URL
+    rows = conn.execute(
+        """
+        SELECT bi.item_id FROM bricklink_items bi
+        WHERE bi.item_type = 'S'
+        AND bi.image_url IS NULL
+        AND NOT EXISTS (
+            SELECT 1 FROM image_assets ia
+            WHERE ia.asset_type = 'set'
+            AND ia.item_id = bi.item_id
+        )
+        """
+    ).fetchall()
+    for (item_id,) in rows:
+        fallback_url = f"https://img.bricklink.com/ItemImage/SN/0/{item_id}.png"
+        conn.execute(
+            """
+            INSERT INTO image_assets (id, asset_type, item_id, source_url, local_path)
+            VALUES (nextval('image_assets_id_seq'), 'set', ?, ?, ?)
+            ON CONFLICT (asset_type, item_id) DO NOTHING
+            """,
+            [item_id, fallback_url, f"sets/{item_id}.png"],
+        )
+        registered += 1
+
     return registered

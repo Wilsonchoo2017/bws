@@ -1,2 +1,2 @@
 #!/usr/bin/env bash
-cd "$(dirname "$0")/frontend" && pnpm dev
+cd "$(dirname "$0")/frontend" && pnpm build && pnpm start -p 9500

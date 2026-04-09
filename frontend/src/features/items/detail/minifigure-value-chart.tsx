@@ -13,6 +13,7 @@ import {
 } from 'recharts';
 import type { MinifigValueSnapshot } from '../types';
 import { formatPrice } from '../types';
+import { useDetailBundle } from './detail-bundle-context';
 import type { ChartDateRange } from './item-detail';
 
 interface MinifigureValueChartProps {
@@ -36,11 +37,15 @@ function ValueTooltip({ active, payload, label }: any) {
 }
 
 export function MinifigureValueChart({ setNumber, globalDateRange, onDateRange }: MinifigureValueChartProps) {
+  const { bundle, loading: bundleLoading } = useDetailBundle();
   const [snapshots, setSnapshots] = useState<MinifigValueSnapshot[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
 
   useEffect(() => {
+    if (bundleLoading) return;
+    const bundleSnaps = (bundle?.minifig_value_history as { snapshots?: MinifigValueSnapshot[] })?.snapshots;
+    if (bundleSnaps) { setSnapshots(bundleSnaps); setLoading(false); return; }
     fetch(`/api/items/${setNumber}/minifigures/value-history`)
       .then((res) => res.json())
       .then((json) => {
@@ -50,7 +55,7 @@ export function MinifigureValueChart({ setNumber, globalDateRange, onDateRange }
       })
       .catch(() => setError(true))
       .finally(() => setLoading(false));
-  }, [setNumber]);
+  }, [setNumber, bundle, bundleLoading]);
 
   const chartData = snapshots.map((s) => ({
     ts: s.scraped_at ? new Date(s.scraped_at).getTime() : 0,

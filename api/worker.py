@@ -20,6 +20,7 @@ logger = logging.getLogger("bws.worker")
 _JOB_TIMEOUT_SECONDS = 300
 _JOB_TIMEOUT_OVERRIDES: dict[str, int] = {
     "shopee": 600,
+    "hobbydigi": 600,
 }
 
 

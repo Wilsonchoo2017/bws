@@ -18,6 +18,7 @@ from PIL import Image
 
 _IMAGES_BASE = Path.home() / ".bws" / "images"
 _PROCESSED_DIR = _IMAGES_BASE / "processed"
+_HIRES_DIR = _IMAGES_BASE / "hires"
 
 BRAND_COLOR = (149, 22, 12)  # Brickwerk dark red (#95160c)
 BORDER_RATIO = 0.06  # Border width as fraction of shorter dimension
@@ -26,11 +27,14 @@ logger = logging.getLogger("bws.listing.templates")
 
 
 def _add_brand_border(src: Path) -> Path:
-    """Add a brand-colored border to an image, returning the processed path.
+    """Add a brand-colored border to an image on a white background.
 
-    The original file is never modified. Bordered copies are cached in
-    ``_PROCESSED_DIR`` and reused if they already exist and are newer than
-    the source.
+    Steps:
+    1. Place the source image (which may have transparency) on a white canvas
+    2. Draw the brand-colored border outline on top
+
+    The output keeps the same dimensions as the source. The original file
+    is never modified; bordered copies are cached in ``_PROCESSED_DIR``.
     """
     _PROCESSED_DIR.mkdir(parents=True, exist_ok=True)
     dest = _PROCESSED_DIR / f"bordered_{src.name}"
@@ -39,13 +43,23 @@ def _add_brand_border(src: Path) -> Path:
     if dest.exists() and dest.stat().st_mtime >= src.stat().st_mtime:
         return dest
 
-    img = Image.open(src).convert("RGB")
+    img = Image.open(src)
     w, h = img.size
     border = max(int(min(w, h) * BORDER_RATIO), 2)
 
-    bordered = Image.new("RGB", (w + 2 * border, h + 2 * border), BRAND_COLOR)
-    bordered.paste(img, (border, border))
-    bordered.save(dest, format="PNG")
+    # White background first, then composite the image on top
+    canvas = Image.new("RGB", (w, h), (255, 255, 255))
+    if img.mode == "RGBA":
+        canvas.paste(img, (0, 0), img)
+    else:
+        canvas.paste(img.convert("RGB"), (0, 0))
+
+    # Draw brand border outline
+    from PIL import ImageDraw
+    draw = ImageDraw.Draw(canvas)
+    for i in range(border):
+        draw.rectangle([i, i, w - 1 - i, h - 1 - i], outline=BRAND_COLOR)
+    canvas.save(dest, format="PNG")
     logger.info("Created bordered image %s (%dx%d, border=%dpx)", dest.name, w, h, border)
     return dest
 
@@ -268,61 +282,167 @@ def _set_number_variants(set_number: str) -> list[str]:
     return [set_number, f"{set_number}-1"]
 
 
+def _fetch_gallery_urls(set_number: str) -> list[str]:
+    """Fetch the full BrickLink gallery image URLs for a set.
+
+    Scrapes the catalog page and extracts hi-res URLs in order:
+    SN (box) -> ON (alternate) -> EXTN (additional user images).
+    """
+    from services.bricklink.parser import extract_gallery_image_urls
+
+    variant = set_number if "-" in set_number else f"{set_number}-1"
+    url = f"https://www.bricklink.com/v2/catalog/catalogitem.page?S={variant}"
+
+    try:
+        resp = httpx.get(
+            url,
+            headers={"User-Agent": "Mozilla/5.0"},
+            follow_redirects=True,
+            timeout=30,
+        )
+        if resp.status_code == 200:
+            return extract_gallery_image_urls(resp.text)
+    except Exception as exc:
+        logger.warning("Failed to fetch gallery for %s: %s", set_number, exc)
+
+    return []
+
+
+_BE_HTML_DIR = Path("logs/brickeconomy_snapshots")
+
+
+def _fetch_be_gallery_urls(set_number: str) -> list[str]:
+    """Extract product gallery image URLs from saved BrickEconomy snapshots.
+
+    BE blocks direct HTTP requests (Cloudflare), so we read from HTML
+    snapshots saved by the BE scraper. The image CDN itself allows
+    direct downloads. Typically returns 5-6 images per set.
+    """
+    from services.brickeconomy.parser import extract_gallery_image_urls
+
+    bare = set_number.split("-")[0]
+
+    # Find the most recent snapshot for this set
+    if not _BE_HTML_DIR.exists():
+        return []
+
+    matches = sorted(_BE_HTML_DIR.glob(f"*_{bare}.html"), reverse=True)
+    if not matches:
+        return []
+
+    try:
+        html = matches[0].read_text()
+        urls = extract_gallery_image_urls(html)
+        if urls:
+            logger.info(
+                "BrickEconomy gallery for %s: %d images (from %s)",
+                set_number, len(urls), matches[0].name,
+            )
+        return urls
+    except Exception as exc:
+        logger.warning("Failed to parse BE snapshot for %s: %s", set_number, exc)
+
+    return []
+
+
+def _download_gallery_images(
+    set_number: str, gallery_urls: list[str], max_photos: int,
+) -> list[Path]:
+    """Download gallery images to hires/ cache, return local paths."""
+    _HIRES_DIR.mkdir(parents=True, exist_ok=True)
+    targets: list[tuple[str, Path]] = []
+
+    for i, url in enumerate(gallery_urls[:max_photos]):
+        # Name: {set_number}_0.png, {set_number}_1.png, ...
+        dest = _HIRES_DIR / f"{set_number}_{i}.png"
+        targets.append((url, dest))
+
+    # Filter to only those not yet cached
+    to_download = [(url, dest) for url, dest in targets if not (dest.exists() and dest.stat().st_size > 10_000)]
+
+    if to_download:
+        logger.info("Downloading %d gallery images for %s", len(to_download), set_number)
+
+        async def _fetch_all() -> None:
+            async with httpx.AsyncClient(timeout=30) as client:
+                for url, dest in to_download:
+                    try:
+                        resp = await client.get(
+                            url,
+                            headers={"User-Agent": "Mozilla/5.0"},
+                            follow_redirects=True,
+                        )
+                        if resp.status_code == 200 and resp.headers.get(
+                            "content-type", ""
+                        ).startswith("image/"):
+                            dest.write_bytes(resp.content)
+                            logger.info("Downloaded %s (%d bytes)", dest.name, len(resp.content))
+                        else:
+                            logger.warning("Gallery download failed %s: HTTP %d", url, resp.status_code)
+                    except Exception as exc:
+                        logger.warning("Gallery download error %s: %s", url, exc)
+
+        try:
+            asyncio.run(_fetch_all())
+        except RuntimeError:
+            import concurrent.futures
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+                pool.submit(lambda: asyncio.run(_fetch_all())).result(timeout=120)
+
+    return [dest for _, dest in targets if dest.exists() and dest.stat().st_size > 10_000]
+
+
 def collect_image_paths(
     conn: Any,
     set_number: str,
     max_photos: int = 9,
     brand_border: bool = True,
 ) -> list[Path]:
-    """Collect downloaded image file paths for a set and its minifigures.
+    """Collect all hi-res set images from BrickLink gallery for a listing.
 
-    Returns absolute paths, set image first, then minifig images, capped
-    at ``max_photos``. Handles both '71841' and '71841-1' formats.
+    Fetches the full image gallery (box, alternate, additional images)
+    in BrickLink display order. Images are cached in hires/ so subsequent
+    listings reuse them. Handles both '71841' and '71841-1' formats.
     """
-    # Download any pending images first
-    _download_pending_images(conn, set_number)
+    variant = set_number if "-" in set_number else f"{set_number}-1"
 
-    paths: list[Path] = []
-    variants = _set_number_variants(set_number)
+    # Check if gallery is already cached
+    cached = sorted(_HIRES_DIR.glob(f"{variant}_*.png")) if _HIRES_DIR.exists() else []
+    cached = [p for p in cached if p.stat().st_size > 10_000]
 
-    # Set image -- try each variant
-    for variant in variants:
-        row = conn.execute(
-            "SELECT local_path FROM image_assets "
-            "WHERE asset_type = 'set' AND item_id = ?",
-            [variant],
-        ).fetchone()
-        if row and row[0]:
-            p = _IMAGES_BASE / row[0]
-            if p.exists():
-                paths.append(p)
-                break
+    if not cached:
+        gallery_urls = _fetch_gallery_urls(variant)
+        if gallery_urls:
+            cached = _download_gallery_images(variant, gallery_urls, max_photos)
 
-    # Minifig images -- try each variant for set_item_id
-    for variant in variants:
-        mf_rows = conn.execute(
-            """
-            SELECT ia.local_path, sm.minifig_id
-            FROM set_minifigures sm
-            JOIN image_assets ia
-                ON ia.asset_type = 'minifig'
-                AND ia.item_id = sm.minifig_id
-            WHERE sm.set_item_id = ?
-            GROUP BY ia.local_path, sm.minifig_id
-            ORDER BY sm.minifig_id
-            """,
-            [variant],
-        ).fetchall()
-        if mf_rows:
-            for mf_row in mf_rows:
-                if mf_row[0]:
-                    p = _IMAGES_BASE / mf_row[0]
-                    if p.exists():
-                        paths.append(p)
-            break
+    # Supplement with BrickEconomy gallery if BrickLink has fewer than max
+    if len(cached) < max_photos:
+        be_urls = _fetch_be_gallery_urls(variant)
+        if be_urls:
+            be_paths = _download_gallery_images(
+                f"{variant}_be", be_urls, max_photos - len(cached),
+            )
+            cached.extend(be_paths)
+
+    # Fallback: use the single image from image_assets if all else fails
+    if not cached:
+        _download_pending_images(conn, set_number)
+        for v in _set_number_variants(set_number):
+            row = conn.execute(
+                "SELECT local_path FROM image_assets "
+                "WHERE asset_type = 'set' AND item_id = ?",
+                [v],
+            ).fetchone()
+            if row and row[0]:
+                p = _IMAGES_BASE / row[0]
+                if p.exists():
+                    cached = [p]
+                    break
+
+    paths = cached[:max_photos]
 
     # Add brand border to the first (set) image
     if paths and brand_border:
         paths = [_add_brand_border(paths[0]), *paths[1:]]
 
-    return paths[:max_photos]
+    return paths

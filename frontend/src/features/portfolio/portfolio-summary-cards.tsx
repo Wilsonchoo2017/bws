@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { formatPrice } from '@/lib/formatting';
-import type { PortfolioSummary } from './types';
+import type { PortfolioSummary, WBRMetrics } from './types';
 
 function PLText({ cents, pct }: { cents: number; pct?: number }) {
   const color =
@@ -18,14 +18,25 @@ function PLText({ cents, pct }: { cents: number; pct?: number }) {
 
 export function PortfolioSummaryCards() {
   const [summary, setSummary] = useState<PortfolioSummary | null>(null);
+  const [wbr, setWbr] = useState<WBRMetrics | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetch('/api/portfolio/summary')
-      .then((r) => r.json())
-      .then((d) => {
-        if (d.success) setSummary(d.data);
+    Promise.all([
+      fetch('/api/portfolio/summary').then((r) => {
+        if (!r.ok) throw new Error(`Summary fetch failed: ${r.status}`);
+        return r.json();
+      }),
+      fetch('/api/portfolio/wbr').then((r) => {
+        if (!r.ok) throw new Error(`WBR fetch failed: ${r.status}`);
+        return r.json();
+      }),
+    ])
+      .then(([summaryRes, wbrRes]) => {
+        if (summaryRes.success) setSummary(summaryRes.data);
+        if (wbrRes.success) setWbr(wbrRes.data);
       })
+      .catch(() => {})
       .finally(() => setLoading(false));
   }, []);
 
@@ -69,22 +80,63 @@ export function PortfolioSummaryCards() {
     },
   ];
 
+  const wbrCards = wbr
+    ? [
+        {
+          label: 'Capital > 20% Return',
+          value: `${wbr.pct_capital_above_hurdle.toFixed(1)}%`,
+        },
+        {
+          label: 'Avg Fwd Return',
+          value: `${(wbr.total_forward_return_weighted * 100).toFixed(1)}%`,
+          sub: 'capital-weighted',
+        },
+        {
+          label: 'Worst Holding',
+          value: wbr.worst_holding
+            ? `${(wbr.worst_holding.forward_annual_return * 100).toFixed(1)}%`
+            : '-',
+          sub: wbr.worst_holding?.set_number,
+        },
+      ]
+    : [];
+
   return (
-    <div className='grid grid-cols-2 gap-4 lg:grid-cols-4'>
-      {cards.map((card) => (
-        <div
-          key={card.label}
-          className='rounded-lg border p-4'
-        >
-          <p className='text-muted-foreground text-xs font-medium uppercase tracking-wider'>
-            {card.label}
-          </p>
-          <p className='mt-1 text-xl font-bold'>{card.value}</p>
-          {card.sub && (
-            <p className='text-muted-foreground mt-0.5 text-xs'>{card.sub}</p>
-          )}
+    <div className='flex flex-col gap-4'>
+      <div className='grid grid-cols-2 gap-4 lg:grid-cols-4'>
+        {cards.map((card) => (
+          <div
+            key={card.label}
+            className='rounded-lg border p-4'
+          >
+            <p className='text-muted-foreground text-xs font-medium uppercase tracking-wider'>
+              {card.label}
+            </p>
+            <p className='mt-1 text-xl font-bold'>{card.value}</p>
+            {card.sub && (
+              <p className='text-muted-foreground mt-0.5 text-xs'>{card.sub}</p>
+            )}
+          </div>
+        ))}
+      </div>
+      {wbrCards.length > 0 && (
+        <div className='grid grid-cols-2 gap-4 lg:grid-cols-4'>
+          {wbrCards.map((card) => (
+            <div
+              key={card.label}
+              className='rounded-lg border border-dashed p-4'
+            >
+              <p className='text-muted-foreground text-xs font-medium uppercase tracking-wider'>
+                {card.label}
+              </p>
+              <p className='mt-1 text-xl font-bold'>{card.value}</p>
+              {card.sub && (
+                <p className='text-muted-foreground mt-0.5 text-xs'>{card.sub}</p>
+              )}
+            </div>
+          ))}
         </div>
-      ))}
+      )}
     </div>
   );
 }

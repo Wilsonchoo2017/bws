@@ -1,5 +1,7 @@
 """Items API routes."""
 
+import asyncio
+import logging
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -955,4 +957,319 @@ def _serialize_box(box) -> dict | None:
             if box.avg_price
             else (box.min_price.currency if box.min_price else "USD")
         ),
+    }
+
+
+# ---------------------------------------------------------------------------
+# Bundle endpoint: returns all detail-page data in a single request
+# ---------------------------------------------------------------------------
+
+_bundle_logger = logging.getLogger("bws.api.items.bundle")
+
+
+def _fetch_brickeconomy(set_number: str) -> dict | None:
+    from db.connection import get_connection
+    from services.brickeconomy.repository import get_latest_snapshot
+
+    conn = get_connection()
+    try:
+        snapshot = get_latest_snapshot(conn, set_number)
+        if not snapshot and "-" not in set_number:
+            snapshot = get_latest_snapshot(conn, f"{set_number}-1")
+        if snapshot and snapshot.get("scraped_at"):
+            snapshot["scraped_at"] = str(snapshot["scraped_at"])
+        return snapshot
+    finally:
+        conn.close()
+
+
+def _fetch_keepa(set_number: str) -> dict | None:
+    from db.connection import get_connection
+    from services.keepa.repository import get_latest_keepa_snapshot
+
+    conn = get_connection()
+    try:
+        snapshot = get_latest_keepa_snapshot(conn, set_number)
+        if snapshot and snapshot.get("scraped_at"):
+            snapshot["scraped_at"] = str(snapshot["scraped_at"])
+        return snapshot
+    finally:
+        conn.close()
+
+
+def _fetch_bricklink_prices(set_number: str) -> dict:
+    from db.connection import get_connection
+
+    conn = get_connection()
+    try:
+        rows = conn.execute(
+            "SELECT item_id FROM bricklink_items WHERE set_number = ?",
+            [set_number],
+        ).fetchall()
+        if not rows:
+            return {"price_history": [], "monthly_sales": []}
+
+        item_id = rows[0][0]
+        history = get_price_history(conn, item_id, limit=50)
+        sales = get_monthly_sales(conn, item_id)
+
+        serialized_history = [
+            {
+                "scraped_at": str(h["scraped_at"]) if h["scraped_at"] else None,
+                "six_month_new": _serialize_box(h["six_month_new"]),
+                "six_month_used": _serialize_box(h["six_month_used"]),
+                "current_new": _serialize_box(h["current_new"]),
+                "current_used": _serialize_box(h["current_used"]),
+            }
+            for h in history
+        ]
+        serialized_sales = [
+            {
+                "year": s.year,
+                "month": s.month,
+                "condition": s.condition.value,
+                "times_sold": s.times_sold,
+                "total_quantity": s.total_quantity,
+                "min_price_cents": s.min_price.amount if s.min_price else None,
+                "max_price_cents": s.max_price.amount if s.max_price else None,
+                "avg_price_cents": s.avg_price.amount if s.avg_price else None,
+                "currency": s.currency,
+            }
+            for s in sales
+        ]
+        return {
+            "item_id": item_id,
+            "price_history": serialized_history,
+            "monthly_sales": serialized_sales,
+        }
+    finally:
+        conn.close()
+
+
+def _fetch_competition(set_number: str) -> dict:
+    from db.connection import get_connection
+    from services.shopee.competition_repository import (
+        get_competition_history,
+        get_latest_competition_listings,
+        get_listing_sold_deltas,
+    )
+
+    conn = get_connection()
+    try:
+        history = get_competition_history(conn, set_number)
+        listings = get_latest_competition_listings(conn, set_number)
+        deltas = get_listing_sold_deltas(conn, set_number)
+        for listing in listings:
+            listing["sold_delta"] = deltas.get(listing["product_url"])
+        return {"history": history, "listings": listings}
+    finally:
+        conn.close()
+
+
+def _fetch_minifigures(set_number: str) -> dict:
+    from db.connection import get_connection
+
+    conn = get_connection()
+    try:
+        rows = conn.execute(
+            "SELECT item_id FROM bricklink_items WHERE set_number = ?",
+            [set_number],
+        ).fetchall()
+        if not rows:
+            return {"minifig_count": 0, "minifigures": []}
+
+        item_id = rows[0][0]
+        minifigs = get_set_minifigures(conn, item_id)
+
+        total_value_cents = 0
+        has_value = False
+        for mf in minifigs:
+            if mf["current_new_avg_cents"] is not None:
+                total_value_cents += mf["current_new_avg_cents"] * mf["quantity"]
+                has_value = True
+
+        return {
+            "set_item_id": item_id,
+            "minifig_count": len(minifigs),
+            "total_value_cents": total_value_cents if has_value else None,
+            "total_value_currency": minifigs[0]["currency"] if minifigs else "USD",
+            "minifigures": minifigs,
+        }
+    finally:
+        conn.close()
+
+
+def _fetch_minifig_value_history(set_number: str) -> dict:
+    from db.connection import get_connection
+
+    conn = get_connection()
+    try:
+        rows = conn.execute(
+            "SELECT item_id FROM bricklink_items WHERE set_number = ?",
+            [set_number],
+        ).fetchall()
+        if not rows:
+            return {"snapshots": []}
+
+        item_id = rows[0][0]
+        snapshots = get_set_minifig_value_history(conn, item_id)
+        return {"snapshots": snapshots}
+    finally:
+        conn.close()
+
+
+def _fetch_ml_growth(set_number: str) -> dict | None:
+    from db.connection import get_connection
+    from services.scoring.growth_provider import growth_provider
+
+    conn = get_connection()
+    try:
+        scores = growth_provider.score_all(conn)
+        pred = scores.get(set_number)
+        if pred is not None:
+            return sanitize_nan({"set_number": set_number, **pred})
+        return None
+    finally:
+        conn.close()
+
+
+def _fetch_ml_tracking(set_number: str) -> list:
+    from db.connection import get_connection
+    from services.ml.prediction_tracker import get_prediction_history
+
+    conn = get_connection()
+    try:
+        return get_prediction_history(conn, set_number)
+    finally:
+        conn.close()
+
+
+def _fetch_signals(set_number: str) -> dict | None:
+    """Return cached signals for a single item (uses module-level cache)."""
+    import time
+
+    from db.connection import get_connection
+    from services.scoring.provider import enrich_signals
+
+    cache_key = "new"
+    now = time.time()
+
+    if cache_key not in _signals_cache or _signals_cache[cache_key]["expires"] <= now:
+        conn = get_connection()
+        try:
+            signals = compute_all_signals_with_cohort(conn, condition="new")
+            signals = enrich_signals(signals, conn)
+            result = sanitize_nan(signals)
+            _signals_cache[cache_key] = {"data": result, "expires": now + _SIGNALS_TTL}
+        finally:
+            conn.close()
+
+    cached = _signals_cache[cache_key]["data"]
+    return next((s for s in cached if s.get("set_number") == set_number), None)
+
+
+def _fetch_signals_be(set_number: str) -> dict | None:
+    """Return cached BE signals for a single item."""
+    import time
+
+    from db.connection import get_connection
+
+    now = time.time()
+    cache_key = "be"
+
+    if cache_key not in _be_signals_cache or _be_signals_cache[cache_key]["expires"] <= now:
+        conn = get_connection()
+        try:
+            signals = compute_be_signals_with_cohort(conn)
+            result = sanitize_nan(signals)
+            _be_signals_cache[cache_key] = {"data": result, "expires": now + _SIGNALS_TTL}
+        finally:
+            conn.close()
+
+    cached = _be_signals_cache[cache_key]["data"]
+    return next((s for s in cached if s.get("set_number") == set_number), None)
+
+
+@router.get("/{set_number}/detail-bundle")
+async def get_item_detail_bundle(set_number: str, conn: Any = Depends(get_db)):
+    """Return all detail-page data in a single response.
+
+    Runs independent queries in parallel threads to minimize latency.
+    Each thread gets its own pooled DB connection.
+    """
+    # Verify item exists first
+    if not item_exists(conn, set_number):
+        raise HTTPException(status_code=404, detail=f"Item {set_number} not found")
+
+    # Run cheap per-item fetches in parallel
+    (
+        brickeconomy,
+        keepa,
+        bricklink_prices,
+        competition,
+        minifigures,
+        minifig_value_history,
+        ml_growth,
+        ml_tracking,
+    ) = await asyncio.gather(
+        asyncio.to_thread(_fetch_brickeconomy, set_number),
+        asyncio.to_thread(_fetch_keepa, set_number),
+        asyncio.to_thread(_fetch_bricklink_prices, set_number),
+        asyncio.to_thread(_fetch_competition, set_number),
+        asyncio.to_thread(_fetch_minifigures, set_number),
+        asyncio.to_thread(_fetch_minifig_value_history, set_number),
+        asyncio.to_thread(_fetch_ml_growth, set_number),
+        asyncio.to_thread(_fetch_ml_tracking, set_number),
+    )
+
+    # Signals and liquidity compute over ALL items on cold cache (very slow).
+    # Only include them if the caches are already warm.
+    import time as _time
+
+    _now = _time.time()
+    signals = None
+    signals_be = None
+    liq_bl_data = None
+    liq_be_data = None
+    liq_cohorts_data = None
+
+    if "new" in _signals_cache and _signals_cache["new"]["expires"] > _now:
+        cached = _signals_cache["new"]["data"]
+        signals = next((s for s in cached if s.get("set_number") == set_number), None)
+
+    if "be" in _be_signals_cache and _be_signals_cache["be"]["expires"] > _now:
+        cached = _be_signals_cache["be"]["data"]
+        signals_be = next((s for s in cached if s.get("set_number") == set_number), None)
+
+    liq_bl_key = "bricklink:new"
+    if liq_bl_key in _liquidity_cache and _liquidity_cache[liq_bl_key]["expires"] > _now:
+        liq_bl_resp = await get_item_liquidity(set_number, "bricklink", "new", False, conn)
+        liq_bl_data = liq_bl_resp.get("data") if isinstance(liq_bl_resp, dict) else None
+
+    liq_be_key = "brickeconomy:new"
+    if liq_be_key in _liquidity_cache and _liquidity_cache[liq_be_key]["expires"] > _now:
+        liq_be_resp = await get_item_liquidity(set_number, "brickeconomy", "new", False, conn)
+        liq_be_data = liq_be_resp.get("data") if isinstance(liq_be_resp, dict) else None
+
+    if liq_bl_data is not None:
+        liq_cohorts_resp = await get_item_liquidity_cohorts(set_number, "bricklink", "new", conn)
+        liq_cohorts_data = liq_cohorts_resp.get("data") if isinstance(liq_cohorts_resp, dict) else None
+
+    return {
+        "success": True,
+        "data": {
+            "brickeconomy": brickeconomy,
+            "keepa": keepa,
+            "bricklink_prices": bricklink_prices,
+            "competition": competition,
+            "minifigures": minifigures,
+            "minifig_value_history": minifig_value_history,
+            "ml_growth": ml_growth,
+            "ml_tracking": sanitize_nan(ml_tracking),
+            "signals": signals,
+            "signals_be": signals_be,
+            "liquidity_bricklink": liq_bl_data,
+            "liquidity_brickeconomy": liq_be_data,
+            "liquidity_cohorts": liq_cohorts_data,
+        },
     }

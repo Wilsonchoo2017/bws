@@ -76,7 +76,8 @@ def _fetch(browser, set_number: str, item_title: str | None) -> Result[object, E
         result = browser.run(scrape_with_page, set_number, item_title)
     except Exception as exc:
         browser.restart()
-        return Err(ExecutorResult.fail(str(exc), category=ErrorCategory.BROWSER_CRASH))
+        error = str(exc) or repr(exc) or "Browser exception (no message)"
+        return Err(ExecutorResult.fail(error, category=ErrorCategory.BROWSER_CRASH))
     return Ok(result)
 
 
