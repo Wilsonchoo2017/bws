@@ -163,17 +163,27 @@ def get_holdings_inputs(conn: Any) -> list[ForwardReturnInput]:
                 FROM price_records
                 WHERE source = 'bricklink_new'
             ) sub WHERE rn = 1
+        ),
+        latest_bph AS (
+            SELECT set_number, six_month_new, current_new
+            FROM (
+                SELECT set_number, six_month_new, current_new,
+                       ROW_NUMBER() OVER (PARTITION BY set_number ORDER BY scraped_at DESC) AS rn
+                FROM bricklink_price_history
+            ) sub WHERE rn = 1
         )
         SELECT li.set_number,
                li.year_retired, li.retiring_soon,
                be.future_estimate_cents, be.future_estimate_date,
                be.annual_growth_pct, be.value_new_cents, be.be_year_retired,
                ml.predicted_growth_pct, ml.confidence,
-               bl.bl_price_cents, bl.bl_currency
+               bl.bl_price_cents, bl.bl_currency,
+               bph.six_month_new, bph.current_new
         FROM lego_items li
         LEFT JOIN latest_be be ON be.set_number = li.set_number
         LEFT JOIN latest_ml ml ON ml.set_number = li.set_number
         LEFT JOIN latest_bl bl ON bl.set_number = li.set_number
+        LEFT JOIN latest_bph bph ON bph.set_number = li.set_number
         WHERE li.set_number IN ({placeholders})
         """,  # noqa: S608
         set_numbers,
@@ -181,6 +191,8 @@ def get_holdings_inputs(conn: Any) -> list[ForwardReturnInput]:
 
     enrichment_map: dict[str, dict] = {}
     for row in enrichment_rows:
+        six_month_new = row[12] or {}
+        current_new = row[13] or {}
         enrichment_map[row[0]] = {
             "year_retired": row[1] or row[7],  # prefer lego_items, fallback BE
             "retiring_soon": bool(row[2]),
@@ -192,6 +204,9 @@ def get_holdings_inputs(conn: Any) -> list[ForwardReturnInput]:
             "ml_confidence": row[9],
             "bl_price_cents": row[10],
             "bl_currency": row[11],
+            "bl_6mo_avg_price_cents": _extract_price(six_month_new),
+            "bl_current_avg_price_cents": _extract_price(current_new),
+            "bl_6mo_times_sold": _extract_int(six_month_new, "times_sold"),
         }
 
     inputs: list[ForwardReturnInput] = []
@@ -217,6 +232,9 @@ def get_holdings_inputs(conn: Any) -> list[ForwardReturnInput]:
                 year_retired=enr.get("year_retired"),
                 retiring_soon=enr.get("retiring_soon", False),
                 is_held=True,
+                bl_6mo_avg_price_cents=enr.get("bl_6mo_avg_price_cents"),
+                bl_current_avg_price_cents=enr.get("bl_current_avg_price_cents"),
+                bl_6mo_times_sold=enr.get("bl_6mo_times_sold"),
             )
         )
 
@@ -274,6 +292,14 @@ def get_candidate_inputs(
                 FROM price_records
                 WHERE source = 'bricklink_new'
             ) sub WHERE rn = 1
+        ),
+        latest_bph AS (
+            SELECT set_number, six_month_new, current_new
+            FROM (
+                SELECT set_number, six_month_new, current_new,
+                       ROW_NUMBER() OVER (PARTITION BY set_number ORDER BY scraped_at DESC) AS rn
+                FROM bricklink_price_history
+            ) sub WHERE rn = 1
         )
         SELECT li.set_number,
                li.year_retired, li.retiring_soon, li.rrp_cents,
@@ -281,12 +307,14 @@ def get_candidate_inputs(
                be.future_estimate_cents, be.future_estimate_date,
                be.annual_growth_pct, be.value_new_cents, be.be_year_retired,
                ml.predicted_growth_pct, ml.confidence,
-               bl.bl_price_cents, bl.bl_currency
+               bl.bl_price_cents, bl.bl_currency,
+               bph.six_month_new, bph.current_new
         FROM lego_items li
         LEFT JOIN latest_retail rt ON rt.set_number = li.set_number
         LEFT JOIN latest_be be ON be.set_number = li.set_number
         LEFT JOIN latest_ml ml ON ml.set_number = li.set_number
         LEFT JOIN latest_bl bl ON bl.set_number = li.set_number
+        LEFT JOIN latest_bph bph ON bph.set_number = li.set_number
         WHERE (rt.min_retail_cents IS NOT NULL OR li.rrp_cents IS NOT NULL)
         """
     ).fetchall()
@@ -317,6 +345,9 @@ def get_candidate_inputs(
         bl_cents = _to_myr(row[13], row[14])
         market_price = bl_cents or acq_price or 0
 
+        six_month_new = row[15] or {}
+        current_new = row[16] or {}
+
         inputs.append(
             ForwardReturnInput(
                 set_number=sn,
@@ -334,6 +365,9 @@ def get_candidate_inputs(
                 year_retired=year_retired,
                 retiring_soon=retiring_soon,
                 is_held=False,
+                bl_6mo_avg_price_cents=_extract_price(six_month_new),
+                bl_current_avg_price_cents=_extract_price(current_new),
+                bl_6mo_times_sold=_extract_int(six_month_new, "times_sold"),
             )
         )
 
@@ -343,6 +377,33 @@ def get_candidate_inputs(
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+
+def _extract_price(bl_json: dict) -> int | None:
+    """Extract qty_avg_price amount from BL price history JSONB."""
+    qty_avg = bl_json.get("qty_avg_price")
+    if qty_avg and isinstance(qty_avg, dict):
+        amount = qty_avg.get("amount")
+        if amount is not None and amount > 0:
+            return int(amount)
+    # Fallback to avg_price
+    avg = bl_json.get("avg_price")
+    if avg and isinstance(avg, dict):
+        amount = avg.get("amount")
+        if amount is not None and amount > 0:
+            return int(amount)
+    return None
+
+
+def _extract_int(bl_json: dict, key: str) -> int | None:
+    """Extract an integer field from BL price history JSONB."""
+    val = bl_json.get(key)
+    if val is not None:
+        try:
+            return int(val)
+        except (ValueError, TypeError):
+            return None
+    return None
 
 
 def _to_myr(price_cents: int | None, currency: str | None) -> int | None:

@@ -20,7 +20,7 @@ from services.backtesting.position_sizing import (
     compute_position_sizing,
     kelly_to_dict,
 )
-from services.backtesting.be_screener import compute_be_signals_with_cohort
+from services.backtesting.keepa_screener import compute_keepa_signals_with_cohort
 from services.backtesting.screener import (
     compute_all_signals_with_cohort,
 )
@@ -246,14 +246,14 @@ _be_signals_cache: dict = {}
 
 @router.get("/{set_number}/signals/be")
 async def get_item_signals_be(set_number: str, conn: Any = Depends(get_db)):
-    """BrickEconomy-based signals and cohort ranks for a single item."""
+    """Keepa-based signals and cohort ranks for a single item."""
     import time
 
     now = time.time()
     cache_key = "be"
 
     if cache_key not in _be_signals_cache or _be_signals_cache[cache_key]["expires"] <= now:
-        signals = compute_be_signals_with_cohort(conn)
+        signals = compute_keepa_signals_with_cohort(conn)
         result = sanitize_nan(signals)
         _be_signals_cache[cache_key] = {"data": result, "expires": now + _SIGNALS_TTL}
 
@@ -378,6 +378,11 @@ def _item_volume_stats(txn_counts: list[int], qty_counts: list[int] | None = Non
     total_qty = sum(qty_counts) if qty_counts else None
     avg_monthly_qty = round(total_qty / total_months, 1) if total_qty is not None else None
 
+    recent_avg_qty: float | None = None
+    if qty_counts:
+        recent_q = qty_counts[-6:] if len(qty_counts) >= 6 else qty_counts
+        recent_avg_qty = round(sum(recent_q) / len(recent_q), 1) if recent_q else None
+
     return {
         "total_months": total_months,
         "months_with_sales": months_with_sales,
@@ -387,6 +392,7 @@ def _item_volume_stats(txn_counts: list[int], qty_counts: list[int] | None = Non
         "avg_monthly_txns": round(avg_monthly_txns, 1),
         "avg_monthly_qty": avg_monthly_qty,
         "recent_avg_txns": round(recent_avg, 1),
+        "recent_avg_qty": recent_avg_qty,
         "trend_ratio": round(trend_ratio, 2) if trend_ratio is not None else None,
     }
 
@@ -488,10 +494,10 @@ async def get_item_liquidity(
                     stats["monthly"] = monthly
                     # Listing ratio: current listings / avg monthly sold (last 6mo)
                     listing = listing_map.get(item_id)
-                    if listing and stats["recent_avg_txns"] > 0:
+                    if listing and stats.get("recent_avg_qty") and stats["recent_avg_qty"] > 0:
                         stats["listing_lots"] = listing[0]
                         stats["listing_qty"] = listing[1]
-                        stats["listing_ratio"] = round(listing[0] / stats["recent_avg_txns"], 2)
+                        stats["listing_ratio"] = round(listing[1] / stats["recent_avg_qty"], 2)
                     all_stats[sn] = stats
 
         # Precompute percentiles and ranks for all items
@@ -566,7 +572,7 @@ async def get_item_liquidity(
             "value": target["listing_ratio"],
             "pct": r["listing_ratio_pct"],
             "label": "Listing ratio",
-            "detail": f"{target.get('listing_lots', 0)} lots vs {target['recent_avg_txns']}/mo sold",
+            "detail": f"{target.get('listing_qty', 0)} units vs {target['recent_avg_qty']}/mo sold",
         }
 
     data = {
@@ -1169,7 +1175,7 @@ def _fetch_signals(set_number: str) -> dict | None:
 
 
 def _fetch_signals_be(set_number: str) -> dict | None:
-    """Return cached BE signals for a single item."""
+    """Return cached Keepa signals for a single item."""
     import time
 
     from db.connection import get_connection
@@ -1180,7 +1186,7 @@ def _fetch_signals_be(set_number: str) -> dict | None:
     if cache_key not in _be_signals_cache or _be_signals_cache[cache_key]["expires"] <= now:
         conn = get_connection()
         try:
-            signals = compute_be_signals_with_cohort(conn)
+            signals = compute_keepa_signals_with_cohort(conn)
             result = sanitize_nan(signals)
             _be_signals_cache[cache_key] = {"data": result, "expires": now + _SIGNALS_TTL}
         finally:

@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import type { CohortRank, ItemSignals } from './types';
-import { scoreColor, scoreBg, rankToPercentile, getSignalWeight } from './percentile-utils';
+import { scoreColor, scoreBg, getSignalWeight } from './percentile-utils';
 
 const SIGNALS = [
   { key: 'demand_pressure', label: 'Demand', desc: '3-month average sales volume' },
@@ -162,9 +162,9 @@ export function CohortSection({
                     ({cohort.key})
                   </span>
                 </div>
-                {rankToPercentile(cohort.rank, cohort.size) != null && (
-                  <span className={`rounded px-1.5 py-0.5 text-xs font-semibold ${scoreColor(overall as number | null)} ${scoreBg(overall as number | null)}`}>
-                    P{rankToPercentile(cohort.rank, cohort.size)}
+                {overall != null && (
+                  <span className={`rounded px-1.5 py-0.5 text-xs font-semibold ${scoreColor(overall)} ${scoreBg(overall)}`}>
+                    P{Math.round(overall)}
                     <span className="text-muted-foreground ml-1 font-normal">n={cohort.size}</span>
                   </span>
                 )}

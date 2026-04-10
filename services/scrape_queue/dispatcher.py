@@ -205,7 +205,9 @@ async def _worker_loop(
                             worker_id, remaining,
                         )
                         try:
-                            await asyncio.sleep(remaining)
+                            while remaining > 0:
+                                await asyncio.sleep(min(10.0, remaining))
+                                remaining -= 10.0
                         except asyncio.CancelledError:
                             logger.info("[%s] Worker cancelled during cooldown sleep", worker_id)
                             return
@@ -215,10 +217,16 @@ async def _worker_loop(
             return
 
         if isinstance(result, float) and result > 0:
-            # Source in cooldown -- sleep until available
+            # Source in cooldown -- sleep in 10s chunks so manual resets
+            # via the /cooldowns/{source}/reset API take effect quickly.
+            # The next loop iteration calls _claim_and_execute which
+            # re-checks cooldown_remaining() in the executor.
             logger.info("[%s] Source in cooldown, sleeping %.0fs", worker_id, result)
             try:
-                await asyncio.sleep(result)
+                remaining = result
+                while remaining > 0:
+                    await asyncio.sleep(min(10.0, remaining))
+                    remaining -= 10.0
             except asyncio.CancelledError:
                 logger.info("[%s] Worker cancelled during cooldown sleep", worker_id)
                 return

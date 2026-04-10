@@ -38,21 +38,11 @@ function barColor(pct: number): string {
 }
 
 export function CoveragePanel() {
-  const [view, setView] = useState<'sources' | 'sets'>('sets');
+  const [view, setView] = useState<'sources' | 'sets'>('sources');
 
   return (
     <div className='flex flex-col gap-4'>
       <div className='flex gap-1 rounded-lg border p-1 self-start'>
-        <button
-          onClick={() => setView('sets')}
-          className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
-            view === 'sets'
-              ? 'bg-primary text-primary-foreground'
-              : 'hover:bg-muted'
-          }`}
-        >
-          By Set
-        </button>
         <button
           onClick={() => setView('sources')}
           className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
@@ -62,6 +52,16 @@ export function CoveragePanel() {
           }`}
         >
           By Source
+        </button>
+        <button
+          onClick={() => setView('sets')}
+          className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
+            view === 'sets'
+              ? 'bg-primary text-primary-foreground'
+              : 'hover:bg-muted'
+          }`}
+        >
+          By Set
         </button>
       </div>
 

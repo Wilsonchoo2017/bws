@@ -36,6 +36,7 @@ export function UnifiedItemsTable() {
   const [cohortThreshold, setCohortThreshold] = useState(65);
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [advancedQuery, setAdvancedQuery] = useState<QueryGroup>(createEmptyGroup);
+  const [yearFilter, setYearFilter] = useState<number | null>(null);
   const [newSetNumber, setNewSetNumber] = useState('');
   const [adding, setAdding] = useState(false);
   const [addError, setAddError] = useState<string | null>(null);
@@ -58,8 +59,19 @@ export function UnifiedItemsTable() {
     setPagination((prev) => ({ ...prev, pageIndex: 0 }));
   }, []);
 
+  const availableYears = useMemo(() => {
+    const years = new Set<number>();
+    for (const item of data) {
+      if (item.year_released != null) years.add(item.year_released);
+    }
+    return [...years].sort((a, b) => b - a);
+  }, [data]);
+
   const filteredData = useMemo(() => {
     let result = data;
+    if (yearFilter != null) {
+      result = result.filter((item) => item.year_released === yearFilter);
+    }
     if (searchQuery.trim()) {
       const q = searchQuery.trim().toLowerCase();
       result = result.filter(
@@ -73,7 +85,7 @@ export function UnifiedItemsTable() {
       result = applyAdvancedQuery(result, advancedQuery);
     }
     return result;
-  }, [data, searchQuery, activeFilters, dealThreshold, cohortThreshold, showAdvanced, advancedQuery]);
+  }, [data, yearFilter, searchQuery, activeFilters, dealThreshold, cohortThreshold, showAdvanced, advancedQuery]);
 
   const minifigMissing = useMemo(
     () => filteredData.filter(i => i.minifig_count === null).map(i => i.set_number),
@@ -413,6 +425,20 @@ export function UnifiedItemsTable() {
             onChange={(e) => setSearchQuery(e.target.value)}
             className='border-input bg-transparent rounded-md border px-3 py-2 text-sm shadow-xs w-64 h-9 placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] outline-none'
           />
+          <select
+            value={yearFilter ?? ''}
+            onChange={(e) => {
+              const val = e.target.value;
+              setYearFilter(val ? Number(val) : null);
+              setPagination((prev) => ({ ...prev, pageIndex: 0 }));
+            }}
+            className='border-input bg-transparent rounded-md border px-3 py-2 text-sm shadow-xs h-9 text-muted-foreground focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] outline-none'
+          >
+            <option value=''>All years</option>
+            {availableYears.map((y) => (
+              <option key={y} value={y}>{y}</option>
+            ))}
+          </select>
         </div>
 
         {/* Row 2: Filter chips + Advanced toggle */}

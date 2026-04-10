@@ -36,7 +36,7 @@ class BrickeconomyWorker:
         set_numbers = get_unscraped_priority_items(conn)
 
         for sn in set_numbers:
-            mgr.create_job(self.scraper_id, sn)
+            mgr.create_job(self.scraper_id, sn, reason="batch: unscraped portfolio/watchlist item")
 
         return WorkResult(
             items_found=len(set_numbers),

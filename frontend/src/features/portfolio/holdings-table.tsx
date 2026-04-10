@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   useReactTable,
   getCoreRowModel,
@@ -15,7 +15,7 @@ import { DataTableColumnHeader } from '@/components/ui/table/data-table-column-h
 import { Badge } from '@/components/ui/badge';
 import { formatPrice } from '@/lib/formatting';
 import { useFetchData } from '@/lib/hooks/use-fetch-data';
-import type { Holding, ForwardReturn } from './types';
+import type { Holding, ForwardReturn, ReallocationData, HoldingReallocation } from './types';
 
 type HoldingWithFR = Holding & {
   forward_annual_return?: number | null;
@@ -23,6 +23,9 @@ type HoldingWithFR = Holding & {
   price_source?: string;
   exceeds_target?: boolean;
   exceeds_hurdle?: boolean;
+  opportunity_cost_cents?: number;
+  opportunity_cost_pct?: number;
+  realloc_market_value_cents?: number;
 };
 
 function ReturnBadge({ decision }: { decision?: string }) {
@@ -162,6 +165,32 @@ const columns: ColumnDef<HoldingWithFR>[] = [
     size: 110,
   },
   {
+    accessorKey: 'apr',
+    header: ({ column }) => (
+      <DataTableColumnHeader column={column} title='APR' />
+    ),
+    cell: ({ row }) => {
+      const apr = row.getValue('apr') as number | null;
+      if (apr == null) return <span className='text-muted-foreground text-xs'>-</span>;
+      const pct = (apr * 100).toFixed(1);
+      const color =
+        apr >= 0.2 ? 'text-green-600' : apr >= 0 ? 'text-yellow-600' : 'text-red-600';
+      const sign = apr > 0 ? '+' : '';
+      const days = row.original.days_held;
+      return (
+        <div className={`font-mono text-sm ${color}`}>
+          {sign}{pct}%
+          {days != null && (
+            <div className='text-muted-foreground text-xs'>
+              {days >= 365 ? `${(days / 365.25).toFixed(1)}y` : `${days}d`}
+            </div>
+          )}
+        </div>
+      );
+    },
+    size: 90,
+  },
+  {
     accessorKey: 'forward_annual_return',
     header: ({ column }) => (
       <DataTableColumnHeader column={column} title='Fwd Return' />
@@ -185,6 +214,47 @@ const columns: ColumnDef<HoldingWithFR>[] = [
     size: 100,
   },
   {
+    accessorKey: 'opportunity_cost_cents',
+    header: ({ column }) => (
+      <DataTableColumnHeader column={column} title='Opp Cost/yr' />
+    ),
+    cell: ({ row }) => {
+      const cost = row.getValue('opportunity_cost_cents') as number | undefined;
+      if (cost == null) return <span className='text-muted-foreground text-xs'>-</span>;
+      if (cost === 0) return <span className='text-green-600 font-mono text-sm'>-</span>;
+      return (
+        <div className='font-mono text-sm text-red-600'>
+          <div>-{formatPrice(cost)}</div>
+          {row.original.opportunity_cost_pct != null && (
+            <div className='text-xs opacity-70'>
+              -{(row.original.opportunity_cost_pct * 100).toFixed(1)}%
+            </div>
+          )}
+        </div>
+      );
+    },
+    size: 110,
+  },
+  {
+    accessorKey: 'realloc_market_value_cents',
+    header: ({ column }) => (
+      <DataTableColumnHeader column={column} title='If Sold' />
+    ),
+    cell: ({ row }) => {
+      const decision = row.original.decision;
+      const market = row.getValue('realloc_market_value_cents') as number | undefined;
+      if (decision !== 'SELL' || market == null) {
+        return <span className='text-muted-foreground text-xs'>-</span>;
+      }
+      return (
+        <span className='font-mono text-sm text-amber-600'>
+          {formatPrice(market)}
+        </span>
+      );
+    },
+    size: 100,
+  },
+  {
     accessorKey: 'decision',
     header: ({ column }) => (
       <DataTableColumnHeader column={column} title='Action' />
@@ -197,13 +267,31 @@ const columns: ColumnDef<HoldingWithFR>[] = [
 export function HoldingsTable() {
   const { data: holdings, loading } = useFetchData<Holding>('/api/portfolio/holdings');
   const { data: forwardReturns } = useFetchData<ForwardReturn>('/api/portfolio/forward-returns');
-  const [sorting, setSorting] = useState<SortingState>([]);
+  const [reallocation, setReallocation] = useState<ReallocationData | null>(null);
+  const [sorting, setSorting] = useState<SortingState>([
+    { id: 'opportunity_cost_cents', desc: true },
+  ]);
+
+  useEffect(() => {
+    fetch('/api/portfolio/reallocation')
+      .then((r) => {
+        if (!r.ok) throw new Error(`Reallocation fetch failed: ${r.status}`);
+        return r.json();
+      })
+      .then((res) => {
+        if (res.success) setReallocation(res.data);
+      })
+      .catch(() => {});
+  }, []);
 
   const data = useMemo(() => {
-    if (!forwardReturns.length) return holdings as HoldingWithFR[];
     const frMap = new Map(forwardReturns.map((fr) => [fr.set_number, fr]));
+    const reallocMap = new Map(
+      (reallocation?.holdings ?? []).map((h) => [h.set_number, h])
+    );
     return holdings.map((h) => {
       const fr = frMap.get(h.set_number);
+      const ra = reallocMap.get(h.set_number);
       return {
         ...h,
         forward_annual_return: fr?.forward_annual_return,
@@ -211,9 +299,12 @@ export function HoldingsTable() {
         price_source: fr?.price_source,
         exceeds_target: fr?.exceeds_target,
         exceeds_hurdle: fr?.exceeds_hurdle,
+        opportunity_cost_cents: ra?.opportunity_cost_cents,
+        opportunity_cost_pct: ra?.opportunity_cost_pct,
+        realloc_market_value_cents: ra?.market_value_cents,
       } as HoldingWithFR;
     });
-  }, [holdings, forwardReturns]);
+  }, [holdings, forwardReturns, reallocation]);
 
   const table = useReactTable({
     data,
@@ -238,5 +329,22 @@ export function HoldingsTable() {
     );
   }
 
-  return <DataTable table={table} />;
+  const totalOppCost = reallocation?.total_opportunity_cost_cents ?? 0;
+  const sellCount = reallocation?.sell_candidates?.length ?? 0;
+
+  return (
+    <div className='flex min-h-0 flex-1 flex-col gap-2'>
+      {totalOppCost > 0 && (
+        <div className='rounded-lg border border-red-200 bg-red-50 px-4 py-2 text-sm dark:border-red-900 dark:bg-red-950'>
+          <span className='font-medium text-red-700 dark:text-red-400'>
+            Portfolio drag: {formatPrice(totalOppCost)}/yr
+          </span>
+          <span className='text-muted-foreground ml-2'>
+            across {sellCount} holding{sellCount !== 1 ? 's' : ''} below 20% target
+          </span>
+        </div>
+      )}
+      <DataTable table={table} />
+    </div>
+  );
 }

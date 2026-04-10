@@ -73,6 +73,28 @@
 26. **Sales rank is the missing gold** -- scraper stores empty sales_rank_json (0 data points extracted); BrickTalk's #1 conviction signal (Amazon velocity/demand)
 27. **Stock market TA does not transfer** -- tested 67 indicators (SMA/EMA/RSI/MACD/Bollinger/Donchian/momentum) on Keepa prices; every feature hurts CV; LEGO prices are RRP-anchored algorithmic, not human-sentiment-driven
 28. **Binary 3P floor above RRP is the first working Keepa feature** -- `kp_fba_floor_above_rrp` gives +0.017 R2 in CV; 135 sets with 3P floor >= RRP grow 11.4% vs 8.8% (+2.5% delta); binary framing avoids the overfitting that killed continuous Keepa features
+29. **3P avg premium is the strongest single feature for BL price prediction** -- Spearman r=0.547 with bl_current_vs_rrp; 7 of top 10 features are 3P-related; OOS frequency itself is weak, but the *price response* to OOS matters
+30. **Keepa+BL model ranks sets well (Spearman 0.618) even at R2=0.34** -- for buy/skip decisions ranking > point estimates; top quintile averages 1.52x RRP vs bottom quintile 0.94x (0.58 separation)
+31. **3P premium signal is universal across all cohorts** -- Spearman 0.3-0.7 in every retirement year (2020-2025), every major theme (Star Wars, City, Technic, HP), every price tier (2-7); not a theme artifact
+32. **BE annual_growth_pct is a different (softer) target than actual BL market price** -- T1 R2=0.75 on BE growth vs R2=0.34 on BL price; BE target may be easier to predict because BE pricing model is smoother/more formulaic than real market
+33. **Amazon review count is a strong demand proxy** -- r=0.487 Spearman; #2 feature by model importance; not leaky (reviews accumulate during retail life)
+34. **12mo and 36mo BL targets don't work** -- R2~0 at 12mo (too noisy/early), R2~0 at 36mo (small n + different era); 24mo is the sweet spot (R2=0.19, n=225)
+35. **Keepa data starts post-retirement for early-retired sets** -- sets retired before ~2020 may have Keepa data starting after retirement, making pre-retirement features empty; a data coverage limitation, not a methodology flaw
+36. **OOS frequency features are completely dead** -- MI < 0.01 for ALL: amz_oos_pct, amz_oos_event_count, amz_oos_in_last_6mo, oos_pct_last_6/12mo, plus all OOS interaction terms. OOS itself doesn't predict appreciation; only the *price response* (3P premium) does
+37. **Theme-aware corrections work** -- `theme_false_pos` (Dots/DUPLO/Holiday/Classic) and `theme_strong` (Star Wars/HP/Technic/Icons) add +0.07 R2; `3p_prem_adj` (3P premium discounted 50% for false-pos themes) ranks #5 by importance
+38. **Excluding 2025+ sets improves model** -- barely-retired sets have meaningless BL prices (still near RRP); removing them changes training pool from 1043 to 876 but R2 jumps from 0.354 to 0.387
+39. **Quintile separation is clean after iteration** -- Bottom 20% actual=0.96x RRP, Top 20% actual=1.58x RRP; all 5 quintiles are monotonically ordered (pred aligns with actual)
+40. **2025 holdout: Spearman=0.453, R2=-0.73** -- model ranks 2025 sets reasonably well (0.45 rank corr) but R2 is negative because barely-retired sets haven't appreciated yet; model correctly predicts *some* will appreciate but BL prices haven't caught up
+41. **Head-to-head on BL ground truth: Exp31 beats Prod T1 on R2 and bias** -- Exp31 R2=0.361, Prod T1 R2=-0.03; Exp31 bias=-0.03 vs Prod bias=-0.14; Exp31 MAE=0.208 vs Prod MAE=0.261; on 872 common retired sets
+42. **Prod T1 still ranks older cohorts better** -- Prod Spearman: 2020=0.82, 2021=0.70, 2022=0.77 vs Exp31: 0.66, 0.59, 0.60; Prod's BE-trained theme encoding captures long-term appreciation patterns better for established cohorts
+43. **Exp31 wins 15 of 25 themes** -- biggest wins: Vidiyo (+0.84), Dots (+0.46), Disney (+0.39), BrickHeadz (+0.38); Prod wins: Classic (-0.37), Duplo (-0.16), Hidden Side (-0.10), Harry Potter (-0.10), Icons (-0.09)
+44. **BE value_new/RRP has highest raw Spearman (0.74) but +0.17 positive bias** -- BE systematically overestimates value; if de-biased it would be a strong baseline; but it IS the look-ahead data we're trying to replace
+45. **Exp31 is the only model with positive R2 against BL truth** -- Naive R2=-0.38, BE R2=-0.07, Prod T1 R2=-0.03, Exp31 R2=+0.36; all others have negative R2 because they're calibrated to a different scale
+46. **If model predicts >=10% growth, 74% actually grow, 63% exceed 10%** -- at >=20% threshold: 81% grow, 72% exceed 10%; at >=30%: 88% grow, 80% exceed 10%; the model is well-calibrated for positive calls
+47. **41.6% of retired sets are "avoid" (BL < RRP)** -- much higher than the 20% loser rate under BE growth definition; many sets never appreciate above retail on BrickLink secondary market
+48. **New classifier (AUC=0.870) underperforms old on BL loser detection** -- OLD model's negated growth has AUC=0.746 for finding BL losers, NEW dedicated classifier only 0.661; the old BE-trained model's growth prediction is a BETTER loser detector than a binary classifier trained on BL data. This suggests keeping the old classifier or using regressor scores directly
+49. **Classifier is underconfident at low P(avoid)** -- at P=0.2-0.4, actual avoid rate is 47% but model says 25-35%; at P>0.5 calibration improves; needs isotonic recalibration
+50. **Buy signal (P(avoid)<0.5 & pred>=15%) delivers 78.7% hit rate, +44.3% avg return** -- the strongest actionable signal; 1,156 sets qualify out of 2,428
 
 ## Production Files
 
@@ -139,6 +161,11 @@
 | 28 | Keepa separated signals | 1193 | All hurt CV | 3P FBA/FBM/BB r=0.30-0.37 but all hurt CV; NOT purely leaky (premiums appear 17mo pre-retire, survive partial corr); too noisy at n=607; sales rank empty |
 | 29 | Keepa technical analysis | 550 | All hurt CV | SMA/EMA/RSI/MACD/Bollinger/Donchian on Amazon prices; 67 features tested; best r=0.25; every feature hurts CV; TA doesn't transfer to LEGO pricing |
 | 30 | 3P spread (BrickTalk exact) | 642 | fba_floor +0.017 | Binary "3P floor above RRP" = first Keepa feature to improve CV; 135 sets, +2.5% avg growth delta; added to pipeline |
+| 31 | Keepa+BL pure signal | 1043 | Spearman 0.618 | BE pricing/growth EXCLUDED; Keepa+BL only; 3P premium is #1 feature (r=0.547); model ranks sets well (Spearman 0.618) despite R2=0.34 on BL current price target; features stable across all cohorts |
+| 31b | Feature selection + failure | 1043 | 20 features, Sp=0.624 | MI+redundancy+LOFO: 56->20 features; OOS frequency features all dead (MI<0.01); winners underpredicted -0.42 bias; Dots/DUPLO/Holiday false positives; 56 false negatives from missing Keepa |
+| 31c | Iterated model | 876 | R2=0.387, Sp=0.646 | Excluded 2025+; theme penalty+strong features; missing Keepa proxy; Optuna tuned; +0.032 R2, +0.022 Spearman; quintile separation clean (0.96->1.58); 2025 holdout Spearman=0.453 |
+| 31d | Model comparison | 872 | Exp31 wins 15/25 themes | Head-to-head vs Prod T1 on BL ground truth: Exp31 R2=0.361 vs Prod R2=-0.03; Exp31 Spearman=0.644 vs Prod=0.574; BUT Prod ranks better for 2020-2022 cohorts; BE value_new has best Spearman (0.74) but +0.17 bias |
+| 31e | Production deploy + calibration | 2428 | CV R2=0.261, AUC=0.870 | Model trained and saved; pred>=10% hit rate 74% (>0%), 63% (>10%); pred>=20% hit rate 81%; classifier AUC=0.870; OLD classifier AUC=0.746 on BL losers -- old model still detects losers better via negated growth |
 
 ## Architecture Change: v1 -> v2
 
@@ -600,3 +627,63 @@ Feature selection (MI + LOFO) will prune any that don't survive in production tr
 10. **Feature engineering from new sources** — Rebrickable (part rarity), designer track record
 11. **Conformal intervals** — code exists in `conformal.py` but not integrated into UI
 12. **Currency data enrichment** — usd_vs_mean is strong (r=-0.231), deeper regional pricing analysis
+
+## Experiment 31: Keepa + BrickLink Pure Signal (2026-04-09)
+
+Stripped all BE pricing/growth data. Used only Keepa + BrickLink market signals + BE factual metadata (theme, pieces, minifigs, RRP, etc). Target: BrickLink current new price / RRP (real secondary market price).
+
+### Design
+- **BE forbidden**: annual_growth_pct, value_new_cents, future_estimate, rolling_growth, subtheme_avg_growth, theme_rank, distribution_mean/stddev
+- **BE allowed**: theme, subtheme, pieces, minifigs, RRP, rating, reviews, designer, exclusive_minifigs, retired_date, release_date
+- **Features**: 67 total across 11 categories — Amazon OOS patterns (9), restock behavior (5), 3P price response to OOS (7), 3P price trend (14), Amazon 1P dynamics (7), demand proxy (3), metadata (12), data quality (3), metadata x market interactions (8)
+- **All Keepa features cut at retired_date** to prevent lookahead bias
+- **BL monthly sales used only as targets** (post-retirement data)
+
+### Dataset
+- 1,043 sets with `bl_current_vs_rrp` target (99.5% coverage)
+- 881 sets with Keepa + retired_date overlap
+- `sales_rank_json` confirmed empty (0 data points) — demand proxy features dropped
+
+### Top Features (Spearman with bl_current_vs_rrp)
+
+| Rank | Feature | Spearman | Category |
+|------|---------|----------|----------|
+| 1 | `3p_avg_premium_vs_rrp_pct` | +0.547 | 3P Trend |
+| 2 | `3p_above_rrp_pct` | +0.521 | 3P Trend |
+| 3 | `3p_fba_vs_amz_avg_spread` | +0.495 | 3P Trend |
+| 4 | `3p_price_during_oos_vs_rrp` | +0.494 | OOS Response |
+| 5 | `amz_review_count` | +0.487 | Demand |
+| 6 | `bb_premium_during_oos_pct` | +0.474 | OOS Response |
+| 7 | `3p_max_premium_vs_rrp_pct` | +0.473 | 3P Trend |
+| 8 | `3p_price_at_retire_vs_rrp` | +0.472 | 3P Trend |
+| 9 | `3p_above_rrp_last_6mo_pct` | +0.466 | 3P Trend |
+| 10 | `3p_premium_x_price_tier` | +0.453 | Interaction |
+
+### LightGBM Results (5-fold GroupKFold by retirement year)
+
+**bl_current_vs_rrp target:**
+- OOF R2 = 0.344, Mean fold R2 = 0.227 +/- 0.057
+- **OOF Spearman rank correlation = 0.618** (strong ranking ability)
+- Top quintile: 1.52x RRP, Bottom quintile: 0.94x RRP, Separation: 0.58
+- Top importance: `3p_avg_premium_vs_rrp_pct` (gain=818), `amz_review_count` (559), `minifig_value_ratio` (458)
+
+**annualized_return target:**
+- OOF R2 = 0.214, Spearman = 0.498
+- Weaker; 2019+2025 fold is the hardest (R2=0.02)
+
+**Multi-horizon:**
+- 12mo: R2 ~ 0 (too noisy at short horizon, n=265)
+- 24mo: R2 = 0.19 (sweet spot, n=225)
+- 36mo: R2 ~ 0 (small n + different era, n=220)
+
+### Cohort Stability
+- `3p_avg_premium_vs_rrp_pct` Spearman by retirement year: 2020=0.52, 2021=0.29, 2022=0.50, 2023=0.49, 2024=0.49, 2025=0.32 — **consistent across all years**
+- Works within themes: Star Wars 0.65, Technic 0.67, City 0.67, Disney 0.64, Town 0.68, HP 0.44
+- Works across price tiers: Tier 2=0.57, Tier 3=0.57, Tier 4=0.55, Tier 5=0.47, Tier 6=0.57 (Tier 1 weaker at 0.29)
+
+### Validation: 76173 (Spider-Man vs Carnage, 19.9% annual growth)
+- 4 OOS episodes, 6% OOS, 3P above RRP 73%, 3P premium 28%, 3P at retirement 1.61x RRP
+- Buy box premium during OOS: 66% — all strong signals confirmed
+
+### Key Insight
+The R2=0.34 vs T1 R2=0.75 gap is partly because the targets differ. T1 predicts BE's `annual_growth_pct` (BE's own pricing model output, smoother). Exp 31 predicts actual BrickLink market prices (noisier but ground truth). The Spearman=0.618 ranking power is the more relevant metric for investment decisions.

@@ -34,7 +34,7 @@ class GrowthScoringProvider:
         return "ml_"
 
     def score_all(self, conn: Any = None) -> dict[str, dict]:
-        """Score all sets with growth predictions. Cached for 10 minutes."""
+        """Score all sets with growth predictions. Cached for 30 days."""
         import time
 
         now = time.time()
@@ -42,15 +42,14 @@ class GrowthScoringProvider:
             return _prediction_cache["data"]
 
         from services.ml.growth.prediction import predict_growth
-        from services.ml.pg_queries import load_growth_candidate_sets, load_keepa_timelines
 
         try:
             tier1, tier2, ts, ss, clf, ensemble = self._get_models()
 
             from db.pg.engine import get_engine
             engine = get_engine()
-            candidates = load_growth_candidate_sets(engine)
-            keepa_df = load_keepa_timelines(engine)
+
+            candidates, keepa_df = self._load_candidate_data(engine)
 
             predictions = predict_growth(
                 candidates, keepa_df,
@@ -114,7 +113,6 @@ class GrowthScoringProvider:
     def predict_single(self, set_number: str) -> dict | None:
         """Force prediction for a single set and inject into cache."""
         from services.ml.growth.prediction import predict_growth
-        from services.ml.pg_queries import load_growth_candidate_sets, load_keepa_timelines
 
         try:
             tier1, tier2, ts, ss, clf, ensemble = self._get_models()
@@ -122,19 +120,15 @@ class GrowthScoringProvider:
             from db.pg.engine import get_engine
             engine = get_engine()
 
-            # Load candidates filtered to this one set
-            all_candidates = load_growth_candidate_sets(engine)
+            all_candidates, keepa_df = self._load_candidate_data(engine)
             candidate = all_candidates[all_candidates["set_number"] == set_number]
 
             if candidate.empty:
-                # Try loading base metadata as fallback (looser criteria)
                 from services.ml.pg_queries import load_base_metadata
                 candidate = load_base_metadata(engine, [set_number])
 
             if candidate.empty:
                 return None
-
-            keepa_df = load_keepa_timelines(engine)
 
             predictions = predict_growth(
                 candidate, keepa_df,
@@ -185,22 +179,34 @@ class GrowthScoringProvider:
         return entry
 
     def retrain(self) -> dict:
-        """Force retrain and return model stats."""
+        """Force retrain using the active model from registry."""
+        from config.model_registry import ACTIVE_MODEL
         from db.pg.engine import get_engine
         from services.ml.growth.persistence import save_growth_models
-        from services.ml.growth.training import train_growth_models
-        from services.ml.pg_queries import load_growth_training_data, load_keepa_timelines
 
         _cache.clear()
         _prediction_cache.clear()
 
         engine = get_engine()
-        df_raw = load_growth_training_data(engine)
-        keepa_df = load_keepa_timelines(engine)
 
-        tier1, tier2, ts, ss, clf, ensemble = train_growth_models(
-            df_raw=df_raw, keepa_df=keepa_df,
-        )
+        if ACTIVE_MODEL == "keepa_bl":
+            from services.ml.growth.keepa_training import train_keepa_bl_models
+            from services.ml.pg_queries import load_keepa_bl_training_data
+
+            base_df, keepa_df, target_series = load_keepa_bl_training_data(engine)
+            tier1, tier2, ts, ss, clf, ensemble = train_keepa_bl_models(
+                base_df=base_df, keepa_df=keepa_df, target_series=target_series,
+            )
+        else:
+            from services.ml.growth.training import train_growth_models
+            from services.ml.pg_queries import load_growth_training_data, load_keepa_timelines
+
+            df_raw = load_growth_training_data(engine)
+            keepa_df = load_keepa_timelines(engine)
+            tier1, tier2, ts, ss, clf, ensemble = train_growth_models(
+                df_raw=df_raw, keepa_df=keepa_df,
+            )
+
         save_growth_models(tier1, tier2, ts, ss, clf, ensemble)
 
         _cache["tier1"] = tier1
@@ -239,6 +245,19 @@ class GrowthScoringProvider:
         except Exception:
             _warmup_stage = "failed"
             logger.warning("Prediction cache warmup failed", exc_info=True)
+
+    def _load_candidate_data(self, engine: Any) -> tuple:
+        """Load candidate sets + Keepa data, routing by active model type."""
+        from services.ml.growth.prediction import _is_keepa_bl_model
+
+        tier1 = _cache.get("tier1")
+        if tier1 and _is_keepa_bl_model(tier1):
+            from services.ml.pg_queries import load_keepa_bl_training_data
+            base_df, keepa_df, _ = load_keepa_bl_training_data(engine)
+            return base_df, keepa_df
+
+        from services.ml.pg_queries import load_growth_candidate_sets, load_keepa_timelines
+        return load_growth_candidate_sets(engine), load_keepa_timelines(engine)
 
     def _get_models(self) -> tuple:
         if not _cache:

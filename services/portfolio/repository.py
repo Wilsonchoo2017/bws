@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 
 from typing import Any
 
@@ -256,12 +256,14 @@ def get_holdings(conn: Any) -> list[dict]:
         cost_basis, held_qty = _fifo_cost_basis(txns)
         if held_qty <= 0:
             continue
+        avg_date = _fifo_weighted_avg_date(txns)
         holdings.append({
             "set_number": set_number,
             "condition": condition,
             "quantity": held_qty,
             "total_cost_cents": cost_basis,
             "avg_cost_cents": cost_basis // held_qty if held_qty > 0 else 0,
+            "_avg_acquisition_date": avg_date,
         })
 
     if not holdings:
@@ -278,6 +280,7 @@ def get_holdings(conn: Any) -> list[dict]:
     from services.listing.repository import get_active_listings_bulk
     active_listings = get_active_listings_bulk(conn, set_numbers)
 
+    now = datetime.now(timezone.utc)
     for h in holdings:
         sn = h["set_number"]
         market_price = prices.get(sn, 0)
@@ -296,6 +299,23 @@ def get_holdings(conn: Any) -> list[dict]:
         h["listing_price_cents"] = item.get("listing_price_cents")
         h["listing_currency"] = item.get("listing_currency")
         h["listed_on"] = active_listings.get(sn, [])
+
+        # Compute annualized return (APR)
+        avg_date = h.pop("_avg_acquisition_date", None)
+        avg_cost = h["avg_cost_cents"]
+        if avg_date and avg_cost > 0 and market_price > 0:
+            days_held = (now - avg_date).total_seconds() / 86400.0
+            h["days_held"] = round(days_held)
+            if days_held >= 30.0:
+                years_held = days_held / 365.25
+                ratio = market_price / avg_cost
+                h["apr"] = round(ratio ** (1.0 / years_held) - 1.0, 4)
+            else:
+                # Too short to annualize meaningfully
+                h["apr"] = None
+        else:
+            h["apr"] = None
+            h["days_held"] = None
 
     return sorted(holdings, key=lambda h: abs(h["unrealized_pl_cents"]), reverse=True)
 
@@ -427,6 +447,45 @@ def _fifo_cost_basis(txns: list[tuple]) -> tuple[int, int]:
     total_cost = sum(lot[0] * lot[1] for lot in lots)
     total_qty = sum(lot[0] for lot in lots)
     return total_cost, total_qty
+
+
+def _fifo_weighted_avg_date(txns: list[tuple]) -> datetime | None:
+    """Compute cost-weighted average acquisition date from FIFO remaining lots.
+
+    Each tuple: (set_number, condition, txn_type, quantity, price_cents, txn_date).
+    Returns the weighted average date, or None if no holdings remain.
+    """
+    lots: list[list] = []  # [qty_remaining, price_cents, txn_date]
+    for row in txns:
+        txn_type, qty, price, txn_date = row[2], row[3], row[4], row[5]
+        if txn_type == "BUY":
+            lots.append([qty, price, txn_date])
+        elif txn_type == "SELL":
+            remaining = qty
+            for lot in lots:
+                if remaining <= 0:
+                    break
+                consumed = min(lot[0], remaining)
+                lot[0] -= consumed
+                remaining -= consumed
+
+    remaining_lots = [(lot[0], lot[1], lot[2]) for lot in lots if lot[0] > 0]
+    if not remaining_lots:
+        return None
+
+    total_cost = sum(q * p for q, p, _ in remaining_lots)
+    if total_cost <= 0:
+        return None
+
+    # Weight each date by its cost contribution
+    epoch = datetime(2020, 1, 1, tzinfo=timezone.utc)
+    weighted_days = sum(
+        (q * p) * (d - epoch).total_seconds()
+        for q, p, d in remaining_lots
+        if d is not None
+    )
+    avg_seconds = weighted_days / total_cost
+    return epoch + timedelta(seconds=avg_seconds)
 
 
 def _fifo_realized_pl(txns: list[tuple]) -> int:

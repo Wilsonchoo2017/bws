@@ -1,11 +1,13 @@
 """Growth model prediction — simplified production pipeline.
 
-Architecture:
-  1. Classifier: P(avoid) — gate to filter out losers
-  2. Regressor: E[growth] — predicted annual growth %
-  3. Buy signal: pass classifier AND growth >= hurdle
+Supports two model types (via config/model_registry.py):
+  - legacy_be: Trained on BE annual_growth_pct, uses intrinsic+Keepa features
+  - keepa_bl: Trained on BL price/RRP, uses Keepa+metadata features (Exp 31)
 
-No T1/T2/ensemble complexity. One regressor, one classifier, one answer.
+Architecture:
+  1. Regressor: E[growth] — predicted growth % (or BL/RRP ratio converted to %)
+  2. Classifier: P(avoid) — gate to filter out losers
+  3. Buy signal: pass classifier AND growth >= hurdle
 """
 
 from __future__ import annotations
@@ -20,7 +22,6 @@ from services.ml.growth.classifier import (
     TrainedClassifier,
     predict_avoid_proba,
 )
-from services.ml.growth.features import engineer_intrinsic_features, engineer_keepa_features
 from services.ml.growth.types import GrowthPrediction, TrainedEnsemble, TrainedGrowthModel
 
 _cfg = MLPipelineConfig()
@@ -32,6 +33,11 @@ AVOID_GATE_THRESHOLD = 0.5
 
 # Minimum predicted growth to trigger a BUY signal
 BUY_HURDLE_PCT = 8.0
+
+
+def _is_keepa_bl_model(tier1: TrainedGrowthModel) -> bool:
+    """Detect if this is a Keepa+BL model by model_name."""
+    return tier1.model_name == "lightgbm_keepa_bl"
 
 
 def predict_growth(
@@ -47,36 +53,60 @@ def predict_growth(
 ) -> list[GrowthPrediction]:
     """Generate growth predictions with buy/avoid signals.
 
-    Steps:
-    1. Engineer features (intrinsic + Keepa)
-    2. Regressor predicts growth % (uses tier1 model on all sets)
-    3. Classifier computes P(avoid)
-    4. Buy signal = P(avoid) < gate AND growth >= hurdle
+    Automatically detects model type (legacy_be vs keepa_bl) and routes
+    to the correct feature engineering pipeline.
     """
     if candidates.empty:
         return []
 
-    # Engineer features using pre-computed stats (no LOO leakage)
-    df_feat, _, _ = engineer_intrinsic_features(
-        candidates,
-        theme_stats=theme_stats,
-        subtheme_stats=subtheme_stats,
-    )
-    df_feat = engineer_keepa_features(df_feat, keepa_df)
+    if _is_keepa_bl_model(tier1):
+        df_feat = _engineer_keepa_bl(candidates, keepa_df)
+    else:
+        df_feat = _engineer_legacy_be(candidates, keepa_df, theme_stats, subtheme_stats)
 
-    # Use tier1 (primary model) for all sets
     model_obj = tier1
-    predictions = _predict_batch(df_feat, model_obj, classifier)
+    is_ratio_target = _is_keepa_bl_model(tier1)
+    predictions = _predict_batch(df_feat, model_obj, classifier, ratio_to_growth=is_ratio_target)
 
     return sorted(predictions, key=lambda p: p.predicted_growth_pct, reverse=True)
+
+
+def _engineer_keepa_bl(
+    candidates: pd.DataFrame,
+    keepa_df: pd.DataFrame,
+) -> pd.DataFrame:
+    """Feature engineering for Keepa+BL model (Exp 31)."""
+    from services.ml.growth.keepa_features import engineer_keepa_bl_features
+    return engineer_keepa_bl_features(candidates, keepa_df)
+
+
+def _engineer_legacy_be(
+    candidates: pd.DataFrame,
+    keepa_df: pd.DataFrame,
+    theme_stats: dict,
+    subtheme_stats: dict,
+) -> pd.DataFrame:
+    """Feature engineering for legacy BE model."""
+    from services.ml.growth.features import engineer_intrinsic_features, engineer_keepa_features
+    df_feat, _, _ = engineer_intrinsic_features(
+        candidates, theme_stats=theme_stats, subtheme_stats=subtheme_stats,
+    )
+    return engineer_keepa_features(df_feat, keepa_df)
 
 
 def _predict_batch(
     df_feat: pd.DataFrame,
     model_obj: TrainedGrowthModel,
     classifier: TrainedClassifier | None,
+    *,
+    ratio_to_growth: bool = False,
 ) -> list[GrowthPrediction]:
-    """Predictions for all sets: regressor growth + classifier gate + buy signal."""
+    """Predictions for all sets: regressor growth + classifier gate + buy signal.
+
+    Args:
+        ratio_to_growth: If True, model predicts BL/RRP ratio and we convert
+            to growth %: growth_pct = (ratio - 1) * 100
+    """
     fill_map = dict(model_obj.fill_values)
     feat_names = [f for f in model_obj.feature_names if f in df_feat.columns]
     if len(feat_names) < len(model_obj.feature_names) * 0.5:
@@ -111,7 +141,11 @@ def _predict_batch(
             preds.reshape(-1, 1),
         ).ravel()
 
-    preds = np.clip(preds, 0.0, 50.0)
+    # For Keepa+BL model: convert BL/RRP ratio to growth %
+    if ratio_to_growth:
+        preds = (preds - 1.0) * 100
+
+    preds = np.clip(preds, -50.0, 200.0)
 
     # Isotonic calibration
     if model_obj.isotonic_calibrator is not None:
@@ -158,7 +192,11 @@ def _predict_batch(
         except Exception:
             pass
 
-    importances = model_obj.model.feature_importances_
+    try:
+        importances = model_obj.model.feature_importances_
+    except AttributeError:
+        # lgb.train() returns Booster which uses feature_importance() method
+        importances = model_obj.model.feature_importance(importance_type="gain")
     top_global = tuple(sorted(
         zip(model_obj.feature_names, importances),
         key=lambda x: x[1],

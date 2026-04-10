@@ -421,13 +421,14 @@ class HourlyRateLimiter:
         async with self._get_lock():
             now = time.monotonic()
 
-            # Wait out quota cooldown if active
+            # Wait out quota cooldown if active (poll every 10s so manual resets take effect)
             if now < self._blocked_until:
                 wait = self._blocked_until - now
                 self._logger.info(
                     "%s cooldown active: sleeping %.0f min", self._source_name, wait / 60,
                 )
-                await asyncio.sleep(wait)
+                while time.monotonic() < self._blocked_until:
+                    await asyncio.sleep(min(10.0, self._blocked_until - time.monotonic()))
                 now = time.monotonic()
                 self._logger.info("%s cooldown finished, resuming", self._source_name)
 

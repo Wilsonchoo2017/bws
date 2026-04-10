@@ -18,8 +18,12 @@ _MODELS_DIR = _PROJECT_ROOT / "models"
 _GROWTH_FILENAME = "growth_models.joblib"
 
 
-def _artifact_path() -> Path:
-    return _MODELS_DIR / _GROWTH_FILENAME
+def _artifact_path(model_type: str | None = None) -> Path:
+    if model_type is None:
+        from config.model_registry import get_model_filename
+        return _MODELS_DIR / get_model_filename()
+    from config.model_registry import MODEL_FILENAMES
+    return _MODELS_DIR / MODEL_FILENAMES.get(model_type, _GROWTH_FILENAME)
 
 
 def save_growth_models(
@@ -29,12 +33,17 @@ def save_growth_models(
     subtheme_stats: dict,
     classifier: Any | None,
     ensemble: Any | None,
+    *,
+    model_type: str | None = None,
 ) -> Path:
     """Serialize the full growth model bundle to disk."""
     import joblib
 
     _MODELS_DIR.mkdir(parents=True, exist_ok=True)
-    path = _artifact_path()
+    path = _artifact_path(model_type)
+
+    from config.model_registry import ACTIVE_MODEL
+    effective_type = model_type or ACTIVE_MODEL
 
     bundle = {
         "tier1": tier1,
@@ -44,10 +53,11 @@ def save_growth_models(
         "classifier": classifier,
         "ensemble": ensemble,
         "saved_at": datetime.now(timezone.utc).isoformat(),
-        "version": 2,  # v2 = hurdle model
+        "version": 3 if effective_type == "keepa_bl" else 2,
+        "model_type": effective_type,
     }
     joblib.dump(bundle, path, compress=3)
-    logger.info("Growth models saved to %s", path)
+    logger.info("Growth models (%s) saved to %s", effective_type, path)
     return path
 
 

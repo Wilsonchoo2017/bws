@@ -26,6 +26,7 @@ from services.portfolio.repository import (
 from services.portfolio.forward_return_query import (
     get_holdings_forward_returns,
 )
+from services.portfolio.reallocation import get_reallocation_analysis
 from services.portfolio.wbr_metrics import calculate_wbr
 
 
@@ -59,7 +60,7 @@ async def add_transaction(request: CreateTransactionRequest, conn: Any = Depends
         [request.set_number],
     ).fetchone()
     if row and (row[0] is None or row[1] is None or row[2] is None):
-        job_manager.create_job("enrichment", request.set_number)
+        job_manager.create_job("enrichment", request.set_number, reason="missing metadata on transaction add")
         logger.info("Queued enrichment for set %s", request.set_number)
 
     txn_id = create_transaction(
@@ -165,7 +166,7 @@ async def add_bill(
             [item.set_number],
         ).fetchone()
         if row and (row[0] is None or row[1] is None or row[2] is None):
-            job_manager.create_job("enrichment", item.set_number)
+            job_manager.create_job("enrichment", item.set_number, reason="missing metadata on bill create")
             logger.info("Queued enrichment for set %s", item.set_number)
 
         txn_id = create_transaction(
@@ -240,7 +241,7 @@ async def update_bill(
             [item.set_number],
         ).fetchone()
         if row and (row[0] is None or row[1] is None or row[2] is None):
-            job_manager.create_job("enrichment", item.set_number)
+            job_manager.create_job("enrichment", item.set_number, reason="missing metadata on bill update")
             logger.info("Queued enrichment for set %s", item.set_number)
 
         txn_id = create_transaction(
@@ -416,7 +417,7 @@ async def enrich_portfolio_items(conn: Any = Depends(get_db)) -> dict:
 
     queued = []
     for (set_number,) in rows:
-        job_manager.create_job("enrichment", set_number)
+        job_manager.create_job("enrichment", set_number, reason="manual re-enrich sweep")
         queued.append(set_number)
 
     return {
@@ -469,5 +470,22 @@ async def wbr_metrics(conn: Any = Depends(get_db)) -> dict:
         return {"success": True, "data": _fr_cache[cache_key]["data"], "cached": True}
 
     data = calculate_wbr(conn)
+    _fr_cache[cache_key] = {"data": data, "expires": now + _FR_TTL}
+    return {"success": True, "data": data}
+
+
+@router.get("/reallocation")
+async def reallocation_analysis(
+    refresh: bool = Query(default=False),
+    conn: Any = Depends(get_db),
+) -> dict:
+    """Hold vs. Sell opportunity cost analysis for all holdings."""
+    now = time.time()
+    cache_key = "reallocation"
+
+    if not refresh and cache_key in _fr_cache and _fr_cache[cache_key]["expires"] > now:
+        return {"success": True, "data": _fr_cache[cache_key]["data"], "cached": True}
+
+    data = get_reallocation_analysis(conn)
     _fr_cache[cache_key] = {"data": data, "expires": now + _FR_TTL}
     return {"success": True, "data": data}

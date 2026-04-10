@@ -257,6 +257,7 @@ export interface BrickeconomyData {
   theme: string | null;
   subtheme: string | null;
   year_released: number | null;
+  year_retired: number | null;
   pieces: number | null;
   minifigs: number | null;
   availability: string | null;

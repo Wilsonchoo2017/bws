@@ -480,17 +480,10 @@ export function BrickeconomyPanel({ setNumber, globalDateRange, onDateRange }: B
     },
   ];
 
-  const growthColor =
-    data.annual_growth_pct !== null
-      ? data.annual_growth_pct >= 0
-        ? 'text-emerald-600'
-        : 'text-red-500'
-      : '';
-
   return (
     <div>
       <div className='mb-3 flex items-center justify-between'>
-        <h2 className='text-lg font-semibold'>BrickEconomy Valuation</h2>
+        <h2 className='text-lg font-semibold'>BrickEconomy Data</h2>
         {data.brickeconomy_url && (
           <a
             href={data.brickeconomy_url}
@@ -504,28 +497,19 @@ export function BrickeconomyPanel({ setNumber, globalDateRange, onDateRange }: B
         )}
       </div>
 
-      {/* Summary cards */}
+      {/* Summary cards -- factual metadata only, no BE pricing/growth */}
       <div className='mb-4 grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6'>
-        <SummaryCard
-          label='Value (New)'
-          value={formatUsd(data.value_new_cents)}
-        />
-        <SummaryCard
-          label='Value (Used)'
-          value={formatUsd(data.value_used_cents)}
-        />
         <SummaryCard
           label='RRP (USD)'
           value={formatUsd(data.rrp_usd_cents)}
         />
         <SummaryCard
-          label='Annual Growth'
-          value={
-            data.annual_growth_pct !== null
-              ? `${data.annual_growth_pct > 0 ? '+' : ''}${data.annual_growth_pct}%`
-              : '-'
-          }
-          color={growthColor}
+          label='Pieces'
+          value={data.pieces !== null && data.pieces !== undefined ? `${data.pieces}` : '-'}
+        />
+        <SummaryCard
+          label='Minifigs'
+          value={data.minifigs !== null && data.minifigs !== undefined ? `${data.minifigs}` : '-'}
         />
         <SummaryCard
           label='Rating'
@@ -537,11 +521,11 @@ export function BrickeconomyPanel({ setNumber, globalDateRange, onDateRange }: B
         <SummaryCard
           label='Status'
           value={data.availability ?? '-'}
-          sub={
-            data.future_estimate_cents
-              ? `Est. ${formatUsd(data.future_estimate_cents)} by ${data.future_estimate_date?.slice(0, 7) ?? '?'}`
-              : undefined
-          }
+        />
+        <SummaryCard
+          label='Released'
+          value={data.year_released ? `${data.year_released}` : '-'}
+          sub={data.year_retired ? `Retired ${data.year_retired}` : undefined}
         />
       </div>
 

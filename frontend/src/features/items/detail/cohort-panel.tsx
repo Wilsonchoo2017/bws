@@ -95,7 +95,7 @@ export function CohortPanel({ setNumber }: CohortPanelProps) {
   return (
     <div className="flex gap-4">
       <CohortSource label="BrickLink" data={bl} loading={blLoading} />
-      <CohortSource label="BrickEconomy" data={be} loading={beLoading} />
+      <CohortSource label="Keepa" data={be} loading={beLoading} />
     </div>
   );
 }

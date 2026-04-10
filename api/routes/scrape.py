@@ -284,7 +284,7 @@ async def start_scrape(request: ScrapeRequest):
             detail="URL must be a LEGO set number",
         )
 
-    job = job_manager.create_job(request.scraper_id, request.url)
+    job = job_manager.create_job(request.scraper_id, request.url, reason="manual")
     return _job_to_response(job)
 
 
@@ -422,6 +422,7 @@ async def get_job(job_id: str):
 
 
 def _job_to_response(job) -> ScrapeJobResponse:
+    last = job_manager.find_last_similar(job.scraper_id, job.url)
     return ScrapeJobResponse(
         job_id=job.job_id,
         status=job.status,
@@ -434,6 +435,9 @@ def _job_to_response(job) -> ScrapeJobResponse:
         error=job.error,
         progress=job.progress,
         worker_no=job.worker_no,
+        reason=job.reason,
+        last_run_at=last.completed_at if last else None,
+        last_run_status=last.status.value if last else None,
     )
 
 
@@ -472,6 +476,22 @@ def _scrape_tasks_as_jobs(conn, limit: int) -> list[ScrapeJobResponse]:
         [limit],
     ).fetchall()
 
+    # Batch-fetch last completed run for each (set_number, task_type) pair
+    last_runs: dict[tuple[str, str], tuple[object, str]] = {}
+    if rows:
+        last_run_rows = conn.execute(
+            """
+            SELECT DISTINCT ON (set_number, task_type)
+                   set_number, task_type, completed_at, status
+            FROM scrape_tasks
+            WHERE status IN ('completed', 'failed')
+              AND completed_at IS NOT NULL
+            ORDER BY set_number, task_type, completed_at DESC
+            """,
+        ).fetchall()
+        for lr_row in last_run_rows:
+            last_runs[(lr_row[0], lr_row[1])] = (lr_row[2], lr_row[3])
+
     results: list[ScrapeJobResponse] = []
     for row in rows:
         (task_id, set_number, task_type, status, priority,
@@ -496,6 +516,20 @@ def _scrape_tasks_as_jobs(conn, limit: int) -> list[ScrapeJobResponse]:
         if not created_at:
             created_at = datetime.now(tz=timezone.utc)
 
+        # Last similar run
+        last_run = last_runs.get((set_number, task_type))
+        last_run_at = last_run[0] if last_run else None
+        last_run_status_raw = last_run[1] if last_run else None
+        last_run_status = (
+            _TASK_STATUS_TO_JOB_STATUS.get(last_run_status_raw, JobStatus.QUEUED).value
+            if last_run_status_raw
+            else None
+        )
+        # Don't show "last run" pointing to the current task itself
+        if last_run_at == completed_at and status in ("completed", "failed"):
+            last_run_at = None
+            last_run_status = None
+
         results.append(ScrapeJobResponse(
             job_id=task_id,
             status=job_status,
@@ -508,6 +542,9 @@ def _scrape_tasks_as_jobs(conn, limit: int) -> list[ScrapeJobResponse]:
             error=error,
             progress=progress,
             worker_no=None,
+            reason="scheduled",
+            last_run_at=last_run_at,
+            last_run_status=last_run_status,
         ))
 
     return results

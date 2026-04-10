@@ -122,6 +122,9 @@ _DEFAULTS: dict[str, Any] = {
         "retired_horizon_years": 1.0,
         "post_retirement_bonus_years": 1.5,
         "min_time_years": 0.25,
+        "selling_fee_pct": 0.05,
+        "currency_buffer_pct": 0.03,
+        "condition_decay_pct": 0.02,
     },
 }
 

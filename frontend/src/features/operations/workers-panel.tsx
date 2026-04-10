@@ -139,9 +139,10 @@ export function WorkersPanel({
                   <th className='px-3 py-2 text-left font-medium'>Status</th>
                   <th className='px-3 py-2 text-left font-medium'>Type</th>
                   <th className='px-3 py-2 text-left font-medium'>Target</th>
+                  <th className='px-3 py-2 text-left font-medium'>Reason</th>
                   <th className='px-3 py-2 text-right font-medium'>Items</th>
                   <th className='px-3 py-2 text-right font-medium'>Duration</th>
-                  <th className='px-3 py-2 text-left font-medium'>Created</th>
+                  <th className='px-3 py-2 text-left font-medium'>Last Run</th>
                   <th className='px-3 py-2 text-left font-medium'>Error</th>
                 </tr>
               </thead>
@@ -288,6 +289,11 @@ function ActiveWorkers({ jobs }: { readonly jobs: readonly WorkerJob[] }) {
             </div>
             <div className='mt-1 space-y-0.5'>
               <div className='truncate font-mono text-xs'>{target}</div>
+              {job.reason && (
+                <div className='text-muted-foreground text-xs'>
+                  {job.reason}
+                </div>
+              )}
               {job.progress && (
                 <div className='text-muted-foreground text-xs'>
                   {job.progress}
@@ -360,6 +366,11 @@ function StatCard({
   );
 }
 
+const LAST_RUN_STATUS_STYLES: Record<string, string> = {
+  completed: 'text-green-600 dark:text-green-400',
+  failed: 'text-red-600 dark:text-red-400',
+};
+
 function JobRow({ job }: { readonly job: WorkerJob }) {
   const target =
     job.scraper_id === 'enrichment' || isScrapeTask(job)
@@ -384,12 +395,21 @@ function JobRow({ job }: { readonly job: WorkerJob }) {
       <td className='max-w-xs truncate px-3 py-2 font-mono text-xs'>
         {target}
       </td>
+      <td className='max-w-[180px] truncate px-3 py-2 text-xs text-muted-foreground' title={job.reason ?? undefined}>
+        {job.reason ?? '-'}
+      </td>
       <td className='px-3 py-2 text-right font-mono'>{job.items_found}</td>
       <td className='text-muted-foreground px-3 py-2 text-right text-xs'>
         {formatDuration(job.started_at, job.completed_at)}
       </td>
-      <td className='text-muted-foreground px-3 py-2 text-xs'>
-        {formatRelativeTime(job.created_at)}
+      <td className='px-3 py-2 text-xs'>
+        {job.last_run_at ? (
+          <span className={LAST_RUN_STATUS_STYLES[job.last_run_status ?? ''] ?? 'text-muted-foreground'}>
+            {job.last_run_status} {formatRelativeTime(job.last_run_at)}
+          </span>
+        ) : (
+          <span className='text-muted-foreground'>first run</span>
+        )}
       </td>
       <td className='max-w-xs truncate px-3 py-2 text-xs text-red-600 dark:text-red-400'>
         {job.error ?? ''}

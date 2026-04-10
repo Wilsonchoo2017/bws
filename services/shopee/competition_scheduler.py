@@ -60,7 +60,7 @@ async def run_competition_sweep(
                 logger.debug("Competition sweep: no items need checking")
                 continue
 
-            manager.create_job("shopee_competition", "batch")
+            manager.create_job("shopee_competition", "batch", reason=f"scheduled sweep: {len(items)} items stale")
             logger.info(
                 "Competition sweep: %d portfolio items need checking, queued batch job",
                 len(items),

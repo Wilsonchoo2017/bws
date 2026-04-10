@@ -20,6 +20,9 @@ export interface WorkerJob {
   error: string | null;
   progress: string | null;
   worker_no: number | null;
+  reason: string | null;
+  last_run_at: string | null;
+  last_run_status: string | null;
 }
 
 export interface SourceCoverage {

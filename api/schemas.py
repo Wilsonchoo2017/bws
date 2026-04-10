@@ -30,6 +30,9 @@ class ScrapeJobResponse(BaseModel):
     error: str | None = None
     progress: str | None = None
     worker_no: int | None = None
+    reason: str | None = None
+    last_run_at: datetime | None = None
+    last_run_status: str | None = None
 
 
 class ScrapeQueueStats(BaseModel):

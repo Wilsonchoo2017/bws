@@ -62,7 +62,7 @@ async def run_saturation_sweep(
                 logger.debug("Saturation sweep: no items need checking")
                 continue
 
-            manager.create_job("shopee_saturation", "batch")
+            manager.create_job("shopee_saturation", "batch", reason=f"scheduled sweep: {len(items)} items stale")
             logger.info(
                 "Saturation sweep: %d items need checking, queued batch job",
                 len(items),

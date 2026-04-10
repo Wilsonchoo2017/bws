@@ -2,9 +2,11 @@
 """Train growth models offline and save to disk.
 
 Usage:
-    ./train              # train + backtest
-    ./train --no-save    # dry run
-    ./train --no-backtest # skip backtest (faster)
+    ./train                     # train active model (from config/model_registry.py)
+    ./train --model keepa_bl    # train Keepa+BL model
+    ./train --model legacy_be   # train legacy BE model
+    ./train --no-save           # dry run
+    ./train --no-backtest       # skip backtest (faster)
 """
 
 import argparse
@@ -27,39 +29,34 @@ logger = logging.getLogger("bws.train")
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Train BWS growth models")
+    parser.add_argument("--model", choices=["keepa_bl", "legacy_be"],
+                        default=None, help="Model type (default: from config)")
     parser.add_argument("--no-save", action="store_true", help="Dry run, don't save")
     parser.add_argument("--no-backtest", action="store_true", help="Skip backtest")
     args = parser.parse_args()
 
+    from config.model_registry import ACTIVE_MODEL
+    model_type = args.model or ACTIVE_MODEL
+    logger.info("Training model: %s", model_type)
+
     from db.pg.engine import get_engine
     from services.ml.growth.persistence import save_growth_models
-    from services.ml.growth.training import train_growth_models
-    from services.ml.pg_queries import load_growth_training_data, load_keepa_timelines
 
     engine = get_engine()
-    logger.info("Loading data from PostgreSQL...")
-    df_raw = load_growth_training_data(engine)
-    keepa_df = load_keepa_timelines(engine)
-    logger.info("Loaded %d training sets, %d Keepa rows", len(df_raw), len(keepa_df))
 
-    logger.info("Starting model training...")
-    t0 = time.time()
-
-    tier1, tier2, theme_stats, subtheme_stats, classifier, ensemble = train_growth_models(
-        df_raw=df_raw, keepa_df=keepa_df,
-    )
-
-    elapsed = time.time() - t0
-    logger.info("Training completed in %.1f minutes", elapsed / 60)
+    if model_type == "keepa_bl":
+        tier1, tier2, theme_stats, subtheme_stats, classifier, ensemble = _train_keepa_bl(engine)
+    else:
+        tier1, tier2, theme_stats, subtheme_stats, classifier, ensemble = _train_legacy_be(engine)
 
     # Model summary
     print(f"\n{'=' * 65}")
-    print(f"  MODEL SUMMARY")
+    print(f"  MODEL SUMMARY ({model_type})")
     print(f"{'=' * 65}")
-    print(f"  Regressor Tier 1: {tier1.n_train} sets, {len(tier1.feature_names)} features, "
+    print(f"  Regressor: {tier1.n_train} sets, {len(tier1.feature_names)} features, "
           f"CV R2={tier1.cv_r2_mean:.3f}")
     if tier2:
-        print(f"  Regressor Tier 2: {tier2.n_train} sets, {len(tier2.feature_names)} features, "
+        print(f"  Tier 2: {tier2.n_train} sets, {len(tier2.feature_names)} features, "
               f"CV R2={tier2.cv_r2_mean:.3f}")
     if classifier:
         print(f"  Classifier: {classifier.n_train} sets, "
@@ -68,58 +65,48 @@ def main() -> None:
     if ensemble:
         print(f"  Ensemble: OOS R2={ensemble.oos_r2:.3f}")
 
-    # Backtest
-    if not args.no_backtest:
-        _run_backtest(df_raw)
-
     if not args.no_save:
         path = save_growth_models(
             tier1, tier2, theme_stats, subtheme_stats, classifier, ensemble,
+            model_type=model_type,
         )
         logger.info("Models saved to %s", path)
     else:
         logger.info("Dry run -- models not saved")
 
 
-def _run_backtest(df_raw):
-    """Run walk-forward backtest and print report card."""
-    import numpy as np
-    import pandas as pd
-    from services.ml.growth.backtest import run_backtest, run_benchmark_backtest
-    from services.ml.growth.features import TIER1_FEATURES, engineer_intrinsic_features
-    from services.ml.growth.feature_selection import select_features
-    from services.ml.growth.model_selection import clip_outliers
+def _train_keepa_bl(engine):
+    """Train the Keepa+BL model (Experiment 31)."""
+    from services.ml.growth.keepa_training import train_keepa_bl_models
+    from services.ml.pg_queries import load_keepa_bl_training_data
 
-    y = df_raw["annual_growth_pct"].values.astype(float)
-    year_retired = np.asarray(
-        pd.to_numeric(df_raw.get("year_retired"), errors="coerce"), dtype=float,
+    logger.info("Loading Keepa+BL training data...")
+    base_df, keepa_df, target_series = load_keepa_bl_training_data(engine)
+    logger.info("Loaded %d base sets, %d Keepa sets, %d targets",
+                len(base_df), len(keepa_df), len(target_series))
+
+    t0 = time.time()
+    result = train_keepa_bl_models(
+        base_df=base_df, keepa_df=keepa_df, target_series=target_series,
     )
+    logger.info("Training completed in %.1f minutes", (time.time() - t0) / 60)
+    return result
 
-    if np.isfinite(year_retired).sum() < len(y) * 0.5:
-        logger.info("Backtest skipped: insufficient year_retired coverage")
-        return
 
-    df_feat, _, _ = engineer_intrinsic_features(df_raw, training_target=pd.Series(y))
-    cands = [f for f in TIER1_FEATURES if f in df_feat.columns]
-    X_raw = df_feat[cands].copy()
-    for c in X_raw.columns:
-        X_raw[c] = pd.to_numeric(X_raw[c], errors="coerce")
+def _train_legacy_be(engine):
+    """Train the legacy BE model (original production model)."""
+    from services.ml.growth.training import train_growth_models
+    from services.ml.pg_queries import load_growth_training_data, load_keepa_timelines
 
-    feats = select_features(X_raw, y, min_mi_score=0.005, max_correlation=0.90, lofo_prune=False)
-    X = X_raw[feats].fillna(X_raw[feats].median())
-    X_arr = clip_outliers(X).values
+    logger.info("Loading legacy BE training data...")
+    df_raw = load_growth_training_data(engine)
+    keepa_df = load_keepa_timelines(engine)
+    logger.info("Loaded %d training sets, %d Keepa rows", len(df_raw), len(keepa_df))
 
-    # Run backtest at different portfolio sizes
-    for pct in [20, 30]:
-        result = run_backtest(
-            X_arr, y, year_retired, feats,
-            df_meta=df_raw, top_pct=pct,
-        )
-        print(result.format_report())
-
-    # Benchmark
-    bench = run_benchmark_backtest(X_arr, y, year_retired)
-    print(bench.format_report())
+    t0 = time.time()
+    result = train_growth_models(df_raw=df_raw, keepa_df=keepa_df)
+    logger.info("Training completed in %.1f minutes", (time.time() - t0) / 60)
+    return result
 
 
 if __name__ == "__main__":

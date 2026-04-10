@@ -33,6 +33,10 @@ class ForwardReturnInput:
     year_retired: int | None
     retiring_soon: bool
     is_held: bool
+    # BrickLink 6-month trend data
+    bl_6mo_avg_price_cents: int | None  # qty_avg_price from six_month_new
+    bl_current_avg_price_cents: int | None  # qty_avg_price from current_new
+    bl_6mo_times_sold: int | None  # liquidity: number of sales in 6 months
 
 
 @dataclass(frozen=True)
@@ -66,7 +70,10 @@ def calculate_forward_return(
     target_return = settings.get("target_return", 0.50)
 
     current_price = _resolve_current_price(inp)
-    future_cents, time_years, source = _resolve_future_price(inp, settings, today)
+    gross_future_cents, time_years, source = _resolve_future_price(inp, settings, today)
+
+    # Apply friction discounts to get net realizable value
+    future_cents = _apply_exit_discounts(gross_future_cents, time_years, settings)
 
     if future_cents is None or current_price <= 0:
         return ForwardReturnResult(
@@ -154,11 +161,33 @@ def _resolve_future_price(
     )
     time_years = max(time_years, min_years)
 
-    # Tier 1: BrickLink current new price
-    if inp.bricklink_new_cents is not None and inp.bricklink_new_cents > 0:
-        return inp.bricklink_new_cents, time_years, "bricklink"
+    liquidity_factor = _liquidity_factor(inp.bl_6mo_times_sold, settings)
 
-    # Tier 2: BrickEconomy future estimate with date
+    # Tier 1: BrickLink 6-month trend projection
+    # Use the annualized growth rate from 6mo sold avg -> current listing avg
+    # to project current BL price forward, then discount by liquidity.
+    if (
+        inp.bl_6mo_avg_price_cents is not None
+        and inp.bl_6mo_avg_price_cents > 0
+        and inp.bl_current_avg_price_cents is not None
+        and inp.bl_current_avg_price_cents > 0
+        and inp.bricklink_new_cents is not None
+        and inp.bricklink_new_cents > 0
+    ):
+        ratio_6mo = inp.bl_current_avg_price_cents / inp.bl_6mo_avg_price_cents
+        # Annualize: 6 months of growth -> 1 year, clamped to [-50%, +200%]
+        annual_growth = max(-0.50, min(2.0, ratio_6mo ** 2.0 - 1.0))
+        # Project forward from current BL price
+        projected = inp.bricklink_new_cents * (1.0 + annual_growth) ** time_years
+        adjusted = round(projected * liquidity_factor)
+        return adjusted, time_years, "bl_trend"
+
+    # Tier 2: BrickLink current new price (static, no trend)
+    if inp.bricklink_new_cents is not None and inp.bricklink_new_cents > 0:
+        adjusted = round(inp.bricklink_new_cents * liquidity_factor)
+        return adjusted, time_years, "bricklink"
+
+    # Tier 3: BrickEconomy future estimate with date
     if (
         inp.be_future_estimate_cents is not None
         and inp.be_future_estimate_cents > 0
@@ -167,12 +196,14 @@ def _resolve_future_price(
         be_years = _parse_date_horizon(inp.be_future_estimate_date, today)
         if be_years is not None:
             be_years = max(be_years, min_years)
-            return inp.be_future_estimate_cents, be_years, "be_estimate"
+            adjusted = round(inp.be_future_estimate_cents * liquidity_factor)
+            return adjusted, be_years, "be_estimate"
 
-    # Tier 3: ML predicted growth (1-year horizon)
+    # Tier 4: ML predicted growth (1-year horizon)
     if inp.ml_growth_pct is not None and inp.market_price_cents > 0:
         future = round(inp.market_price_cents * (1.0 + inp.ml_growth_pct / 100.0))
-        return future, 1.0, "ml_growth"
+        adjusted = round(future * liquidity_factor)
+        return adjusted, 1.0, "ml_growth"
 
     return None, time_years, "none"
 
@@ -217,6 +248,58 @@ def _parse_date_horizon(date_str: str, today: date) -> float | None:
         return delta_days / 365.25
     except (ValueError, TypeError):
         return None
+
+
+def _liquidity_factor(
+    times_sold: int | None,
+    settings: dict[str, Any],
+) -> float:
+    """Compute a 0..1 discount factor based on BrickLink 6-month sales volume.
+
+    High liquidity (many sales) -> factor ~1.0 (no discount).
+    Low liquidity (few/no sales) -> factor as low as min_liquidity_factor.
+
+    Uses a simple ramp: factor = min(1.0, times_sold / liquidity_threshold).
+    """
+    if times_sold is None:
+        return 1.0  # No data, assume no discount
+
+    threshold = max(settings.get("liquidity_threshold", 10), 1)
+    floor = max(0.0, min(1.0, settings.get("min_liquidity_factor", 0.70)))
+
+    if times_sold >= threshold:
+        return 1.0
+    if times_sold <= 0:
+        return floor
+
+    # Linear ramp from floor to 1.0
+    return floor + (1.0 - floor) * (times_sold / threshold)
+
+
+def _apply_exit_discounts(
+    gross_cents: int | None,
+    time_years: float,
+    settings: dict[str, Any],
+) -> int | None:
+    """Apply friction discounts to get net realizable exit price.
+
+    Discounts:
+    - selling_fee_pct: one-time platform/transaction cost at exit (default 5%)
+    - currency_buffer_pct: one-time MYR/USD volatility buffer (default 3%)
+    - condition_decay_pct: annual deterioration of sealed condition (default 2%/yr)
+    """
+    if gross_cents is None or gross_cents <= 0:
+        return gross_cents
+
+    selling_fee = settings.get("selling_fee_pct", 0.05)
+    currency_buffer = settings.get("currency_buffer_pct", 0.03)
+    condition_decay = settings.get("condition_decay_pct", 0.02)
+
+    net = gross_cents * (1.0 - selling_fee) * (1.0 - currency_buffer)
+    if condition_decay > 0 and time_years > 0:
+        net *= (1.0 - condition_decay) ** time_years
+
+    return round(net)
 
 
 def _decide(annual_return: float, is_held: bool, min_return: float) -> str:

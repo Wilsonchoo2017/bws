@@ -26,6 +26,7 @@ class Job:
     error: str | None = None
     progress: str | None = None
     worker_no: int | None = None
+    reason: str | None = None
 
 
 class JobManager:
@@ -36,7 +37,7 @@ class JobManager:
         self._queue: asyncio.Queue[str] = asyncio.Queue()
         self._max_history = 1000
 
-    def create_job(self, scraper_id: str, url: str) -> Job:
+    def create_job(self, scraper_id: str, url: str, *, reason: str | None = None) -> Job:
         """Create a new job and add it to the queue.
 
         If a job with the same scraper_id and url is already queued or
@@ -51,11 +52,22 @@ class JobManager:
                 return existing
 
         job_id = uuid.uuid4().hex[:12]
-        job = Job(job_id=job_id, scraper_id=scraper_id, url=url)
+        job = Job(job_id=job_id, scraper_id=scraper_id, url=url, reason=reason)
         self._jobs[job_id] = job
         self._queue.put_nowait(job_id)
         self._trim_history()
         return job
+
+    def find_last_similar(self, scraper_id: str, url: str) -> Job | None:
+        """Find the most recent completed or failed job with the same scraper_id and url."""
+        for job in reversed(self._jobs.values()):
+            if (
+                job.scraper_id == scraper_id
+                and job.url == url
+                and job.status in (JobStatus.COMPLETED, JobStatus.FAILED)
+            ):
+                return job
+        return None
 
     def get_job(self, job_id: str) -> Job | None:
         return self._jobs.get(job_id)

@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { scoreColor, scoreBg, rankToPercentile, formatMetricValue as fmtMetric, getLiquidityWeight } from '../percentile-utils';
+import { scoreColor, scoreBg, formatMetricValue as fmtMetric, getLiquidityWeight } from '../percentile-utils';
 import { useDetailBundle } from './detail-bundle-context';
 
 interface LiquidityMetric {
@@ -226,8 +226,7 @@ function LiquidityCohortGrid({ cohorts }: { cohorts: Record<string, LiquidityCoh
       <div className="divide-y">
         {entries.map(([strategy, cohort]) => {
           const meta = COHORT_LABELS[strategy];
-          const rankPct = rankToPercentile(cohort.rank, cohort.size);
-          const overall = cohort.composite_pct ?? rankPct;
+          const overall = cohort.composite_pct ?? null;
           return (
             <div key={strategy} className="px-4 py-2">
               <div className="flex items-center justify-between mb-1">
@@ -238,9 +237,9 @@ function LiquidityCohortGrid({ cohorts }: { cohorts: Record<string, LiquidityCoh
                     ({cohort.key})
                   </span>
                 </div>
-                {rankPct != null && (
+                {overall != null && (
                   <span className={`rounded px-1.5 py-0.5 text-xs font-semibold ${scoreColor(overall)} ${scoreBg(overall)}`}>
-                    P{rankPct}
+                    P{Math.round(overall)}
                     <span className="text-muted-foreground ml-1 font-normal">n={cohort.size}</span>
                   </span>
                 )}
