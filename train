@@ -44,8 +44,9 @@ def main() -> None:
 
     engine = get_engine()
 
+    great_buy_classifier = None
     if model_type == "keepa_bl":
-        tier1, tier2, theme_stats, subtheme_stats, classifier, ensemble = _train_keepa_bl(engine)
+        tier1, tier2, theme_stats, subtheme_stats, classifier, ensemble, great_buy_classifier = _train_keepa_bl(engine)
     else:
         tier1, tier2, theme_stats, subtheme_stats, classifier, ensemble = _train_legacy_be(engine)
 
@@ -53,22 +54,25 @@ def main() -> None:
     print(f"\n{'=' * 65}")
     print(f"  MODEL SUMMARY ({model_type})")
     print(f"{'=' * 65}")
-    print(f"  Regressor: {tier1.n_train} sets, {len(tier1.feature_names)} features, "
-          f"CV R2={tier1.cv_r2_mean:.3f}")
-    if tier2:
-        print(f"  Tier 2: {tier2.n_train} sets, {len(tier2.feature_names)} features, "
-              f"CV R2={tier2.cv_r2_mean:.3f}")
+    if tier1 is not None:
+        print(f"  Regressor: {tier1.n_train} sets, {len(tier1.feature_names)} features, "
+              f"CV R2={tier1.cv_r2_mean:.3f}")
+    else:
+        print("  Regressor: None (classifier-only)")
     if classifier:
         print(f"  Classifier: {classifier.n_train} sets, "
               f"AUC={classifier.cv_auc:.3f}, F1={classifier.cv_f1:.3f}, "
               f"Recall={classifier.cv_recall:.3f}")
-    if ensemble:
-        print(f"  Ensemble: OOS R2={ensemble.oos_r2:.3f}")
+    if great_buy_classifier:
+        print(f"  Great-Buy: {great_buy_classifier.n_train} sets, "
+              f"AUC={great_buy_classifier.cv_auc:.3f}, F1={great_buy_classifier.cv_f1:.3f}, "
+              f"Recall={great_buy_classifier.cv_recall:.3f}")
 
     if not args.no_save:
         path = save_growth_models(
             tier1, tier2, theme_stats, subtheme_stats, classifier, ensemble,
             model_type=model_type,
+            great_buy_classifier=great_buy_classifier,
         )
         logger.info("Models saved to %s", path)
     else:
@@ -76,18 +80,20 @@ def main() -> None:
 
 
 def _train_keepa_bl(engine):
-    """Train the Keepa+BL model (Experiment 31)."""
+    """Train the Keepa+BL model (Experiment 31) + GT features (Exp 32)."""
     from services.ml.growth.keepa_training import train_keepa_bl_models
-    from services.ml.pg_queries import load_keepa_bl_training_data
+    from services.ml.pg_queries import load_google_trends_data, load_keepa_bl_training_data
 
     logger.info("Loading Keepa+BL training data...")
     base_df, keepa_df, target_series = load_keepa_bl_training_data(engine)
-    logger.info("Loaded %d base sets, %d Keepa sets, %d targets",
-                len(base_df), len(keepa_df), len(target_series))
+    gt_df = load_google_trends_data(engine)
+    logger.info("Loaded %d base sets, %d Keepa sets, %d targets, %d GT sets",
+                len(base_df), len(keepa_df), len(target_series), len(gt_df))
 
     t0 = time.time()
     result = train_keepa_bl_models(
         base_df=base_df, keepa_df=keepa_df, target_series=target_series,
+        gt_df=gt_df,
     )
     logger.info("Training completed in %.1f minutes", (time.time() - t0) / 60)
     return result

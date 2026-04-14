@@ -9,24 +9,18 @@ export type FilterKey =
   | 'retired'
   | 'active'
   | 'retiring_soon'
-  | 'signal_buy'
-  | 'signal_hold'
-  | 'signal_avoid'
-  | 'growth_strong'
-  | 'growth_buy'
-  | 'growth_hold'
-  | 'growth_avoid'
-  | 'growth_none'
+  | 'cat_great'
+  | 'cat_good'
+  | 'cat_skip'
+  | 'cat_worst'
+  | 'cat_none'
   | 'conf_high'
   | 'conf_moderate'
   | 'conf_low'
   | 'deal'
   | 'cohort_half_year'
-  | 'cohort_year'
   | 'cohort_theme'
-  | 'cohort_year_theme'
   | 'cohort_price_tier'
-  | 'cohort_piece_group'
   | 'liq_high'
   | 'liq_medium'
   | 'liq_low'
@@ -59,23 +53,14 @@ export const FILTER_GROUPS: FilterGroup[] = [
     ],
   },
   {
-    id: 'signal',
-    label: 'ML Signal',
+    id: 'buy_category',
+    label: 'Buy Category',
     filters: [
-      { key: 'signal_buy', label: 'BUY' },
-      { key: 'signal_hold', label: 'HOLD' },
-      { key: 'signal_avoid', label: 'AVOID' },
-    ],
-  },
-  {
-    id: 'growth',
-    label: 'ML Growth',
-    filters: [
-      { key: 'growth_strong', label: 'Strong (15%+)' },
-      { key: 'growth_buy', label: 'Buy (10%+)' },
-      { key: 'growth_hold', label: 'Hold (5%+)' },
-      { key: 'growth_avoid', label: 'Avoid (<5%)' },
-      { key: 'growth_none', label: 'No Prediction' },
+      { key: 'cat_great', label: 'GREAT' },
+      { key: 'cat_good', label: 'GOOD' },
+      { key: 'cat_skip', label: 'SKIP' },
+      { key: 'cat_worst', label: 'WORST' },
+      { key: 'cat_none', label: 'No Prediction' },
     ],
   },
   {
@@ -92,11 +77,8 @@ export const FILTER_GROUPS: FilterGroup[] = [
     label: 'Cohort',
     filters: [
       { key: 'cohort_half_year', label: 'Half-Year' },
-      { key: 'cohort_year', label: 'Year' },
       { key: 'cohort_theme', label: 'Theme' },
-      { key: 'cohort_year_theme', label: 'Year+Theme' },
       { key: 'cohort_price_tier', label: 'Price Tier' },
-      { key: 'cohort_piece_group', label: 'Piece Grp' },
     ],
   },
   {
@@ -125,18 +107,6 @@ export const FILTER_GROUPS: FilterGroup[] = [
   },
 ];
 
-function isAvoidItem(item: UnifiedItem): boolean {
-  return item.ml_avoid_probability != null && item.ml_avoid_probability >= 0.5;
-}
-
-function isBuyItem(item: UnifiedItem): boolean {
-  return !isAvoidItem(item) && item.ml_growth_pct != null && item.ml_growth_pct >= 8;
-}
-
-function isHoldItem(item: UnifiedItem): boolean {
-  return !isAvoidItem(item) && item.ml_growth_pct != null && item.ml_growth_pct < 8;
-}
-
 const PREDICATES: Record<FilterKey, (item: UnifiedItem, dealThreshold: number, cohortThreshold: number) => boolean> = {
   watchlist: (item) => item.watchlist,
   has_retail: (item) =>
@@ -152,23 +122,17 @@ const PREDICATES: Record<FilterKey, (item: UnifiedItem, dealThreshold: number, c
     item.year_retired === null && item.availability?.toLowerCase() !== 'retired',
   retiring_soon: (item) =>
     item.retiring_soon === true && item.year_retired === null,
-  signal_buy: (item) => isBuyItem(item),
-  signal_hold: (item) => isHoldItem(item),
-  signal_avoid: (item) => isAvoidItem(item),
-  growth_strong: (item) => item.ml_growth_pct != null && item.ml_growth_pct >= 15,
-  growth_buy: (item) => item.ml_growth_pct != null && item.ml_growth_pct >= 10,
-  growth_hold: (item) => item.ml_growth_pct != null && item.ml_growth_pct >= 5,
-  growth_avoid: (item) => item.ml_growth_pct != null && item.ml_growth_pct < 5,
-  growth_none: (item) => item.ml_growth_pct == null,
+  cat_great: (item) => item.ml_buy_category === 'GREAT',
+  cat_good: (item) => item.ml_buy_category === 'GOOD',
+  cat_skip: (item) => item.ml_buy_category === 'SKIP',
+  cat_worst: (item) => item.ml_buy_category === 'WORST',
+  cat_none: (item) => item.ml_buy_category == null,
   conf_high: (item) => item.ml_confidence === 'high',
   conf_moderate: (item) => item.ml_confidence === 'moderate',
   conf_low: (item) => item.ml_confidence === 'low',
   cohort_half_year: (item, _dt, ct) => item.cohort_half_year != null && item.cohort_half_year >= ct,
-  cohort_year: (item, _dt, ct) => item.cohort_year != null && item.cohort_year >= ct,
   cohort_theme: (item, _dt, ct) => item.cohort_theme != null && item.cohort_theme >= ct,
-  cohort_year_theme: (item, _dt, ct) => item.cohort_year_theme != null && item.cohort_year_theme >= ct,
   cohort_price_tier: (item, _dt, ct) => item.cohort_price_tier != null && item.cohort_price_tier >= ct,
-  cohort_piece_group: (item, _dt, ct) => item.cohort_piece_group != null && item.cohort_piece_group >= ct,
   liq_high: (item) => item.liquidity_score != null && item.liquidity_score >= 70,
   liq_medium: (item) => item.liquidity_score != null && item.liquidity_score >= 40 && item.liquidity_score < 70,
   liq_low: (item) => item.liquidity_score != null && item.liquidity_score < 40,

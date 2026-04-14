@@ -453,8 +453,9 @@ def _diagnose_missing_data(conn: Any, set_number: str) -> dict:
     # 3. Check Keepa data (Tier 2)
     keepa_row = conn.execute("""
         SELECT amazon_price_json
-        FROM keepa_products
+        FROM keepa_snapshots
         WHERE set_number = ?
+        ORDER BY scraped_at DESC
         LIMIT 1
     """, [set_number]).fetchone()
 

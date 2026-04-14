@@ -34,7 +34,15 @@ def get_items_needing_enrichment(
         """
         SELECT li.set_number, li.title, li.theme, li.year_released,
                li.year_retired, li.parts_count, li.weight, li.image_url,
-               li.retiring_soon, li.release_date, li.retired_date
+               li.retiring_soon, li.release_date, li.retired_date,
+               EXISTS (SELECT 1 FROM brickeconomy_snapshots bs
+                       WHERE bs.set_number = li.set_number) AS has_be,
+               EXISTS (SELECT 1 FROM keepa_snapshots ks
+                       WHERE ks.set_number = li.set_number) AS has_keepa,
+               EXISTS (SELECT 1 FROM bricklink_items bl
+                       WHERE bl.set_number = li.set_number) AS has_bl,
+               EXISTS (SELECT 1 FROM google_trends_snapshots gts
+                       WHERE gts.set_number = li.set_number) AS has_gt
         FROM lego_items li
         WHERE (
             (li.title IS NULL OR LOWER(TRIM(li.title)) LIKE '%image coming soon%')
@@ -86,8 +94,45 @@ def get_items_needing_enrichment(
         "set_number", "title", "theme", "year_released", "year_retired",
         "parts_count", "weight", "image_url", "retiring_soon",
         "release_date", "retired_date",
+        "has_be", "has_keepa", "has_bl", "has_gt",
     ]
     return [dict(zip(columns, row)) for row in result]
+
+
+def compute_enrichment_reason(item: dict) -> str:
+    """Build a specific reason string describing what the item is missing."""
+    missing: list[str] = []
+
+    # Missing metadata fields
+    meta_fields = []
+    if not item.get("title") or "image coming soon" in str(item.get("title", "")).lower():
+        meta_fields.append("title")
+    if not item.get("theme"):
+        meta_fields.append("theme")
+    if not item.get("year_released"):
+        meta_fields.append("year")
+    if not item.get("parts_count"):
+        meta_fields.append("parts")
+    if not item.get("image_url"):
+        meta_fields.append("image")
+    if not item.get("release_date"):
+        meta_fields.append("release_date")
+    if meta_fields:
+        missing.append("no " + "/".join(meta_fields))
+
+    # Missing data sources
+    if not item.get("has_bl"):
+        missing.append("no BL")
+    if not item.get("has_be"):
+        missing.append("no BE")
+    if not item.get("has_keepa"):
+        missing.append("no Keepa")
+    if not item.get("has_gt"):
+        missing.append("no GT")
+
+    if not missing:
+        return "enrichment"
+    return "enrichment: " + ", ".join(missing)
 
 
 def store_enrichment_result(

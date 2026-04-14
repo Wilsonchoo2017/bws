@@ -68,7 +68,7 @@ async def scrape_retiring_soon(
         async with stealth_browser(
             headless=headless,
             locale=BRICKECONOMY_CONFIG.locale,
-            profile_name="brickeconomy",
+            profile_name="brickeconomy-retire",
         ) as browser:
             page = await new_page(browser)
             return await _scrape_retiring_soon_page(page)

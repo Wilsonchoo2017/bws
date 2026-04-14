@@ -180,6 +180,29 @@ async def _worker_loop(
                 return
             continue
 
+        # Honor source-level cooldown before claiming a task. After a
+        # process restart this prevents the claim → cooldown → requeue
+        # cycle that otherwise burns a noisy attempt log per worker per
+        # restart while the source is still rate-limited.
+        if cfg.cooldown_check is not None:
+            try:
+                remaining = cfg.cooldown_check()
+            except Exception:
+                remaining = 0.0
+            if remaining > 0:
+                logger.info(
+                    "[%s] Source cooldown active, sleeping %.0fs before claiming",
+                    worker_id, remaining,
+                )
+                try:
+                    while remaining > 0 and not _shutting_down:
+                        await asyncio.sleep(min(10.0, remaining))
+                        remaining -= 10.0
+                except asyncio.CancelledError:
+                    logger.info("[%s] Worker cancelled during pre-claim cooldown", worker_id)
+                    return
+                continue
+
         try:
             try:
                 result = await asyncio.wait_for(

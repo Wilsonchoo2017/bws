@@ -56,22 +56,18 @@ export interface UnifiedItem {
   ml_confidence: string | null;
   ml_tier: number | null;
   ml_avoid_probability: number | null;
+  ml_great_buy_probability: number | null;
+  ml_buy_category: 'GREAT' | 'GOOD' | 'SKIP' | 'WORST' | null;
   ml_raw_growth_pct: number | null;
   ml_kelly_fraction: number | null;
   ml_win_probability: number | null;
   cohort_half_year: number | null;
-  cohort_year: number | null;
   cohort_theme: number | null;
-  cohort_year_theme: number | null;
   cohort_price_tier: number | null;
-  cohort_piece_group: number | null;
   liquidity_score: number | null;
   liq_cohort_half_year: number | null;
-  liq_cohort_year: number | null;
   liq_cohort_theme: number | null;
-  liq_cohort_year_theme: number | null;
   liq_cohort_price_tier: number | null;
-  liq_cohort_piece_group: number | null;
 }
 
 export interface PriceRecord {
@@ -248,6 +244,42 @@ export interface KellySizing {
   recommended_amount_cents: number | null;
   confidence: 'high' | 'moderate' | 'low' | 'insufficient';
   warnings: string[];
+}
+
+export interface DiscountRow {
+  discount_pct: number;
+  entry_price_cents: number;
+  effective_annual_roi: number;
+  effective_3yr_return: number;
+  meets_target: boolean;
+  recommended_amount_cents: number | null;
+  target_position_cents: number | null;
+  remaining_amount_cents: number | null;
+}
+
+export interface CapitalAllocationData {
+  set_number: string;
+  ml_buy_category: 'GREAT' | 'GOOD' | 'SKIP' | 'WORST' | null;
+  rrp_cents: number | null;
+  rrp_currency: string;
+  annual_roi: number;
+  total_return_3yr: number;
+  win_probability: number;
+  kelly_fraction: number;
+  half_kelly: number;
+  recommended_pct: number;
+  recommended_amount_cents: number | null;
+  total_capital_cents: number | null;
+  deployed_cents: number;
+  available_cents: number;
+  existing_quantity: number;
+  existing_cost_cents: number;
+  target_position_cents: number | null;
+  remaining_amount_cents: number | null;
+  target_value_cents: number | null;
+  expected_value_cents: number | null;
+  meets_target: boolean;
+  discount_table: DiscountRow[];
 }
 
 export interface BrickeconomyData {

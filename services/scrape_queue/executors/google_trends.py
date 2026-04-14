@@ -157,7 +157,12 @@ def _persist(conn: Any, data: object) -> None:
 # ---------------------------------------------------------------------------
 
 
-@executor(TaskType.GOOGLE_TRENDS, concurrency=1, timeout=180)
+@executor(
+    TaskType.GOOGLE_TRENDS,
+    concurrency=1,
+    timeout=180,
+    cooldown_check=get_trends_cooldown_remaining,
+)
 def execute_google_trends(
     conn: Any,
     set_number: str,

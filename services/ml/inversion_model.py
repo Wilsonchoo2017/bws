@@ -103,9 +103,10 @@ def predict_avoids(
         combined = avoid_prob
 
         # Confidence based on how extreme the prediction is
-        if avoid_prob >= 0.7:
+        # Bands shifted down to match lowered decision threshold (~0.30)
+        if avoid_prob >= 0.50:
             confidence = "high"
-        elif avoid_prob >= 0.4:
+        elif avoid_prob >= 0.20:
             confidence = "moderate"
         else:
             confidence = "low"
@@ -167,6 +168,9 @@ def _get_ml_probabilities(
     if not feature_cols:
         logger.warning("No matching features between model and feature store")
         return {row["set_number"]: 0.0 for _, row in df.iterrows()}
+
+    if df.empty:
+        return {}
 
     x = df[feature_cols].fillna(df[feature_cols].median())
 

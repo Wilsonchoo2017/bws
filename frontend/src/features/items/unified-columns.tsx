@@ -242,50 +242,67 @@ export const unifiedColumns: ColumnDef<UnifiedItem>[] = [
     size: 55
   },
   {
-    accessorKey: 'liq_cohort_piece_group',
+    id: 'ml_buy_category',
+    accessorKey: 'ml_buy_category',
     header: ({ column }) => (
-      <DataTableColumnHeader column={column} title='L:Pc' />
-    ),
-    cell: ({ row }) => <CohortCell value={row.getValue('liq_cohort_piece_group') as number | null} />,
-    size: 55
-  },
-  {
-    accessorKey: 'ml_growth_pct',
-    header: ({ column }) => (
-      <DataTableColumnHeader column={column} title='ML Growth' />
+      <DataTableColumnHeader column={column} title='Buy' />
     ),
     cell: ({ row, table }) => {
-      const growth = row.getValue('ml_growth_pct') as number | null;
-      if (table.options.meta?.enriching && growth == null) return <PriceShimmer />;
-      if (growth == null || Number.isNaN(growth)) return <span className='text-muted-foreground'>-</span>;
-      const color =
-        growth >= 15 ? 'text-emerald-600 dark:text-emerald-500' :
-        growth >= 10 ? 'text-green-600 dark:text-green-400' :
-        growth >= 5 ? 'text-yellow-600 dark:text-yellow-400' :
-        'text-red-500';
-      const avoid = row.original.ml_avoid_probability;
-      const isAvoid = avoid != null && avoid >= 0.5;
-      const isBuy = !isAvoid && growth >= 8;
-      const signalLabel = isAvoid ? 'AVOID' : isBuy ? 'BUY' : 'HOLD';
-      const signalClass = isAvoid
-        ? 'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300'
-        : isBuy
-          ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300'
-          : 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/40 dark:text-yellow-300';
+      const category = row.original.ml_buy_category;
+      if (table.options.meta?.enriching && category == null) return <PriceShimmer />;
+      if (category == null) return <span className='text-muted-foreground'>-</span>;
+      const styles: Record<string, { label: string; cls: string }> = {
+        GREAT: { label: 'GREAT', cls: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300' },
+        GOOD: { label: 'GOOD', cls: 'bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300' },
+        SKIP: { label: 'SKIP', cls: 'bg-neutral-100 text-neutral-500 dark:bg-neutral-800/40 dark:text-neutral-400' },
+        WORST: { label: 'WORST', cls: 'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300' },
+      };
+      const style = styles[category] ?? styles.SKIP;
       return (
-        <div className='flex flex-col gap-0.5'>
-          <div className='flex items-center gap-1'>
-            <span className={`font-mono text-sm font-semibold ${color}`}>
-              +{growth.toFixed(1)}%
-            </span>
-            <span className={`rounded px-1 text-[9px] font-bold ${signalClass}`}>
-              {signalLabel}
-            </span>
-          </div>
-        </div>
+        <span className={`rounded px-1.5 py-0.5 text-[10px] font-bold leading-none ${style.cls}`}>
+          {style.label}
+        </span>
       );
     },
-    size: 95
+    sortingFn: (rowA, rowB) => {
+      const order: Record<string, number> = { GREAT: 4, GOOD: 3, SKIP: 2, WORST: 1 };
+      const a = order[rowA.original.ml_buy_category ?? ''] ?? 0;
+      const b = order[rowB.original.ml_buy_category ?? ''] ?? 0;
+      return a - b;
+    },
+    size: 65
+  },
+  {
+    id: 'ml_avoid',
+    accessorKey: 'ml_avoid_probability',
+    header: ({ column }) => (
+      <DataTableColumnHeader column={column} title='Avoid' />
+    ),
+    cell: ({ row, table }) => {
+      const prob = row.original.ml_avoid_probability;
+      if (table.options.meta?.enriching && prob == null) return <PriceShimmer />;
+      if (prob == null) return <span className='text-muted-foreground'>-</span>;
+      const isAvoid = row.original.ml_buy_category === 'WORST';
+      if (isAvoid) {
+        return (
+          <span
+            className='rounded bg-red-100 px-1.5 py-0.5 text-[10px] font-bold text-red-700 dark:bg-red-900/40 dark:text-red-300'
+            title={`P(avoid) = ${(prob * 100).toFixed(1)}%`}
+          >
+            AVOID
+          </span>
+        );
+      }
+      return (
+        <span
+          className='text-muted-foreground text-xs'
+          title={`P(avoid) = ${(prob * 100).toFixed(1)}%`}
+        >
+          Neutral
+        </span>
+      );
+    },
+    size: 60
   },
   {
     accessorKey: 'cohort_half_year',
@@ -293,14 +310,6 @@ export const unifiedColumns: ColumnDef<UnifiedItem>[] = [
       <DataTableColumnHeader column={column} title='C:HY' />
     ),
     cell: ({ row }) => <CohortCell value={row.getValue('cohort_half_year') as number | null} />,
-    size: 55
-  },
-  {
-    accessorKey: 'cohort_year',
-    header: ({ column }) => (
-      <DataTableColumnHeader column={column} title='C:Yr' />
-    ),
-    cell: ({ row }) => <CohortCell value={row.getValue('cohort_year') as number | null} />,
     size: 55
   },
   {
@@ -312,27 +321,11 @@ export const unifiedColumns: ColumnDef<UnifiedItem>[] = [
     size: 55
   },
   {
-    accessorKey: 'cohort_year_theme',
-    header: ({ column }) => (
-      <DataTableColumnHeader column={column} title='C:YT' />
-    ),
-    cell: ({ row }) => <CohortCell value={row.getValue('cohort_year_theme') as number | null} />,
-    size: 55
-  },
-  {
     accessorKey: 'cohort_price_tier',
     header: ({ column }) => (
       <DataTableColumnHeader column={column} title='C:$$' />
     ),
     cell: ({ row }) => <CohortCell value={row.getValue('cohort_price_tier') as number | null} />,
-    size: 55
-  },
-  {
-    accessorKey: 'cohort_piece_group',
-    header: ({ column }) => (
-      <DataTableColumnHeader column={column} title='C:Pc' />
-    ),
-    cell: ({ row }) => <CohortCell value={row.getValue('cohort_piece_group') as number | null} />,
     size: 55
   },
   {

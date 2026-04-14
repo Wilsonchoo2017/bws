@@ -16,6 +16,7 @@ from datetime import datetime, timezone
 from config.ml import LICENSED_THEMES
 from services.scrape_queue.executors.google_trends import (
     _trends_cooldown,
+    get_trends_cooldown_remaining,
 )
 from services.scrape_queue.models import ExecutorResult, TaskType
 from services.scrape_queue.registry import executor
@@ -177,7 +178,12 @@ def _persist(conn: Any, theme: str, theme_type: str, data: dict) -> None:
     )
 
 
-@executor(TaskType.GOOGLE_TRENDS_THEME, concurrency=1, timeout=180)
+@executor(
+    TaskType.GOOGLE_TRENDS_THEME,
+    concurrency=1,
+    timeout=180,
+    cooldown_check=get_trends_cooldown_remaining,
+)
 def execute_google_trends_theme(
     conn: Any,
     set_number: str,

@@ -1,8 +1,9 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { formatPrice } from '@/lib/formatting';
-import type { PortfolioSummary, WBRMetrics } from './types';
+import { useDebounce } from '@/lib/hooks/use-debounce';
+import type { CapitalData, PortfolioSummary, WBRMetrics } from './types';
 
 function PLText({ cents, pct }: { cents: number; pct?: number }) {
   const color =
@@ -16,10 +17,31 @@ function PLText({ cents, pct }: { cents: number; pct?: number }) {
   );
 }
 
+function readLS(key: string): string {
+  try {
+    if (typeof window !== 'undefined') return localStorage.getItem(key) || '';
+  } catch { /* private browsing */ }
+  return '';
+}
+
+function writeLS(key: string, value: string): void {
+  try {
+    if (typeof window !== 'undefined') localStorage.setItem(key, value);
+  } catch { /* silently degrade */ }
+}
+
 export function PortfolioSummaryCards() {
   const [summary, setSummary] = useState<PortfolioSummary | null>(null);
   const [wbr, setWbr] = useState<WBRMetrics | null>(null);
+  const [capital, setCapital] = useState<CapitalData | null>(null);
+  const [capitalInput, setCapitalInput] = useState<string>(() => readLS('bws_total_capital'));
   const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+
+  const parsed = parseFloat(capitalInput);
+  const capitalCents = !isNaN(parsed) && parsed > 0 ? Math.round(parsed * 100) : null;
+  const debouncedCents = useDebounce(capitalCents, 800);
+  const prevSavedRef = useRef<number | null>(null);
 
   useEffect(() => {
     Promise.all([
@@ -31,19 +53,58 @@ export function PortfolioSummaryCards() {
         if (!r.ok) throw new Error(`WBR fetch failed: ${r.status}`);
         return r.json();
       }),
+      fetch('/api/portfolio/capital').then((r) => {
+        if (!r.ok) throw new Error(`Capital fetch failed: ${r.status}`);
+        return r.json();
+      }),
     ])
-      .then(([summaryRes, wbrRes]) => {
+      .then(([summaryRes, wbrRes, capitalRes]) => {
         if (summaryRes.success) setSummary(summaryRes.data);
         if (wbrRes.success) setWbr(wbrRes.data);
+        if (capitalRes.success) {
+          setCapital(capitalRes.data);
+          if (capitalRes.data.total_capital_cents != null) {
+            prevSavedRef.current = capitalRes.data.total_capital_cents;
+            if (!capitalInput) {
+              const rm = (capitalRes.data.total_capital_cents / 100).toString();
+              setCapitalInput(rm);
+              writeLS('bws_total_capital', rm);
+            }
+          }
+        }
       })
       .catch(() => {})
       .finally(() => setLoading(false));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Persist capital to backend on debounced change
+  useEffect(() => {
+    if (debouncedCents === null || debouncedCents === prevSavedRef.current) return;
+    prevSavedRef.current = debouncedCents;
+    setSaving(true);
+    fetch('/api/portfolio/capital', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ total_capital_cents: debouncedCents }),
+    })
+      .then((r) => r.json())
+      .then((json) => {
+        if (json.success) setCapital(json.data);
+      })
+      .catch(() => {})
+      .finally(() => setSaving(false));
+  }, [debouncedCents]);
+
+  const handleCapitalChange = useCallback((value: string) => {
+    setCapitalInput(value);
+    writeLS('bws_total_capital', value);
   }, []);
 
   if (loading) {
     return (
-      <div className='grid grid-cols-2 gap-4 lg:grid-cols-4'>
-        {Array.from({ length: 4 }).map((_, i) => (
+      <div className='grid grid-cols-2 gap-4 lg:grid-cols-5'>
+        {Array.from({ length: 5 }).map((_, i) => (
           <div key={i} className='bg-muted h-24 animate-pulse rounded-lg' />
         ))}
       </div>
@@ -57,6 +118,9 @@ export function PortfolioSummaryCards() {
       </div>
     );
   }
+
+  const deployed = capital?.deployed_cents ?? summary.total_cost_cents;
+  const available = capital?.available_cents ?? 0;
 
   const cards = [
     {
@@ -103,7 +167,34 @@ export function PortfolioSummaryCards() {
 
   return (
     <div className='flex flex-col gap-4'>
-      <div className='grid grid-cols-2 gap-4 lg:grid-cols-4'>
+      <div className='grid grid-cols-2 gap-4 lg:grid-cols-5'>
+        {/* Capital input card */}
+        <div className='rounded-lg border border-blue-500/30 bg-blue-500/5 p-4'>
+          <p className='text-muted-foreground text-xs font-medium uppercase tracking-wider'>
+            Total Capital
+          </p>
+          <div className='mt-1 flex items-center gap-1'>
+            <span className='text-sm font-medium'>RM</span>
+            <input
+              type='number'
+              min={0}
+              step={100}
+              value={capitalInput}
+              onChange={(e) => handleCapitalChange(e.target.value)}
+              placeholder='10000'
+              className='bg-background w-full rounded border px-2 py-1 font-mono text-lg font-bold'
+            />
+          </div>
+          <div className='mt-1 flex items-center gap-2 text-xs'>
+            <span className='text-muted-foreground'>
+              Deployed {formatPrice(deployed)}
+            </span>
+            <span className='text-emerald-500 font-medium'>
+              Avail {formatPrice(available)}
+            </span>
+            {saving && <span className='text-muted-foreground animate-pulse'>saving...</span>}
+          </div>
+        </div>
         {cards.map((card) => (
           <div
             key={card.label}

@@ -81,7 +81,7 @@ async def scrape_set(
         async with stealth_browser(
             headless=headless,
             locale=BRICKECONOMY_CONFIG.locale,
-            profile_name="brickeconomy",
+            profile_name="brickeconomy-oneoff",
         ) as browser:
             p = await new_page(browser)
             return await scrape_with_search(p, set_number)
@@ -435,7 +435,7 @@ async def scrape_batch(
         async with stealth_browser(
             headless=headless,
             locale=BRICKECONOMY_CONFIG.locale,
-            profile_name="brickeconomy",
+            profile_name="brickeconomy-oneoff",
         ) as browser:
             page = await new_page(browser)
 

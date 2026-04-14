@@ -487,18 +487,53 @@ def train_growth_models(
     fill1 = X1.median()
     X1 = X1.fillna(fill1)
 
-    # -- Phase 2: Classifier (advisory P(avoid) on ALL data) --
+    # -- Phase 2: Classifier (advisory P(avoid) on BL ground truth) --
 
     logger.info("=" * 60)
-    logger.info("Training avoid classifier on ALL %d sets (advisory signal)", len(y_all))
+    logger.info("Training avoid classifier (BrickLink ground truth)")
     logger.info("=" * 60)
 
-    X1_arr = clip_outliers(X1).values
+    # Use BrickLink annualized returns as ground truth for the classifier.
+    # Only includes retired sets with known retirement dates.
+    from services.ml.growth.classifier import compute_avoid_sample_weights
+
+    try:
+        from db.pg.engine import get_engine
+        from services.ml.pg_queries import load_bl_ground_truth
+        _engine = get_engine()
+        bl_target = load_bl_ground_truth(_engine)
+    except Exception as exc:
+        logger.warning("Could not load BL ground truth: %s", exc)
+        bl_target = {}
+
+    if bl_target:
+        # Filter to sets with BL ground truth
+        set_numbers = df_feat["set_number"].values if "set_number" in df_feat.columns else df_raw["set_number"].values
+        bl_mask = np.array([sn in bl_target for sn in set_numbers])
+        y_classifier = np.array([bl_target.get(sn, 0.0) for sn in set_numbers[bl_mask]])
+        X1_classifier = clip_outliers(X1).values[bl_mask]
+
+        logger.info(
+            "BL ground truth: %d sets (%.1f%% of total), avoid rate %.1f%%",
+            len(y_classifier), len(y_classifier) / len(y_all) * 100,
+            (y_classifier < 8.0).mean() * 100,
+        )
+
+        # Asymmetric weights: penalize missing severe losers more
+        avoid_weights = compute_avoid_sample_weights(y_classifier)
+    else:
+        # Fallback to BE target if no BL data (e.g., no DB connection)
+        logger.warning("No BL ground truth available, falling back to BE annual_growth_pct")
+        y_classifier = y_all
+        X1_classifier = clip_outliers(X1).values
+        avoid_weights = compute_avoid_sample_weights(y_classifier)
+
     classifier = train_classifier(
-        X1_arr, y_all, tier1_features,
+        X1_classifier, y_classifier, tier1_features,
         tuple((f, float(fill1[f])) for f in tier1_features),
         threshold=8.0,  # 8% hurdle rate for buy decision
         tuning_trials=_cfg.classifier_tuning_trials,
+        sample_weight=avoid_weights,
     )
 
     # -- Phase 3: Tier 2 features (Keepa) --

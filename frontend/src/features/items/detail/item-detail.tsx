@@ -25,6 +25,7 @@ import { DetailBundleProvider } from './detail-bundle-context';
 import { InvestmentPanel } from './investment-panel';
 import { BrickeconomyPanel } from './brickeconomy-panel';
 import { BricklinkPriceChart } from './bricklink-price-chart';
+import { BricklinkSellersPanel } from './bricklink-sellers-panel';
 import { CohortPanel } from './cohort-panel';
 import { LiquidityPanel } from './liquidity-panel';
 import { MLPredictionPanel } from './ml-prediction-panel';
@@ -33,6 +34,7 @@ import { MinifiguresPanel } from './minifigures-panel';
 import { ListingPanel } from './listing-panel';
 import { CompetitionPanel } from './competition-panel';
 import { MinifigureValueChart } from './minifigure-value-chart';
+import { CapitalAllocationPanel } from './capital-allocation-panel';
 
 export interface ChartDateRange {
   min: number; // unix ms
@@ -731,6 +733,12 @@ export function ItemDetailView({ setNumber }: ItemDetailViewProps) {
         globalDateRange={globalDateRange}
         onDateRange={(r) => reportDateRange('bricklink', r)}
       />
+
+      {/* BrickLink seller snapshot — Asia stats + global lowest */}
+      <BricklinkSellersPanel setNumber={setNumber} />
+
+      {/* Capital allocation (Kelly) */}
+      <CapitalAllocationPanel setNumber={setNumber} />
 
       {/* Price history table */}
       <div>

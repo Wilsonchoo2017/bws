@@ -138,6 +138,7 @@ class TaskTypeConfig:
     concurrency: int = 1
     timeout_seconds: float = 300
     browser_profile: str | None = None
+    cooldown_check: Callable[[], float] | None = None
 
     @property
     def uses_browser(self) -> bool:
@@ -180,6 +181,7 @@ class ScrapeTask:
     completed_at: object | None
     locked_by: str | None
     locked_at: object | None
+    reason: str | None = None
 
 
 # ---------------------------------------------------------------------------

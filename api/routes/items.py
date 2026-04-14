@@ -14,11 +14,16 @@ from services.bricklink.repository import (
     get_price_history,
     get_set_minifigures,
     get_set_minifig_value_history,
+    get_store_listing_country_stats,
 )
 from services.bricklink.scraper import scrape_set_minifigures
 from services.backtesting.position_sizing import (
     compute_position_sizing,
     kelly_to_dict,
+)
+from services.portfolio.capital_allocation import (
+    compute_capital_allocation,
+    allocation_to_dict,
 )
 from services.backtesting.keepa_screener import compute_keepa_signals_with_cohort
 from services.backtesting.screener import (
@@ -153,6 +158,27 @@ async def list_signals(
     return {"success": True, "data": result, "count": len(result)}
 
 
+@router.get("/signals/be")
+async def list_signals_be(
+    refresh: bool = False,
+    conn: Any = Depends(get_db),
+):
+    """Bulk Keepa-based signals with cohort ranks. Cached for 30 days."""
+    import time
+
+    cache_key = "be"
+    now = time.time()
+
+    if not refresh and cache_key in _be_signals_cache and _be_signals_cache[cache_key]["expires"] > now:
+        cached = _be_signals_cache[cache_key]["data"]
+        return {"success": True, "data": cached, "count": len(cached), "cached": True}
+
+    signals = compute_keepa_signals_with_cohort(conn)
+    result = sanitize_nan(signals)
+    _be_signals_cache[cache_key] = {"data": result, "expires": now + _SIGNALS_TTL}
+    return {"success": True, "data": result, "count": len(result)}
+
+
 @router.get("/shopee")
 async def list_shopee_products(conn: Any = Depends(get_db)):
     """List all raw Shopee products from the database."""
@@ -203,17 +229,44 @@ async def get_item_competition(set_number: str, conn: Any = Depends(get_db)):
 @router.get("/{set_number}/kelly")
 async def get_item_kelly(
     set_number: str,
-    budget: int | None = None,
-    condition: str = "new",
     conn: Any = Depends(get_db),
 ):
-    """Compute Kelly Criterion position sizing for a single item."""
-    sizing = compute_position_sizing(
-        conn, set_number, budget_cents=budget, condition=condition
+    """Capital allocation using simplified Kelly Criterion (assumption-based)."""
+    from services.scoring.growth_provider import growth_provider
+
+    # Look up ML buy category
+    scores = growth_provider.score_all(conn)
+    pred = scores.get(set_number)
+    ml_buy_category = pred.get("buy_category") if pred else None
+
+    # Look up RRP
+    row = conn.execute(
+        "SELECT rrp_cents, rrp_currency FROM lego_items WHERE set_number = ?",
+        [set_number],
+    ).fetchone()
+    rrp_cents = row[0] if row else None
+    rrp_currency = row[1] if row and row[1] else "MYR"
+
+    # If no RRP from lego_items, try brickeconomy
+    if rrp_cents is None:
+        from services.portfolio.repository import MYR_PER_USD
+
+        be_row = conn.execute(
+            """
+            SELECT rrp_usd_cents FROM brickeconomy_snapshots
+            WHERE set_number = ?
+            ORDER BY scraped_at DESC LIMIT 1
+            """,
+            [set_number],
+        ).fetchone()
+        if be_row and be_row[0]:
+            rrp_cents = round(be_row[0] * MYR_PER_USD)
+            rrp_currency = "MYR"
+
+    alloc = compute_capital_allocation(
+        conn, set_number, ml_buy_category, rrp_cents, rrp_currency
     )
-    if not sizing:
-        return {"success": True, "data": None}
-    return {"success": True, "data": kelly_to_dict(sizing)}
+    return {"success": True, "data": allocation_to_dict(alloc)}
 
 
 @router.get("/{set_number}/signals")
@@ -1052,6 +1105,26 @@ def _fetch_bricklink_prices(set_number: str) -> dict:
         conn.close()
 
 
+def _fetch_bricklink_sellers(set_number: str) -> dict | None:
+    from db.connection import get_connection
+
+    conn = get_connection()
+    try:
+        rows = conn.execute(
+            "SELECT item_id FROM bricklink_items WHERE set_number = ?",
+            [set_number],
+        ).fetchall()
+        if not rows:
+            return None
+        item_id = rows[0][0]
+        stats = get_store_listing_country_stats(conn, item_id)
+        if stats is None:
+            return None
+        return {"item_id": item_id, **stats}
+    finally:
+        conn.close()
+
+
 def _fetch_competition(set_number: str) -> dict:
     from db.connection import get_connection
     from services.shopee.competition_repository import (
@@ -1196,6 +1269,19 @@ def _fetch_signals_be(set_number: str) -> dict | None:
     return next((s for s in cached if s.get("set_number") == set_number), None)
 
 
+@router.get("/{set_number}/bricklink-sellers")
+async def get_item_bricklink_sellers(set_number: str, conn: Any = Depends(get_db)):
+    """Return latest BrickLink store-listing snapshot grouped by condition.
+
+    Provides Asia stats (count/min/max/mean/median) plus the cheapest
+    Asian shop and cheapest global shop for both new and used listings.
+    """
+    if not item_exists(conn, set_number):
+        raise HTTPException(status_code=404, detail=f"Item {set_number} not found")
+    data = await asyncio.to_thread(_fetch_bricklink_sellers, set_number)
+    return {"success": True, "data": data}
+
+
 @router.get("/{set_number}/detail-bundle")
 async def get_item_detail_bundle(set_number: str, conn: Any = Depends(get_db)):
     """Return all detail-page data in a single response.
@@ -1212,6 +1298,7 @@ async def get_item_detail_bundle(set_number: str, conn: Any = Depends(get_db)):
         brickeconomy,
         keepa,
         bricklink_prices,
+        bricklink_sellers,
         competition,
         minifigures,
         minifig_value_history,
@@ -1221,6 +1308,7 @@ async def get_item_detail_bundle(set_number: str, conn: Any = Depends(get_db)):
         asyncio.to_thread(_fetch_brickeconomy, set_number),
         asyncio.to_thread(_fetch_keepa, set_number),
         asyncio.to_thread(_fetch_bricklink_prices, set_number),
+        asyncio.to_thread(_fetch_bricklink_sellers, set_number),
         asyncio.to_thread(_fetch_competition, set_number),
         asyncio.to_thread(_fetch_minifigures, set_number),
         asyncio.to_thread(_fetch_minifig_value_history, set_number),
@@ -1267,6 +1355,7 @@ async def get_item_detail_bundle(set_number: str, conn: Any = Depends(get_db)):
             "brickeconomy": brickeconomy,
             "keepa": keepa,
             "bricklink_prices": bricklink_prices,
+            "bricklink_sellers": bricklink_sellers,
             "competition": competition,
             "minifigures": minifigures,
             "minifig_value_history": minifig_value_history,

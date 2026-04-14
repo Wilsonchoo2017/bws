@@ -98,6 +98,12 @@ export interface HoldingReallocation {
   decision: 'BUY' | 'SELL' | 'HOLD' | 'SKIP';
 }
 
+export interface CapitalData {
+  total_capital_cents: number | null;
+  deployed_cents: number;
+  available_cents: number;
+}
+
 export interface ReallocationData {
   total_capital_cents: number;
   total_opportunity_cost_cents: number;

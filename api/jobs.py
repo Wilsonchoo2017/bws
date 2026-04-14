@@ -27,6 +27,7 @@ class Job:
     progress: str | None = None
     worker_no: int | None = None
     reason: str | None = None
+    blocked_by_event_id: int | None = None
 
 
 class JobManager:
@@ -109,6 +110,47 @@ class JobManager:
             job.status = JobStatus.FAILED
             job.completed_at = datetime.now(timezone.utc)
             job.error = error
+
+    def mark_blocked_verify(self, job_id: str, event_id: int) -> None:
+        """Mark a job as blocked pending manual captcha verification.
+
+        The job stays in _jobs so it can be resumed (via requeue_blocked)
+        once the user solves the captcha event.
+        """
+        job = self._jobs.get(job_id)
+        if job:
+            job.status = JobStatus.BLOCKED_VERIFY
+            job.blocked_by_event_id = event_id
+            job.error = f"Blocked by captcha event #{event_id}"
+
+    def requeue_blocked(self, event_id: int) -> list[str]:
+        """Re-enqueue every job blocked by the given captcha event.
+
+        Called after the user has successfully solved the captcha. Returns
+        the list of job ids that were resumed.
+        """
+        resumed: list[str] = []
+        for job in self._jobs.values():
+            if (
+                job.status == JobStatus.BLOCKED_VERIFY
+                and job.blocked_by_event_id == event_id
+            ):
+                job.status = JobStatus.QUEUED
+                job.error = None
+                job.blocked_by_event_id = None
+                job.started_at = None
+                job.completed_at = None
+                self._queue.put_nowait(job.job_id)
+                resumed.append(job.job_id)
+        return resumed
+
+    def has_blocked_shopee_jobs(self) -> bool:
+        """True if any Shopee-family job is currently blocked on captcha."""
+        return any(
+            job.status == JobStatus.BLOCKED_VERIFY
+            and job.scraper_id.startswith("shopee")
+            for job in self._jobs.values()
+        )
 
     def clear_finished(self) -> int:
         """Remove all completed and failed jobs. Returns count removed."""

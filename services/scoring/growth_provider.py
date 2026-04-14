@@ -44,38 +44,41 @@ class GrowthScoringProvider:
         from services.ml.growth.prediction import predict_growth
 
         try:
-            tier1, tier2, ts, ss, clf, ensemble = self._get_models()
+            tier1, tier2, ts, ss, clf, ensemble, gb_clf = self._get_models()
 
             from db.pg.engine import get_engine
             engine = get_engine()
 
-            candidates, keepa_df = self._load_candidate_data(engine)
+            candidates, keepa_df, gt_df = self._load_candidate_data(engine)
 
             predictions = predict_growth(
                 candidates, keepa_df,
                 tier1, tier2, ts, ss,
                 classifier=clf, ensemble=ensemble,
+                great_buy_classifier=gb_clf,
+                gt_df=gt_df,
             )
         except Exception:
             logger.warning("Growth model failed", exc_info=True)
             return {}
 
-        from services.ml.growth.prediction import AVOID_GATE_THRESHOLD, BUY_HURDLE_PCT
-
         result: dict[str, dict] = {}
         for p in predictions:
             ap = p.avoid_probability
-            is_avoid = ap is not None and ap >= AVOID_GATE_THRESHOLD
-            is_buy = (not is_avoid) and p.predicted_growth_pct >= BUY_HURDLE_PCT
+            is_avoid = p.buy_category == "WORST"
+            is_buy = p.buy_category in ("GREAT", "GOOD")
 
             entry: dict = {
                 "growth_pct": p.predicted_growth_pct,
                 "confidence": p.confidence,
                 "buy_signal": is_buy,
                 "avoid": is_avoid,
+                "buy_category": p.buy_category,
             }
             if ap is not None:
                 entry["avoid_probability"] = round(ap, 3)
+            if p.great_buy_probability is not None:
+                entry["great_buy_probability"] = round(p.great_buy_probability, 3)
             if p.kelly_fraction is not None:
                 entry["kelly_fraction"] = p.kelly_fraction
             if p.win_probability is not None:
@@ -115,12 +118,12 @@ class GrowthScoringProvider:
         from services.ml.growth.prediction import predict_growth
 
         try:
-            tier1, tier2, ts, ss, clf, ensemble = self._get_models()
+            tier1, tier2, ts, ss, clf, ensemble, gb_clf = self._get_models()
 
             from db.pg.engine import get_engine
             engine = get_engine()
 
-            all_candidates, keepa_df = self._load_candidate_data(engine)
+            all_candidates, keepa_df, gt_df = self._load_candidate_data(engine)
             candidate = all_candidates[all_candidates["set_number"] == set_number]
 
             if candidate.empty:
@@ -134,6 +137,8 @@ class GrowthScoringProvider:
                 candidate, keepa_df,
                 tier1, tier2, ts, ss,
                 classifier=clf, ensemble=ensemble,
+                great_buy_classifier=gb_clf,
+                gt_df=gt_df,
             )
         except Exception:
             logger.warning("predict_single failed for %s", set_number, exc_info=True)
@@ -142,21 +147,22 @@ class GrowthScoringProvider:
         if not predictions:
             return None
 
-        from services.ml.growth.prediction import AVOID_GATE_THRESHOLD, BUY_HURDLE_PCT
-
         p = predictions[0]
         ap = p.avoid_probability
-        is_avoid = ap is not None and ap >= AVOID_GATE_THRESHOLD
-        is_buy = (not is_avoid) and p.predicted_growth_pct >= BUY_HURDLE_PCT
+        is_avoid = p.buy_category == "WORST"
+        is_buy = p.buy_category in ("GREAT", "GOOD")
 
         entry: dict = {
             "growth_pct": p.predicted_growth_pct,
             "confidence": p.confidence,
             "buy_signal": is_buy,
             "avoid": is_avoid,
+            "buy_category": p.buy_category,
         }
         if ap is not None:
             entry["avoid_probability"] = round(ap, 3)
+        if p.great_buy_probability is not None:
+            entry["great_buy_probability"] = round(p.great_buy_probability, 3)
         if p.kelly_fraction is not None:
             entry["kelly_fraction"] = p.kelly_fraction
         if p.win_probability is not None:
@@ -189,13 +195,16 @@ class GrowthScoringProvider:
 
         engine = get_engine()
 
+        gb_clf = None
         if ACTIVE_MODEL == "keepa_bl":
             from services.ml.growth.keepa_training import train_keepa_bl_models
-            from services.ml.pg_queries import load_keepa_bl_training_data
+            from services.ml.pg_queries import load_google_trends_data, load_keepa_bl_training_data
 
             base_df, keepa_df, target_series = load_keepa_bl_training_data(engine)
-            tier1, tier2, ts, ss, clf, ensemble = train_keepa_bl_models(
+            gt_df = load_google_trends_data(engine)
+            tier1, tier2, ts, ss, clf, ensemble, gb_clf = train_keepa_bl_models(
                 base_df=base_df, keepa_df=keepa_df, target_series=target_series,
+                gt_df=gt_df,
             )
         else:
             from services.ml.growth.training import train_growth_models
@@ -207,24 +216,31 @@ class GrowthScoringProvider:
                 df_raw=df_raw, keepa_df=keepa_df,
             )
 
-        save_growth_models(tier1, tier2, ts, ss, clf, ensemble)
+        save_growth_models(tier1, tier2, ts, ss, clf, ensemble,
+                           great_buy_classifier=gb_clf)
 
         _cache["tier1"] = tier1
         _cache["tier2"] = tier2
         _cache["classifier"] = clf
         _cache["ensemble"] = ensemble
+        _cache["great_buy_classifier"] = gb_clf
         _cache["theme_stats"] = ts
         _cache["subtheme_stats"] = ss
 
-        result = {
-            "n_train": tier1.n_train,
-            "regressor_cv_r2": round(tier1.cv_r2_mean or 0, 3),
-            "regressor_features": len(tier1.feature_names),
-        }
+        result: dict[str, object] = {}
+        if tier1 is not None:
+            result["n_train"] = tier1.n_train
+            result["regressor_cv_r2"] = round(tier1.cv_r2_mean or 0, 3)
+            result["regressor_features"] = len(tier1.feature_names)
+        else:
+            result["architecture"] = "classifier-only"
         if clf:
             result["classifier_auc"] = round(clf.cv_auc, 3)
             result["classifier_recall"] = round(clf.cv_recall, 3)
             result["n_avoid"] = clf.n_avoid
+        if gb_clf:
+            result["great_buy_auc"] = round(gb_clf.cv_auc, 3)
+            result["great_buy_recall"] = round(gb_clf.cv_recall, 3)
         return result
 
     def warm_cache(self) -> None:
@@ -247,17 +263,23 @@ class GrowthScoringProvider:
             logger.warning("Prediction cache warmup failed", exc_info=True)
 
     def _load_candidate_data(self, engine: Any) -> tuple:
-        """Load candidate sets + Keepa data, routing by active model type."""
+        """Load candidate sets + Keepa + GT data, routing by active model type."""
         from services.ml.growth.prediction import _is_keepa_bl_model
+        from services.ml.pg_queries import load_google_trends_data
+
+        gt_df = load_google_trends_data(engine)
 
         tier1 = _cache.get("tier1")
-        if tier1 and _is_keepa_bl_model(tier1):
+        model_type = _cache.get("model_type")
+
+        # Classifier-only (tier1=None) or keepa_bl model
+        if model_type == "keepa_bl" or (tier1 and _is_keepa_bl_model(tier1)):
             from services.ml.pg_queries import load_keepa_bl_training_data
             base_df, keepa_df, _ = load_keepa_bl_training_data(engine)
-            return base_df, keepa_df
+            return base_df, keepa_df, gt_df
 
         from services.ml.pg_queries import load_growth_candidate_sets, load_keepa_timelines
-        return load_growth_candidate_sets(engine), load_keepa_timelines(engine)
+        return load_growth_candidate_sets(engine), load_keepa_timelines(engine), gt_df
 
     def _get_models(self) -> tuple:
         if not _cache:
@@ -267,19 +289,22 @@ class GrowthScoringProvider:
 
                     loaded = load_growth_models(max_age_hours=0)
                     if loaded is not None:
-                        tier1, tier2, ts, ss, clf, ensemble = loaded
+                        tier1, tier2, ts, ss, clf, ensemble, gb_clf = loaded
                         logger.info("Growth models loaded from disk")
                     else:
                         raise RuntimeError(
                             "No pre-trained growth models found. Run ./train first."
                         )
 
+                    from config.model_registry import ACTIVE_MODEL
                     _cache["tier1"] = tier1
                     _cache["tier2"] = tier2
                     _cache["classifier"] = clf
                     _cache["ensemble"] = ensemble
+                    _cache["great_buy_classifier"] = gb_clf
                     _cache["theme_stats"] = ts
                     _cache["subtheme_stats"] = ss
+                    _cache["model_type"] = ACTIVE_MODEL
 
         return (
             _cache["tier1"],
@@ -288,6 +313,7 @@ class GrowthScoringProvider:
             _cache["subtheme_stats"],
             _cache.get("classifier"),
             _cache.get("ensemble"),
+            _cache.get("great_buy_classifier"),
         )
 
 

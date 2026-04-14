@@ -78,3 +78,20 @@ HOLD_HORIZONS: tuple[str, ...] = (
 # learned values and update ML_WEIGHTS_SOURCE to the model name.
 ML_SIGNAL_WEIGHTS: dict[str, float] = dict(SIGNAL_WEIGHTS)
 ML_WEIGHTS_SOURCE: str = "handtuned"
+
+# ---------------------------------------------------------------------------
+# Assumption-based capital allocation (simplified Kelly)
+# ---------------------------------------------------------------------------
+# Win probabilities from FINDINGS.md Phase 3 Category Breakdown (BL ground truth)
+# Loss scenario: -20% half the time, -100% half the time → avg -60%
+CATEGORY_PARAMS: dict[str, dict[str, float]] = {
+    "GREAT": {"annual_roi": 0.20, "win_prob": 0.973, "hold_years": 3.0},
+    "GOOD": {"annual_roi": 0.10, "win_prob": 0.952, "hold_years": 3.0},
+}
+
+LOSS_SCENARIOS: list[tuple[float, float]] = [(-0.20, 0.5), (-1.00, 0.5)]
+AVG_LOSS_PCT: float = 0.60  # weighted average of loss scenarios
+
+HALF_KELLY_MULTIPLIER: float = 0.5
+TARGET_APR: float = 0.20
+DISCOUNT_STEPS: list[float] = [0.0, 0.05, 0.10, 0.15, 0.20, 0.25, 0.30]

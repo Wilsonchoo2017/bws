@@ -1,46 +1,42 @@
 # Research Findings: LEGO Set Investment Return Prediction
 
-27 experiments across EDA, feature engineering, model tuning, portfolio optimization, model architecture, and model alternatives.
+27+ experiments across EDA, feature engineering, model tuning, portfolio optimization, model architecture, and model alternatives.
 
-## Current Model (1701 sets, T1-only)
+## Current Model (Classifier-only, BL ground truth + GT + Exp 34-35 features)
 
-**Single-tier hurdle model** (LightGBM):
-1. **Classifier**: P(avoid) — trained on ALL sets, identifies losers (growth < 5%)
-2. **Regressor**: E[growth] — Tier 1 intrinsic features on ALL 1701 sets
-3. **Combined**: P(good) * regressor + P(bad) * median_loser_return
+**Classifier-only architecture** (LightGBM, Exp 32 + 33 + 34 + 35):
+1. **P(avoid)**: BL annualized return < 8%, asymmetric weights, F2-optimized
+2. **P(great_buy)**: BL annualized return >= 20%, Optuna-tuned
+3. **No regressor** -- buy categories determined purely by classifier probabilities
+4. **43 features**: 36 Keepa+metadata (Exp 31+33+34+35) + 7 Google Trends (Exp 32)
 
-**Tier 1** (intrinsic features): 20 features after LOFO selection from 35 candidates
-- Top features: theme_bayes, theme_size, review_rank_in_year, theme_growth_std, log_parts
-- Target winsorization (P1/P99), monotonic constraints, recency-weighted samples
-- Yeo-Johnson target transform, Huber loss, Optuna-tuned (depth 3-8, leaves 15-63)
-- Classifier now Optuna-tuned (AUC +0.018 over hardcoded params)
+**Buy Categories** (from classifiers):
+- **WORST**: P(avoid) >= auto-tuned threshold (~0.18)
+- **GREAT**: P(great_buy) >= auto-tuned threshold (~0.21)
+- **GOOD**: P(great_buy) >= 0.10 (below GREAT threshold)
+- **SKIP**: everything else
 
-**Performance** (GroupKFold, 2025-04-07):
-- T1 on all 1701 sets: **CV R2=0.754 +/-0.151** (Optuna-tuned: depth=8, leaves=41, lr=0.039)
-- Classifier AUC=0.961, F1=0.919, Brier 0.078->0.066 (isotonic cal)
-- Backtest Q1 (top 20%): +19.7% return, 93% hit rate
-- T1 on Keepa subset (965): R2=0.494, MAE=2.7%
-- T2 Keepa-only on same subset: R2=0.368, MAE=3.3% (worse)
-- T1+T2 combined: R2=0.368, MAE=3.3% (Keepa features dominate and hurt)
-- Ensemble AVG(T1,T2): R2=0.398, MAE=3.2% (averaging doesn't help)
+**Performance** (production training, 2026-04-10):
+- Avoid classifier: AUC=0.820, F1=0.783, **Recall=98.7%**, threshold=0.15
+- Great-buy classifier: AUC=0.783, F1=0.384, Recall=66.9%, threshold=0.17
+- Training: 1116 sets with BL ground truth (from 2470 total retired <= 2024)
+- GT coverage: 24.8% (661/2662 sets)
 
-**Decision**: T2, T3, and ensemble tiers dropped. T1 regressor + avoid classifier is the production model.
+**Google Trends features** (Exp 32, YouTube search property):
+- gt_avg_value (ranked #9/39 in feature importance)
+- gt_pre_retire_avg, gt_peak_value, gt_months_active, gt_decay_rate
+- gt_lifetime_months, gt_peak_recency
+- All cut at retired_date during training (no lookahead)
+- Exp 32 diagnostic: P(avoid) AUC +0.017, P(great_buy) AUC +0.006
 
-**Avoid Classifier** (Munger inversion, from inversion research exps 01-04, updated Exp 27):
-- Hardcoded params: AUC=0.961, now Optuna-tuned: **AUC=0.979** (+0.018, 30 trials)
-- Best params: depth=5, leaves=13, lr=0.095, n_est=400, min_child=5, reg_alpha=0.33, subsample=0.73
-- Brier score=0.087 (well-calibrated at high probs, overconfident at low probs)
-- False negatives: 39/583 (6.7%) losers missed at P<0.3 — concentrated in Minecraft (71% miss rate), Harry Potter (71%), Brick Sketches
-- False positives: 33/1118 (3.0%) good sets flagged at P>0.7 — Classic, Dots, DREAMZzz themes
-- Weak themes (AUC<0.65): Dots (0.60), Minecraft (0.61), Hidden Side (0.62)
-- Temporal drift: AUC=0.75 on 2024 cohort (worst), 0.87 on 2025 — 2024 was harder
-- Lifecycle features (shelf_life_months, retire_quarter, retires_before_q4): +0.002 AUC, marginal
-- Shown as RISK/WARN badges on UI (avoid_probability >= 0.5/0.8)
-
-**Preprocessing improvements**:
-- Target winsorization at P5/P95 (reduces outlier pull on mean compression)
-- Monotonic constraints: mfigs+, rating+, reviews+, licensed+, mfig_value+
-- Recency weighting: half-life=3yr exponential decay (newer cohorts matter more)
+**Avoid Classifier** (Munger inversion, BL ground truth + asymmetric weights):
+- **Ground truth: BrickLink annualized returns** (1323 retired sets, BE pricing excluded)
+- Keepa 3P FBA as fallback for sets without BL price data
+- **Asymmetric sample weights**: strong loser (< -15%) = 3x, loser (-15% to -5%) = 2x, stagnant = 1x
+- **F2 Optuna objective** (recall-weighted, beta=2)
+- **Auto-tuned decision threshold** (max-F2 with precision >= 40%)
+- Isotonic calibration on OOF probabilities (fixes low-prob overconfidence)
+- Shown as RISK/WARN badges on UI (confidence bands: high >= 0.50, moderate >= 0.20)
 - Isotonic calibration: fixed scale bug (wrapper ensures raw-scale CV predictions)
 
 ## Key Insights
@@ -95,6 +91,24 @@
 48. **New classifier (AUC=0.870) underperforms old on BL loser detection** -- OLD model's negated growth has AUC=0.746 for finding BL losers, NEW dedicated classifier only 0.661; the old BE-trained model's growth prediction is a BETTER loser detector than a binary classifier trained on BL data. This suggests keeping the old classifier or using regressor scores directly
 49. **Classifier is underconfident at low P(avoid)** -- at P=0.2-0.4, actual avoid rate is 47% but model says 25-35%; at P>0.5 calibration improves; needs isotonic recalibration
 50. **Buy signal (P(avoid)<0.5 & pred>=15%) delivers 78.7% hit rate, +44.3% avg return** -- the strongest actionable signal; 1,156 sets qualify out of 2,428
+51. **Lower thresholds dominate** -- F2-optimal thresholds are 0.20 for both avoid and great_buy; default 0.50 too conservative; tuned: +2.8% avg return, +3.6pp precision(20%), +32.5pp WORST recall
+52. **P(great_buy) is temporally stable (AUC 0.72-0.78)** -- no degradation across 2022-2024 walk-forward; P(avoid) more volatile (0.56-0.85); great_buy generalizes better
+53. **2024 holdout validates the model** -- 89.5% hit rate, 66.7% precision(>=20%) on 402 unseen sets; WORST recall=96.4%
+54. **Regressor has -9.6% bias in 10-20% bucket** -- predicts +15.2% when actual +24.8%; mean compression persists; classifiers bypass this
+55. **P(good_buy) classifier doesn't help** -- with tuned low thresholds, GOOD captures only 22 sets at -9.9% return; regressor fallback adequate
+56. **Asymmetric loss improves ranking but not decisions** -- alpha=2 Huber gives +0.033 Spearman but buy decisions unchanged (classifier-driven)
+57. **P(great_buy) alone ranks better than regressor** -- Spearman 0.547 vs 0.533; classifier probability is a better ranking signal
+58. **Best ensemble is marginal** -- blended signals add +0.022 Spearman max; not worth complexity
+59. **NEW system dominates on BL ground truth** -- +4.1% higher avg return (20.6% vs 16.6%), +11.4pp precision(>=20%), 98.1% WORST recall; buys 192 sets vs 429 but each buy is higher quality
+60. **BL-trained inversion is strictly better than BE-trained** -- AUC +0.005, recall +7.3pp, FN -58 on BL truth; compounds with P(great_buy) into +4.1% portfolio gain
+61. **Only 6 losers slip through the new system** -- vs 33 old; BL+weights avoid + P(great_buy) forms extremely tight filter
+62. **GREAT category delivers +21.6% annualized on BL** -- 150 sets, 97.3% positive rate, median +17.7%
+63. **258 borderline sets correctly skipped** -- OLD system buys at +13.5% avg but includes 29 losers; NEW trades quantity for certainty
+59. **BL ground truth + asymmetric weights cut classifier FN by 44%** -- switching target from BE annual_growth_pct to BL annualized returns (1319 retired sets) and weighting severe losers 3x: FN 133->75, recall 83.2%->90.5%; strong losers now 1% miss rate (was 5%); AUC 0.808->0.813
+60. **F2 Optuna objective + lowered threshold boost recall** -- F2 (recall 4x precision) replaces AUC as Optuna objective; auto-tuned threshold ~0.30 (vs default 0.50); on BE target alone: FN 139->59 (-57%), recall 84.7%->93.5%, precision 80.4%->77.1%
+61. **Asymmetric weights specifically fix severe losers** -- strong losers (<-15%) down to 1% miss (1/79), losers (-15% to -5%) down to 4% miss (6/157), stagnant 9% miss (37/416); weighting concentrates model attention on costly mistakes
+62. **scale_pos_weight is more effective than is_unbalance** -- Optuna consistently selects SPW ~4.5; SPW=3.0 gives best F2 in ablation; explicit class weight outperforms LightGBM's automatic balancing
+63. **Minecraft FN fixed by F2 tuning** -- miss rate dropped from 93% (baseline) to 7% (F2-tuned) on BE target; from 50% to 19% on BL ground truth; the F2 objective alone resolved the worst blind spot
 
 ## Production Files
 
@@ -166,6 +180,11 @@
 | 31c | Iterated model | 876 | R2=0.387, Sp=0.646 | Excluded 2025+; theme penalty+strong features; missing Keepa proxy; Optuna tuned; +0.032 R2, +0.022 Spearman; quintile separation clean (0.96->1.58); 2025 holdout Spearman=0.453 |
 | 31d | Model comparison | 872 | Exp31 wins 15/25 themes | Head-to-head vs Prod T1 on BL ground truth: Exp31 R2=0.361 vs Prod R2=-0.03; Exp31 Spearman=0.644 vs Prod=0.574; BUT Prod ranks better for 2020-2022 cohorts; BE value_new has best Spearman (0.74) but +0.17 bias |
 | 31e | Production deploy + calibration | 2428 | CV R2=0.261, AUC=0.870 | Model trained and saved; pred>=10% hit rate 74% (>0%), 63% (>10%); pred>=20% hit rate 81%; classifier AUC=0.870; OLD classifier AUC=0.746 on BL losers -- old model still detects losers better via negated growth |
+| 31f | P(great_buy) classifier | 876 | AUC=0.786 | Dedicated binary classifier for P(growth>=20%); 4-tier buy categories (GREAT/GOOD/SKIP/WORST); reframes buying decision from regression to classification |
+| 31g | Improvement evaluation | 2448 | Threshold tuning wins | Tuned thresholds: +2.8% avg return, +3.6pp precision(20%), +32.5pp WORST recall; P(good_buy) classifier, asymmetric loss, ensembles all neutral/negative; P(great_buy) temporally stable (AUC 0.72-0.78 across years) |
+| 31h | Combined system eval | 1291 | +4.1% return, 98.1% recall | BL+weights inversion + P(great_buy) evaluated on 1291 BL ground truth sets; NEW system: 192 buys at +20.6% avg return (vs OLD 429 buys at +16.6%); only 6 losers bought (vs 33); WORST recall 98.1% (vs 79.9%); portfolio +14.7% over buying all sets |
+| 23b | FN minimization | 2631 | FN 139->59 (-57%) | F2 Optuna objective + auto-tuned threshold=0.30 + scale_pos_weight; Minecraft miss 93%->7%; recall 84.7%->93.5%; AUC 0.940->0.967; precision 80.4%->77.1% (acceptable tradeoff) |
+| 23c | BL ground truth + asymmetric loss | 1294 | FN 133->75 (-44%) | BL annualized returns replace BE annual_growth_pct; asymmetric weights (3x strong loser, 2x loser); strong losers 1% miss rate; recall 83.2%->90.5%; AUC 0.808->0.813 on BL labels |
 
 ## Architecture Change: v1 -> v2
 
@@ -219,6 +238,66 @@ Comprehensive diagnostics on the avoid classifier using 1701 sets.
 ### Decision Boundary
 - 254 sets (15%) in uncertainty zone (P=0.35-0.65). These average 6.8% growth with 39% avoid rate.
 - Key differentiator in boundary zone: `subtheme_loo` (7.9 vs 10.7 for confident good), `theme_bayes` (8.7 vs 9.7), `usd_vs_mean` (1.01 vs 0.95). These are the features that matter most for disambiguation.
+
+## Experiment 23b: FN Minimization (2026-04-10)
+
+Three-pronged approach to aggressively minimize classifier false negatives (missed losers).
+
+### Approach
+1. **F2 Optuna objective**: Replaced AUC with F-beta (beta=2, recall weighted 4x over precision)
+2. **Auto-tuned threshold**: Sweeps 0.15-0.55, picks threshold maximizing F2 with precision >= 40%
+3. **scale_pos_weight**: Added to Optuna search space [1.5, 5.0], replaces is_unbalance
+
+### Results (2631 sets, BE target, threshold=0.30)
+- **FN: 139 -> 59 (-57%)**, recall 84.7% -> 93.5%, AUC 0.940 -> 0.967
+- Precision 80.4% -> 77.1% (acceptable tradeoff)
+- **Minecraft miss rate: 93% -> 7%** (the single biggest blind spot fixed)
+- Dots: 9% -> 9% (stable), Harry Potter: 58% -> 58% (needs red flags)
+- scale_pos_weight: Optuna consistently picks ~4.5; SPW=3.0 best in ablation
+- F2-tuned model at threshold=0.30: F2=0.897
+
+### Code Changes
+- `classifier.py`: `_find_recall_threshold` (max-F2 sweep), F2 Optuna objective, scale_pos_weight in search space, decision_threshold field on TrainedClassifier, sample_weight threading
+- `inversion_model.py`: confidence bands shifted (high >= 0.50, moderate >= 0.20)
+
+## Experiment 23c: BL Ground Truth + Asymmetric Loss (2026-04-10)
+
+Switched classifier training target from BE annual_growth_pct to BrickLink actual market prices.
+
+### Ground Truth Construction
+- **Primary**: BL current_new price (MYR / 4.4 for USD) vs RRP, annualized by years since retirement
+- **Fallback**: Keepa 3P FBA latest price vs RRP (for sets without BL data)
+- **Excluded**: Sets without retired_date (can't annualize)
+- **Result**: 1319 sets with BL annualized returns (down from 2700 BE sets)
+
+### BL vs BE Target Comparison
+- BL avoid rate: 61% (at 8% threshold) vs BE avoid rate: 55% -- BL is stricter
+- BL tiers: 79 strong losers, 157 losers, 418 stagnant, 474 neutral, 168 performers
+- Correlation between BL and BE returns: r=0.345 (substantially different targets)
+
+### Asymmetric Sample Weights
+- Strong loser (< -15%): weight 3.0
+- Loser (-15% to -5%): weight 2.0
+- Stagnant (-5% to 5%) and keepers: weight 1.0
+- Implemented via `compute_avoid_sample_weights()`, threaded through all clf training functions
+
+### Results (1294 sets, evaluated against BL labels, threshold=0.30)
+
+| Model | AUC | Recall | FN | Strong Loser Miss |
+|-------|-----|--------|----|--------------------|
+| BE target (baseline) | 0.808 | 83.2% | 133 | 5% |
+| BL target | 0.814 | 88.6% | 90 | 4% |
+| BL + weights | 0.813 | 90.5% | 75 | **1%** |
+
+### Per-Theme (BL + weights)
+- Friends: 0% miss, City: 0% miss, Monkie Kid: 0% miss
+- Minecraft: 19% miss (down from 50% on BE), Harry Potter: 18%, Star Wars: 19%
+- Weak: Creator 38% miss, BrickHeadz 40%, Icons 38%
+
+### Code Changes
+- `pg_queries.py`: `load_bl_ground_truth()` -- BL annualized returns + Keepa fallback
+- `classifier.py`: `compute_avoid_sample_weights()` + sample_weight parameter threading
+- `training.py`: classifier now loads BL ground truth at training time
 
 ## Experiment 24: ML Improvement Scan (2026-04-07)
 
@@ -333,6 +412,24 @@ Validated quick wins, BrickTalk features, anti-overfit tweaks, and quantile inte
 - **CORRECTION**: r=0.14 was an artifact of the shelf_life filter. Removing shelf requirement (coverage 27%->57%), correlation drops to r=-0.02 and adding to model hurts R2 (0.631->0.578). **Signal is dead.**
 - RRP from BrickEconomy already at 100% coverage — problem isn't data, it's that discount history isn't predictive
 - **Verdict**: `never_discounted` is not viable. BrickTalk's insight requires real-time pre-retirement assessment (Keepa velocity, 3P premiums), not historical discount patterns.
+
+### Discount-during-retail RE-TEST (Exp 36)
+The "signal is dead" verdict above came from a binary `never_discounted` cutoff. Re-tested with continuous, depth-weighted, in-stock-aware variants on the 43-feature classifier baseline (Avoid AUC 0.8001, Great-Buy AUC 0.7293):
+
+| Feature | ΔAvoid | ΔGB | LOFO | Corr w/ existing |
+|---|---|---|---|---|
+| `amz_discount_depth_x_freq` | **+0.0071** | +0.0028 | HELPS | 0.67 vs max_discount |
+| `amz_discount_episodes` | **+0.0064** | -0.0019 | HELPS | 0.04 (uncorrelated) |
+| `amz_discount_pct_last_12mo` | **+0.0057** | +0.0009 | HELPS | 0.77 |
+| `amz_discount_pct_last_6mo` | +0.0008 | **+0.0068** | HELPS | 0.76 |
+| `amz_avg_discount_when_discounted` | +0.0050 | +0.0024 | NEUTRAL | 0.91 redundant |
+
+- All 5 use `_cut(retired_date)` Amazon 1P + `rrp_usd_cents` from BrickEconomy, in-stock-only denominators.
+- Cumulative GROUP_A (all 5): +0.0075 Avoid, +0.0070 GB.
+- **Productionized**: only `amz_discount_depth_x_freq` (= `avg_discount_pct × pct_below_95rrp`). Cleanest signal, lowest collinearity. Added to `KEEPA_BL_FEATURES` (now 37).
+- **OOS-timing features (Exp 31:280-327) prototyped + tested**: `amz_first_oos_months_before_retire`, `amz_final_oos_to_retire_days`, `amz_restocked_after_final_oos`. All weak vs the 43-feature baseline (best ΔAUC +0.0020, group cumulative -0.0036 on Great-Buy). **Not productionized.**
+- **Corrected verdict**: discount history IS predictive when formulated as a continuous depth × frequency composite. The original "dead" finding was a thresholding artifact, not a data limitation. The binary `never_discounted` erased the magnitude signal.
+- See `research/growth/36_retail_demand_signals.py`.
 
 ### Anti-Overfit Tweaks (all hurt)
 | Tweak | R2 | vs d5+P1/P99 |
@@ -615,7 +712,7 @@ Feature selection (MI + LOFO) will prune any that don't survive in production tr
 4. **Add quantile P10/P90 intervals to UI** — usable for directional uncertainty (8.1% avg width)
 
 ### Medium Priority
-5. **Fix winner underprediction** — 20%+ growth sets underpredicted by 12.0%; fundamental mean compression, not fixable by tuning; explore asymmetric loss or winner-specific post-hoc correction
+5. ~~**Fix winner underprediction**~~ REFRAMED (Exp 31f) — instead of fixing regression bias (-12.8%), added P(great_buy) classifier that directly predicts P(growth>=20%); classification bypasses mean compression entirely; 4-tier buy categories (GREAT/GOOD/SKIP/WORST) replace old BUY/HOLD/AVOID
 6. ~~**Calibrate P(avoid)**~~ APPLIED — isotonic calibration added to `classifier.py`, auto-fits on CV probs at training time
 7. ~~**Improve Keepa coverage for never_discounted**~~ DEAD — r=0.14 was artifact of shelf filter; r=-0.02 when filter removed
 8. **Fix Keepa sales rank extraction** — scraper stores sales_rank_json column but extracts 0 data; this is BrickTalk's #1 signal (Amazon velocity/demand) and the only non-leaky Keepa signal
@@ -687,3 +784,576 @@ Stripped all BE pricing/growth data. Used only Keepa + BrickLink market signals 
 
 ### Key Insight
 The R2=0.34 vs T1 R2=0.75 gap is partly because the targets differ. T1 predicts BE's `annual_growth_pct` (BE's own pricing model output, smoother). Exp 31 predicts actual BrickLink market prices (noisier but ground truth). The Spearman=0.618 ranking power is the more relevant metric for investment decisions.
+
+## Experiment 31f: P(great_buy) Classifier (2026-04-10)
+
+Reframed the buying decision from regression (predict exact growth %) to classification (predict "is this a Great Buy?"). The regressor suffers from -12.8% mean compression on winners, but the model already ranks well (Spearman=0.618). Classification bypasses mean compression entirely.
+
+### Motivation
+- Regressor compresses toward mean: 20%+ growth sets underpredicted by -12.8%
+- 2025/2026 sets cluster just below 20% — model lacks confidence to push higher
+- User's actual decision is binary: **buy or not buy**, not "predict exact growth"
+- Finding 46: model already well-calibrated for positive calls (81% accuracy at 20% threshold)
+
+### Architecture Change
+
+**Old decision logic** (regression-driven):
+```
+IF P(avoid) >= 0.5  -> AVOID
+ELIF growth >= 8%   -> BUY
+ELSE                -> HOLD
+```
+
+**New decision logic** (classifier-driven):
+```
+IF P(avoid) >= 0.5          -> WORST   (never buy)
+ELIF P(great_buy) >= 0.6    -> GREAT   (buy)
+ELIF regressor >= 10%       -> GOOD    (buy if conditions right)
+ELSE                        -> SKIP    (don't buy)
+```
+
+### Implementation
+- P(great_buy) classifier: LightGBM binary, same 26 Keepa+metadata features
+- Trained with `invert=True` (positive class = growth >= 20%, not growth < threshold)
+- Reuses same infrastructure: Optuna tuning, isotonic calibration, OOF threshold tuning
+- Regressor stays for ranking within categories (which "GREAT" sets are best?)
+- P(avoid) stays for bottom-end detection (AUC=0.961)
+
+### Expected Performance
+- ~17% positive class rate (149/876 sets grow 20%+)
+- Expected AUC 0.80-0.90 based on existing ranking quality
+- Class imbalance handled via `is_unbalance=True` + `scale_pos_weight` (Optuna-tuned)
+
+### Key Findings
+47. **Classification > regression for buying decisions** — the user doesn't need exact growth %, they need P(growth>=20%). The regressor's Spearman=0.618 ranking ability directly translates to classification AUC
+48. **Mean compression is irrelevant for classifiers** — binary P(great_buy) doesn't suffer from the -12.8% bias that cripples regression predictions for winners
+49. **4-tier categories are more actionable** — GREAT/GOOD/SKIP/WORST maps directly to portfolio actions vs ambiguous growth percentages
+
+### Roadmap: Further Improvements (updated after Exp 31g)
+
+**High Priority — DONE (Exp 31g):**
+1. ~~Tune GREAT_BUY_THRESHOLD~~ — **DONE**: optimal=0.20; +2.8% avg return, +32.5pp WORST recall
+2. ~~Walk-forward validation~~ — **DONE**: P(great_buy) AUC stable 0.72-0.78 across years
+3. ~~Calibrate for 2024 sets~~ — **DONE**: 89.5% hit rate, 66.7% precision(>=20%), WORST recall=96.4%
+
+**Medium Priority — EVALUATED, SKIP:**
+4. ~~P(good_buy) classifier~~ — **SKIP**: -0.7pp precision; GOOD category too small with tuned thresholds
+5. ~~Asymmetric loss~~ — **SKIP**: +0.033 Spearman but no decision impact (classifier-driven)
+6. ~~Ensemble signals~~ — **SKIP**: +0.022 Spearman max; marginal
+
+**Low Priority / Explore:**
+7. **Multi-class ordinal classifier** — directly predict 4 categories instead of combining two binary classifiers + regressor
+8. **Dynamic thresholds** — adjust GREAT_BUY_THRESHOLD based on market conditions (more conservative in uncertain markets)
+
+## Experiment 31g: Priority Improvements Evaluation (2026-04-10)
+
+Systematic evaluation of 6 improvements on 2448 training sets (retired <= 2024), using GroupKFold OOF predictions. Each improvement measured in isolation and combined.
+
+### Baseline (Exp 31f architecture)
+
+| Metric | Value |
+|--------|-------|
+| Regressor OOF R2 | 0.263 |
+| Regressor Spearman | 0.533 |
+| P(avoid) AUC | 0.687 |
+| P(great_buy) AUC | 0.786 |
+| Great-buy positive rate | 37.2% (910/2448) |
+| Avoid rate | 41.3% (1011/2448) |
+
+Baseline buy decision (avoid=0.5, great=0.5, good=regressor>=10%):
+- BUY: n=1369, avg_return=+39.0%, hit_rate=74.3%, precision(>=20%)=53.4%
+- WORST recall: 45.7%
+
+### Improvement 1: Threshold Tuning -- THE WINNER
+
+Swept avoid and great_buy thresholds from 0.20-0.75, optimizing F2 (recall-weighted).
+
+**Best thresholds**: avoid=0.20, great_buy=0.20
+
+| Config | Buy n | Avg Return | Hit(>0%) | Prec(20%) | WORST Recall |
+|--------|-------|------------|----------|-----------|--------------|
+| Baseline (0.5/0.5) | 1369 | +39.0% | 74.3% | 53.4% | 45.7% |
+| **Tuned (0.20/0.20)** | **867** | **+41.8%** | **76.8%** | **57.0%** | **78.2%** |
+| Delta | -502 | **+2.8%** | **+2.5pp** | **+3.6pp** | **+32.5pp** |
+
+The tuned model is more selective (867 vs 1369 buys) but significantly better:
+- **Higher quality buys**: +2.8% average return, +3.6pp precision for 20%+ growth
+- **Much better loser detection**: WORST recall 45.7% -> 78.2% (catches 78% of all losers)
+- Trade-off: more sets classified as WORST (787 -> 1560), some good sets may be missed
+
+50. **Lower thresholds dominate** -- F2-optimal thresholds are 0.20 for both avoid and great_buy; the default 0.50 is far too conservative; auto-tuned `_find_recall_threshold()` in production should converge near this
+
+### Improvement 2: Walk-Forward P(great_buy) Stability
+
+Temporal walk-forward: train on years < test_year, evaluate on test_year.
+
+| Test Year | n | n_great | AUC(great) | AUC(avoid) | Regressor R2 | Spearman |
+|-----------|---|---------|------------|------------|--------------|----------|
+| 2022 | 226 | 134 | **0.783** | **0.850** | 0.265 | 0.573 |
+| 2023 | 1580 | 518 | 0.719 | 0.556 | 0.163 | 0.478 |
+| 2024 | 402 | 107 | 0.732 | 0.719 | 0.185 | 0.520 |
+
+51. **P(great_buy) is temporally stable (AUC 0.72-0.78)** -- no degradation trend; P(avoid) is more volatile (0.56-0.85); the great_buy classifier generalizes better than the avoid classifier across unseen years
+52. **2023 is the hard year** -- P(avoid) AUC drops to 0.556, regressor R2=0.163; likely a large cohort with mixed outcomes; P(great_buy) holds up (0.719)
+
+### Improvement 3: 2024 Holdout (Newly-Retiring Calibration)
+
+Train on <= 2023, test on 2024 (402 sets).
+
+**Regressor**: R2=0.185, Spearman=0.520, Bias=-4.1%
+
+| Pred Bucket | n | Avg Actual | Avg Pred | Bias | Hit(>0%) |
+|-------------|---|-----------|----------|------|----------|
+| <0% | 160 | -0.8% | -8.4% | -7.6% | 39.4% |
+| 0-10% | 96 | +6.2% | +4.5% | -1.6% | 60.4% |
+| 10-20% | 74 | +24.8% | +15.2% | -9.6% | 79.7% |
+| 20-50% | 67 | +25.7% | +31.1% | +5.3% | 76.1% |
+
+**Classifiers on 2024**: P(great_buy) AUC=0.732, P(avoid) AUC=0.719
+
+**Buy decision on 2024 holdout (tuned thresholds)**:
+- BUY: n=57, avg_return=**+35.4%**, hit_rate=**89.5%**, precision(>=20%)=**66.7%**
+- WORST recall=**96.4%** (catches nearly all losers)
+
+53. **2024 holdout validates the model** -- 89.5% hit rate and 66.7% precision for 20%+ growth on unseen 2024 sets; WORST recall=96.4% means only 3.6% of actual losers slip through
+54. **Regressor has -9.6% bias in the 10-20% growth bucket** -- predicts +15.2% when actual is +24.8%; mean compression persists for moderate winners; classifiers bypass this
+
+### Improvement 4: P(good_buy) Classifier -- NEGATIVE
+
+P(good_buy) AUC=0.737 (growth >= 10% positive class: 46.8%).
+
+| Config | Buy n | Avg Return | Prec(20%) | Delta |
+|--------|-------|------------|-----------|-------|
+| Tuned baseline | 867 | +41.8% | 57.0% | - |
+| With P(good_buy) | 878 | +41.2% | 56.3% | **-0.7pp** |
+
+55. **P(good_buy) classifier doesn't help** -- with tuned low thresholds (0.20), nearly all sets are classified as GREAT or WORST; GOOD category captures only 22 sets with -9.9% avg return; the regressor fallback was already adequate for the few middle-ground sets
+
+### Improvement 5: Asymmetric Loss -- NEGATIVE for decisions
+
+| Alpha | OOF R2 | Spearman | Bias(20%+) | MAE(20%+) |
+|-------|--------|----------|-----------|-----------|
+| 1.0 (baseline) | 0.115 | 0.515 | -48.0% | 50.3% |
+| 1.5 | 0.167 | **0.541** | -46.5% | 48.6% |
+| **2.0** | 0.043 | **0.548** | **-43.1%** | **47.6%** |
+| 3.0 | 0.149 | 0.498 | -47.0% | 48.6% |
+| 5.0 | 0.111 | 0.509 | -48.9% | 50.1% |
+
+Alpha=2.0 gives best Spearman (+0.033) and reduces winner bias by 5pp, but R2 collapses and buy decisions are unchanged.
+
+56. **Asymmetric loss improves ranking but not decisions** -- alpha=2.0 Huber improves Spearman from 0.515 to 0.548 and reduces winner bias from -48% to -43%; but buy decisions are classifier-driven so the regressor improvement doesn't propagate; not worth the R2 trade-off
+
+### Improvement 6: Ensemble Strategies -- MARGINAL
+
+| Strategy | Spearman | Top20% Avg | Top20% Hit(>=20%) |
+|----------|----------|-----------|-------------------|
+| Regressor only | 0.533 | +64.6% | 73.6% |
+| P(great_buy) only | 0.547 | +64.0% | 75.3% |
+| **0.5*Reg + 0.5*P(great)*50** | **0.555** | +64.6% | 74.6% |
+| P(great)*(1-P(avoid))*Reg | 0.529 | **+64.8%** | **76.5%** |
+
+57. **P(great_buy) alone ranks better than the regressor** -- Spearman 0.547 vs 0.533; the classifier's probability is a better ranking signal than predicted growth %; confirms classification > regression for this problem
+58. **Best ensemble is marginal** -- blended `0.5*Reg + 0.5*P(great)*50` gives Spearman=0.555 (+0.022 over regressor, +0.008 over classifier alone); not enough improvement to justify complexity; `P(great)*(1-P(avoid))*Reg` has best top-20% hit rate (76.5%) but worse overall ranking
+
+### Summary Table
+
+| Improvement | Impact | Verdict |
+|-------------|--------|---------|
+| 1. Threshold tuning | +2.8% return, +32.5pp WORST recall | **IMPLEMENT** |
+| 2. Walk-forward stability | AUC 0.72-0.78 across years | **VALIDATED** |
+| 3. 2024 holdout | 89.5% hit rate, 96.4% WORST recall | **VALIDATED** |
+| 4. P(good_buy) classifier | -0.7pp precision | **SKIP** |
+| 5. Asymmetric loss | +0.033 Spearman, no decision impact | **SKIP** |
+| 6. Ensemble strategies | +0.022 Spearman max | **SKIP** |
+
+### Action Items
+
+1. **Verify production auto-tuned thresholds align with 0.20** -- the `_find_recall_threshold()` function in `classifier.py` should converge near 0.20; if not, hardcode override
+2. **Monitor P(great_buy) AUC on 2025 cohort** -- walk-forward shows stability but 2025 data is scarce; track as more sets retire and BL prices stabilize
+3. **Consider dropping GOOD category** -- with tuned thresholds, GOOD captures <2% of sets; simplify to GREAT/WORST/SKIP (3-tier)
+
+### Remaining Alpha Opportunities
+
+- **More training data** -- n=2448 is 2.5x the original 876 from Exp 31c; learning curve still climbing
+- **Sales rank features** -- still empty in DB; this is the #1 potential new signal (Amazon velocity)
+- **Prior versions count** -- "one-and-done" sets (no prior version) have higher growth; needs Rebrickable data
+
+## Experiment 31h: Combined System Evaluation (2026-04-10)
+
+Full pipeline evaluation on 1291 sets with BrickLink ground truth (annualized returns). Tests how the improved BL-trained inversion classifier works together with the growth prediction model (regressor + P(great_buy)).
+
+### Setup
+
+Two separate model pipelines evaluated on the **same 1291 BL ground truth sets**:
+1. **Inversion classifier** (avoid gate): 3 variants -- BE-trained (old), BL-trained, BL+asymmetric weights (new)
+2. **Growth model**: Keepa+BL regressor (R2=0.333, Sp=0.538) + P(great_buy) classifier (AUC=0.707)
+
+### Phase 1: Inversion Classifier on BL Ground Truth
+
+| Variant | AUC | Recall | Precision | F2 | FN |
+|---------|-----|--------|-----------|----|----|
+| BE target (old) | 0.808 | 83.2% | 75.8% | 0.816 | 133 |
+| BL target | 0.814 | 88.6% | 73.5% | 0.851 | 90 |
+| **BL + weights** | **0.813** | **90.5%** | **73.0%** | **0.864** | **75** |
+
+BL+weights reduces false negatives by 44% (133 -> 75), especially for severe losers (5% -> 1% miss rate for <-15% sets).
+
+### Phase 2: Head-to-Head -- OLD vs NEW System
+
+| Metric | OLD | NEW | Delta |
+|--------|-----|-----|-------|
+| Buy signals | 429 | 192 | -237 |
+| Buy avg BL return | +16.6% | **+20.6%** | **+4.1%** |
+| Buy hit rate (>0%) | 92.3% | **96.9%** | **+4.6pp** |
+| Buy precision (>=20%) | 26.6% | **38.0%** | **+11.4pp** |
+| WORST signals | 704 | 1089 | +385 |
+| WORST recall | 79.9% | **98.1%** | **+18.2pp** |
+| Losers bought | 33 | **6** | **-27** |
+
+OLD system: BE avoid (>=0.50) + regressor (>=8%) buy signal.
+NEW system: BL+weights avoid (>=0.20) + P(great_buy)(>=0.20) + regressor (>=10%).
+
+### Phase 3: Category Breakdown (BL Ground Truth)
+
+| Category | n | Avg BL Return | Hit >0% | Hit >=20% | Median |
+|----------|---|---------------|---------|-----------|--------|
+| **GREAT** | **150** | **+21.6%** | **97.3%** | **40.7%** | **+17.7%** |
+| GOOD | 42 | +17.3% | 95.2% | 28.6% | +14.6% |
+| SKIP | 10 | +9.1% | 80.0% | 30.0% | +5.4% |
+| WORST | 1089 | +3.4% | 62.8% | 8.3% | +3.0% |
+
+GREAT sets average +21.6% annualized BL return with 97.3% positive rate. WORST sets average only +3.4% with 37.2% losing money. Clean separation.
+
+### Phase 4: Portfolio Impact
+
+| Strategy | n | Portfolio Return | vs Buy All |
+|----------|---|-----------------|-----------|
+| Buy ALL sets | 1291 | +6.0% | -- |
+| OLD system | 429 | +16.6% | +10.6% |
+| **NEW system** | **192** | **+20.6%** | **+14.7%** |
+
+The new system generates **+14.7% excess return over buying all sets**, vs +10.6% for the old system. More selective (192 vs 429 buys) but higher quality.
+
+### Phase 5: System Disagreement
+
+| Agreement | n | Avg BL Return | Hit >0% |
+|-----------|---|---------------|---------|
+| Both buy | 171 | +21.2% | 97.7% |
+| Both skip | 841 | +0.3% | 55.1% |
+| OLD buys, NEW skips | 258 | +13.5% | 88.8% |
+| NEW buys, OLD skips | 21 | +16.4% | 90.5% |
+
+258 sets the OLD system would buy but NEW skips: avg return +13.5%, only 11% are actual losers. These are **borderline sets** -- profitable on average but below the NEW system's quality bar. The NEW system correctly trades quantity for quality.
+
+### Key Findings
+
+59. **NEW system dominates on BL ground truth** -- +4.1% higher avg return, +11.4pp better precision for 20%+ growth, catches 98.1% of losers (vs 79.9%); buys fewer sets (192 vs 429) but each buy is much higher quality
+60. **BL-trained inversion classifier is strictly better than BE-trained** -- on BL ground truth, AUC +0.005, recall +7.3pp, FN -58; the improvement compounds with P(great_buy) into a +4.1% portfolio return gain
+61. **Only 6 losers slip through the new system** -- vs 33 in the old system; combined BL+weights avoid (thresh=0.20) + P(great_buy) forms an extremely tight filter; 98.1% of all BL losers are caught
+62. **GREAT category delivers +21.6% annualized on BL** -- 150 sets, 97.3% positive rate, median +17.7%; this is the core actionable signal for portfolio construction
+63. **258 borderline sets correctly skipped** -- OLD system would buy these (avg +13.5%), but they include 29 actual losers; NEW system trades this quantity for higher certainty on the 192 it does buy
+
+## Experiment 32: Google Trends Re-test + Classifier-only Architecture (2026-04-10)
+
+Re-tested Google Trends (GT) with the current production pipeline (2459 sets, BL ground truth). Previous tests (Exp 16, 19b) at n=78-346 found GT dead. With 2400+ sets and BL ground truth, GT shows positive signal for classifiers.
+
+### Phase 1: Quick Diagnostic
+
+7 GT features engineered (all pre-retirement, no lookahead): gt_peak_value, gt_avg_value, gt_months_active, gt_decay_rate, gt_pre_retire_avg, gt_lifetime_months, gt_peak_recency.
+
+| Metric | Baseline | +GT | Delta |
+|--------|----------|-----|-------|
+| P(great_buy) AUC | 0.7855 | 0.7917 | **+0.006** |
+| P(avoid) AUC | 0.6874 | 0.7042 | **+0.017** |
+| Regressor R2 | 0.2687 | 0.2549 | -0.014 |
+
+Correlations (GT subset, n=658): gt_pre_retire_avg Sp=+0.398, gt_avg_value Sp=+0.358. gt_avg_value ranked #9/33 in feature importance. GT coverage: 24.9% (659/2650 sets).
+
+### Phase 2: Production Integration
+
+GT features added to classifiers only (not regressor). CLASSIFIER_FEATURES = 26 Keepa+metadata + 7 GT = 33 total. Regressor removed entirely -- classifier-only architecture.
+
+Production training (2026-04-10):
+- P(avoid): AUC=0.779, Recall=97.8%, threshold=0.15 (33 features)
+- P(great_buy): AUC=0.725, Recall=64.3%, threshold=0.25 (33 features)
+- Training: 5.0 minutes (was 5.8 with regressor)
+- Inference: 2740 sets scored (106 GREAT, 168 GOOD, 72 SKIP, 2394 WORST)
+
+### Key Findings
+
+64. **GT helps classifiers, not regressor** -- P(avoid) +0.017 AUC, P(great_buy) +0.006 AUC, but regressor R2 drops -0.014; GT captures "collector awareness" that classifies well but doesn't predict exact growth
+65. **GT was not dead, just undertested** -- original Exp 16/19b used n=78-346 with BE targets; at n=2459 with BL ground truth, correlations are 2-3x stronger (Sp=0.398 vs max |r|=0.198)
+66. **Classifier-only architecture is viable** -- regressor removed, buy categories from P(avoid) + P(great_buy) only; GOOD category uses P(great_buy) >= 0.10 threshold
+67. **24.9% GT coverage is a limitation** -- 76% of sets get zero-filled GT features; if coverage improves, signal may strengthen further
+
+## Experiment 33: Theme-Level Keepa Feature Aggregates (2026-04-10)
+
+Replace removed BE theme growth features (`theme_bayes`, `be_theme_avg_growth`) with theme-level aggregates computed from our own Keepa data. All Keepa features are already cut at `retired_date`, so no lookahead. LOO Bayesian encoding (alpha=20) prevents target leakage.
+
+### Design
+
+4 candidate features (LOO Bayesian encoded from per-set Keepa features):
+- `theme_avg_3p_premium`: mean `3p_above_rrp_pct` within theme
+- `theme_avg_retire_price`: mean `3p_price_at_retire_vs_rrp` within theme
+- `theme_avg_demand`: mean `amz_review_count` within theme
+- `theme_growth_x_prem`: interaction `theme_avg_3p_premium * 3p_above_rrp_pct`
+
+All source features are pre-retirement Keepa data (cut at retired_date in Exp 31).
+
+### Correlations with BL Target (n=2470 training sets)
+
+| Feature | Pearson | Spearman | n |
+|---------|---------|----------|---|
+| `theme_avg_retire_price` | +0.141 | +0.167 | 2470 |
+| `theme_avg_3p_premium` | +0.121 | +0.155 | 2470 |
+| `theme_growth_x_prem` | +0.384 | +0.456 | 1703 |
+| `theme_avg_demand` | +0.036 | +0.040 | 2470 |
+| `theme_strong` (binary baseline) | -- | +0.095 | 2470 |
+| `theme_false_pos` (binary baseline) | -- | -0.035 | 2470 |
+
+Continuous theme features have 1.6-4.8x stronger Spearman than binary flags.
+
+### Feature Importance (37-feature model)
+
+All 4 theme features rank in top 13 out of 37:
+- `theme_avg_retire_price`: rank #5 (gain=621)
+- `theme_avg_3p_premium`: rank #10 (gain=476)
+- `theme_avg_demand`: rank #12 (gain=309)
+- `theme_growth_x_prem`: rank #13 (gain=286)
+
+### LOO Correctness
+
+Star Wars (186 sets): `theme_avg_3p_premium` range=[46.36, 46.85], 129 unique values out of 186. LOO encoding correctly produces different values per set.
+
+### Ablation: Individual Features (P(great_buy >= 20%) AUC)
+
+| Config | P(great_buy) AUC | Delta |
+|--------|-----------------|-------|
+| Baseline (33 features) | 0.7881 | -- |
+| + `theme_avg_retire_price` | **0.7960** | **+0.0079** |
+| + `theme_avg_3p_premium` | 0.7957 | +0.0076 |
+| + `theme_avg_demand` | 0.7899 | +0.0018 |
+| + `theme_growth_x_prem` | 0.7898 | +0.0017 |
+| + all 4 | 0.7860 | -0.0021 |
+
+### Subset Selection (both classifiers)
+
+| Config | P(great_buy) AUC | P(avoid) AUC |
+|--------|-----------------|--------------|
+| Baseline (33 features) | 0.7881 | 0.7475 |
+| + `retire_price` only | 0.7960 (+0.008) | 0.7499 (+0.002) |
+| + `retire_price + 3p_premium` | 0.7915 (+0.003) | 0.7501 (+0.003) |
+| **+ `retire_price + growth_x_prem`** | **0.7959 (+0.008)** | **0.7537 (+0.006)** |
+| + all 4 | 0.7860 (-0.002) | 0.7466 (-0.001) |
+
+Best combination: `theme_avg_retire_price` + `theme_growth_x_prem` (2 features).
+
+### Key Findings
+
+68. **Theme Keepa aggregates replace BE theme features** -- continuous LOO-encoded theme averages from Keepa data (no BE dependency) have 1.6-4.8x stronger Spearman than binary theme flags; `theme_avg_retire_price` ranks #5 by feature importance
+69. **2 features beat 4** -- adding all 4 theme features dilutes signal (multicollinearity with `3p_above_rrp_pct`); best subset is `theme_avg_retire_price` + `theme_growth_x_prem`: P(great_buy) +0.008, P(avoid) +0.006
+70. **Interaction captures theme-set synergy** -- `theme_growth_x_prem` (theme premium tendency * set premium) has Sp=+0.456 with target; it identifies sets with strong premiums in themes that broadly command premiums
+71. **No lookahead risk** -- all source features are Keepa data cut at retired_date (Exp 31 design); LOO encoding excludes each set's own value; theme stats persisted for inference mode
+
+### Production Integration
+
+Features added to `KEEPA_BL_FEATURES` (26 -> 28 base, 33 -> 35 classifier with GT). Theme stats computed during training, serialized via existing `persistence.py`, used at inference via `group_mean_encode()`. Feature count: 35 total (28 Keepa+metadata + 7 GT).
+
+
+## Experiment 34: New Feature Group Evaluation (2026-04-10)
+
+Systematic evaluation of 6 feature groups (23 candidate features) against the 35-feature baseline from Exp 33. Tested regional RRP ratios, Keepa volatility, price positioning, FBM/buy box, derived interactions, and tracking users.
+
+### Data Availability (verified in DB)
+
+**Empty/unavailable (dead ends):** `sales_rank_json` (ALL empty), `warehouse_deals_json` (0 points), `used_price_json` (0 points), `used_like_new_json` (0 points), `collectible_json` (0 points).
+
+### Feature Diagnostics (Spearman with BL annualized return, MI with targets)
+
+| Feature | Group | Coverage | Spearman | MI(avoid) | MI(great_buy) | Safe? |
+|---------|-------|----------|----------|-----------|---------------|-------|
+| `rrp_gbp_usd_ratio` | A | 99.7% | +0.258 | 0.052 | 0.024 | SAFE |
+| `rrp_eur_usd_ratio` | A | 99.4% | +0.236 | 0.029 | 0.000 | SAFE |
+| `rrp_regional_cv` | A | 99.9% | -0.158 | 0.072 | 0.033 | SAFE |
+| `rrp_uk_premium` | A | 92.5% | +0.267 | 0.059 | 0.028 | SAFE |
+| `fba_price_range_pct` | B | 72.4% | +0.341 | 0.027 | 0.008 | SAFE |
+| `amz_price_drawdown` | B | 61.2% | -0.260 | 0.021 | 0.011 | SAFE |
+| `buybox_premium_avg` | D | 74.3% | +0.279 | 0.044 | 0.024 | SAFE |
+| `amz_fba_spread_at_retire` | E | 63.2% | -0.267 | 0.022 | 0.017 | SAFE |
+| `discount_x_tier` | E | 61.8% | -0.339 | 0.043 | 0.014 | SAFE |
+| `reviews_per_dollar` | E | 79.3% | +0.287 | 0.032 | 0.006 | SAFE |
+| `tracking_x_3p_premium` | F | 68.6% | **+0.513** | 0.068 | 0.035 | **LEAKY** |
+| `tracking_per_dollar` | F | 74.5% | +0.344 | 0.062 | 0.023 | **LEAKY** |
+
+### GroupKFold CV Results (9 configurations)
+
+| Config | #Features | P(avoid) AUC | Delta | P(great_buy) AUC | Delta |
+|--------|-----------|--------------|-------|-------------------|-------|
+| BASELINE | 35 | 0.7990 | -- | 0.7276 | -- |
+| +Group A (Regional RRP) | 39 | **0.8158** | **+0.017** | 0.7235 | -0.004 |
+| +Group B (Keepa Vol) | 40 | 0.7912 | -0.008 | 0.7176 | -0.010 |
+| +Group C (Price Pos) | 39 | 0.7971 | -0.002 | 0.7008 | -0.027 |
+| +Group D (FBM/BB) | 39 | 0.7980 | -0.001 | 0.7251 | -0.003 |
+| +Group E (Interactions) | 38 | 0.7980 | -0.001 | 0.7299 | +0.002 |
+| **+SAFE_ALL** | **55** | **0.8180** | **+0.019** | **0.7370** | **+0.009** |
+| +Tracking (LEAKY) | 38 | 0.8064 | +0.007 | 0.7343 | +0.007 |
+| +EVERYTHING | 58 | 0.8145 | +0.016 | 0.7481 | +0.021 |
+
+### LOFO Ablation (SAFE_ALL, removing one new feature at a time)
+
+Removing these features hurt the most (confirming they help):
+- `rrp_regional_cv`: removing drops Avoid AUC by -0.012
+- `rrp_uk_premium`: removing drops GB AUC by -0.011
+- `amz_fba_spread_at_retire`: removing drops GB AUC by -0.024
+- `buybox_premium_avg`: removing drops both by -0.005
+
+### Forward Selection (greedy, from baseline)
+
+| Step | Feature Added | P(avoid) AUC | P(great_buy) AUC | Combined Delta |
+|------|---------------|--------------|-------------------|----------------|
+| 1 | `rrp_uk_premium` | 0.8045 (+0.006) | 0.7349 (+0.007) | +0.013 |
+| 2 | `amz_fba_spread_at_retire` | 0.8095 (+0.011) | 0.7474 (+0.020) | +0.017 |
+| 3 | `rrp_regional_cv` | 0.8184 (+0.019) | 0.7469 (+0.019) | +0.009 |
+| 4 | `buybox_premium_avg` | 0.8156 (+0.017) | 0.7532 (+0.026) | +0.004 |
+| 5 | STOP (best < 0.003 threshold) | | | |
+
+**Selected 4 features** (35 -> 39 total):
+1. `rrp_uk_premium` -- UK pricing premium deviation (LEGO prices collector sets higher in UK)
+2. `amz_fba_spread_at_retire` -- 1P vs 3P gap at retirement (large gap = Amazon still stocking)
+3. `rrp_regional_cv` -- cross-currency pricing variation (inconsistent = unusual set)
+4. `buybox_premium_avg` -- average buy box premium vs RRP (pre-retirement market signal)
+
+### Feature Importance (SAFE_ALL model, P(avoid) classifier)
+
+New features ranked highly:
+- `rrp_regional_cv`: **rank #2** overall (importance=141, behind only `theme_avg_retire_price`)
+- `ppp_vs_theme_avg`: rank #4 (104) -- though not selected by forward selection
+- `amz_fba_spread_at_retire`: rank #6 (81)
+- `rrp_uk_premium`: rank #7 (70)
+- `buybox_premium_avg`: rank #14 (48)
+
+### Key Findings
+
+72. **Regional RRP ratios are strong signals** -- `rrp_regional_cv` (CV across exchange-normalized prices) ranked #2 in feature importance; `rrp_uk_premium` (deviation from median GBP/USD) has Spearman +0.267 with BL returns. LEGO prices collector-oriented sets higher in the UK. 100% factual, no lookahead possible.
+73. **1P vs 3P spread at retirement captures Amazon stocking signal** -- `amz_fba_spread_at_retire` (Amazon 1P price / 3P FBA price at retired_date) has Spearman -0.267. When Amazon is still selling at/below RRP while 3P sellers charge premium, it signals the set hasn't yet appreciated. Low spread = both channels pricing similarly = set already scarce.
+74. **Buy box premium is a pre-retirement market signal** -- `buybox_premium_avg` (mean buy box price / RRP, pre-retirement) has Spearman +0.279 and MI=0.044. Higher buy box premium before retirement indicates early scarcity and collector demand.
+75. **Keepa volatility and price positioning hurt individually but help in combination** -- Groups B (volatility) and C (positioning) hurt when added alone (-0.008 to -0.027 AUC) but SAFE_ALL combining all groups achieves +0.019 P(avoid) and +0.009 P(great_buy), suggesting synergistic interactions across feature groups.
+76. **Tracking users are leaky but signal is modest** -- `tracking_users` (current Keepa snapshot) only adds +0.007 AUC despite being a post-retirement measurement. The modest gain suggests pre-retirement tracking_users (if scraped before retirement) would provide minimal incremental value over existing features.
+77. **Forward selection finds 4 features from 20 candidates** -- greedy selection stops at 4 features (combined +0.017 P(avoid), +0.026 P(great_buy)) with no further feature adding >0.003 combined AUC. This matches the Exp 33 finding that fewer, orthogonal features beat many correlated ones.
+78. **Empty Keepa data columns** -- `sales_rank_json` (would be #1 potential signal for demand velocity) has zero non-empty records. `warehouse_deals_json`, `used_price_json`, `used_like_new_json`, `collectible_json` also completely empty. These represent untapped signal sources if Keepa scraping is expanded.
+
+### Production Integration
+
+4 features added to `KEEPA_BL_FEATURES` (28 -> 32 base, 35 -> 39 classifier with GT):
+- `rrp_uk_premium`: GBP/USD ratio - median; regional stats stored in theme_stats["regional_stats"]
+- `rrp_regional_cv`: CV across exchange-normalized regional prices
+- `buybox_premium_avg`: mean buy box / RRP (Keepa buy_box_json, cut at retired_date)
+- `amz_fba_spread_at_retire`: amz_at_retire / 3p_at_retire ratio
+
+Production results (2026-04-10): P(avoid) AUC=0.816 (+0.006 vs Exp 33), P(great_buy) AUC=0.778 (+0.008), Recall=98.1%.
+
+
+## Experiment 35: Phase-Aware Features, Composites, and Pricing Risk (2026-04-10)
+
+Tested 4 feature groups (14 candidates) against the 39-feature baseline from Exp 34. Focus on lifecycle phase transitions, relative signal positioning ("already priced in"), composite multi-condition signals, and demand intensity.
+
+### Feature Diagnostics (Spearman with BL annualized return, MI with targets)
+
+| Feature | Group | Coverage | Spearman | MI(avoid) | MI(great_buy) |
+|---------|-------|----------|----------|-----------|---------------|
+| `fba_prem_late_vs_early` | A:Phase | 72.5% | +0.109 | 0.005 | 0.017 |
+| `spread_late_vs_early` | A:Phase | 62.2% | -0.030 | 0.000 | 0.008 |
+| `fba_cv_late_vs_early` | A:Phase | 71.0% | +0.049 | 0.013 | 0.015 |
+| `buybox_late_share` | A:Phase | 74.0% | -0.006 | 0.004 | 0.004 |
+| `discount_deepening` | A:Phase | 57.8% | -0.186 | 0.000 | 0.008 |
+| `3p_prem_vs_theme` | B:Relative | 100% | +0.192 | 0.037 | 0.030 |
+| `reviews_vs_theme` | B:Relative | 100% | +0.093 | 0.033 | 0.021 |
+| `buybox_vs_theme` | B:Relative | 100% | +0.040 | 0.039 | 0.030 |
+| `inefficiency_x_demand` | C:Composite | 78.3% | +0.305 | 0.051 | 0.012 |
+| `scarcity_pressure` | C:Composite | 67.9% | +0.288 | 0.014 | 0.031 |
+| `premium_momentum` | C:Composite | 71.3% | **+0.427** | 0.038 | 0.019 |
+| `theme_quality_x_premium` | C:Composite | 100% | +0.207 | 0.057 | 0.036 |
+| `review_velocity` | D:Demand | 79.3% | +0.283 | 0.016 | 0.003 |
+| `review_per_dollar` | D:Demand | 79.3% | +0.287 | 0.032 | 0.006 |
+
+### Collinearity with existing `amz_discount_trend`
+
+Phase transition features show low collinearity with existing features:
+- `fba_prem_late_vs_early` vs `amz_discount_trend`: Pearson=0.317 (different channel: 3P vs 1P)
+- `spread_late_vs_early` vs `amz_discount_trend`: Pearson=-0.239 (cross-channel, opposite direction)
+- `fba_cv_late_vs_early` vs `amz_discount_trend`: Pearson=-0.031 (nearly independent)
+- `buybox_late_share` vs `amz_discount_trend`: Pearson=0.023 (independent)
+
+### GroupKFold CV Results (6 configurations)
+
+| Config | #Features | P(avoid) AUC | Delta | P(great_buy) AUC | Delta |
+|--------|-----------|--------------|-------|-------------------|-------|
+| BASELINE | 39 | 0.8165 | -- | 0.7501 | -- |
+| +Group A (Phase Trans) | 44 | 0.8199 | +0.003 | 0.7380 | -0.012 |
+| +Group B (Relative Sig) | 42 | 0.8202 | +0.004 | 0.7416 | -0.009 |
+| +Group C (Composites) | 43 | 0.8162 | -0.000 | 0.7494 | -0.001 |
+| +Group D (Demand Int) | 41 | 0.8190 | +0.003 | 0.7420 | -0.008 |
+| **+ALL_NEW (A+B+C+D)** | **53** | **0.8174** | **+0.001** | **0.7581** | **+0.008** |
+
+### LOFO Ablation (ALL_NEW, removing one new feature at a time)
+
+**Features that HELP (removal hurts):**
+- `fba_prem_late_vs_early`: removal drops GB AUC by -0.007
+- `spread_late_vs_early`: removal drops GB AUC by -0.008
+- `3p_prem_vs_theme`: removal drops GB AUC by -0.012
+- `reviews_vs_theme`: removal drops GB AUC by -0.009
+- `buybox_vs_theme`: removal drops GB AUC by -0.011
+- `scarcity_pressure`: removal drops GB AUC by -0.006
+- `theme_quality_x_premium`: removal drops GB AUC by -0.008
+
+**Features that HURT (removal helps):**
+- `discount_deepening`: removal improves GB AUC by +0.004
+- `premium_momentum`: removal improves avoid AUC by +0.003
+- `review_per_dollar`: removal improves avoid AUC by +0.002
+
+### Forward Selection (greedy, from 39-feature baseline)
+
+| Step | Feature Added | P(avoid) AUC | P(great_buy) AUC | Combined Delta |
+|------|---------------|--------------|-------------------|----------------|
+| 1 | `theme_quality_x_premium` | 0.8182 (+0.002) | 0.7525 (+0.002) | +0.004 |
+| 2 | `buybox_vs_theme` | 0.8230 (+0.007) | 0.7509 (+0.001) | +0.003 |
+| 3 | `fba_prem_late_vs_early` | 0.8213 (+0.005) | 0.7593 (+0.009) | +0.007 |
+| 4 | `scarcity_pressure` | 0.8231 (+0.007) | 0.7633 (+0.013) | +0.006 |
+| 5 | STOP (best < 0.003 threshold) | | | |
+
+**Selected 4 features** (39 -> 43 total):
+1. `theme_quality_x_premium` [C] -- theme retire price * excess 3P premium (good theme AND above-average premium)
+2. `buybox_vs_theme` [B] -- buy box premium minus LOO theme average (excess buy box = truly exceptional)
+3. `fba_prem_late_vs_early` [A] -- 3P premium late half / early half (growing premium = rising demand)
+4. `scarcity_pressure` [C] -- buybox_premium * (1 - spread) (high buybox + low 1P/3P gap = both channels scarce)
+
+### Feature Importance (ALL_NEW model, P(avoid) classifier)
+
+New features ranked in top 20:
+- `reviews_vs_theme`: rank #8 (gain=63) [B:Relative]
+- `buybox_late_share`: rank #10 (gain=57) [A:Phase]
+- `review_velocity`: rank #11 (gain=55) [D:Demand]
+- `scarcity_pressure`: rank #15 (gain=44) [C:Composite]
+- `buybox_vs_theme`: rank #16 (gain=43) [B:Relative]
+- `inefficiency_x_demand`: rank #17 (gain=42) [C:Composite]
+- `theme_quality_x_premium`: rank #19 (gain=39) [C:Composite]
+
+### Key Findings
+
+79. **3P premium trajectory is a genuine new signal** -- `fba_prem_late_vs_early` (3P FBA mean in second half / first half of shelf life) adds +0.007 combined AUC. Unlike `amz_discount_trend` (Amazon 1P, Pearson=0.317), this captures 3P seller behavior evolution. Sets where 3P premium GROWS over shelf life have stronger post-retirement appreciation.
+80. **"Already priced in" concept works via theme-relative signals** -- `buybox_vs_theme` (buy box premium minus LOO theme average) adds +0.003 combined AUC. A high buy box premium in a theme where premiums are normally low is more meaningful than the same premium in a theme where it's standard. 100% coverage (all sets have a theme).
+81. **Composite signals capture multi-condition investment theses** -- `scarcity_pressure` (buybox * (1 - spread)) adds +0.006 combined AUC. It encodes "both channels show scarcity" -- high buy box AND low 1P/3P gap means Amazon is already sold out AND marketplace sellers are charging premium. `theme_quality_x_premium` (theme retire price * excess 3P premium) adds +0.004 combined AUC -- good theme AND above-average demand for that theme.
+82. **Phase transition features are low-collinearity with existing** -- All 5 Group A features have Pearson < 0.32 with `amz_discount_trend`. The strongest (`fba_prem_late_vs_early` at 0.317) captures a different channel (3P not 1P). `fba_cv_late_vs_early` and `buybox_late_share` are nearly independent (Pearson < 0.03).
+83. **Individual groups hurt P(great_buy) but ALL_NEW helps** -- Same pattern as Exp 34: groups added individually hurt GB AUC (-0.001 to -0.012) but the full combination improves it (+0.008). Features have synergistic interactions that only emerge when all groups are present.
+84. **`premium_momentum` has highest Spearman (+0.427) but hurts in CV** -- Despite the strongest univariate correlation of any new feature, `premium_momentum` (3p_above_rrp_pct * fba_prem_late_vs_early) hurts the avoid classifier. This is because it's collinear with its component `3p_above_rrp_pct` (the #1 existing feature), causing overfitting. Simple products of strong features don't always help.
+85. **Demand intensity features are marginal** -- `review_velocity` and `review_per_dollar` have decent Spearman (0.28) but don't survive forward selection. `review_per_dollar` was already tested in Exp 34 and remains marginal. The signal from review count is already well-captured by `amz_review_count` and `meta_demand_proxy`.
+
+### Production Integration
+
+4 features added to `KEEPA_BL_FEATURES` (32 -> 36 base, 39 -> 43 classifier with GT):
+- `fba_prem_late_vs_early`: mean(fba_prices[50%:]) / mean(fba_prices[:50%]) -- 3P premium trajectory
+- `scarcity_pressure`: buybox_premium_avg * (1 - amz_fba_spread_at_retire) -- multi-channel scarcity
+- `theme_quality_x_premium`: theme_avg_retire_price * (3p_above_rrp_pct - LOO_theme_avg) -- theme quality * excess premium
+- `buybox_vs_theme`: buybox_premium_avg - LOO_theme_avg(buybox_premium_avg) -- relative buy box signal
+
+Production results (2026-04-10): P(avoid) AUC=0.820 (+0.004 vs Exp 34), P(great_buy) AUC=0.783 (+0.005), Recall=98.7%.

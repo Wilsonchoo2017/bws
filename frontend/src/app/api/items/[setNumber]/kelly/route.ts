@@ -15,28 +15,14 @@ export async function GET(
       );
     }
 
-    const { searchParams } = new URL(request.url);
-    let queryStr = '';
-    const budgetRaw = searchParams.get('budget');
-    if (budgetRaw) {
-      const budgetNum = parseInt(budgetRaw, 10);
-      if (isNaN(budgetNum) || budgetNum < 0 || budgetNum > 100_000_000) {
-        return NextResponse.json(
-          { success: false, error: 'Invalid budget parameter' },
-          { status: 400 }
-        );
-      }
-      queryStr = `?budget=${budgetNum}`;
-    }
-
     const res = await fetch(
-      `${API_BASE}/api/items/${setNumber}/kelly${queryStr}`
+      `${API_BASE}/api/items/${setNumber}/kelly`
     );
     const data = await res.json();
 
     if (!res.ok) {
       return NextResponse.json(
-        { success: false, error: data.detail || 'Failed to fetch Kelly sizing' },
+        { success: false, error: data.detail || 'Failed to fetch capital allocation' },
         { status: res.status }
       );
     }
@@ -44,7 +30,7 @@ export async function GET(
     return NextResponse.json(data);
   } catch (error) {
     const message =
-      error instanceof Error ? error.message : 'Failed to fetch Kelly sizing';
+      error instanceof Error ? error.message : 'Failed to fetch capital allocation';
     return NextResponse.json(
       { success: false, error: message },
       { status: 500 }

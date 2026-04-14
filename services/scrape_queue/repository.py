@@ -62,6 +62,7 @@ def _row_to_task(row: tuple, columns: list[str]) -> ScrapeTask:
         completed_at=d.get("completed_at"),
         locked_by=d.get("locked_by"),
         locked_at=d.get("locked_at"),
+        reason=d.get("reason"),
     )
 
 
@@ -69,6 +70,7 @@ _TASK_COLUMNS = [
     "id", "task_id", "set_number", "task_type", "priority", "status",
     "depends_on", "attempt_count", "max_attempts", "error",
     "created_at", "started_at", "completed_at", "locked_by", "locked_at",
+    "reason",
 ]
 
 _COLUMNS_SQL = ", ".join(_TASK_COLUMNS)
@@ -84,6 +86,7 @@ def _create_task_inner(
     conn: Any,
     set_number: str,
     task_type: TaskType,
+    reason: str | None = None,
 ) -> ScrapeTask | None:
     """Create a single scrape task within an existing transaction.
 
@@ -132,11 +135,11 @@ def _create_task_inner(
         conn.execute(
             """
             INSERT INTO scrape_tasks (id, task_id, set_number, task_type, priority,
-                                      status, depends_on)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+                                      status, depends_on, reason)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """,
             [seq_id, task_id, set_number, task_type.value, priority,
-             status.value, depends_on],
+             status.value, depends_on, reason],
         )
     except Exception as exc:
         # Partial unique index (idx_scrape_tasks_active_unique) prevents
@@ -163,6 +166,7 @@ def create_task(
     conn: Any,
     set_number: str,
     task_type: TaskType,
+    reason: str | None = None,
 ) -> ScrapeTask | None:
     """Create a single scrape task, deduplicating against active tasks.
 
@@ -177,7 +181,7 @@ def create_task(
 
     conn.execute("BEGIN TRANSACTION")
     try:
-        result = _create_task_inner(conn, set_number, task_type)
+        result = _create_task_inner(conn, set_number, task_type, reason=reason)
         conn.execute("COMMIT")
         return result
     except Exception:
@@ -198,6 +202,7 @@ def is_polybag(set_number: str) -> bool:
 def create_tasks_for_set(
     conn: Any,
     set_number: str,
+    reason: str | None = None,
 ) -> list[ScrapeTask]:
     """Create the full set of scrape tasks for a LEGO set.
 
@@ -219,7 +224,7 @@ def create_tasks_for_set(
         for task_type in TaskType:
             if task_type in NON_SET_TASK_TYPES:
                 continue
-            task = _create_task_inner(conn, set_number, task_type)
+            task = _create_task_inner(conn, set_number, task_type, reason=reason)
             if task is not None:
                 created.append(task)
 
@@ -749,7 +754,7 @@ RETIREMENT_WINDOW_MONTHS = 48
 def get_rescrape_candidates(
     conn: Any,
     task_type: TaskType,
-) -> list[str]:
+) -> list[tuple[str, str]]:
     """Find set_numbers needing a rescrape using tiered intervals.
 
     Tiers (highest priority wins):
@@ -760,8 +765,8 @@ def get_rescrape_candidates(
 
     Portfolio/watchlist override the 48-month retirement cutoff.
 
-    Returns a deduplicated list of set_numbers, excluding any with an
-    active (pending/running/blocked) task of the given type.
+    Returns a deduplicated list of (set_number, reason) tuples, excluding
+    any with an active (pending/running/blocked) task of the given type.
     """
     task_type_value = task_type.value
     active_list = [s.value for s in ACTIVE_STATUSES]
@@ -777,7 +782,8 @@ def get_rescrape_candidates(
         ),
         tiered_sets AS (
             -- Tier 1: Portfolio or watchlist -> 30 days
-            SELECT li.set_number, {TIER_PORTFOLIO_WATCHLIST_DAYS} AS stale_days
+            SELECT li.set_number, {TIER_PORTFOLIO_WATCHLIST_DAYS} AS stale_days,
+                   'portfolio/watchlist' AS tier_label
             FROM lego_items li
             WHERE li.set_number IN (SELECT set_number FROM portfolio_sets)
                OR li.watchlist = TRUE
@@ -785,7 +791,8 @@ def get_rescrape_candidates(
             UNION ALL
 
             -- Tier 2: Retiring soon -> 60 days
-            SELECT li.set_number, {TIER_RETIRING_SOON_DAYS} AS stale_days
+            SELECT li.set_number, {TIER_RETIRING_SOON_DAYS} AS stale_days,
+                   'retiring soon' AS tier_label
             FROM lego_items li
             WHERE li.retiring_soon = TRUE
               AND li.set_number NOT IN (SELECT set_number FROM portfolio_sets)
@@ -794,7 +801,8 @@ def get_rescrape_candidates(
             UNION ALL
 
             -- Tier 3a: Not retired -> 150 days
-            SELECT li.set_number, {TIER_GENERAL_DAYS} AS stale_days
+            SELECT li.set_number, {TIER_GENERAL_DAYS} AS stale_days,
+                   'general' AS tier_label
             FROM lego_items li
             WHERE li.retired_date IS NULL
               AND li.year_retired IS NULL
@@ -805,7 +813,8 @@ def get_rescrape_candidates(
             UNION ALL
 
             -- Tier 3b: Retired with retired_date, within 48 months -> 150 days
-            SELECT li.set_number, {TIER_GENERAL_DAYS} AS stale_days
+            SELECT li.set_number, {TIER_GENERAL_DAYS} AS stale_days,
+                   'general' AS tier_label
             FROM lego_items li
             WHERE li.retired_date IS NOT NULL
               AND li.retired_date
@@ -818,7 +827,8 @@ def get_rescrape_candidates(
 
             -- Tier 3c: Retired with year_retired only, use Dec of that year,
             --          within 48 months -> 150 days
-            SELECT li.set_number, {TIER_GENERAL_DAYS} AS stale_days
+            SELECT li.set_number, {TIER_GENERAL_DAYS} AS stale_days,
+                   'general' AS tier_label
             FROM lego_items li
             WHERE li.retired_date IS NULL
               AND li.year_retired IS NOT NULL
@@ -831,9 +841,10 @@ def get_rescrape_candidates(
             -- Tier 4 (expired): not selected at all -> never scraped
         ),
         best_tier AS (
-            SELECT set_number, MIN(stale_days) AS stale_days
+            SELECT DISTINCT ON (set_number)
+                   set_number, stale_days, tier_label
             FROM tiered_sets
-            GROUP BY set_number
+            ORDER BY set_number, stale_days ASC
         ),
         last_scrape AS (
             SELECT set_number, MAX(completed_at) AS last_completed
@@ -860,7 +871,7 @@ def get_rescrape_candidates(
             FROM set_minifigures WHERE ? = 'minifigures'
             GROUP BY set_number
         )
-        SELECT bt.set_number
+        SELECT bt.set_number, bt.stale_days, bt.tier_label
         FROM best_tier bt
         LEFT JOIN last_scrape ls ON ls.set_number = bt.set_number
         LEFT JOIN source_data sd ON sd.set_number = bt.set_number
@@ -889,4 +900,94 @@ def get_rescrape_candidates(
         task_type_value, *active_list,  # NOT EXISTS active
         task_type_value,  # NOT EXISTS failed
     ]).fetchall()
-    return [row[0] for row in rows]
+    return [
+        (row[0], f"rescrape: {row[2]} ({row[1]}d)")
+        for row in rows
+    ]
+
+
+# Re-queue items whose BrickLink store listings are missing or too stale.
+# The sweep runs hourly, so we use a short failure cooldown (1 day) so a
+# transient browser hiccup does not block an item for a week.
+LISTINGS_STALE_DAYS = 7
+LISTINGS_FAIL_COOLDOWN_DAYS = 1
+
+
+def get_missing_listings_candidates(
+    conn: Any,
+    *,
+    limit: int = 100,
+    stale_days: int = LISTINGS_STALE_DAYS,
+) -> list[tuple[str, str]]:
+    """Find sets whose BrickLink store-listings snapshot is missing or stale.
+
+    Returns the ``limit`` most-recent (by ``year_released``) sets that
+    either have no row in ``bricklink_store_listings`` or whose latest
+    snapshot is older than ``stale_days`` days, excluding sets that
+    already have an active or recently-failed ``bricklink_metadata``
+    task.
+
+    Returns:
+        List of ``(set_number, reason)`` tuples.  Reason explains why
+        the item was picked (missing / stale / year).
+    """
+    active_list = [s.value for s in ACTIVE_STATUSES]
+    active_placeholders = ", ".join("?" for _ in active_list)
+    task_type_value = TaskType.BRICKLINK_METADATA.value
+
+    # Filter out obviously-bogus release years (data corruption) so the
+    # sweep does not waste browser cycles on them.  Anything newer than
+    # (current year + 1) is almost certainly a data glitch.
+    sql = f"""
+        WITH latest_listing AS (
+            SELECT set_number, MAX(scraped_at) AS last_listings_at
+            FROM bricklink_store_listings
+            GROUP BY set_number
+        )
+        SELECT li.set_number,
+               li.year_released,
+               ll.last_listings_at
+        FROM lego_items li
+        LEFT JOIN latest_listing ll ON ll.set_number = li.set_number
+        WHERE (
+            ll.last_listings_at IS NULL
+            OR ll.last_listings_at
+               < CURRENT_TIMESTAMP - CAST(? || ' days' AS INTERVAL)
+        )
+          AND (
+              li.year_released IS NULL
+              OR li.year_released <= EXTRACT(YEAR FROM CURRENT_DATE) + 1
+          )
+          AND NOT EXISTS (
+              SELECT 1 FROM scrape_tasks st
+              WHERE st.set_number = li.set_number
+                AND st.task_type = ?
+                AND st.status IN ({active_placeholders})
+          )
+          AND NOT EXISTS (
+              SELECT 1 FROM scrape_tasks st
+              WHERE st.set_number = li.set_number
+                AND st.task_type = ?
+                AND st.status = 'failed'
+                AND st.completed_at
+                    > CURRENT_TIMESTAMP - CAST(? || ' days' AS INTERVAL)
+          )
+        ORDER BY li.year_released DESC NULLS LAST, li.set_number DESC
+        LIMIT ?
+    """  # noqa: S608
+
+    rows = conn.execute(sql, [
+        stale_days,
+        task_type_value, *active_list,
+        task_type_value, LISTINGS_FAIL_COOLDOWN_DAYS,
+        limit,
+    ]).fetchall()
+
+    result: list[tuple[str, str]] = []
+    for set_number, year_released, last_at in rows:
+        if last_at is None:
+            reason = f"listings missing (y{year_released or '?'})"
+        else:
+            reason = f"listings stale >{stale_days}d (y{year_released or '?'})"
+        result.append((set_number, reason))
+    return result

@@ -121,7 +121,19 @@ def _persist(conn: Any, scrape_result: object) -> Result[None, ExecutorResult]:
 # ---------------------------------------------------------------------------
 
 
-@executor(TaskType.KEEPA, concurrency=5, timeout=300, browser_profile="keepa-profile")
+def _keepa_cooldown_remaining() -> float:
+    from config.settings import KEEPA_RATE_LIMITER
+
+    return KEEPA_RATE_LIMITER.cooldown_remaining()
+
+
+@executor(
+    TaskType.KEEPA,
+    concurrency=5,
+    timeout=300,
+    browser_profile="keepa-profile",
+    cooldown_check=_keepa_cooldown_remaining,
+)
 def execute_keepa(
     conn: Any,
     set_number: str,

@@ -24,6 +24,36 @@ logger = logging.getLogger("bws.enrichment.fetchers")
 _DEFAULT_FRESHNESS = timedelta(hours=24)
 
 
+def _bricklink_listings_fresh(
+    conn: Any,
+    item_id: str,
+    freshness: timedelta,
+) -> bool:
+    """Return True if bricklink_store_listings has a snapshot newer than ``freshness``.
+
+    Used to keep the metadata cache branch honest: if the item's
+    metadata is fresh but no listings snapshot exists (or it is too
+    old), the caller still needs to run the browser scrape so the
+    store listings table catches up.
+    """
+    try:
+        row = conn.execute(
+            "SELECT MAX(scraped_at) FROM bricklink_store_listings "
+            "WHERE item_id = ?",
+            [item_id],
+        ).fetchone()
+    except Exception:
+        logger.debug(
+            "Bricklink listings freshness check failed for %s",
+            item_id, exc_info=True,
+        )
+        return False
+    if not row or row[0] is None:
+        return False
+    from db.queries import is_fresh
+    return is_fresh(row[0], freshness)
+
+
 def fetch_from_bricklink(
     conn: Any,
     set_number: str,
@@ -51,7 +81,16 @@ def fetch_from_bricklink(
         if row and row[8] is not None:
             from db.queries import is_fresh
 
-            if is_fresh(row[8], freshness):
+            metadata_fresh = is_fresh(row[8], freshness)
+            # Listings are the new "fuller" data the browser scraper
+            # produces.  Metadata alone being fresh is not enough -- if
+            # we have no (or stale) listings, we still want to run the
+            # browser scrape so the listings table gets populated.
+            listings_fresh = _bricklink_listings_fresh(
+                conn, row[0], freshness,
+            )
+
+            if metadata_fresh and listings_fresh:
                 from bws_types.models import BricklinkData
                 cached = BricklinkData(
                     item_id=row[0],
@@ -65,10 +104,23 @@ def fetch_from_bricklink(
                     minifig_count=row[9],
                     dimensions=row[10],
                 )
-                logger.info("Bricklink cache hit for %s (last_scraped: %s)", set_number, row[8])
+                logger.info(
+                    "Bricklink cache hit for %s (last_scraped: %s)",
+                    set_number, row[8],
+                )
                 return adapt_bricklink(cached)
+
+            if metadata_fresh and not listings_fresh:
+                logger.info(
+                    "Bricklink metadata for %s is fresh but store listings "
+                    "are missing/stale -- falling through to browser scrape",
+                    set_number,
+                )
     except Exception:
-        logger.debug("Bricklink cache lookup failed for %s, falling back to HTTP", set_number, exc_info=True)
+        logger.debug(
+            "Bricklink cache lookup failed for %s, falling back to HTTP",
+            set_number, exc_info=True,
+        )
 
     # Short-circuit if BrickLink quota cooldown is active
     from config.settings import BRICKLINK_RATE_LIMITER
@@ -77,11 +129,16 @@ def fetch_from_bricklink(
         logger.warning("BrickLink quota cooldown active, skipping HTTP for %s", set_number)
         return make_failed_result(SourceId.BRICKLINK, "Quota cooldown active")
 
-    # HTTP scrape
+    # Browser scrape (logged-in Camoufox).  Replaces the old anonymous
+    # HTTPX path; the new scraper fetches v2 catalogitem.page for item
+    # metadata + per-store listings AND catalogPG.asp for price boxes
+    # and monthly sales, then archives both raw HTMLs.
     try:
+        from services.bricklink.browser_scraper import (
+            BrowserProfileMissing,
+            scrape_item_browser_sync,
+        )
         from services.bricklink.repository import has_recent_pricing
-        from services.bricklink.scraper import scrape_item_sync
-        from services.bricklink.parser import build_price_guide_url
         from services.enrichment.config import PRICING_FRESHNESS
 
         item_id = f"{set_number}-1"
@@ -89,11 +146,17 @@ def fetch_from_bricklink(
         if skip_pricing:
             logger.info("Skipping pricing write for %s (fresh within 7 days)", set_number)
 
-        url = build_price_guide_url("S", f"{set_number}-1")
-        scrape_result = scrape_item_sync(conn, url, save=True, skip_pricing=skip_pricing)
+        scrape_result = scrape_item_browser_sync(
+            conn,
+            item_id,
+            save=True,
+            skip_pricing=skip_pricing,
+        )
 
         if not scrape_result.success:
-            return make_failed_result(SourceId.BRICKLINK, scrape_result.error or "Unknown error")
+            return make_failed_result(
+                SourceId.BRICKLINK, scrape_result.error or "Unknown error",
+            )
 
         if scrape_result.data is None:
             return make_failed_result(SourceId.BRICKLINK, "No data returned")
@@ -103,12 +166,16 @@ def fetch_from_bricklink(
         null_fields = [k.value for k, v in result.fields.items() if v is None]
         if null_fields:
             logger.info(
-                "BrickLink for %s: got %d fields (%s), missing %d (%s)",
+                "BrickLink for %s: got %d fields (%s), missing %d (%s), "
+                "listings_inserted=%d",
                 set_number, len(non_null_fields), non_null_fields,
-                len(null_fields), null_fields,
+                len(null_fields), null_fields, scrape_result.listings_inserted,
             )
         return result
 
+    except BrowserProfileMissing as e:
+        logger.error("BrickLink browser profile missing: %s", e)
+        return make_failed_result(SourceId.BRICKLINK, str(e))
     except Exception as e:
         logger.exception("Bricklink fetch failed for %s", set_number)
         return make_failed_result(SourceId.BRICKLINK, str(e))

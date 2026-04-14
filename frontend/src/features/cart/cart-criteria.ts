@@ -54,18 +54,10 @@ export function meetsCartCriteria(
   const itemConf = CONFIDENCE_ORDER[(item.ml_confidence ?? '').toLowerCase()] ?? 0;
   if (itemConf < minConf) return false;
 
-  // 4. Not avoid (Hold or Buy)
+  // 4. Must be a buy category (GREAT or GOOD)
   if (
-    item.ml_avoid_probability == null ||
-    item.ml_avoid_probability >= settings.max_avoid_probability
-  ) {
-    return false;
-  }
-
-  // 5. Growth >= threshold
-  if (
-    item.ml_growth_pct == null ||
-    item.ml_growth_pct < settings.min_growth_pct
+    item.ml_buy_category == null ||
+    (item.ml_buy_category !== 'GREAT' && item.ml_buy_category !== 'GOOD')
   ) {
     return false;
   }

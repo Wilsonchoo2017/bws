@@ -133,7 +133,7 @@ def queue_keepa_batch(manager: JobManager, set_numbers: list[str]) -> int:
         if _is_on_cooldown(set_number):
             logger.debug("Keepa sweep: skipping %s (on cooldown)", set_number)
             continue
-        manager.create_job("keepa", set_number, reason="scheduled sweep")
+        manager.create_job("keepa", set_number, reason="sweep: no keepa data")
         queued += 1
 
     return queued

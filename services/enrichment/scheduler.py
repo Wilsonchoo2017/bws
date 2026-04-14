@@ -42,7 +42,10 @@ async def run_enrichment_sweep(
         try:
             from db.connection import get_connection
             from db.schema import init_schema
-            from services.enrichment.repository import get_items_needing_enrichment
+            from services.enrichment.repository import (
+                compute_enrichment_reason,
+                get_items_needing_enrichment,
+            )
             from services.scrape_queue.repository import create_tasks_for_set
 
             conn = get_connection()
@@ -56,7 +59,10 @@ async def run_enrichment_sweep(
 
                 queued = 0
                 for item in items:
-                    tasks = create_tasks_for_set(conn, item["set_number"])
+                    reason = compute_enrichment_reason(item)
+                    tasks = create_tasks_for_set(
+                        conn, item["set_number"], reason=reason,
+                    )
                     if tasks:
                         queued += 1
 
@@ -221,8 +227,10 @@ async def run_priority_rescrape_sweep(
                         continue
 
                     queued = 0
-                    for set_number in candidates:
-                        task = create_task(conn, set_number, task_type)
+                    for set_number, reason in candidates:
+                        task = create_task(
+                            conn, set_number, task_type, reason=reason,
+                        )
                         if task is not None:
                             queued += 1
 

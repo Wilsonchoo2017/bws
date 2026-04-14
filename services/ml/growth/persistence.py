@@ -35,6 +35,7 @@ def save_growth_models(
     ensemble: Any | None,
     *,
     model_type: str | None = None,
+    great_buy_classifier: Any | None = None,
 ) -> Path:
     """Serialize the full growth model bundle to disk."""
     import joblib
@@ -52,6 +53,7 @@ def save_growth_models(
         "subtheme_stats": subtheme_stats,
         "classifier": classifier,
         "ensemble": ensemble,
+        "great_buy_classifier": great_buy_classifier,
         "saved_at": datetime.now(timezone.utc).isoformat(),
         "version": 3 if effective_type == "keepa_bl" else 2,
         "model_type": effective_type,
@@ -63,11 +65,11 @@ def save_growth_models(
 
 def load_growth_models(
     max_age_hours: float = 168,
-) -> tuple[Any, Any | None, dict, dict, Any | None, Any | None] | None:
+) -> tuple[Any, Any | None, dict, dict, Any | None, Any | None, Any | None] | None:
     """Load growth models from disk.
 
-    Returns (tier1, tier2, theme_stats, subtheme_stats, classifier, ensemble)
-    or None if no valid artifact exists.
+    Returns (tier1, tier2, theme_stats, subtheme_stats, classifier, ensemble,
+    great_buy_classifier) or None if no valid artifact exists.
     """
     import joblib
 
@@ -107,10 +109,11 @@ def load_growth_models(
         classifier = None  # force None for v1
 
     return (
-        bundle["tier1"],
+        bundle.get("tier1"),
         bundle.get("tier2"),
-        bundle["theme_stats"],
-        bundle["subtheme_stats"],
+        bundle.get("theme_stats", {}),
+        bundle.get("subtheme_stats", {}),
         classifier,
         bundle.get("ensemble"),
+        bundle.get("great_buy_classifier"),
     )

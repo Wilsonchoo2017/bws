@@ -63,6 +63,25 @@ CREATE TABLE IF NOT EXISTS bricklink_monthly_sales (
 );
 """
 
+BRICKLINK_STORE_LISTINGS_DDL = """
+CREATE TABLE IF NOT EXISTS bricklink_store_listings (
+    id INTEGER PRIMARY KEY,
+    item_id VARCHAR NOT NULL,
+    set_number VARCHAR GENERATED ALWAYS AS (SPLIT_PART(item_id, '-', 1)) STORED,
+    store_id VARCHAR,
+    store_name VARCHAR,
+    seller_country_code VARCHAR,
+    seller_country_name VARCHAR,
+    condition VARCHAR,
+    quantity INTEGER,
+    price_cents INTEGER,
+    currency VARCHAR,
+    ships_to_viewer BOOLEAN,
+    row_class_names VARCHAR,
+    scraped_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+"""
+
 PRODUCT_ANALYSIS_DDL = """
 CREATE TABLE IF NOT EXISTS product_analysis (
     id INTEGER PRIMARY KEY,
@@ -103,6 +122,23 @@ CREATE TABLE IF NOT EXISTS shopee_scrape_history (
     success BOOLEAN DEFAULT TRUE,
     error VARCHAR,
     scraped_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+);
+"""
+
+SHOPEE_CAPTCHA_EVENTS_DDL = """
+CREATE TABLE IF NOT EXISTS shopee_captcha_events (
+    id INTEGER PRIMARY KEY,
+    job_id VARCHAR,
+    source_url VARCHAR NOT NULL,
+    snapshot_dir VARCHAR NOT NULL,
+    detection_reason VARCHAR NOT NULL,
+    detection_signals JSONB,
+    status VARCHAR NOT NULL DEFAULT 'pending',
+    detected_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    verified_at TIMESTAMPTZ,
+    resolved_at TIMESTAMPTZ,
+    resolution_duration_s INTEGER,
+    notes VARCHAR
 );
 """
 
@@ -346,7 +382,8 @@ CREATE TABLE IF NOT EXISTS scrape_tasks (
     started_at TIMESTAMPTZ,
     completed_at TIMESTAMPTZ,
     locked_by VARCHAR,
-    locked_at TIMESTAMPTZ
+    locked_at TIMESTAMPTZ,
+    reason VARCHAR
 );
 """
 
@@ -376,6 +413,39 @@ CREATE TABLE IF NOT EXISTS google_trends_snapshots (
     peak_date VARCHAR,
     average_value FLOAT,
     scraped_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+);
+"""
+
+REDDIT_MENTIONS_DDL = """
+CREATE TABLE IF NOT EXISTS reddit_mentions (
+    id INTEGER PRIMARY KEY,
+    set_number VARCHAR NOT NULL,
+    subreddit VARCHAR NOT NULL,
+    post_id VARCHAR NOT NULL,
+    comment_id VARCHAR,
+    created_at TIMESTAMPTZ NOT NULL,
+    score INTEGER,
+    num_comments INTEGER,
+    author_hash VARCHAR,
+    title VARCHAR,
+    body_preview VARCHAR,
+    permalink VARCHAR,
+    is_comment BOOLEAN NOT NULL DEFAULT FALSE,
+    scraped_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(subreddit, post_id, comment_id, set_number)
+);
+"""
+
+REDDIT_SCRAPE_CURSORS_DDL = """
+CREATE TABLE IF NOT EXISTS reddit_scrape_cursors (
+    subreddit VARCHAR NOT NULL,
+    listing VARCHAR NOT NULL,
+    last_fullname VARCHAR,
+    last_created_utc TIMESTAMPTZ,
+    last_run_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+    posts_seen INTEGER NOT NULL DEFAULT 0,
+    mentions_saved INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (subreddit, listing)
 );
 """
 
@@ -574,6 +644,7 @@ SEQUENCES_DDL = """
 CREATE SEQUENCE IF NOT EXISTS bricklink_items_id_seq;
 CREATE SEQUENCE IF NOT EXISTS bricklink_price_history_id_seq;
 CREATE SEQUENCE IF NOT EXISTS bricklink_monthly_sales_id_seq;
+CREATE SEQUENCE IF NOT EXISTS bricklink_store_listings_id_seq;
 CREATE SEQUENCE IF NOT EXISTS product_analysis_id_seq;
 CREATE SEQUENCE IF NOT EXISTS minifigures_id_seq;
 CREATE SEQUENCE IF NOT EXISTS set_minifigures_id_seq;
@@ -581,6 +652,7 @@ CREATE SEQUENCE IF NOT EXISTS minifig_price_history_id_seq;
 CREATE SEQUENCE IF NOT EXISTS shopee_products_id_seq;
 CREATE SEQUENCE IF NOT EXISTS shopee_saturation_id_seq;
 CREATE SEQUENCE IF NOT EXISTS shopee_scrape_history_id_seq;
+CREATE SEQUENCE IF NOT EXISTS shopee_captcha_events_id_seq;
 CREATE SEQUENCE IF NOT EXISTS mightyutan_products_id_seq;
 CREATE SEQUENCE IF NOT EXISTS mightyutan_price_history_id_seq;
 CREATE SEQUENCE IF NOT EXISTS hobbydigi_products_id_seq;
@@ -596,6 +668,7 @@ CREATE SEQUENCE IF NOT EXISTS brickeconomy_snapshots_id_seq;
 CREATE SEQUENCE IF NOT EXISTS keepa_snapshots_id_seq;
 CREATE SEQUENCE IF NOT EXISTS google_trends_snapshots_id_seq;
 CREATE SEQUENCE IF NOT EXISTS google_trends_theme_snapshots_id_seq;
+CREATE SEQUENCE IF NOT EXISTS reddit_mentions_id_seq;
 CREATE SEQUENCE IF NOT EXISTS scrape_tasks_id_seq;
 CREATE SEQUENCE IF NOT EXISTS scrape_task_attempts_id_seq;
 CREATE SEQUENCE IF NOT EXISTS ml_feature_store_id_seq;
@@ -613,6 +686,12 @@ CREATE INDEX IF NOT EXISTS idx_bricklink_price_history_set_number
     ON bricklink_price_history(set_number);
 CREATE INDEX IF NOT EXISTS idx_bricklink_monthly_sales_set_number
     ON bricklink_monthly_sales(set_number);
+CREATE INDEX IF NOT EXISTS idx_bricklink_store_listings_item_scraped
+    ON bricklink_store_listings(item_id, scraped_at);
+CREATE INDEX IF NOT EXISTS idx_bricklink_store_listings_set_number
+    ON bricklink_store_listings(set_number, scraped_at);
+CREATE INDEX IF NOT EXISTS idx_bricklink_store_listings_country
+    ON bricklink_store_listings(seller_country_code);
 CREATE INDEX IF NOT EXISTS idx_set_minifigures_set_number
     ON set_minifigures(set_number);
 CREATE INDEX IF NOT EXISTS idx_bricklink_items_watch_status
@@ -681,6 +760,12 @@ CREATE INDEX IF NOT EXISTS idx_gtrends_snapshots_set
     ON google_trends_snapshots(set_number, scraped_at);
 CREATE INDEX IF NOT EXISTS idx_gtrends_snapshots_scraped
     ON google_trends_snapshots(scraped_at);
+CREATE INDEX IF NOT EXISTS idx_reddit_mentions_set_created
+    ON reddit_mentions(set_number, created_at);
+CREATE INDEX IF NOT EXISTS idx_reddit_mentions_subreddit_created
+    ON reddit_mentions(subreddit, created_at);
+CREATE INDEX IF NOT EXISTS idx_reddit_mentions_post
+    ON reddit_mentions(subreddit, post_id);
 CREATE INDEX IF NOT EXISTS idx_scrape_tasks_status_priority
     ON scrape_tasks(status, priority, created_at);
 CREATE INDEX IF NOT EXISTS idx_scrape_tasks_set_type
@@ -702,6 +787,10 @@ CREATE INDEX IF NOT EXISTS idx_competition_listings_set_url
     ON shopee_competition_listings(set_number, product_url, scraped_at);
 CREATE INDEX IF NOT EXISTS idx_competition_listings_set_shop
     ON shopee_competition_listings(set_number, shop_id);
+CREATE INDEX IF NOT EXISTS idx_shopee_captcha_events_status
+    ON shopee_captcha_events(status, detected_at DESC);
+CREATE INDEX IF NOT EXISTS idx_shopee_captcha_events_job
+    ON shopee_captcha_events(job_id);
 CREATE INDEX IF NOT EXISTS idx_price_records_source_shopee
     ON price_records(set_number, recorded_at DESC)
     WHERE source = 'shopee';
@@ -733,6 +822,7 @@ ALL_DDL = [
     BRICKLINK_ITEMS_DDL,
     BRICKLINK_PRICE_HISTORY_DDL,
     BRICKLINK_MONTHLY_SALES_DDL,
+    BRICKLINK_STORE_LISTINGS_DDL,
     PRODUCT_ANALYSIS_DDL,
     IMAGE_ASSETS_DDL,
     MINIFIGURES_DDL,
@@ -741,6 +831,7 @@ ALL_DDL = [
     SHOPEE_PRODUCTS_DDL,
     SHOPEE_SATURATION_DDL,
     SHOPEE_SCRAPE_HISTORY_DDL,
+    SHOPEE_CAPTCHA_EVENTS_DDL,
     MIGHTYUTAN_PRODUCTS_DDL,
     MIGHTYUTAN_PRICE_HISTORY_DDL,
     HOBBYDIGI_PRODUCTS_DDL,
@@ -755,6 +846,8 @@ ALL_DDL = [
     KEEPA_SNAPSHOTS_DDL,
     GOOGLE_TRENDS_SNAPSHOTS_DDL,
     GOOGLE_TRENDS_THEME_SNAPSHOTS_DDL,
+    REDDIT_MENTIONS_DDL,
+    REDDIT_SCRAPE_CURSORS_DDL,
     SCRAPE_TASKS_DDL,
     SCRAPE_TASK_ATTEMPTS_DDL,
     ML_FEATURE_STORE_DDL,
@@ -897,6 +990,19 @@ def _migrate_ml_prediction_snapshots(conn: Any) -> None:
             )
 
 
+def _migrate_scrape_tasks(conn: Any) -> None:
+    """Add reason column to scrape_tasks."""
+    existing = {
+        row[0]
+        for row in conn.execute(
+            "SELECT column_name FROM information_schema.columns "
+            "WHERE table_name = 'scrape_tasks'"
+        ).fetchall()
+    }
+    if "reason" not in existing:
+        conn.execute("ALTER TABLE scrape_tasks ADD COLUMN reason VARCHAR")
+
+
 def _migrate_shopee_products(conn: Any) -> None:
     """Add is_sold_out column to shopee_products."""
     existing = {
@@ -1021,6 +1127,7 @@ _SEQUENCE_TABLE_MAP = [
     ("bricklink_items_id_seq", "bricklink_items"),
     ("bricklink_price_history_id_seq", "bricklink_price_history"),
     ("bricklink_monthly_sales_id_seq", "bricklink_monthly_sales"),
+    ("bricklink_store_listings_id_seq", "bricklink_store_listings"),
     ("product_analysis_id_seq", "product_analysis"),
     ("minifigures_id_seq", "minifigures"),
     ("set_minifigures_id_seq", "set_minifigures"),
@@ -1028,6 +1135,7 @@ _SEQUENCE_TABLE_MAP = [
     ("shopee_products_id_seq", "shopee_products"),
     ("shopee_saturation_id_seq", "shopee_saturation"),
     ("shopee_scrape_history_id_seq", "shopee_scrape_history"),
+    ("shopee_captcha_events_id_seq", "shopee_captcha_events"),
     ("mightyutan_products_id_seq", "mightyutan_products"),
     ("mightyutan_price_history_id_seq", "mightyutan_price_history"),
     ("hobbydigi_products_id_seq", "hobbydigi_products"),
@@ -1043,6 +1151,7 @@ _SEQUENCE_TABLE_MAP = [
     ("keepa_snapshots_id_seq", "keepa_snapshots"),
     ("google_trends_snapshots_id_seq", "google_trends_snapshots"),
     ("google_trends_theme_snapshots_id_seq", "google_trends_theme_snapshots"),
+    ("reddit_mentions_id_seq", "reddit_mentions"),
     ("scrape_tasks_id_seq", "scrape_tasks"),
     ("scrape_task_attempts_id_seq", "scrape_task_attempts"),
     ("ml_feature_store_id_seq", "ml_feature_store"),
@@ -1102,6 +1211,7 @@ def init_schema(conn: Any) -> None:
     _migrate_lego_items(conn)
     _migrate_brickeconomy_snapshots(conn)
     _migrate_ml_prediction_snapshots(conn)
+    _migrate_scrape_tasks(conn)
     _migrate_shopee_products(conn)
     _migrate_timestamp_to_timestamptz(conn)
     _migrate_date_columns(conn)
@@ -1165,6 +1275,7 @@ def get_table_stats(conn: Any) -> dict[str, int]:
         "keepa_snapshots",
         "google_trends_snapshots",
         "google_trends_theme_snapshots",
+        "reddit_mentions",
         "scrape_tasks",
         "shopee_competition_snapshots",
         "shopee_competition_listings",

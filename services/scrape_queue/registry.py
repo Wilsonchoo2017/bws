@@ -17,6 +17,7 @@ the dispatcher.
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 
 from services.scrape_queue.models import Executor, TaskType, TaskTypeConfig
 
@@ -41,11 +42,17 @@ def executor(
     concurrency: int = 1,
     timeout: int = 300,
     browser_profile: str | None = None,
+    cooldown_check: Callable[[], float] | None = None,
 ):
     """Register a function as the executor for *task_type*.
 
     The function must satisfy the :class:`Executor` protocol (see
     ``models.py``).
+
+    ``cooldown_check`` (optional) returns the seconds remaining until
+    the source is available again; the dispatcher worker calls it
+    *before* claiming a task so a long cooldown that survives a process
+    restart doesn't get burned by claim → cooldown → requeue noise.
     """
     def decorator(fn: Executor) -> Executor:
         if task_type in REGISTRY:
@@ -61,6 +68,7 @@ def executor(
             concurrency=concurrency,
             timeout_seconds=timeout,
             browser_profile=browser_profile,
+            cooldown_check=cooldown_check,
         )
         return fn
 

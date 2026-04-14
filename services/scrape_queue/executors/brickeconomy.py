@@ -26,7 +26,19 @@ class _FetchContext:
     last_error: str | None = None
 
 
-@executor(TaskType.BRICKECONOMY, concurrency=3, timeout=300, browser_profile="brickeconomy-profile")
+def _brickeconomy_cooldown_remaining() -> float:
+    from config.settings import BRICKECONOMY_RATE_LIMITER
+
+    return BRICKECONOMY_RATE_LIMITER.cooldown_remaining()
+
+
+@executor(
+    TaskType.BRICKECONOMY,
+    concurrency=3,
+    timeout=300,
+    browser_profile="brickeconomy-profile",
+    cooldown_check=_brickeconomy_cooldown_remaining,
+)
 def execute_brickeconomy(
     conn: Any,
     set_number: str,
@@ -60,7 +72,7 @@ def execute_brickeconomy(
 
     # Mutable container for fetch context -- avoids nonlocal mutation.
     # The list holds exactly one _FetchContext that gets replaced (not mutated).
-    ctx_holder: list[_FetchContext] = [_FetchContext()]
+    ctx_holder: list[_FetchContext] = [_FetchContext(), _FetchContext()]  # [ctx, _timeout_marker]
 
     def _fetch_be(sn: str):
         from services.brickeconomy.parser import is_excluded_packaging
@@ -68,11 +80,15 @@ def execute_brickeconomy(
         from services.items.repository import delete_item
 
         try:
-            scrape_result = browser.run(scrape_with_search, sn)
+            scrape_result = browser.run(scrape_with_search, sn, timeout=120)
         except TimeoutError:
-            error_msg = f"Browser timed out for {sn}"
-            logger.warning("BrickEconomy browser timed out for %s (90s) -- restarting browser", sn)
+            error_msg = f"Browser timed out for {sn} after 120s"
+            logger.warning(
+                "BrickEconomy browser timed out for %s (120s) -- marking permanent fail",
+                sn,
+            )
             ctx_holder[0] = _FetchContext(last_error=error_msg)
+            ctx_holder[1] = _FetchContext(last_error="TIMEOUT")  # signal permanent
             browser.restart()
             return make_failed_result(SourceId.BRICKECONOMY, error_msg)
         except Exception as exc:
@@ -131,14 +147,17 @@ def execute_brickeconomy(
             if fr.status.value != "found"
         ]
         error_detail = ctx_holder[0].last_error or "unknown"
+        timed_out = ctx_holder[1].last_error == "TIMEOUT"
         logger.warning(
-            "BrickEconomy for %s: 0 fields -- %s (fields: %s) -- restarting browser",
+            "BrickEconomy for %s: 0 fields -- %s (fields: %s)%s",
             set_number, error_detail, ", ".join(failed_fields[:5]),
+            " -- permanent fail (timeout)" if timed_out else " -- restarting browser",
         )
         browser.restart()
         return ExecutorResult.fail(
             f"BrickEconomy returned no data (0 fields): {error_detail}",
-            category=ErrorCategory.BROWSER_CRASH,
+            category=ErrorCategory.TIMEOUT if timed_out else ErrorCategory.BROWSER_CRASH,
+            permanent=timed_out,
         )
 
     store_enrichment_result(conn, result)

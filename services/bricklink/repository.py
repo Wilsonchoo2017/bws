@@ -4,6 +4,7 @@ Pure functions for CRUD operations on Bricklink data in the database.
 """
 
 import json
+import statistics
 from datetime import UTC, datetime, timedelta
 
 from db.queries import parse_timestamp
@@ -396,6 +397,71 @@ def upsert_monthly_sales(
             [item_id, sale.year, sale.month, sale.condition.value, *params],
         )
 
+        count += 1
+
+    return count
+
+
+def insert_store_listings_snapshot(
+    conn: Any,
+    item_id: str,
+    listings: list,
+    *,
+    scraped_at: datetime | None = None,
+) -> int:
+    """Append a snapshot of per-store listings for a BrickLink item.
+
+    Each call inserts a fresh batch of rows (append-only) tagged with the
+    same ``scraped_at`` timestamp so we can analyse historical country /
+    shipping patterns later.
+
+    Args:
+        conn: DB connection.
+        item_id: BrickLink item id, e.g. "10857-1".
+        listings: Iterable of ``BricklinkListing`` dataclasses.
+        scraped_at: Batch timestamp; defaults to now.
+
+    Returns:
+        Number of rows inserted.
+    """
+    if not listings:
+        return 0
+
+    ts = (scraped_at or datetime.now(tz=_UTC)).isoformat()
+    count = 0
+
+    for listing in listings:
+        price_cents = listing.price.amount if listing.price is not None else None
+        currency = listing.price.currency if listing.price is not None else None
+        condition_value = (
+            listing.condition.value if listing.condition is not None else None
+        )
+        class_names_str = ",".join(listing.row_class_names) if listing.row_class_names else None
+
+        conn.execute(
+            """INSERT INTO bricklink_store_listings (
+                   item_id, store_id, store_name, seller_country_code,
+                   seller_country_name, condition, quantity,
+                   price_cents, currency, ships_to_viewer,
+                   row_class_names, scraped_at
+               ) VALUES (
+                   ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+               )""",
+            [
+                item_id,
+                listing.store_id,
+                listing.store_name,
+                listing.seller_country_code,
+                listing.seller_country_name,
+                condition_value,
+                listing.quantity,
+                price_cents,
+                currency,
+                listing.ships_to_my,
+                class_names_str,
+                ts,
+            ],
+        )
         count += 1
 
     return count
@@ -809,6 +875,113 @@ def get_set_minifig_value_history(
         }
         for row in results
     ]
+
+
+ASIA_COUNTRY_CODES: frozenset[str] = frozenset({
+    "AF", "AM", "AZ", "BH", "BD", "BT", "BN", "KH", "CN", "CY",
+    "GE", "HK", "IN", "ID", "IR", "IQ", "IL", "JP", "JO", "KZ",
+    "KW", "KG", "LA", "LB", "MO", "MY", "MV", "MN", "MM", "NP",
+    "KP", "OM", "PK", "PS", "PH", "QA", "SA", "SG", "KR", "LK",
+    "SY", "TW", "TJ", "TH", "TL", "TR", "TM", "AE", "UZ", "VN", "YE",
+})
+
+
+def get_store_listing_country_stats(conn: Any, item_id: str) -> dict | None:
+    """Aggregate the latest store-listing snapshot by condition.
+
+    Loads the most recent snapshot batch for ``item_id`` and groups
+    rows into ``new`` and ``used`` listings. For each grouping it
+    computes Asia-only stats (count, min, max, mean, median) plus the
+    cheapest Asian shop and the cheapest global shop.
+
+    Returns ``None`` when no snapshot exists.
+    """
+    latest = conn.execute(
+        "SELECT MAX(scraped_at) FROM bricklink_store_listings WHERE item_id = ?",
+        [item_id],
+    ).fetchone()
+    if not latest or latest[0] is None:
+        return None
+    scraped_at = latest[0]
+
+    rows = conn.execute(
+        """SELECT condition, seller_country_code, seller_country_name,
+                  store_id, store_name, price_cents, currency, quantity
+           FROM bricklink_store_listings
+           WHERE item_id = ? AND scraped_at = ?""",
+        [item_id, scraped_at],
+    ).fetchall()
+
+    grouped: dict[str, list[dict]] = {"new": [], "used": []}
+    for row in rows:
+        condition = (row[0] or "").lower()
+        if condition not in grouped:
+            continue
+        if row[5] is None:
+            continue
+        grouped[condition].append({
+            "country_code": row[1],
+            "country_name": row[2],
+            "store_id": row[3],
+            "store_name": row[4],
+            "price_cents": int(row[5]),
+            "currency": row[6],
+            "quantity": int(row[7]) if row[7] is not None else None,
+        })
+
+    return {
+        "scraped_at": str(scraped_at),
+        "new": _build_listing_grouping(grouped["new"]),
+        "used": _build_listing_grouping(grouped["used"]),
+    }
+
+
+def _build_listing_grouping(listings: list[dict]) -> dict | None:
+    if not listings:
+        return None
+
+    asia = [
+        l for l in listings
+        if (l["country_code"] or "").upper() in ASIA_COUNTRY_CODES
+    ]
+    global_lowest_row = min(listings, key=lambda x: x["price_cents"])
+
+    result: dict[str, Any] = {
+        "global_count": len(listings),
+        "global_lowest": _shop_summary(global_lowest_row),
+        "asia": None,
+    }
+
+    if asia:
+        prices = [l["price_cents"] for l in asia]
+        currencies = [l["currency"] for l in asia if l["currency"]]
+        currency = (
+            max(set(currencies), key=currencies.count)
+            if currencies else None
+        )
+        result["asia"] = {
+            "count": len(asia),
+            "min_cents": min(prices),
+            "max_cents": max(prices),
+            "mean_cents": int(round(statistics.fmean(prices))),
+            "median_cents": int(round(statistics.median(prices))),
+            "currency": currency,
+            "lowest_shop": _shop_summary(min(asia, key=lambda x: x["price_cents"])),
+        }
+
+    return result
+
+
+def _shop_summary(listing: dict) -> dict:
+    return {
+        "country_code": listing["country_code"],
+        "country_name": listing["country_name"],
+        "store_id": listing["store_id"],
+        "store_name": listing["store_name"],
+        "price_cents": listing["price_cents"],
+        "currency": listing["currency"],
+        "quantity": listing["quantity"],
+    }
 
 
 def update_watch_status(

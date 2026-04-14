@@ -5,8 +5,7 @@ import { Button } from '@/components/ui/button';
 import { FILTER_GROUPS, type FilterKey } from './filter-utils';
 
 const COHORT_KEYS = new Set([
-  'cohort_half_year', 'cohort_year', 'cohort_theme',
-  'cohort_year_theme', 'cohort_price_tier', 'cohort_piece_group',
+  'cohort_half_year', 'cohort_theme', 'cohort_price_tier',
 ]);
 
 interface FilterBarProps {

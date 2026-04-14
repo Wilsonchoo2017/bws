@@ -21,6 +21,7 @@ from config.ml import MLPipelineConfig
 from services.ml.growth.classifier import (
     TrainedClassifier,
     predict_avoid_proba,
+    predict_class_proba,
 )
 from services.ml.growth.types import GrowthPrediction, TrainedEnsemble, TrainedGrowthModel
 
@@ -34,39 +35,64 @@ AVOID_GATE_THRESHOLD = 0.5
 # Minimum predicted growth to trigger a BUY signal
 BUY_HURDLE_PCT = 8.0
 
+# P(great_buy) threshold for GREAT category
+GREAT_BUY_THRESHOLD = 0.6
 
-def _is_keepa_bl_model(tier1: TrainedGrowthModel) -> bool:
+# P(great_buy) threshold for GOOD category (classifier-only mode)
+GOOD_BUY_THRESHOLD = 0.10
+
+# Regressor fallback: predicted growth >= this for GOOD category
+GOOD_BUY_HURDLE_PCT = 10.0
+
+
+def _is_keepa_bl_model(tier1: TrainedGrowthModel | None) -> bool:
     """Detect if this is a Keepa+BL model by model_name."""
+    if tier1 is None:
+        return False
     return tier1.model_name == "lightgbm_keepa_bl"
 
 
 def predict_growth(
     candidates: pd.DataFrame,
     keepa_df: pd.DataFrame,
-    tier1: TrainedGrowthModel,
+    tier1: TrainedGrowthModel | None,
     tier2: TrainedGrowthModel | None,
     theme_stats: dict,
     subtheme_stats: dict,
     *,
     classifier: TrainedClassifier | None = None,
     ensemble: TrainedEnsemble | None = None,
+    great_buy_classifier: TrainedClassifier | None = None,
+    gt_df: pd.DataFrame | None = None,
 ) -> list[GrowthPrediction]:
     """Generate growth predictions with buy/avoid signals.
 
-    Automatically detects model type (legacy_be vs keepa_bl) and routes
-    to the correct feature engineering pipeline.
+    Supports two modes:
+    - Classifier-only (tier1=None): categories from P(avoid) + P(great_buy)
+    - Full model (tier1 present): regressor + classifiers
     """
     if candidates.empty:
         return []
 
+    # Classifier-only mode: no regressor, categories from classifiers
+    if tier1 is None:
+        df_feat = _engineer_keepa_bl(candidates, keepa_df, gt_df=gt_df, theme_stats=theme_stats)
+        return _predict_classifier_only(
+            df_feat, classifier, great_buy_classifier,
+        )
+
     if _is_keepa_bl_model(tier1):
-        df_feat = _engineer_keepa_bl(candidates, keepa_df)
+        df_feat = _engineer_keepa_bl(candidates, keepa_df, gt_df=gt_df, theme_stats=theme_stats)
     else:
         df_feat = _engineer_legacy_be(candidates, keepa_df, theme_stats, subtheme_stats)
 
     model_obj = tier1
     is_ratio_target = _is_keepa_bl_model(tier1)
-    predictions = _predict_batch(df_feat, model_obj, classifier, ratio_to_growth=is_ratio_target)
+    predictions = _predict_batch(
+        df_feat, model_obj, classifier,
+        ratio_to_growth=is_ratio_target,
+        great_buy_classifier=great_buy_classifier,
+    )
 
     return sorted(predictions, key=lambda p: p.predicted_growth_pct, reverse=True)
 
@@ -74,10 +100,32 @@ def predict_growth(
 def _engineer_keepa_bl(
     candidates: pd.DataFrame,
     keepa_df: pd.DataFrame,
+    *,
+    gt_df: pd.DataFrame | None = None,
+    theme_stats: dict | None = None,
 ) -> pd.DataFrame:
-    """Feature engineering for Keepa+BL model (Exp 31)."""
-    from services.ml.growth.keepa_features import engineer_keepa_bl_features
-    return engineer_keepa_bl_features(candidates, keepa_df)
+    """Feature engineering for Keepa+BL model (Exp 31) + GT (Exp 32) + theme (Exp 33)."""
+    from services.ml.growth.keepa_features import (
+        GT_FEATURES,
+        engineer_gt_features,
+        engineer_keepa_bl_features,
+    )
+
+    df_feat = engineer_keepa_bl_features(
+        candidates, keepa_df, theme_stats=theme_stats if theme_stats else None,
+    )
+
+    if gt_df is not None and not gt_df.empty:
+        gt_feat = engineer_gt_features(gt_df, candidates)
+        df_feat = df_feat.merge(gt_feat, on="set_number", how="left")
+
+    for col in GT_FEATURES:
+        if col not in df_feat.columns:
+            df_feat[col] = 0.0
+        else:
+            df_feat[col] = df_feat[col].fillna(0.0)
+
+    return df_feat
 
 
 def _engineer_legacy_be(
@@ -94,12 +142,94 @@ def _engineer_legacy_be(
     return engineer_keepa_features(df_feat, keepa_df)
 
 
+def _predict_classifier_only(
+    df_feat: pd.DataFrame,
+    classifier: TrainedClassifier | None,
+    great_buy_classifier: TrainedClassifier | None,
+) -> list[GrowthPrediction]:
+    """Classifier-only predictions: categories from P(avoid) + P(great_buy).
+
+    No regressor -- growth_pct is set to 0. Buy categories:
+      WORST: P(avoid) >= avoid_threshold
+      GREAT: P(great_buy) >= great_threshold
+      GOOD:  P(great_buy) >= GOOD_BUY_THRESHOLD (but below great)
+      SKIP:  everything else
+    """
+    if df_feat.empty:
+        return []
+
+    # P(avoid)
+    avoid_probs = np.zeros(len(df_feat))
+    if classifier is not None:
+        clf_feats = [f for f in classifier.feature_names if f in df_feat.columns]
+        X_clf = df_feat[clf_feats].copy()
+        for c in X_clf.columns:
+            X_clf[c] = pd.to_numeric(X_clf[c], errors="coerce")
+        clf_fill = dict(classifier.fill_values)
+        for f in clf_feats:
+            X_clf[f] = X_clf[f].fillna(clf_fill.get(f, 0))
+        for f in classifier.feature_names:
+            if f not in X_clf.columns:
+                X_clf[f] = clf_fill.get(f, 0)
+        X_clf = X_clf[list(classifier.feature_names)]
+        avoid_probs = predict_avoid_proba(X_clf, classifier)
+
+    # P(great_buy)
+    great_buy_probs = np.zeros(len(df_feat))
+    if great_buy_classifier is not None:
+        gb_feats = [f for f in great_buy_classifier.feature_names if f in df_feat.columns]
+        X_gb = df_feat[gb_feats].copy()
+        for c in X_gb.columns:
+            X_gb[c] = pd.to_numeric(X_gb[c], errors="coerce")
+        gb_fill = dict(great_buy_classifier.fill_values)
+        for f in gb_feats:
+            X_gb[f] = X_gb[f].fillna(gb_fill.get(f, 0))
+        for f in great_buy_classifier.feature_names:
+            if f not in X_gb.columns:
+                X_gb[f] = gb_fill.get(f, 0)
+        X_gb = X_gb[list(great_buy_classifier.feature_names)]
+        great_buy_probs = predict_class_proba(X_gb, great_buy_classifier)
+
+    avoid_threshold = classifier.decision_threshold if classifier else AVOID_GATE_THRESHOLD
+    great_threshold = great_buy_classifier.decision_threshold if great_buy_classifier else GREAT_BUY_THRESHOLD
+
+    predictions: list[GrowthPrediction] = []
+    for i, (_, row) in enumerate(df_feat.iterrows()):
+        ap = float(avoid_probs[i])
+        gbp = float(great_buy_probs[i])
+
+        if ap >= avoid_threshold:
+            category = "WORST"
+        elif gbp >= great_threshold:
+            category = "GREAT"
+        elif gbp >= GOOD_BUY_THRESHOLD:
+            category = "GOOD"
+        else:
+            category = "SKIP"
+
+        predictions.append(GrowthPrediction(
+            set_number=str(row.get("set_number", "")),
+            title=str(row.get("title", "")),
+            theme=str(row.get("theme", "")),
+            predicted_growth_pct=0.0,
+            confidence="high" if classifier and great_buy_classifier else "low",
+            tier=1,
+            avoid_probability=ap,
+            great_buy_probability=gbp,
+            buy_category=category,
+            raw_growth_pct=0.0,
+        ))
+
+    return sorted(predictions, key=lambda p: p.great_buy_probability or 0, reverse=True)
+
+
 def _predict_batch(
     df_feat: pd.DataFrame,
     model_obj: TrainedGrowthModel,
     classifier: TrainedClassifier | None,
     *,
     ratio_to_growth: bool = False,
+    great_buy_classifier: TrainedClassifier | None = None,
 ) -> list[GrowthPrediction]:
     """Predictions for all sets: regressor growth + classifier gate + buy signal.
 
@@ -107,6 +237,9 @@ def _predict_batch(
         ratio_to_growth: If True, model predicts BL/RRP ratio and we convert
             to growth %: growth_pct = (ratio - 1) * 100
     """
+    if df_feat.empty:
+        return []
+
     fill_map = dict(model_obj.fill_values)
     feat_names = [f for f in model_obj.feature_names if f in df_feat.columns]
     if len(feat_names) < len(model_obj.feature_names) * 0.5:
@@ -172,6 +305,23 @@ def _predict_batch(
 
         avoid_probs = predict_avoid_proba(X_clf, classifier)
 
+    # Great-buy classifier: P(growth >= 20%)
+    great_buy_probs = None
+    if great_buy_classifier is not None:
+        gb_feats = [f for f in great_buy_classifier.feature_names if f in df_feat.columns]
+        X_gb = df_feat.loc[X_batch.index, gb_feats].copy()
+        for c in X_gb.columns:
+            X_gb[c] = pd.to_numeric(X_gb[c], errors="coerce")
+        gb_fill = dict(great_buy_classifier.fill_values)
+        for f in gb_feats:
+            X_gb[f] = X_gb[f].fillna(gb_fill.get(f, 0))
+        for f in great_buy_classifier.feature_names:
+            if f not in X_gb.columns:
+                X_gb[f] = gb_fill.get(f, 0)
+        X_gb = X_gb[list(great_buy_classifier.feature_names)]
+
+        great_buy_probs = predict_class_proba(X_gb, great_buy_classifier)
+
     # Conformal intervals
     intervals: list | None = None
     if model_obj.conformal_calibration is not None:
@@ -210,6 +360,20 @@ def _predict_batch(
         coverage = 1 - (n_missing_per_row.iloc[i] / n_feat) if n_feat > 0 else 0
         growth_i = float(predicted_growth[i])
         ap = float(avoid_probs[i]) if avoid_probs is not None else None
+        gbp = float(great_buy_probs[i]) if great_buy_probs is not None else None
+
+        # Buy category from combined classifier signals
+        # Use auto-tuned thresholds from classifiers when available
+        avoid_threshold = classifier.decision_threshold if classifier is not None else AVOID_GATE_THRESHOLD
+        great_threshold = great_buy_classifier.decision_threshold if great_buy_classifier is not None else GREAT_BUY_THRESHOLD
+        if ap is not None and ap >= avoid_threshold:
+            category = "WORST"
+        elif gbp is not None and gbp >= great_threshold:
+            category = "GREAT"
+        elif growth_i >= GOOD_BUY_HURDLE_PCT:
+            category = "GOOD"
+        else:
+            category = "SKIP"
 
         # Confidence from feature coverage
         if coverage > 0.8:
@@ -248,6 +412,8 @@ def _predict_batch(
             prediction_interval=intervals[i] if intervals else None,
             shap_base_value=base_val,
             avoid_probability=ap,
+            great_buy_probability=gbp,
+            buy_category=category,
             raw_growth_pct=round(growth_i, 1),
             kelly_fraction=kelly_frac_i,
             win_probability=win_prob_i,

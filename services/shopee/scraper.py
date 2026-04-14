@@ -2,21 +2,27 @@
 
 
 import asyncio
-import json
 import logging
 import secrets
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import urlparse
 
 from playwright.async_api import Page, TimeoutError as PlaywrightTimeout
 
+from config.settings import SHOPEE_CONFIG
 from db.connection import get_connection
 from db.schema import init_schema
 from services.shopee.auth import is_logged_in, login
 from services.shopee.browser import shopee_browser, human_delay, new_page
+from services.shopee.captcha_detection import (
+    CaptchaSignals,
+    detect_captcha,
+    save_snapshot,
+    snapshot_relative_path,
+)
+from services.shopee.captcha_events import record_event as record_captcha_event
 from services.shopee.humanize import random_click, random_click_element, random_type
 from services.shopee.parser import ShopeeProduct, parse_search_results
 from services.shopee.popups import (
@@ -32,87 +38,42 @@ logger = logging.getLogger("bws.shopee.scraper")
 
 SHOPEE_BASE = "https://shopee.com.my"
 
-# Directory where captcha snapshots are stored for future analysis
-_SNAPSHOT_DIR = Path(__file__).resolve().parent / "captcha_snapshots"
 
-# URL fragments / page indicators that signal a captcha or verification challenge
-_CAPTCHA_URL_PATTERNS: tuple[str, ...] = (
-    "/verify/",
-    "/captcha",
-    "security-check",
-    "challenge",
-)
+class CaptchaPendingError(RuntimeError):
+    """Raised when a captcha is detected and manual verification is required.
 
-
-async def _save_snapshot(page: Page, *, reason: str = "unknown") -> Path | None:
-    """Save a full page snapshot (screenshot + HTML + metadata) for analysis.
-
-    Snapshots are stored under services/shopee/captcha_snapshots/ with a
-    timestamp prefix so they sort chronologically.
-
-    Returns the snapshot directory path, or None on failure.
+    The scraper persists a shopee_captcha_events row and raises this so the
+    worker can return the job to the queue (status=blocked_verify) instead
+    of blocking a worker slot for minutes.
     """
-    try:
-        _SNAPSHOT_DIR.mkdir(parents=True, exist_ok=True)
-        ts = datetime.now(tz=timezone.utc).strftime("%Y%m%d_%H%M%S")
-        snap_dir = _SNAPSHOT_DIR / ts
-        snap_dir.mkdir(parents=True, exist_ok=True)
 
-        # Screenshot
-        await page.screenshot(path=str(snap_dir / "screenshot.png"), full_page=True)
-
-        # Full HTML
-        html = await page.content()
-        (snap_dir / "page.html").write_text(html, encoding="utf-8")
-
-        # Metadata
-        meta = {
-            "url": page.url,
-            "timestamp": datetime.now(tz=timezone.utc).isoformat(),
-            "reason": reason,
-            "title": await page.title(),
-        }
-        (snap_dir / "meta.json").write_text(
-            json.dumps(meta, indent=2), encoding="utf-8"
+    def __init__(
+        self,
+        event_id: int,
+        *,
+        source_url: str,
+        snapshot_dir: str,
+        reason: str,
+    ) -> None:
+        super().__init__(
+            f"Shopee captcha detected (event={event_id}, reason={reason})"
         )
-
-        logger.info("Captcha snapshot saved to %s", snap_dir)
-        return snap_dir
-    except Exception:
-        logger.exception("Failed to save captcha snapshot")
-        return None
+        self.event_id = event_id
+        self.source_url = source_url
+        self.snapshot_dir = snapshot_dir
+        self.reason = reason
 
 
-def _is_captcha_url(url: str) -> bool:
-    """Return True if the URL looks like a Shopee captcha/verification page."""
-    lower = url.lower()
-    return any(pat in lower for pat in _CAPTCHA_URL_PATTERNS)
-
-
-async def _detect_captcha_page(page: Page) -> bool:
-    """Check both URL and page content for captcha indicators."""
-    if _is_captcha_url(page.url):
-        return True
-    # Some captcha pages keep the original URL but inject a challenge overlay
-    has_captcha_el = await page.evaluate("""() => {
-        const sel = [
-            '[class*="captcha"]', '[id*="captcha"]',
-            '[class*="verify"]', '[id*="verify"]',
-            'iframe[src*="captcha"]', 'iframe[src*="challenge"]',
-        ];
-        return sel.some(s => document.querySelector(s) !== null);
-    }""")
-    return bool(has_captcha_el)
-
-
-def _notify_shopee_captcha() -> None:
+def _notify_shopee_captcha(event_id: int | None = None) -> None:
     """Send ntfy alert so user can come solve the captcha."""
+    suffix = f" (event #{event_id})" if event_id is not None else ""
     send_notification(
         NtfyMessage(
             title="Shopee: CAPTCHA detected",
             message=(
-                "Shopee scraper hit a CAPTCHA / verification page. "
-                "Please open the browser window and solve it within 3 minutes."
+                "Shopee scraper hit a CAPTCHA / verification page"
+                f"{suffix}. Open the Operations page and click "
+                "'Verify now' to solve it."
             ),
             priority=5,
             tags=("warning", "robot"),
@@ -121,91 +82,127 @@ def _notify_shopee_captcha() -> None:
     )
 
 
-async def _wait_for_captcha(
-    page: Page,
+def _record_event_safely(
     *,
-    timeout_s: int = 180,
-    on_progress: Callable[[str], None] | None = None,
-) -> bool:
-    """If the page is a captcha, notify the user and wait for resolution.
-
-    Returns True if captcha was detected (and either solved or timed out).
-    Returns False if no captcha was detected.
-    """
-    if not await _detect_captcha_page(page):
-        return False
-
-    logger.warning("Captcha detected at %s — sending ntfy and waiting", page.url)
-    await _save_snapshot(page, reason="captcha_detected")
-    if on_progress:
-        on_progress("CAPTCHA detected — waiting for you to solve it...")
-    _notify_shopee_captcha()
-
-    # Poll every 2 seconds until the captcha is gone or timeout
-    polls = timeout_s // 2
-    for i in range(polls):
-        await human_delay(min_ms=1_800, max_ms=2_200)
-        if not await _detect_captcha_page(page):
-            elapsed = (i + 1) * 2
-            logger.info("Captcha resolved after ~%ds", elapsed)
-            if on_progress:
-                on_progress(f"CAPTCHA solved after ~{elapsed}s — resuming scrape")
-            # Small grace period for page to finish loading
-            await human_delay(min_ms=1_500, max_ms=3_000)
-            return True
-
-    logger.error("Captcha not solved within %ds", timeout_s)
-    if on_progress:
-        on_progress(f"CAPTCHA not solved within {timeout_s}s — aborting")
-    return True
+    source_url: str,
+    snapshot_dir: Path | None,
+    reason: str,
+    signals: CaptchaSignals | None,
+    job_id: str | None,
+) -> int | None:
+    """Persist a captcha event. Never raises — returns None on failure."""
+    if snapshot_dir is None:
+        return None
+    try:
+        conn = get_connection()
+        init_schema(conn)
+        event_id = record_captcha_event(
+            conn,
+            source_url=source_url,
+            snapshot_dir=snapshot_relative_path(snapshot_dir),
+            detection_reason=reason,
+            detection_signals=signals.to_dict() if signals else None,
+            job_id=job_id,
+        )
+        conn.close()
+        return event_id
+    except Exception:
+        logger.exception("Failed to record captcha event")
+        return None
 
 
-async def _handle_click_timeout(
+async def _handle_captcha_detected(
     page: Page,
-    error: Exception,
+    signals: CaptchaSignals,
     *,
+    source_url: str,
+    job_id: str | None,
     on_progress: Callable[[str], None] | None = None,
-) -> bool:
-    """Handle a Playwright click/interaction timeout as a potential captcha.
+) -> None:
+    """Persist event + notify, then either raise or block-wait (legacy mode).
 
-    Saves a snapshot for analysis, then triggers the captcha wait flow.
-    Returns True if it looks like a captcha (waited for user), False otherwise.
+    If SHOPEE_CONFIG.inline_captcha_wait is False (default), raises
+    CaptchaPendingError after recording the event. Otherwise, polls for up to
+    ~3 minutes waiting for the user to solve it inline.
     """
-    err_msg = str(error).lower()
-    if "timeout" not in err_msg:
-        return False
-
-    logger.warning("Click timeout — possible captcha. Saving snapshot...")
-    await _save_snapshot(page, reason=f"click_timeout: {error}")
-
-    # Notify and wait regardless of detection — the timeout itself is the signal
+    reason = signals.reason
+    logger.warning(
+        "Captcha detected at %s (signals=%s)", signals.url or page.url, reason,
+    )
+    snap_dir = await save_snapshot(
+        page,
+        reason=f"captcha_detected:{reason}",
+        signals=signals,
+        job_id=job_id,
+    )
+    event_id = _record_event_safely(
+        source_url=source_url,
+        snapshot_dir=snap_dir,
+        reason=reason,
+        signals=signals,
+        job_id=job_id,
+    )
+    _notify_shopee_captcha(event_id)
     if on_progress:
-        on_progress("Interaction blocked — possible CAPTCHA. Waiting for you...")
-    _notify_shopee_captcha()
+        on_progress(
+            "CAPTCHA detected — open Operations page to verify"
+            if not SHOPEE_CONFIG.inline_captcha_wait
+            else "CAPTCHA detected — waiting for you to solve it..."
+        )
 
-    # Wait up to 3 min for page to become interactive again
+    if not SHOPEE_CONFIG.inline_captcha_wait:
+        raise CaptchaPendingError(
+            event_id if event_id is not None else 0,
+            source_url=source_url,
+            snapshot_dir=str(snap_dir) if snap_dir else "",
+            reason=reason,
+        )
+
+    # Legacy inline-wait path: poll until captcha is gone
     polls = 180 // 2
     for i in range(polls):
         await human_delay(min_ms=1_800, max_ms=2_200)
-        # Consider resolved if URL changed away from captcha,
-        # or if the original page elements become interactable
-        if not await _detect_captcha_page(page):
-            # Try a basic interaction to confirm page is usable
-            try:
-                await page.evaluate("document.title")
-                elapsed = (i + 1) * 2
-                logger.info("Page responsive after ~%ds", elapsed)
-                if on_progress:
-                    on_progress(f"Page unblocked after ~{elapsed}s — resuming")
-                await human_delay(min_ms=1_500, max_ms=3_000)
-                return True
-            except Exception:
-                continue
+        follow_up = await detect_captcha(page)
+        if not follow_up.detected:
+            elapsed = (i + 1) * 2
+            logger.info("Captcha resolved inline after ~%ds", elapsed)
+            if on_progress:
+                on_progress(f"CAPTCHA solved after ~{elapsed}s — resuming scrape")
+            await human_delay(min_ms=1_500, max_ms=3_000)
+            return
 
-    logger.error("Page still blocked after 3 minutes")
-    if on_progress:
-        on_progress("Page still blocked after 3 minutes — aborting")
-    return True
+    logger.error("Captcha not solved within 180s (inline mode)")
+    raise CaptchaPendingError(
+        event_id if event_id is not None else 0,
+        source_url=source_url,
+        snapshot_dir=str(snap_dir) if snap_dir else "",
+        reason=reason,
+    )
+
+
+async def _wait_for_captcha(
+    page: Page,
+    *,
+    source_url: str = SHOPEE_BASE,
+    job_id: str | None = None,
+    on_progress: Callable[[str], None] | None = None,
+) -> bool:
+    """Check for captcha; if present, record the event and notify.
+
+    Default behaviour (inline_captcha_wait=False) raises CaptchaPendingError.
+    Legacy behaviour blocks in-process for up to 3 minutes.
+
+    Returns True if no captcha detected (so scraping can continue), False
+    only in legacy mode when a captcha was seen-and-cleared inline.
+    """
+    signals = await detect_captcha(page)
+    if not signals.detected:
+        return True
+    await _handle_captcha_detected(
+        page, signals,
+        source_url=source_url, job_id=job_id, on_progress=on_progress,
+    )
+    return False
 
 # Search bar selectors (multiple fallbacks)
 SEL_SEARCH_INPUTS: tuple[str, ...] = (
@@ -269,7 +266,7 @@ async def search_shopee(
             await human_delay(min_ms=2_000, max_ms=4_000)
 
             # Check for captcha right after landing
-            await _wait_for_captcha(page)
+            await _wait_for_captcha(page, source_url=SHOPEE_BASE)
 
             # Dismiss popups first (promo modal blocks everything)
             await dismiss_popups_loop(page, interval_ms=2_000, max_rounds=5)
@@ -317,7 +314,7 @@ async def search_shopee(
                 pass
 
             # Check for captcha after search redirect
-            await _wait_for_captcha(page)
+            await _wait_for_captcha(page, source_url=SHOPEE_BASE)
             await dismiss_popups(page)
 
             # Parse product cards
@@ -343,6 +340,7 @@ async def scrape_shop_page(
     max_items: int = 200,
     max_pages: int = 20,
     on_progress: Callable[[str], None] | None = None,
+    job_id: str | None = None,
 ) -> ShopeeScrapeResult:
     """Scrape all products from a Shopee shop/collection page.
 
@@ -354,9 +352,14 @@ async def scrape_shop_page(
         url: Full Shopee URL to scrape
         max_items: Maximum products to extract
         max_pages: Maximum number of pages to scrape
+        job_id: Optional queue job id for correlating captcha events
 
     Returns:
         ShopeeScrapeResult with parsed products or error
+
+    Raises:
+        CaptchaPendingError: propagated (not wrapped) so the worker can
+            return the job to the queue in blocked_verify state.
     """
     try:
         async with shopee_browser() as browser:
@@ -367,7 +370,7 @@ async def scrape_shop_page(
             # _scrape_all_pages, so nothing is lost if the job times out.
             items = await _do_shop_scrape(
                 page, url, max_items=max_items, max_pages=max_pages,
-                on_progress=on_progress,
+                on_progress=on_progress, job_id=job_id,
             )
 
             # Record the overall scrape success
@@ -385,6 +388,9 @@ async def scrape_shop_page(
                 items=items,
             )
 
+    except CaptchaPendingError:
+        _save_scrape_error(url, "captcha_pending — awaiting manual verification")
+        raise
     except Exception as e:
         _save_scrape_error(url, str(e))
         return ShopeeScrapeResult(
@@ -401,6 +407,7 @@ async def _do_shop_scrape(
     max_items: int = 200,
     max_pages: int = 20,
     on_progress: Callable[[str], None] | None = None,
+    job_id: str | None = None,
     _retried: bool = False,
 ) -> tuple[ShopeeProduct, ...]:
     """Inner scrape logic for a shop page, with captcha-aware retry.
@@ -416,7 +423,9 @@ async def _do_shop_scrape(
         await human_delay(min_ms=2_000, max_ms=4_000)
 
         # Check for captcha right after landing
-        await _wait_for_captcha(page, on_progress=on_progress)
+        await _wait_for_captcha(
+            page, source_url=url, job_id=job_id, on_progress=on_progress,
+        )
 
         await dismiss_popups_loop(page, interval_ms=2_000, max_rounds=5)
         await select_english(page)
@@ -432,7 +441,9 @@ async def _do_shop_scrape(
                 # After login, go to the actual target
                 await page.goto(url, wait_until="domcontentloaded", timeout=30_000)
                 await human_delay(min_ms=2_000, max_ms=3_000)
-                await _wait_for_captcha(page, on_progress=on_progress)
+                await _wait_for_captcha(
+                    page, source_url=url, job_id=job_id, on_progress=on_progress,
+                )
                 await dismiss_popups_loop(page, interval_ms=2_000, max_rounds=3)
 
         # Wait for product cards to render (Shopee is a SPA)
@@ -446,7 +457,8 @@ async def _do_shop_scrape(
         if on_progress:
             on_progress("Scraping page 1...")
         items = await _scrape_all_pages(
-            page, max_items, max_pages, on_progress, source_url=url,
+            page, max_items, max_pages, on_progress,
+            source_url=url, job_id=job_id,
         )
 
         # Extract shop name from URL
@@ -470,23 +482,51 @@ async def _do_shop_scrape(
 
     except PlaywrightTimeout as e:
         # Any Playwright timeout is likely a captcha blocking interaction.
-        # Snapshot the page state for analysis, notify, wait, then retry once.
+        # The timeout itself is the signal even if detect_captcha() sees
+        # nothing — we still record a snapshot and raise a pending event so
+        # the user can manually clear Shopee's bot-check.
         logger.warning("Playwright timeout during scrape: %s", e)
-        await _save_snapshot(page, reason=f"playwright_timeout: {e}")
+
+        signals = await detect_captcha(page)
+        reason = f"playwright_timeout:{signals.reason}"
+        snap_dir = await save_snapshot(
+            page,
+            reason=reason,
+            signals=signals,
+            job_id=job_id,
+            extra_meta={"exception": str(e)},
+        )
+        event_id = _record_event_safely(
+            source_url=url,
+            snapshot_dir=snap_dir,
+            reason=reason,
+            signals=signals,
+            job_id=job_id,
+        )
+        _notify_shopee_captcha(event_id)
+        if on_progress:
+            on_progress(
+                "Timeout detected — possible CAPTCHA. "
+                "Open Operations page to verify."
+            )
+
+        if not SHOPEE_CONFIG.inline_captcha_wait:
+            raise CaptchaPendingError(
+                event_id if event_id is not None else 0,
+                source_url=url,
+                snapshot_dir=str(snap_dir) if snap_dir else "",
+                reason=reason,
+            ) from e
 
         if _retried:
-            # Already retried once — give up
             raise
 
-        if on_progress:
-            on_progress("Timeout detected — possible CAPTCHA. Notifying...")
-        _notify_shopee_captcha()
-
-        # Wait up to 3 min for user to solve captcha
+        # Legacy inline-wait mode: block up to 3 min for user to solve
         polls = 180 // 2
         for i in range(polls):
             await human_delay(min_ms=1_800, max_ms=2_200)
-            if not await _detect_captcha_page(page):
+            follow_up = await detect_captcha(page)
+            if not follow_up.detected:
                 elapsed = (i + 1) * 2
                 logger.info("Page unblocked after ~%ds, retrying scrape", elapsed)
                 if on_progress:
@@ -495,10 +535,8 @@ async def _do_shop_scrape(
                 return await _do_shop_scrape(
                     page, url,
                     max_items=max_items, max_pages=max_pages,
-                    on_progress=on_progress, _retried=True,
+                    on_progress=on_progress, job_id=job_id, _retried=True,
                 )
-
-        # Timeout expired — re-raise so outer handler marks job as failed
         raise
 
 
@@ -789,6 +827,7 @@ async def _scrape_all_pages(
     max_pages: int = 20,
     on_progress: Callable[[str], None] | None = None,
     source_url: str | None = None,
+    job_id: str | None = None,
 ) -> tuple[ShopeeProduct, ...]:
     """Scroll, parse, and paginate through all pages of results.
 
@@ -812,7 +851,10 @@ async def _scrape_all_pages(
     seen_urls: set[str] = set()
 
     for page_num in range(max_pages):
-        await _scroll_to_load(page, max_scrolls=10)
+        # After the first few pages, reduce scroll/simulation intensity
+        # to stay within the job timeout while still looking human.
+        late_page = page_num >= 5
+        await _scroll_to_load(page, max_scrolls=5 if late_page else 10)
         page_items = await parse_search_results(page, max_items)
 
         new_items: list[ShopeeProduct] = []
@@ -835,8 +877,11 @@ async def _scrape_all_pages(
         if len(all_items) >= max_items:
             break
 
-        # Simulate human browsing before navigating to next page
-        await _simulate_browsing(page)
+        # Simulate human browsing before navigating to next page.
+        # Skip simulation on late pages to save time — the initial pages
+        # already established a human-like pattern.
+        if not late_page:
+            await _simulate_browsing(page)
 
         if on_progress:
             on_progress(f"Page {page_num + 1} done, navigating to page {page_num + 2}...")
@@ -846,7 +891,12 @@ async def _scrape_all_pages(
             break
 
         # Captcha can appear after pagination
-        await _wait_for_captcha(page, on_progress=on_progress)
+        await _wait_for_captcha(
+            page,
+            source_url=source_url or SHOPEE_BASE,
+            job_id=job_id,
+            on_progress=on_progress,
+        )
 
     return tuple(all_items[:max_items])
 
@@ -857,10 +907,14 @@ def scrape_shop_page_sync(
     max_items: int = 200,
     max_pages: int = 20,
     on_progress: Callable[[str], None] | None = None,
+    job_id: str | None = None,
 ) -> ShopeeScrapeResult:
     """Synchronous wrapper for scrape_shop_page."""
     return asyncio.run(
-        scrape_shop_page(url, max_items=max_items, max_pages=max_pages, on_progress=on_progress)
+        scrape_shop_page(
+            url, max_items=max_items, max_pages=max_pages,
+            on_progress=on_progress, job_id=job_id,
+        )
     )
 
 

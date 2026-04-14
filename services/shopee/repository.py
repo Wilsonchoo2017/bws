@@ -21,6 +21,21 @@ def _parse_price_cents(price_display: str) -> int | None:
         return None
 
 
+_LEGO_TITLE_RE = re.compile(r"\blego\b", re.IGNORECASE)
+
+
+def _looks_like_lego(title: str) -> bool:
+    """True if the title mentions LEGO as a standalone word.
+
+    Shops like brickssmart/mightyutan also sell Bandai, Blokees, Funko, Banpresto,
+    etc. Those product codes (e.g. "Blokees 71205") collide with real LEGO set
+    numbers when run through extract_set_number, poisoning price_records.
+    Gate side-writes on this check so only genuine LEGO rows reach the
+    lego_items + price_records pipelines. Raw rows still land in shopee_products.
+    """
+    return bool(_LEGO_TITLE_RE.search(title))
+
+
 def upsert_products(
     conn: Any,
     products: tuple[ShopeeProduct, ...],
@@ -84,7 +99,12 @@ def upsert_products(
 
         saved += 1
 
-        # Also write to unified lego_items + price_records
+        # Also write to unified lego_items + price_records, but only for titles
+        # that actually mention LEGO. Shops like brickssmart carry many non-LEGO
+        # brands whose product codes collide with real set numbers.
+        if not _looks_like_lego(product.title):
+            continue
+
         set_number = extract_set_number(product.title)
         if set_number and price_cents:
             get_or_create_item(

@@ -11,6 +11,7 @@ class JobStatus(str, Enum):
     RUNNING = "running"
     COMPLETED = "completed"
     FAILED = "failed"
+    BLOCKED_VERIFY = "blocked_verify"
 
 
 class ScrapeRequest(BaseModel):

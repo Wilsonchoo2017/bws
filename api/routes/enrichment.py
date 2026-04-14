@@ -71,10 +71,10 @@ async def enrich_item(
     if request.source:
         task_type_str = _SOURCE_TO_TASK_TYPE.get(request.source, request.source)
         task_type = TaskType(task_type_str)
-        task = create_task(conn, request.set_number, task_type)
+        task = create_task(conn, request.set_number, task_type, reason="manual")
         tasks = [task] if task else []
     else:
-        tasks = create_tasks_for_set(conn, request.set_number)
+        tasks = create_tasks_for_set(conn, request.set_number, reason="manual")
 
     return ScrapeTasksResponse(
         created=len(tasks),
@@ -137,7 +137,9 @@ async def enrich_missing(
     queued_numbers: list[str] = []
     for item in items:
         set_number = item["set_number"]
-        tasks = create_tasks_for_set(conn, set_number)
+        tasks = create_tasks_for_set(
+            conn, set_number, reason="manual: enrich missing",
+        )
         if tasks:
             queued_numbers.append(set_number)
 
@@ -171,7 +173,10 @@ async def scrape_missing_minifigs(
     queued_numbers: list[str] = []
     for (set_number,) in rows:
         # Create bricklink_metadata task (which discovers minifig_count)
-        task = create_task(conn, set_number, TaskType.BRICKLINK_METADATA)
+        task = create_task(
+            conn, set_number, TaskType.BRICKLINK_METADATA,
+            reason="manual: missing minifig count",
+        )
         if task:
             queued_numbers.append(set_number)
 
@@ -200,7 +205,10 @@ async def enrich_missing_dimensions(
 
     queued_numbers: list[str] = []
     for (set_number,) in rows:
-        task = create_task(conn, set_number, TaskType.BRICKLINK_METADATA)
+        task = create_task(
+            conn, set_number, TaskType.BRICKLINK_METADATA,
+            reason="manual: missing dimensions",
+        )
         if task:
             queued_numbers.append(set_number)
 

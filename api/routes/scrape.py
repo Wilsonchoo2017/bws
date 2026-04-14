@@ -1,7 +1,13 @@
 """Scrape API routes."""
 
 
-from fastapi import APIRouter, HTTPException
+import asyncio
+import logging
+from pathlib import Path
+
+from fastapi import APIRouter, BackgroundTasks, HTTPException
+from fastapi.responses import FileResponse, Response
+from pydantic import BaseModel
 
 from api.jobs import job_manager
 from api.schemas import (
@@ -15,6 +21,8 @@ from api.schemas import (
     ScraperInfo,
     ScrapeTargetInfo,
 )
+
+logger = logging.getLogger("bws.api.scrape")
 
 router = APIRouter(prefix="/scrape", tags=["scrape"])
 
@@ -459,7 +467,7 @@ def _scrape_tasks_as_jobs(conn, limit: int) -> list[ScrapeJobResponse]:
         """
         SELECT task_id, set_number, task_type, status, priority,
                depends_on, attempt_count, max_attempts, error,
-               created_at, started_at, completed_at, locked_by
+               created_at, started_at, completed_at, locked_by, reason
         FROM scrape_tasks
         ORDER BY
             CASE status
@@ -496,7 +504,7 @@ def _scrape_tasks_as_jobs(conn, limit: int) -> list[ScrapeJobResponse]:
     for row in rows:
         (task_id, set_number, task_type, status, priority,
          depends_on, attempt_count, max_attempts, error,
-         created_at, started_at, completed_at, locked_by) = row
+         created_at, started_at, completed_at, locked_by, reason) = row
 
         job_status = _TASK_STATUS_TO_JOB_STATUS.get(status, JobStatus.QUEUED)
 
@@ -542,9 +550,190 @@ def _scrape_tasks_as_jobs(conn, limit: int) -> list[ScrapeJobResponse]:
             error=error,
             progress=progress,
             worker_no=None,
-            reason="scheduled",
+            reason=reason or "scheduled",
             last_run_at=last_run_at,
             last_run_status=last_run_status,
         ))
 
     return results
+
+
+# ---------------------------------------------------------------------------
+# Shopee captcha verification routes
+# ---------------------------------------------------------------------------
+
+class CaptchaEventResponse(BaseModel):
+    id: int
+    job_id: str | None = None
+    source_url: str
+    snapshot_dir: str
+    detection_reason: str
+    detection_signals: dict | None = None
+    status: str
+    detected_at: str
+    verified_at: str | None = None
+    resolved_at: str | None = None
+    resolution_duration_s: int | None = None
+    notes: str | None = None
+
+
+class CaptchaEventsListResponse(BaseModel):
+    events: list[CaptchaEventResponse]
+    pending_count: int
+
+
+def _event_to_response(ev) -> "CaptchaEventResponse":
+    def _iso(dt):
+        return dt.isoformat() if dt else None
+    return CaptchaEventResponse(
+        id=ev.id,
+        job_id=ev.job_id,
+        source_url=ev.source_url,
+        snapshot_dir=ev.snapshot_dir,
+        detection_reason=ev.detection_reason,
+        detection_signals=ev.detection_signals,
+        status=ev.status,
+        detected_at=_iso(ev.detected_at) or "",
+        verified_at=_iso(ev.verified_at),
+        resolved_at=_iso(ev.resolved_at),
+        resolution_duration_s=ev.resolution_duration_s,
+        notes=ev.notes,
+    )
+
+
+@router.get(
+    "/shopee/captcha-events",
+    response_model=CaptchaEventsListResponse,
+)
+async def list_captcha_events(status: str | None = None, limit: int = 50):
+    """List recent Shopee captcha events, newest first."""
+    from db.connection import get_connection
+    from db.schema import init_schema
+    from services.shopee.captcha_events import count_pending, list_events
+
+    conn = get_connection()
+    init_schema(conn)
+    try:
+        rows = list_events(conn, status=status, limit=limit)
+        pending = count_pending(conn)
+    finally:
+        conn.close()
+    return CaptchaEventsListResponse(
+        events=[_event_to_response(r) for r in rows],
+        pending_count=pending,
+    )
+
+
+@router.get(
+    "/shopee/captcha-events/{event_id}",
+    response_model=CaptchaEventResponse,
+)
+async def get_captcha_event(event_id: int):
+    """Fetch a single captcha event row."""
+    from db.connection import get_connection
+    from db.schema import init_schema
+    from services.shopee.captcha_events import get_event
+
+    conn = get_connection()
+    init_schema(conn)
+    try:
+        ev = get_event(conn, event_id)
+    finally:
+        conn.close()
+    if ev is None:
+        raise HTTPException(status_code=404, detail="Event not found")
+    return _event_to_response(ev)
+
+
+_ALLOWED_SNAPSHOT_FILES = {"meta.json", "page.html", "screenshot.png"}
+
+
+@router.get("/shopee/captcha-events/{event_id}/snapshot/{file_name}")
+async def get_captcha_snapshot_file(event_id: int, file_name: str):
+    """Serve a file from the event's snapshot directory (sanitized)."""
+    if file_name not in _ALLOWED_SNAPSHOT_FILES:
+        raise HTTPException(status_code=400, detail="Invalid snapshot file")
+
+    from db.connection import get_connection
+    from db.schema import init_schema
+    from services.shopee.captcha_detection import SNAPSHOT_DIR
+    from services.shopee.captcha_events import get_event
+
+    conn = get_connection()
+    init_schema(conn)
+    try:
+        ev = get_event(conn, event_id)
+    finally:
+        conn.close()
+    if ev is None:
+        raise HTTPException(status_code=404, detail="Event not found")
+
+    snap_path = (SNAPSHOT_DIR / ev.snapshot_dir).resolve()
+    # Security: snap_path MUST live under SNAPSHOT_DIR
+    try:
+        snap_path.relative_to(SNAPSHOT_DIR.resolve())
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail="Invalid snapshot path") from e
+
+    target = snap_path / file_name
+    if not target.exists():
+        raise HTTPException(status_code=404, detail=f"{file_name} not found")
+
+    media_types = {
+        "meta.json": "application/json",
+        "page.html": "text/html; charset=utf-8",
+        "screenshot.png": "image/png",
+    }
+    return FileResponse(str(target), media_type=media_types[file_name])
+
+
+class VerifyStartResponse(BaseModel):
+    event_id: int
+    status: str
+    message: str
+
+
+@router.post(
+    "/shopee/captcha-events/{event_id}/verify",
+    response_model=VerifyStartResponse,
+)
+async def start_captcha_verification(
+    event_id: int,
+    background_tasks: BackgroundTasks,
+):
+    """Launch the manual verification flow in the background.
+
+    Returns immediately with status='verifying'. The client polls GET
+    /shopee/captcha-events/{event_id} to track progress.
+    """
+    from db.connection import get_connection
+    from db.schema import init_schema
+    from services.shopee.captcha_events import STATUS_PENDING, get_event
+    from services.shopee.verification import run_verification
+
+    conn = get_connection()
+    init_schema(conn)
+    try:
+        ev = get_event(conn, event_id)
+    finally:
+        conn.close()
+    if ev is None:
+        raise HTTPException(status_code=404, detail="Event not found")
+    if ev.status != STATUS_PENDING:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Event is {ev.status}, cannot start verification",
+        )
+
+    async def _runner() -> None:
+        try:
+            await run_verification(event_id)
+        except Exception:
+            logger.exception("Verification background task failed event=%s", event_id)
+
+    background_tasks.add_task(_runner)
+    return VerifyStartResponse(
+        event_id=event_id,
+        status="verifying",
+        message="Browser launching — solve the captcha in the new window.",
+    )

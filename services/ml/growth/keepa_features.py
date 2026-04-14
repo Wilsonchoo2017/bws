@@ -1,10 +1,13 @@
 """Keepa+BL feature engineering for the growth model.
 
-Extracts 26 features from Keepa timelines + factual metadata.
+Extracts 36 features from Keepa timelines + factual metadata.
 All Keepa features are cut at retired_date to prevent lookahead.
 No BE pricing/growth data used -- only factual metadata (theme, pieces, RRP, etc).
 
-From Experiment 31 feature selection (MI + redundancy + LOFO).
+From Experiment 31 feature selection (MI + redundancy + LOFO),
+Exp 33 theme-level Keepa aggregates (LOO Bayesian encoded),
+Exp 34 new feature groups (regional RRP, buy box, interactions),
+and Exp 35 phase-aware, composite, and relative signal features.
 """
 
 from __future__ import annotations
@@ -18,6 +21,11 @@ import numpy as np
 import pandas as pd
 
 from config.ml import LICENSED_THEMES
+from services.ml.encodings import (
+    compute_group_stats,
+    group_mean_encode,
+    loo_bayesian_encode,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -32,7 +40,21 @@ STRONG_THEMES = frozenset({
     "Creator", "Icons", "NINJAGO", "Ninjago",
 })
 
-# Final 26 features from Exp 31 Phase 12
+# 7 Google Trends features (Exp 32: +0.017 AUC on P(avoid), +0.006 on P(great_buy))
+GT_FEATURES: tuple[str, ...] = (
+    "gt_peak_value",
+    "gt_avg_value",
+    "gt_months_active",
+    "gt_decay_rate",
+    "gt_pre_retire_avg",
+    "gt_lifetime_months",
+    "gt_peak_recency",
+)
+
+# 37 features: 26 from Exp 31 Phase 12 + 2 theme aggregates from Exp 33
+#              + 4 from Exp 34 (regional RRP, buy box, interactions)
+#              + 4 from Exp 35 (phase-aware, composite, relative signal)
+#              + 1 from Exp 36 (depth × frequency discount composite)
 KEEPA_BL_FEATURES: tuple[str, ...] = (
     # From LOFO-selected 20
     "3p_price_at_retire_vs_rrp",
@@ -62,7 +84,25 @@ KEEPA_BL_FEATURES: tuple[str, ...] = (
     "strong_theme_x_prem",
     "has_keepa_3p",
     "meta_demand_proxy",
+    # Exp 33: Theme-level Keepa aggregates (LOO Bayesian encoded)
+    "theme_avg_retire_price",
+    "theme_growth_x_prem",
+    # Exp 34: Regional RRP, buy box, interactions
+    "rrp_uk_premium",
+    "rrp_regional_cv",
+    "buybox_premium_avg",
+    "amz_fba_spread_at_retire",
+    # Exp 35: Phase-aware, composite, relative signal
+    "fba_prem_late_vs_early",
+    "scarcity_pressure",
+    "theme_quality_x_premium",
+    "buybox_vs_theme",
+    # Exp 36: depth × frequency composite
+    "amz_discount_depth_x_freq",
 )
+
+# Classifier-specific features: base 36 + 7 GT = 43 (Exp 32-35)
+CLASSIFIER_FEATURES: tuple[str, ...] = KEEPA_BL_FEATURES + GT_FEATURES
 
 
 def _parse_timeline(raw: object) -> list[list]:
@@ -195,6 +235,17 @@ def extract_keepa_features_for_set(
         if amz_mean > 0:
             rec["amz_price_cv"] = float(np.std(amz_prices) / amz_mean)
 
+        # Depth × frequency composite (Exp 36): avg discount magnitude across
+        # in-stock days × % of in-stock days discounted >5% off RRP. Captures
+        # demand weakness that the binary amz_never_discounted erases.
+        if len(amz_prices) >= 3:
+            n_below = sum(1 for p in amz_prices if p < rrp * 0.95)
+            pct_below = n_below / len(amz_prices) * 100
+            avg_disc = float(np.mean([
+                max(0.0, (rrp - p) / rrp * 100) for p in amz_prices
+            ]))
+            rec["amz_discount_depth_x_freq"] = avg_disc * pct_below
+
     # --- Restock features ---
     oos_episodes: list[dict] = []
     in_stock_episodes: list[dict] = []
@@ -226,6 +277,13 @@ def extract_keepa_features_for_set(
                 break
 
     rec["amz_max_restock_delay_days"] = float(max(restock_delays)) if restock_delays else 0.0
+
+    # --- Buy box features (Exp 34) ---
+    bb_raw = _parse_timeline(keepa_row.get("buy_box_json"))
+    bb = _cut(bb_raw)
+    bb_prices = [float(p[1]) for p in bb if p[1] is not None and p[1] > 0]
+    if bb_prices and rrp > 0:
+        rec["buybox_premium_avg"] = float(np.mean(bb_prices)) / rrp
 
     # --- Demand proxy ---
     if pd.notna(keepa_row.get("kp_reviews")):
@@ -259,7 +317,48 @@ def extract_keepa_features_for_set(
         * rec["minifig_value_ratio"]
     )
 
+    # Exp 34: 1P vs 3P spread at retirement
+    amz_ret = rec.get("amz_price_at_retire_vs_rrp", 0) or 0
+    fba_ret = rec.get("3p_price_at_retire_vs_rrp", 0) or 0
+    rec["amz_fba_spread_at_retire"] = amz_ret / fba_ret if fba_ret > 0 else 0.0
+
+    # Exp 35: Phase-aware -- 3P premium late vs early half
+    if len(fba_prices) >= 6:
+        half = len(fba_prices) // 2
+        early_fba_mean = float(np.mean(fba_prices[:half]))
+        late_fba_mean = float(np.mean(fba_prices[half:]))
+        if early_fba_mean > 0:
+            rec["fba_prem_late_vs_early"] = late_fba_mean / early_fba_mean
+
+    # Exp 35: Composite -- scarcity_pressure = buybox_premium * (1 - spread)
+    bb_prem = rec.get("buybox_premium_avg", 0) or 0
+    spread_val = rec.get("amz_fba_spread_at_retire", 0) or 0
+    rec["scarcity_pressure"] = bb_prem * (1 - spread_val)
+
     return rec
+
+
+# Approximate exchange rates for regional RRP normalization (Exp 34).
+# These convert foreign-currency cents to USD-equivalent cents.
+_FX_TO_USD = {"gbp": 1.27, "eur": 1.08, "cad": 0.74, "aud": 0.66}
+
+
+def _regional_cv(usd: float, gbp: float, eur: float, cad: float, aud: float) -> float:
+    """CV of exchange-rate-normalized regional prices (Exp 34)."""
+    vals = [usd]  # USD is already in USD cents
+    if gbp > 0:
+        vals.append(gbp * _FX_TO_USD["gbp"])
+    if eur > 0:
+        vals.append(eur * _FX_TO_USD["eur"])
+    if cad > 0:
+        vals.append(cad * _FX_TO_USD["cad"])
+    if aud > 0:
+        vals.append(aud * _FX_TO_USD["aud"])
+    if len(vals) < 2:
+        return 0.0
+    arr = np.array(vals, dtype=float)
+    mean = arr.mean()
+    return float(arr.std() / mean) if mean > 0 else 0.0
 
 
 def _price_tier(rrp_cents: float) -> float:
@@ -285,6 +384,8 @@ def _price_tier(rrp_cents: float) -> float:
 def engineer_keepa_bl_features(
     base_df: pd.DataFrame,
     keepa_df: pd.DataFrame,
+    *,
+    theme_stats: dict | None = None,
 ) -> pd.DataFrame:
     """Build feature matrix for all sets.
 
@@ -294,6 +395,9 @@ def engineer_keepa_bl_features(
                  retired_date
         keepa_df: Keepa timelines with set_number, amazon_price_json,
                   new_3p_fba_json, kp_reviews, kp_rating
+        theme_stats: Pre-computed theme statistics for inference mode.
+                     If None, theme aggregate features are left at 0
+                     (training pipeline encodes them separately).
 
     Returns:
         DataFrame with set_number + all KEEPA_BL_FEATURES columns.
@@ -346,14 +450,256 @@ def engineer_keepa_bl_features(
         else:
             rec["has_exclusive_minifigs"] = 0.0
 
+        # Exp 34: Regional RRP features
+        gbp = float(meta.get("rrp_gbp_cents", 0) or 0)
+        eur = float(meta.get("rrp_eur_cents", 0) or 0)
+        cad = float(meta.get("rrp_cad_cents", 0) or 0)
+        aud = float(meta.get("rrp_aud_cents", 0) or 0)
+
+        if gbp > 0:
+            rec["_gbp_usd_ratio"] = gbp / rrp  # temp, used for rrp_uk_premium later
+        rec["rrp_regional_cv"] = _regional_cv(rrp, gbp, eur, cad, aud)
+
         rec["set_number"] = sn
+        rec["theme"] = theme
         rows.append(rec)
 
     df = pd.DataFrame(rows)
+
+    # Exp 34: rrp_uk_premium = gbp/usd ratio - median
+    # Median comes from theme_stats["regional_stats"] (training) or computed from df
+    median_gbp_usd = None
+    if theme_stats and "regional_stats" in theme_stats:
+        median_gbp_usd = theme_stats["regional_stats"].get("median_gbp_usd_ratio")
+    if median_gbp_usd is None and "_gbp_usd_ratio" in df.columns:
+        valid = df["_gbp_usd_ratio"].dropna()
+        median_gbp_usd = float(valid.median()) if len(valid) > 10 else 0.876
+    if "_gbp_usd_ratio" in df.columns:
+        df["rrp_uk_premium"] = df["_gbp_usd_ratio"] - (median_gbp_usd or 0.876)
+        df = df.drop(columns=["_gbp_usd_ratio"])
 
     # Ensure all feature columns exist
     for col in KEEPA_BL_FEATURES:
         if col not in df.columns:
             df[col] = 0.0
 
+    # Inference mode: encode theme features from saved stats
+    if theme_stats is not None:
+        df = encode_theme_keepa_features(df, theme_stats=theme_stats)
+
     return df
+
+
+# Source features for theme-level aggregation (Exp 33).
+# Keys = new theme feature name, values = per-set source feature.
+# Both computed as theme stats; theme_avg_3p_premium used only for the
+# interaction feature (theme_growth_x_prem) and not exposed directly.
+THEME_SOURCE_FEATURES: dict[str, str] = {
+    "theme_avg_retire_price": "3p_price_at_retire_vs_rrp",
+    "theme_avg_3p_premium": "3p_above_rrp_pct",
+    # Exp 35: theme-level buybox for relative signal features
+    "theme_avg_buybox": "buybox_premium_avg",
+}
+
+
+def compute_regional_stats(base_df: pd.DataFrame) -> dict:
+    """Compute regional RRP statistics for persistence (Exp 34).
+
+    Returns dict with median GBP/USD ratio for rrp_uk_premium computation.
+    """
+    usd = base_df["rrp_usd_cents"].astype(float)
+    gbp = base_df.get("rrp_gbp_cents", pd.Series(dtype=float)).astype(float)
+    valid = (usd > 0) & (gbp > 0)
+    if valid.sum() > 10:
+        ratios = gbp[valid] / usd[valid]
+        return {"median_gbp_usd_ratio": float(ratios.median())}
+    return {"median_gbp_usd_ratio": 0.876}
+
+
+def compute_theme_keepa_stats(df: pd.DataFrame) -> dict:
+    """Compute theme-level Keepa feature statistics for persistence.
+
+    Groups the per-set Keepa features (already cut at retired_date) by theme
+    and computes group stats for each source feature.
+
+    Args:
+        df: Feature DataFrame with theme column and source features.
+
+    Returns:
+        Dict with per-source-feature group stats, suitable for serialization.
+    """
+    result: dict[str, dict] = {}
+    for theme_feat, source_feat in THEME_SOURCE_FEATURES.items():
+        source_vals = df[source_feat].fillna(0).astype(float)
+        stats = compute_group_stats(df, "theme", source_vals)
+        result[theme_feat] = stats
+    return result
+
+
+def encode_theme_keepa_features(
+    df: pd.DataFrame,
+    *,
+    theme_stats: dict | None = None,
+    training: bool = False,
+) -> pd.DataFrame:
+    """Encode theme-level Keepa feature aggregates.
+
+    Training mode (training=True):
+        Uses LOO Bayesian encoding (excludes each set's own value).
+        If theme_stats is None, computes from df first.
+    Inference mode (training=False, theme_stats provided):
+        Uses saved stats with full mean encoding (no LOO).
+
+    Args:
+        df: Feature DataFrame with theme column and source features.
+        theme_stats: Pre-computed stats from compute_theme_keepa_stats().
+        training: If True, use LOO encoding even when theme_stats provided.
+
+    Returns:
+        DataFrame with theme aggregate features added.
+    """
+    if theme_stats is None:
+        theme_stats = compute_theme_keepa_stats(df)
+        training = True
+
+    for theme_feat, source_feat in THEME_SOURCE_FEATURES.items():
+        stats = theme_stats[theme_feat]
+        if training:
+            source_vals = df[source_feat].fillna(0).astype(float)
+            df[theme_feat] = loo_bayesian_encode(
+                df["theme"], source_vals, stats, alpha=20,
+            )
+        else:
+            df[theme_feat] = group_mean_encode(
+                df["theme"], stats, alpha=20,
+            )
+
+    # Interaction: theme premium tendency * individual set premium
+    df["theme_growth_x_prem"] = (
+        df["theme_avg_3p_premium"] * df["3p_above_rrp_pct"].fillna(0)
+    )
+
+    # Exp 35: buybox_vs_theme = set's buybox - theme average buybox
+    df["buybox_vs_theme"] = (
+        df["buybox_premium_avg"].fillna(0) - df["theme_avg_buybox"].fillna(0)
+    )
+
+    # Exp 35: theme_quality_x_premium = theme retire price * excess 3P premium
+    # excess 3P premium = set's 3p_above_rrp_pct - theme average 3p_above_rrp_pct
+    excess_prem = df["3p_above_rrp_pct"].fillna(0) - df["theme_avg_3p_premium"].fillna(0)
+    df["theme_quality_x_premium"] = df["theme_avg_retire_price"].fillna(0) * excess_prem
+
+    # Drop intermediate columns not in KEEPA_BL_FEATURES
+    for _int_col in ("theme_avg_3p_premium", "theme_avg_buybox"):
+        if _int_col not in KEEPA_BL_FEATURES:
+            df = df.drop(columns=[_int_col], errors="ignore")
+
+    return df
+
+
+def engineer_gt_features(
+    gt_df: pd.DataFrame,
+    base_df: pd.DataFrame,
+) -> pd.DataFrame:
+    """Engineer Google Trends features per set.
+
+    At training time: timelines are cut at retired_date (no lookahead).
+    At inference time: sets without retired_date use full timeline
+    (these are active sets we're evaluating for purchase).
+
+    Args:
+        gt_df: Google Trends data with set_number, interest_json.
+        base_df: Metadata with set_number, retired_date.
+
+    Returns:
+        DataFrame with set_number + GT_FEATURES columns.
+    """
+    retire_map: dict[str, pd.Timestamp] = {}
+    for _, row in base_df.iterrows():
+        sn = str(row["set_number"])
+        rd = _parse_date(str(row.get("retired_date", "")))
+        if rd is not None:
+            retire_map[sn] = rd
+
+    records: list[dict] = []
+    for _, row in gt_df.iterrows():
+        sn = str(row["set_number"])
+        retire_dt = retire_map.get(sn)
+
+        tl = _parse_timeline(row.get("interest_json"))
+        if not tl:
+            continue
+
+        dates: list[datetime] = []
+        values: list[float] = []
+        for entry in tl:
+            if len(entry) >= 2:
+                dt = _date_str_to_dt(str(entry[0]))
+                if dt is not None:
+                    try:
+                        values.append(float(entry[1]))
+                        dates.append(dt)
+                    except (ValueError, TypeError):
+                        continue
+
+        if not dates:
+            continue
+
+        vals = np.array(values, dtype=float)
+
+        # Cut at retired_date when available (training); use full timeline otherwise (inference)
+        if retire_dt is not None:
+            pre_mask = np.array([d <= retire_dt for d in dates])
+            pre_dates = [d for d, m in zip(dates, pre_mask) if m]
+            pre_vals = vals[pre_mask] if pre_mask.any() else np.array([0.0])
+
+            pre_12m_mask = np.array([
+                d > retire_dt - timedelta(days=365) and d <= retire_dt
+                for d in dates
+            ])
+            pre_12m = vals[pre_12m_mask] if pre_12m_mask.any() else np.array([0.0])
+        else:
+            # Inference: use full timeline as "pre" (set hasn't retired yet)
+            pre_vals = vals
+            pre_dates = dates
+            pre_12m = vals[-12:] if len(vals) >= 12 else vals
+
+        if len(pre_vals) == 0 or pre_vals.max() == 0:
+            continue
+
+        gt_peak = float(pre_vals.max())
+        gt_avg = float(pre_vals.mean())
+        gt_months_active = int((pre_vals > 0).sum())
+        gt_lifetime_months = len(pre_vals)
+
+        # Decay rate: linear slope of interest over time
+        gt_decay = 0.0
+        if len(pre_vals) >= 6 and pre_vals.std() > 0:
+            x = np.arange(len(pre_vals), dtype=float)
+            gt_decay = float(np.polyfit(x, pre_vals, 1)[0])
+
+        pre_avg = float(pre_12m.mean()) if len(pre_12m) > 0 else 0.0
+
+        # Peak recency: months between peak and cutoff date
+        gt_peak_recency = 0.0
+        if pre_dates:
+            peak_idx = int(pre_vals.argmax())
+            peak_date = pre_dates[peak_idx]
+            cutoff = retire_dt if retire_dt is not None else dates[-1]
+            gt_peak_recency = max(0.0, (cutoff - peak_date).days / 30.0)
+
+        records.append({
+            "set_number": sn,
+            "gt_peak_value": gt_peak,
+            "gt_avg_value": gt_avg,
+            "gt_months_active": gt_months_active,
+            "gt_decay_rate": gt_decay,
+            "gt_pre_retire_avg": pre_avg,
+            "gt_lifetime_months": gt_lifetime_months,
+            "gt_peak_recency": gt_peak_recency,
+        })
+
+    result = pd.DataFrame(records)
+    if result.empty:
+        result = pd.DataFrame(columns=["set_number"] + list(GT_FEATURES))
+    return result

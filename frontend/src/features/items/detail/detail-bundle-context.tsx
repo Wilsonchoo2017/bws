@@ -7,6 +7,7 @@ export interface DetailBundle {
   brickeconomy: Record<string, unknown> | null;
   keepa: Record<string, unknown> | null;
   bricklink_prices: Record<string, unknown> | null;
+  bricklink_sellers: Record<string, unknown> | null;
   competition: Record<string, unknown> | null;
   minifigures: Record<string, unknown> | null;
   minifig_value_history: Record<string, unknown> | null;

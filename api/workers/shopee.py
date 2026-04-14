@@ -22,7 +22,14 @@ class ShopeeWorker:
         def _progress(msg: str) -> None:
             mgr.update_progress(job.job_id, msg)
 
-        result = await scrape_shop_page(job.url, max_items=10_000, on_progress=_progress)
+        # scrape_shop_page may raise CaptchaPendingError — we let it propagate
+        # so the dispatcher can mark the job BLOCKED_VERIFY instead of FAILED.
+        result = await scrape_shop_page(
+            job.url,
+            max_items=10_000,
+            on_progress=_progress,
+            job_id=job.job_id,
+        )
 
         if not result.success:
             raise RuntimeError(result.error or "Scrape failed")

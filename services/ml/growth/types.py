@@ -30,6 +30,8 @@ class GrowthPrediction:
     prediction_interval: PredictionInterval | None = None
     shap_base_value: float | None = None
     avoid_probability: float | None = None  # P(avoid) from classifier
+    great_buy_probability: float | None = None  # P(growth >= 20%)
+    buy_category: str | None = None  # "GREAT", "GOOD", "SKIP", "WORST"
     raw_growth_pct: float | None = None  # regressor output before hurdle
     kelly_fraction: float | None = None  # recommended position size (0-1)
     win_probability: float | None = None  # P(return > hurdle)

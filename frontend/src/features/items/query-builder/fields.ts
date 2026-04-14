@@ -46,18 +46,14 @@ export const QUERY_FIELDS: readonly FieldDefinition[] = [
   { key: 'ml_kelly_fraction', label: 'Kelly Fraction', type: 'number', group: 'ML' },
   { key: 'ml_win_probability', label: 'Win Probability', type: 'number', group: 'ML' },
 
-  // Cohort Percentiles
+  // Cohort Percentiles (Keepa)
   { key: 'cohort_half_year', label: 'Cohort Half-Year', type: 'number', group: 'Cohort' },
-  { key: 'cohort_year', label: 'Cohort Year', type: 'number', group: 'Cohort' },
   { key: 'cohort_theme', label: 'Cohort Theme', type: 'number', group: 'Cohort' },
-  { key: 'cohort_year_theme', label: 'Cohort Year+Theme', type: 'number', group: 'Cohort' },
   { key: 'cohort_price_tier', label: 'Cohort Price Tier', type: 'number', group: 'Cohort' },
-  { key: 'cohort_piece_group', label: 'Cohort Piece Grp', type: 'number', group: 'Cohort' },
 
   // Liquidity
   { key: 'liquidity_score', label: 'Liquidity Score', type: 'number', group: 'Liquidity' },
   { key: 'liq_cohort_half_year', label: 'Liq Half-Year', type: 'number', group: 'Liquidity' },
-  { key: 'liq_cohort_year', label: 'Liq Year', type: 'number', group: 'Liquidity' },
   { key: 'liq_cohort_theme', label: 'Liq Theme', type: 'number', group: 'Liquidity' },
 ];
 

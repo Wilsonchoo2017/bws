@@ -14,6 +14,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from api.routes import cart, enrichment, images, items, listing, ml, portfolio, scrape, settings, stats
 from api.worker import run_worker
 from services.brickeconomy.analysis_scheduler import run_analysis_sweep
+from services.bricklink.scheduler import run_bricklink_listings_sweep
 from services.enrichment.scheduler import run_enrichment_sweep, run_priority_rescrape_sweep, run_retiring_soon_sweep
 from services.images.sweep import run_image_download_sweep
 from services.keepa.scheduler import run_keepa_sweep
@@ -182,6 +183,7 @@ async def lifespan(app: FastAPI):
     keepa_task = asyncio.create_task(run_keepa_sweep(job_manager))
     rescrape_task = asyncio.create_task(run_priority_rescrape_sweep())
     retiring_soon_task = asyncio.create_task(run_retiring_soon_sweep())
+    bricklink_listings_task = asyncio.create_task(run_bricklink_listings_sweep())
     analysis_sweep_task = asyncio.create_task(run_analysis_sweep())
 
     # Eagerly warm growth models in a background thread so scraping isn't
@@ -205,7 +207,7 @@ async def lifespan(app: FastAPI):
     except Exception:
         logger.warning("Failed to save cooldown state", exc_info=True)
     # Everything inside _shutdown has a hard 10s ceiling
-    all_tasks = [worker_task, sweep_task, saturation_task, image_task, scrape_dispatcher_task, keepa_task, rescrape_task, prediction_task, retiring_soon_task, analysis_sweep_task]
+    all_tasks = [worker_task, sweep_task, saturation_task, image_task, scrape_dispatcher_task, keepa_task, rescrape_task, prediction_task, retiring_soon_task, bricklink_listings_task, analysis_sweep_task]
     try:
         await asyncio.wait_for(_shutdown(all_tasks), timeout=10)
     except (asyncio.TimeoutError, asyncio.CancelledError):

@@ -427,19 +427,27 @@ def parse_price_guide(html: str) -> dict[str, PricingBox | None]:
         msg = "Price guide page not found - item may not exist on Bricklink"
         raise ValueError(msg)
 
-    # Find pricing boxes (4 boxes in row with bgcolor="#C0C0C0")
-    price_boxes = soup.select('tr[bgcolor="#C0C0C0"] > td')
-
-    if not price_boxes:
-        msg = "Price guide table structure not found. Page may have been redirected or Bricklink's HTML structure has changed."
-        raise ValueError(msg)
-
     result: dict[str, PricingBox | None] = {
         "six_month_new": None,
         "six_month_used": None,
         "current_new": None,
         "current_used": None,
     }
+
+    # Find pricing boxes (4 boxes in row with bgcolor="#C0C0C0").
+    # Legacy catalogPG.asp uses the HTML attribute form; the v2
+    # catalogitem.page embeds the same row with an inline style instead.
+    price_boxes = soup.select('tr[bgcolor="#C0C0C0"] > td')
+    if not price_boxes:
+        price_boxes = soup.select('tr[style*="background-color: #C0C0C0"] > td')
+
+    # Sets with no sales/listings (unreleased, newly added, or otherwise
+    # absent from the marketplace) render the price-guide shell without the
+    # price-boxes row at all. Treat that as "no data" instead of a hard
+    # parse failure -- the caller already handles all-None pricing as
+    # "degraded pricing" and logs accordingly.
+    if not price_boxes:
+        return result
 
     if len(price_boxes) >= 4:
         result["six_month_new"] = extract_price_box(price_boxes[0].get_text())

@@ -97,7 +97,20 @@ def _save_enrichment_snapshot(set_number: str, result: EnrichmentResult) -> None
         logger.warning("Failed to save enrichment snapshot: %s", e)
 
 
-@executor(TaskType.BRICKLINK_METADATA, concurrency=2, timeout=300)
+def _bricklink_cooldown_remaining() -> float:
+    from config.settings import BRICKLINK_RATE_LIMITER
+
+    if BRICKLINK_RATE_LIMITER.is_in_maintenance():
+        return BRICKLINK_RATE_LIMITER.maintenance_remaining()
+    return BRICKLINK_RATE_LIMITER.cooldown_remaining()
+
+
+@executor(
+    TaskType.BRICKLINK_METADATA,
+    concurrency=2,
+    timeout=300,
+    cooldown_check=_bricklink_cooldown_remaining,
+)
 def execute_bricklink_metadata(
     conn: Any,
     set_number: str,
@@ -112,6 +125,15 @@ def execute_bricklink_metadata(
     from services.enrichment.repository import store_enrichment_result
     from services.enrichment.types import SourceId
     from services.items.repository import get_item_detail
+
+    # Skip during daily maintenance window (1pm-2pm MYT)
+    if BRICKLINK_RATE_LIMITER.is_in_maintenance():
+        maint_remaining = BRICKLINK_RATE_LIMITER.maintenance_remaining()
+        logger.info(
+            "BrickLink maintenance window -- %d min remaining",
+            int(maint_remaining / 60),
+        )
+        return ExecutorResult.cooldown(maint_remaining)
 
     remaining = BRICKLINK_RATE_LIMITER.cooldown_remaining()
     if remaining > 0:

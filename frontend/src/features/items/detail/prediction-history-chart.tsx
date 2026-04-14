@@ -18,6 +18,7 @@ interface PredictionPoint {
   growth_pct: number;
   confidence: string | null;
   buy_signal: boolean | null;
+  buy_category: 'GREAT' | 'GOOD' | 'SKIP' | 'WORST' | null;
   avoid_probability: number | null;
   interval_lower: number | null;
   interval_upper: number | null;
@@ -33,11 +34,7 @@ function ChartTooltip({ active, payload, label }: any) {
   const d = payload[0]?.payload;
   if (!d) return null;
 
-  const signal = d.buy_signal === true
-    ? 'BUY'
-    : d.buy_signal === false
-      ? 'HOLD'
-      : '--';
+  const signal = d.buy_category ?? (d.buy_signal === true ? 'BUY' : d.buy_signal === false ? 'HOLD' : '--');
 
   return (
     <div className="rounded-lg border bg-white px-3 py-2 text-xs shadow-lg dark:bg-zinc-900">

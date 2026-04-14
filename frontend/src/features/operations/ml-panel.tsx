@@ -34,8 +34,8 @@ export function MLPanel() {
       const json = await res.json();
       if (Array.isArray(json)) {
         const preds = json;
-        const buy = preds.filter((p: Record<string, unknown>) => p.buy_signal === true).length;
-        const avoid = preds.filter((p: Record<string, unknown>) => p.avoid === true).length;
+        const buy = preds.filter((p: Record<string, unknown>) => p.buy_category === 'GREAT' || p.buy_category === 'GOOD').length;
+        const avoid = preds.filter((p: Record<string, unknown>) => p.buy_category === 'WORST').length;
         const hold = preds.length - buy - avoid;
         const growths = preds
           .map((p: Record<string, unknown>) => p.growth_pct as number)

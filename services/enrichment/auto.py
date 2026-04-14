@@ -24,7 +24,7 @@ def queue_enrichment_if_needed(
     conn = get_connection()
     try:
         init_schema(conn)
-        tasks = create_tasks_for_set(conn, set_number)
+        tasks = create_tasks_for_set(conn, set_number, reason="auto: new item")
     finally:
         conn.close()
 
@@ -51,7 +51,7 @@ def queue_enrichment_batch(
         init_schema(conn)
         queued = 0
         for sn in set_numbers:
-            tasks = create_tasks_for_set(conn, sn)
+            tasks = create_tasks_for_set(conn, sn, reason="auto: new item batch")
             if tasks:
                 queued += 1
     finally:

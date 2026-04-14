@@ -1,35 +1,40 @@
-"""Keepa+BL growth model training pipeline.
+"""Keepa+BL classifier-only training pipeline.
 
 Target: BrickLink current new price / RRP (real secondary market data).
-Features: 26 Keepa+metadata features from Experiment 31.
+Features: 43 classifier features (36 Keepa+metadata + 7 Google Trends).
 
-Architecture:
-  - Regressor: LightGBM predicting BL price / RRP ratio
-  - Classifier: P(avoid) where avoid = BL price < RRP (set lost money)
+Architecture (Exp 32 + Exp 33 + Exp 34 + Exp 35):
+  - P(avoid): BL annualized return < 8%, asymmetric weights
+  - P(great_buy): BL annualized return >= 20%
+  - No regressor -- buy categories from classifiers only
+  - Theme-level Keepa aggregates (LOO Bayesian encoded, Exp 33)
+  - Regional RRP, buy box, interactions (Exp 34)
+  - Phase-aware, composite, and relative signal features (Exp 35)
 """
 
 from __future__ import annotations
 
 import logging
-from datetime import datetime
 
 import numpy as np
 import pandas as pd
-from sklearn.metrics import r2_score
-from sklearn.model_selection import GroupKFold
-from sklearn.preprocessing import PowerTransformer
 
 from services.ml.growth.keepa_features import (
+    CLASSIFIER_FEATURES,
+    GT_FEATURES,
     KEEPA_BL_FEATURES,
+    compute_regional_stats,
+    compute_theme_keepa_stats,
+    encode_theme_keepa_features,
+    engineer_gt_features,
     engineer_keepa_bl_features,
 )
 from services.ml.growth.classifier import TrainedClassifier, train_classifier
 from services.ml.growth.model_selection import (
-    build_model,
     clip_outliers,
     compute_recency_weights,
 )
-from services.ml.growth.types import KellyCalibration, TrainedGrowthModel
+from services.ml.growth.types import TrainedGrowthModel
 
 logger = logging.getLogger(__name__)
 
@@ -39,23 +44,27 @@ def train_keepa_bl_models(
     base_df: pd.DataFrame,
     keepa_df: pd.DataFrame,
     target_series: pd.Series,
+    gt_df: pd.DataFrame | None = None,
 ) -> tuple[
-    TrainedGrowthModel,
-    None,  # no tier2 in this architecture
-    dict,  # theme_stats (empty -- not used)
+    None,  # no regressor in classifier-only architecture
+    None,  # no tier2
+    dict,  # theme_stats (Keepa feature aggregates per theme)
     dict,  # subtheme_stats (empty)
     TrainedClassifier | None,
     None,  # no ensemble
+    TrainedClassifier | None,  # great-buy classifier
 ]:
-    """Train Keepa+BL regressor and classifier.
+    """Train Keepa+BL classifiers (no regressor).
 
     Args:
         base_df: Metadata (set_number, theme, parts_count, rrp_usd_cents, etc.)
         keepa_df: Keepa timelines
         target_series: BL current price / RRP ratio (indexed by set_number)
+        gt_df: Google Trends data (optional). GT features added to classifiers.
 
     Returns:
-        Same 6-tuple as legacy train_growth_models for compatibility.
+        7-tuple: (None, None, theme_stats, subtheme_stats, classifier,
+        None, great_buy_classifier).
     """
     logger.info("=" * 60)
     logger.info("KEEPA+BL MODEL TRAINING")
@@ -71,20 +80,49 @@ def train_keepa_bl_models(
     df_feat["target"] = df_feat["set_number"].map(target_map)
     df_feat = df_feat[df_feat["target"].notna()].copy()
 
+    # Exp 33: Theme-level Keepa feature aggregates (LOO encoded, training mode)
+    theme_stats = compute_theme_keepa_stats(df_feat)
+    df_feat = encode_theme_keepa_features(df_feat, theme_stats=theme_stats, training=True)
+    logger.info("Theme Keepa stats: %d themes, features: theme_avg_retire_price, "
+                "theme_growth_x_prem",
+                len(theme_stats.get("theme_avg_retire_price", {}).get("groups", {})))
+
+    # Exp 34: Regional RRP stats (median GBP/USD ratio for rrp_uk_premium)
+    regional_stats = compute_regional_stats(base_df)
+    theme_stats["regional_stats"] = regional_stats
+    logger.info("Regional stats: median_gbp_usd_ratio=%.4f",
+                regional_stats.get("median_gbp_usd_ratio", 0))
+
+    # Merge GT features (for classifiers, not regressor)
+    if gt_df is not None and not gt_df.empty:
+        gt_feat = engineer_gt_features(gt_df, base_df)
+        df_feat = df_feat.merge(gt_feat, on="set_number", how="left")
+        for col in GT_FEATURES:
+            if col not in df_feat.columns:
+                df_feat[col] = 0.0
+            else:
+                df_feat[col] = df_feat[col].fillna(0.0)
+        gt_coverage = (df_feat["gt_peak_value"] > 0).sum()
+        logger.info("GT features merged: %d/%d sets with data (%.1f%%)",
+                    gt_coverage, len(df_feat), gt_coverage / len(df_feat) * 100)
+    else:
+        for col in GT_FEATURES:
+            df_feat[col] = 0.0
+        logger.info("No GT data provided, GT features zeroed")
+
     logger.info("Sets with features + target: %d", len(df_feat))
 
     if len(df_feat) < 50:
         raise ValueError(f"Too few training sets: {len(df_feat)} (need 50+)")
 
-    y = df_feat["target"].values.astype(float)
-    feature_names = [f for f in KEEPA_BL_FEATURES if f in df_feat.columns]
-    X = df_feat[feature_names].fillna(0).copy()
-    fill_values = X.median()
-    X = X.fillna(fill_values)
+    # Classifier features: base 36 + GT 7 = 43 total
+    clf_feature_names = [f for f in CLASSIFIER_FEATURES if f in df_feat.columns]
+    X_clf_full = df_feat[clf_feature_names].fillna(0).copy()
+    clf_fill_values = X_clf_full.median()
+    X_clf_full = X_clf_full.fillna(clf_fill_values)
 
     # Groups for CV: year_retired from base_df
     year_retired_map = dict(zip(base_df["set_number"].astype(str), base_df.get("year_retired")))
-    # Also try retired_date
     for _, row in base_df.iterrows():
         sn = str(row["set_number"])
         if sn not in year_retired_map or pd.isna(year_retired_map.get(sn)):
@@ -97,152 +135,91 @@ def train_keepa_bl_models(
 
     # Exclude 2025+ from training (barely retired)
     train_mask = groups <= 2024
-    X_train = X[train_mask].copy()
-    y_train = y[train_mask]
-    groups_train = groups[train_mask]
+    X_clf_train = X_clf_full[train_mask].copy()
 
     logger.info("Training on %d sets (retired <= 2024), excluded %d sets (2025+)",
                 train_mask.sum(), (~train_mask).sum())
 
-    # Winsorize target
-    lo, hi = np.percentile(y_train, [2, 98])
-    y_clipped = np.clip(y_train, lo, hi)
+    # No regressor -- classifier-only architecture (Exp 32)
+    logger.info("Classifier-only architecture: no regressor trained")
 
-    # Recency weights
-    sample_weight = compute_recency_weights(groups_train.astype(float))
+    # Phase 4: Classifier (BL ground truth + asymmetric weights)
+    # Exp 31h: BL annualized returns are strictly better than raw ratio for
+    # classifier training. Asymmetric weights (3x strong losers, 2x losers)
+    # reduce false negatives by 44% (133->75). Combined system: 98.1% WORST
+    # recall, +20.6% avg return on buys.
+    logger.info("Phase 4: Avoid classifier (BL ground truth + asymmetric weights)")
 
-    # Yeo-Johnson transform
-    tt = PowerTransformer(method="yeo-johnson")
-    y_transformed = tt.fit_transform(y_clipped.reshape(-1, 1)).ravel()
+    from services.ml.growth.classifier import compute_avoid_sample_weights
 
-    # Phase 2: Cross-validation
-    logger.info("Phase 2: 5-fold GroupKFold cross-validation")
-    X_arr = clip_outliers(X_train).values.astype(float)
+    # Load BL annualized returns as classifier ground truth
+    try:
+        from db.pg.engine import get_engine as _get_engine
+        from services.ml.pg_queries import load_bl_ground_truth
 
-    n_splits = min(5, len(np.unique(groups_train)))
-    gkf = GroupKFold(n_splits=n_splits)
-    oof = np.full(len(y_clipped), np.nan)
-    fold_r2s: list[float] = []
+        _engine = _get_engine()
+        bl_target = load_bl_ground_truth(_engine)
+    except Exception as exc:
+        logger.warning("Could not load BL ground truth: %s", exc)
+        bl_target = {}
 
-    for fold_i, (tr_idx, va_idx) in enumerate(gkf.split(X_arr, y_transformed, groups_train)):
-        import lightgbm as lgb
+    # Classifier uses expanded feature set (base 26 + GT 7 = 33)
+    X_clf_arr = clip_outliers(X_clf_train).values.astype(float)
+    n_base = len([f for f in KEEPA_BL_FEATURES if f in df_feat.columns])
+    logger.info("Classifier features: %d (base %d + GT %d)",
+                len(clf_feature_names), n_base, len(clf_feature_names) - n_base)
 
-        dtrain = lgb.Dataset(
-            X_arr[tr_idx], label=y_transformed[tr_idx],
-            feature_name=feature_names,
-            weight=sample_weight[tr_idx] if sample_weight is not None else None,
-        )
-        dval = lgb.Dataset(
-            X_arr[va_idx], label=y_transformed[va_idx],
-            feature_name=feature_names, reference=dtrain,
-        )
+    # Map BL returns to training set order
+    train_set_numbers = df_feat.loc[train_mask, "set_number"].values.astype(str)
+    if not bl_target:
+        raise ValueError("BL ground truth required for classifier-only architecture")
 
-        model = lgb.train(
-            {
-                "objective": "huber", "metric": "mae",
-                "learning_rate": 0.068, "num_leaves": 20, "max_depth": 8,
-                "min_child_samples": 19, "subsample": 0.60,
-                "colsample_bytree": 0.88, "reg_alpha": 0.35,
-                "reg_lambda": 0.009, "verbosity": -1,
-                "seed": 42 + fold_i,
-            },
-            dtrain, num_boost_round=500,
-            valid_sets=[dval],
-            callbacks=[lgb.early_stopping(50, verbose=False)],
-        )
-        pred_t = model.predict(X_arr[va_idx])
-        oof[va_idx] = tt.inverse_transform(pred_t.reshape(-1, 1)).ravel()
+    bl_mask = np.array([sn in bl_target for sn in train_set_numbers])
+    y_classifier = np.array([bl_target[sn] for sn in train_set_numbers[bl_mask]])
+    X_classifier = X_clf_arr[bl_mask]
 
-        fold_r2 = r2_score(y_clipped[va_idx], oof[va_idx])
-        fold_r2s.append(fold_r2)
-        yrs = sorted(np.unique(groups_train[va_idx]).tolist())
-        logger.info("  Fold %d: R2=%.3f, years=%s", fold_i + 1, fold_r2, yrs)
-
-    valid_mask = ~np.isnan(oof)
-    cv_r2 = r2_score(y_clipped[valid_mask], oof[valid_mask])
-    cv_r2_std = float(np.std(fold_r2s))
-
-    from scipy.stats import spearmanr
-    sp, _ = spearmanr(y_clipped[valid_mask], oof[valid_mask])
-    logger.info("CV R2=%.3f +/- %.3f, Spearman=%.3f", cv_r2, cv_r2_std, sp)
-
-    # Phase 3: Train final model on all training data
-    logger.info("Phase 3: Final model on all %d training sets", len(y_clipped))
-
-    import lightgbm as lgb
-
-    dtrain_full = lgb.Dataset(
-        X_arr, label=y_transformed, feature_name=feature_names,
-        weight=sample_weight,
-    )
-    final_model = lgb.train(
-        {
-            "objective": "huber", "metric": "mae",
-            "learning_rate": 0.068, "num_leaves": 20, "max_depth": 8,
-            "min_child_samples": 19, "subsample": 0.60,
-            "colsample_bytree": 0.88, "reg_alpha": 0.35,
-            "reg_lambda": 0.009, "verbosity": -1,
-        },
-        dtrain_full, num_boost_round=300,
+    logger.info(
+        "BL ground truth: %d/%d sets (%.1f%%), avoid rate %.1f%%",
+        len(y_classifier), len(train_set_numbers),
+        len(y_classifier) / len(train_set_numbers) * 100,
+        (y_classifier < 8.0).mean() * 100,
     )
 
-    train_pred = tt.inverse_transform(final_model.predict(X_arr).reshape(-1, 1)).ravel()
-    train_r2 = r2_score(y_clipped, train_pred)
+    avoid_weights = compute_avoid_sample_weights(y_classifier)
+    classifier_threshold = 8.0  # annualized growth % hurdle
 
-    # Build Kelly calibration from CV residuals
-    residuals = oof[valid_mask] - y_clipped[valid_mask]
-    kelly_cal = KellyCalibration(
-        residual_std=float(np.std(residuals)),
-        residual_mean=float(np.mean(residuals)),
-        hurdle_rate=0.10,  # 10% hurdle for BL price appreciation
-        n_samples=int(valid_mask.sum()),
-    )
-
-    tier1 = TrainedGrowthModel(
-        tier=1,
-        model=final_model,
-        scaler=None,
-        feature_names=tuple(feature_names),
-        fill_values=tuple((f, float(fill_values[f])) for f in feature_names),
-        n_train=len(y_clipped),
-        train_r2=train_r2,
-        trained_at=datetime.now().isoformat(),
-        model_name="lightgbm_keepa_bl",
-        cv_r2_mean=cv_r2,
-        cv_r2_std=cv_r2_std,
-        target_transformer=tt,
-        kelly_calibration=kelly_cal,
-    )
-
-    # Phase 4: Classifier
-    # Finding from Exp 31d: the regressor's predicted BL/RRP ratio is a BETTER
-    # loser detector (AUC=0.746) than a dedicated binary classifier (AUC=0.661).
-    # So we train the classifier on the same features but use the regressor's
-    # score as the primary avoid signal: pred < 1.0 = avoid.
-    #
-    # We still train a classifier for the P(avoid) probability display,
-    # but the regressor is the authoritative signal.
-    logger.info("Phase 4: Avoid classifier (avoid = BL price/RRP < 1.0)")
-
-    y_binary = (y_clipped < 1.0).astype(float)
-    n_avoid = int(y_binary.sum())
-    logger.info("  Avoid class: %d / %d (%.1f%%)", n_avoid, len(y_binary),
-                n_avoid / len(y_binary) * 100)
-
-    # Convert BL ratio target to growth % for classifier compatibility
-    y_growth_pct = (y_train - 1.0) * 100  # ratio -> growth %
     classifier = train_classifier(
-        X_arr, y_growth_pct, feature_names,
-        tuple((f, float(fill_values[f])) for f in feature_names),
-        threshold=0.0,  # avoid = growth < 0% (BL price < RRP)
+        X_classifier, y_classifier, clf_feature_names,
+        tuple((f, float(clf_fill_values[f])) for f in clf_feature_names),
+        threshold=classifier_threshold,
         tuning_trials=20,
+        sample_weight=avoid_weights,
     )
 
     if classifier:
-        logger.info("Classifier: AUC=%.3f, F1=%.3f, Recall=%.3f",
-                    classifier.cv_auc, classifier.cv_f1, classifier.cv_recall)
-        logger.info("NOTE: Regressor score (pred<1.0) is the primary avoid signal (AUC=0.75 vs classifier 0.66)")
+        logger.info("Classifier: AUC=%.3f, F1=%.3f, Recall=%.3f, threshold=%.2f, features=%d",
+                    classifier.cv_auc, classifier.cv_f1, classifier.cv_recall,
+                    classifier.decision_threshold, len(clf_feature_names))
     else:
         logger.info("Classifier training returned None (too few avoid samples)")
 
-    return tier1, None, {}, {}, classifier, None
+    # Phase 5: Great-buy classifier (great_buy = growth >= 20%)
+    # Uses same BL ground truth target and classifier features for consistency
+    logger.info("Phase 5: Great-buy classifier (great_buy = growth >= 20%%)")
+
+    great_buy_classifier = train_classifier(
+        X_classifier, y_classifier, clf_feature_names,
+        tuple((f, float(clf_fill_values[f])) for f in clf_feature_names),
+        threshold=20.0,
+        tuning_trials=20,
+        invert=True,
+    )
+
+    if great_buy_classifier:
+        logger.info("Great-buy classifier: AUC=%.3f, F1=%.3f, Recall=%.3f, threshold=%.2f",
+                    great_buy_classifier.cv_auc, great_buy_classifier.cv_f1,
+                    great_buy_classifier.cv_recall, great_buy_classifier.decision_threshold)
+    else:
+        logger.info("Great-buy classifier training returned None")
+
+    return None, None, theme_stats, {}, classifier, None, great_buy_classifier

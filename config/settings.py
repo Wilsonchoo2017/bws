@@ -11,7 +11,9 @@ import secrets
 import threading
 import time
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 from dotenv import load_dotenv
 
@@ -149,6 +151,19 @@ class ShopeeSettings:
     min_action_delay_ms: int = 800
     max_action_delay_ms: int = 2_500
 
+    # Captcha handling:
+    # - inline_captcha_wait=False: scraper raises CaptchaPendingError and
+    #   returns the job to the queue; user manually verifies via UI.
+    # - inline_captcha_wait=True: legacy behaviour, block in-worker for up to
+    #   3 minutes while the user solves it in the live browser.
+    inline_captcha_wait: bool = os.environ.get(
+        "SHOPEE_INLINE_CAPTCHA_WAIT", "false"
+    ).lower() in ("1", "true", "yes")
+    verify_timeout_s: int = int(os.environ.get("SHOPEE_VERIFY_TIMEOUT_S", "300"))
+    snapshot_retention_days: int = int(
+        os.environ.get("SHOPEE_SNAPSHOT_RETENTION_DAYS", "30")
+    )
+
 
 SHOPEE_CONFIG = ShopeeSettings()
 
@@ -262,9 +277,23 @@ class HourlyRateLimiter:
     MAX_CONTINUOUS_SCRAPE_SECONDS = 3 * 3600.0  # 3 hours
     REST_PERIOD_SECONDS = 1800.0                # 30 min rest
 
-    def __init__(self, max_per_hour: int, source_name: str = "BrickLink") -> None:
+    def __init__(
+        self,
+        max_per_hour: int,
+        source_name: str = "BrickLink",
+        maintenance_window: tuple[int, int, str] | None = None,
+    ) -> None:
+        """
+        Args:
+            max_per_hour: Maximum requests per hour.
+            source_name: Human-readable name for logging.
+            maintenance_window: Optional (start_hour, end_hour, tz_name) tuple.
+                Requests are blocked during this daily window.
+                E.g. (13, 14, "Asia/Kuala_Lumpur") for 1pm-2pm MYT.
+        """
         self._max_per_hour = max_per_hour
         self._source_name = source_name
+        self._maintenance_window = maintenance_window
         self._logger = logging.getLogger(f"bws.ratelimit.{source_name.lower()}")
         self._timestamps: list[float] = []
         self._lock: asyncio.Lock | None = None
@@ -373,12 +402,16 @@ class HourlyRateLimiter:
     def to_snapshot(self) -> dict:
         """Export cooldown state as a JSON-serialisable dict using wall-clock time."""
         remaining = self.cooldown_remaining()
-        return {
+        maint_remaining = self._maintenance_seconds_remaining()
+        snap: dict = {
             "blocked_until_wallclock": time.time() + remaining if remaining > 0 else 0.0,
             "escalation_level": self._escalation_level,
             "consecutive_failures": self._consecutive_failures,
             "was_blocked": self._was_blocked,
         }
+        if maint_remaining > 0:
+            snap["maintenance_until_wallclock"] = time.time() + maint_remaining
+        return snap
 
     def restore_snapshot(self, snap: dict) -> None:
         """Restore cooldown state from a previously saved snapshot."""
@@ -396,6 +429,28 @@ class HourlyRateLimiter:
         self._escalation_level = snap.get("escalation_level", 0)
         self._consecutive_failures = snap.get("consecutive_failures", 0)
         self._was_blocked = snap.get("was_blocked", False)
+
+    def _maintenance_seconds_remaining(self) -> float:
+        """Seconds until the daily maintenance window ends, or 0.0 if outside it."""
+        if self._maintenance_window is None:
+            return 0.0
+        start_hour, end_hour, tz_name = self._maintenance_window
+        tz = ZoneInfo(tz_name)
+        now_local = datetime.now(tz)
+        if start_hour <= now_local.hour < end_hour:
+            end_today = now_local.replace(
+                hour=end_hour, minute=0, second=0, microsecond=0,
+            )
+            return (end_today - now_local).total_seconds()
+        return 0.0
+
+    def is_in_maintenance(self) -> bool:
+        """Check if currently in the daily maintenance window."""
+        return self._maintenance_seconds_remaining() > 0
+
+    def maintenance_remaining(self) -> float:
+        """Seconds until the maintenance window ends, or 0.0 if outside it."""
+        return self._maintenance_seconds_remaining()
 
     def _check_rest_period(self, now: float) -> float:
         """Enforce mandatory rest after sustained continuous scraping.
@@ -420,6 +475,17 @@ class HourlyRateLimiter:
         """Wait until a request slot is available, then record it."""
         async with self._get_lock():
             now = time.monotonic()
+
+            # Wait out daily maintenance window (e.g. BrickLink 1pm-2pm MYT)
+            maint_wait = self._maintenance_seconds_remaining()
+            if maint_wait > 0:
+                self._logger.info(
+                    "%s maintenance window active — sleeping %.0f min",
+                    self._source_name, maint_wait / 60,
+                )
+                await asyncio.sleep(maint_wait)
+                now = time.monotonic()
+                self._logger.info("%s maintenance window ended, resuming", self._source_name)
 
             # Wait out quota cooldown if active (poll every 10s so manual resets take effect)
             if now < self._blocked_until:
@@ -475,15 +541,24 @@ def register_domain_limiter(
     domain: str,
     max_per_hour: int,
     source_name: str,
+    maintenance_window: tuple[int, int, str] | None = None,
 ) -> HourlyRateLimiter:
     """Register (or retrieve) the rate limiter for a domain.
 
     If the domain already has a limiter, returns the existing one.
     This enforces one-limiter-per-domain across the whole codebase.
+
+    Args:
+        maintenance_window: Optional (start_hour, end_hour, tz_name) tuple.
+            Blocks requests during this daily window.
     """
     if domain in _domain_registry:
         return _domain_registry[domain]
-    limiter = HourlyRateLimiter(max_per_hour, source_name=source_name)
+    limiter = HourlyRateLimiter(
+        max_per_hour,
+        source_name=source_name,
+        maintenance_window=maintenance_window,
+    )
     _domain_registry[domain] = limiter
     return limiter
 
@@ -494,10 +569,12 @@ def get_domain_limiter(domain: str) -> HourlyRateLimiter | None:
 
 
 # --- BrickLink (www.bricklink.com + img.bricklink.com = same domain) ---
+# Daily maintenance window: 1pm-2pm MYT (UTC+8)
 BRICKLINK_RATE_LIMITER = register_domain_limiter(
     "bricklink.com",
     RATE_LIMIT_CONFIG.max_requests_per_hour,
     source_name="BrickLink",
+    maintenance_window=(13, 14, "Asia/Kuala_Lumpur"),
 )
 
 

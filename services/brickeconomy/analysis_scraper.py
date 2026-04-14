@@ -110,7 +110,7 @@ async def scrape_analysis_pages(
     async with stealth_browser(
         headless=headless,
         locale=BRICKECONOMY_CONFIG.locale,
-        profile_name="brickeconomy",
+        profile_name="brickeconomy-analysis",
     ) as browser:
         page = await new_page(browser)
 

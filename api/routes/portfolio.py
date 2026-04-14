@@ -27,6 +27,7 @@ from services.portfolio.forward_return_query import (
     get_holdings_forward_returns,
 )
 from services.portfolio.reallocation import get_reallocation_analysis
+from services.portfolio.settings import get_total_capital, set_total_capital
 from services.portfolio.wbr_metrics import calculate_wbr
 
 
@@ -489,3 +490,48 @@ async def reallocation_analysis(
     data = get_reallocation_analysis(conn)
     _fr_cache[cache_key] = {"data": data, "expires": now + _FR_TTL}
     return {"success": True, "data": data}
+
+
+# ---------------------------------------------------------------------------
+# Capital allocation settings
+# ---------------------------------------------------------------------------
+
+
+class SetCapitalRequest(BaseModel):
+    total_capital_cents: int = Field(..., gt=0)
+
+
+@router.get("/capital")
+async def get_capital(conn: Any = Depends(get_db)) -> dict:
+    """Return total capital, deployed, and available amounts."""
+    total = get_total_capital(conn)
+    summary = get_portfolio_summary(conn)
+    deployed = summary["total_cost_cents"]
+    available = max(0, (total or 0) - deployed)
+    return {
+        "success": True,
+        "data": {
+            "total_capital_cents": total,
+            "deployed_cents": deployed,
+            "available_cents": available,
+        },
+    }
+
+
+@router.put("/capital")
+async def update_capital(
+    request: SetCapitalRequest, conn: Any = Depends(get_db)
+) -> dict:
+    """Set the total portfolio capital."""
+    set_total_capital(conn, request.total_capital_cents)
+    summary = get_portfolio_summary(conn)
+    deployed = summary["total_cost_cents"]
+    available = max(0, request.total_capital_cents - deployed)
+    return {
+        "success": True,
+        "data": {
+            "total_capital_cents": request.total_capital_cents,
+            "deployed_cents": deployed,
+            "available_cents": available,
+        },
+    }

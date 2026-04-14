@@ -9,6 +9,8 @@ from typing import TYPE_CHECKING
 from api.jobs import job_manager
 from api.workers import WORKER_REGISTRY
 from api.workers.base import SourceWorker
+from services.shopee.captcha_gate import should_gate_job
+from services.shopee.scraper import CaptchaPendingError
 
 if TYPE_CHECKING:
     from api.jobs import JobManager, Job
@@ -19,7 +21,7 @@ logger = logging.getLogger("bws.worker")
 # Shopee gets extra time because captcha resolution requires human intervention (up to 3 min).
 _JOB_TIMEOUT_SECONDS = 300
 _JOB_TIMEOUT_OVERRIDES: dict[str, int] = {
-    "shopee": 600,
+    "shopee": 1200,
     "hobbydigi": 600,
 }
 
@@ -87,6 +89,12 @@ async def _process_job(
         except asyncio.TimeoutError:
             logger.error("%s Job %s timed out after %ds", log_prefix, job.job_id, timeout)
             mgr.mark_failed(job.job_id, f"Timed out after {timeout}s")
+        except CaptchaPendingError as e:
+            logger.warning(
+                "%s Job %s blocked on captcha event #%s — awaiting manual verify",
+                log_prefix, job.job_id, e.event_id,
+            )
+            mgr.mark_blocked_verify(job.job_id, e.event_id)
         except Exception as e:
             logger.exception("%s Job %s failed", log_prefix, job.job_id)
             mgr.mark_failed(job.job_id, str(e))
@@ -120,6 +128,18 @@ async def run_worker(manager: JobManager | None = None) -> None:
         worker = WORKER_REGISTRY.get(job.scraper_id)
         if not worker:
             mgr.mark_failed(job_id, f"Unknown scraper: {job.scraper_id}")
+            continue
+
+        # Shopee-family gate: if a captcha verification is pending, park the
+        # job as BLOCKED_VERIFY instead of running it.
+        if should_gate_job(job.scraper_id):
+            from services.shopee.captcha_gate import latest_pending_event_id
+            event_id = latest_pending_event_id() or 0
+            logger.info(
+                "Job %s parked BLOCKED_VERIFY (captcha event #%s pending)",
+                job_id, event_id,
+            )
+            mgr.mark_blocked_verify(job_id, event_id)
             continue
 
         sem = semaphores.get(job.scraper_id)

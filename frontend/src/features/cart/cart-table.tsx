@@ -130,11 +130,12 @@ export function CartTable() {
   const enrichItems = useCallback(async () => {
     setEnriching(true);
     try {
-      const [itemsRes, signalsRes, liqRes, liqCohortRes] = await Promise.all([
+      const [itemsRes, signalsRes, liqRes, liqCohortRes, beSignalsRes] = await Promise.all([
         fetch('/api/items').then((r) => r.json()),
         fetch('/api/items/signals').then((r) => r.json()).catch(() => null),
         fetch('/api/items/liquidity').then((r) => r.json()).catch(() => null),
         fetch('/api/items/liquidity/cohorts').then((r) => r.json()).catch(() => null),
+        fetch('/api/items/signals/be').then((r) => r.json()).catch(() => null),
       ]);
 
       if (!itemsRes.success) return;
@@ -143,6 +144,8 @@ export function CartTable() {
         growth: number | null;
         confidence: string | null;
         avoid_probability: number | null;
+        great_buy_probability: number | null;
+        buy_category: 'GREAT' | 'GOOD' | 'SKIP' | 'WORST' | null;
         buy_signal: boolean;
         avoid: boolean;
         kelly_fraction: number | null;
@@ -158,6 +161,8 @@ export function CartTable() {
               growth: hasML ? sig.ml_growth_pct : null,
               confidence: sig.ml_confidence ?? null,
               avoid_probability: sig.ml_avoid_probability ?? null,
+              great_buy_probability: sig.ml_great_buy_probability ?? null,
+              buy_category: sig.ml_buy_category ?? null,
               buy_signal: sig.ml_buy_signal ?? false,
               avoid: sig.ml_avoid ?? false,
               kelly_fraction: sig.ml_kelly_fraction ?? null,
@@ -172,9 +177,20 @@ export function CartTable() {
       const liqCohortMap: Record<string, Record<string, number | null>> =
         liqCohortRes?.success && liqCohortRes.data ? liqCohortRes.data : {};
 
+      // Build Keepa cohort map from bulk BE signals endpoint
+      const beCohortMap = new Map<string, Record<string, { composite_score_pct: number | null }>>();
+      if (beSignalsRes?.success && Array.isArray(beSignalsRes.data)) {
+        for (const sig of beSignalsRes.data) {
+          const setNum = (sig.set_number ?? sig.item_id) as string | undefined;
+          if (setNum && sig.cohorts) {
+            beCohortMap.set(setNum, sig.cohorts);
+          }
+        }
+      }
+
       const merged: UnifiedItem[] = (itemsRes.data as UnifiedItem[]).map((item) => {
         const ml = mlMap.get(item.set_number);
-        const c = ml?.cohorts;
+        const c = beCohortMap.get(item.set_number);
         const lc = liqCohortMap[item.set_number];
         return {
           ...item,
@@ -182,22 +198,18 @@ export function CartTable() {
           ml_confidence: ml?.confidence ?? null,
           ml_tier: null,
           ml_avoid_probability: ml?.avoid_probability ?? null,
+          ml_great_buy_probability: ml?.great_buy_probability ?? null,
+          ml_buy_category: ml?.buy_category ?? null,
           ml_raw_growth_pct: null,
           ml_kelly_fraction: ml?.kelly_fraction ?? null,
           ml_win_probability: ml?.win_probability ?? null,
           cohort_half_year: c?.half_year?.composite_score_pct ?? null,
-          cohort_year: c?.year?.composite_score_pct ?? null,
           cohort_theme: c?.theme?.composite_score_pct ?? null,
-          cohort_year_theme: c?.year_theme?.composite_score_pct ?? null,
           cohort_price_tier: c?.price_tier?.composite_score_pct ?? null,
-          cohort_piece_group: c?.piece_group?.composite_score_pct ?? null,
           liquidity_score: liqMap[item.set_number] ?? null,
           liq_cohort_half_year: lc?.half_year ?? null,
-          liq_cohort_year: lc?.year ?? null,
           liq_cohort_theme: lc?.theme ?? null,
-          liq_cohort_year_theme: lc?.year_theme ?? null,
           liq_cohort_price_tier: lc?.price_tier ?? null,
-          liq_cohort_piece_group: lc?.piece_group ?? null,
         };
       });
 
@@ -227,13 +239,12 @@ export function CartTable() {
         bricklink_new_cents: null, bricklink_new_currency: null, bricklink_new_last_seen: null,
         bricklink_used_cents: null, bricklink_used_currency: null, bricklink_used_last_seen: null,
         ml_growth_pct: null, ml_confidence: null, ml_tier: null,
-        ml_avoid_probability: null, ml_raw_growth_pct: null,
+        ml_avoid_probability: null, ml_great_buy_probability: null,
+        ml_buy_category: null, ml_raw_growth_pct: null,
         ml_kelly_fraction: null, ml_win_probability: null,
-        cohort_half_year: null, cohort_year: null, cohort_theme: null,
-        cohort_year_theme: null, cohort_price_tier: null, cohort_piece_group: null,
+        cohort_half_year: null, cohort_theme: null, cohort_price_tier: null,
         liquidity_score: null,
-        liq_cohort_half_year: null, liq_cohort_year: null, liq_cohort_theme: null,
-        liq_cohort_year_theme: null, liq_cohort_price_tier: null, liq_cohort_piece_group: null,
+        liq_cohort_half_year: null, liq_cohort_theme: null, liq_cohort_price_tier: null,
       } as UnifiedItem));
 
       setAllItems(liteItems);
