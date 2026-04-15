@@ -29,9 +29,10 @@ class GrowthPrediction:
     feature_contributions: tuple[tuple[str, float], ...] = ()
     prediction_interval: PredictionInterval | None = None
     shap_base_value: float | None = None
-    avoid_probability: float | None = None  # P(avoid) from classifier
-    great_buy_probability: float | None = None  # P(growth >= 20%)
-    buy_category: str | None = None  # "GREAT", "GOOD", "SKIP", "WORST"
+    avoid_probability: float | None = None  # P(APR < 10%)
+    great_buy_probability: float | None = None  # P(APR >= 20%)
+    good_buy_probability: float | None = None  # P(10% <= APR < 20%) derived
+    buy_category: str | None = None  # "GREAT", "GOOD", "HOLD", "SKIP", "WORST"
     raw_growth_pct: float | None = None  # regressor output before hurdle
     kelly_fraction: float | None = None  # recommended position size (0-1)
     win_probability: float | None = None  # P(return > hurdle)
@@ -43,7 +44,7 @@ class KellyCalibration:
 
     residual_std: float  # std of (actual - predicted) from CV
     residual_mean: float
-    hurdle_rate: float  # 8% default
+    hurdle_rate: float  # 10% default (Exp 36)
     n_samples: int
     # Pre-computed Kelly params at key growth levels
     # Maps predicted_growth_pct -> (win_prob, kelly_fraction)

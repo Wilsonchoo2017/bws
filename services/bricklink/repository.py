@@ -180,6 +180,7 @@ def upsert_item(conn: Any, data: BricklinkData) -> int:
                 minifig_count = ?,
                 dimensions = ?,
                 has_instructions = ?,
+                wanted_count = ?,
                 last_scraped_at = ?,
                 next_scrape_at = ?,
                 updated_at = ?
@@ -195,6 +196,7 @@ def upsert_item(conn: Any, data: BricklinkData) -> int:
                 data.minifig_count,
                 data.dimensions,
                 data.has_instructions,
+                data.wanted_count,
                 now,
                 (datetime.now(tz=_UTC) + timedelta(days=existing.scrape_interval_days)).isoformat(),
                 now,
@@ -213,9 +215,9 @@ def upsert_item(conn: Any, data: BricklinkData) -> int:
         INSERT INTO bricklink_items (
             id, item_id, item_type, title, weight, year_released, image_url,
             parts_count, theme, minifig_count, dimensions, has_instructions,
-            watch_status, scrape_interval_days, last_scraped_at, next_scrape_at,
-            created_at, updated_at
-        ) VALUES (nextval('bricklink_items_id_seq'), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            wanted_count, watch_status, scrape_interval_days, last_scraped_at,
+            next_scrape_at, created_at, updated_at
+        ) VALUES (nextval('bricklink_items_id_seq'), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         RETURNING id
         """,
         [
@@ -230,6 +232,7 @@ def upsert_item(conn: Any, data: BricklinkData) -> int:
             data.minifig_count,
             data.dimensions,
             data.has_instructions,
+            data.wanted_count,
             "active",
             scrape_interval,
             now,

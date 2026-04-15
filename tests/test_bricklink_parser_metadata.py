@@ -182,11 +182,11 @@ class TestParseItemInfoIntegration:
         assert result["year_released"] == 2023
 
     def test_minimal_html_all_keys_present(self):
-        """#15: Given empty HTML, all 9 keys present with None values."""
+        """#15: Given empty HTML, all keys present with None values."""
         result = parse_item_info("<html><body></body></html>")
         expected_keys = {
             "title", "weight", "year_released", "image_url", "parts_count", "theme",
-            "minifig_count", "dimensions", "has_instructions",
+            "minifig_count", "dimensions", "has_instructions", "wanted_count",
         }
         assert set(result.keys()) == expected_keys
         assert result["parts_count"] is None
@@ -194,6 +194,7 @@ class TestParseItemInfoIntegration:
         assert result["minifig_count"] is None
         assert result["dimensions"] is None
         assert result["has_instructions"] is None
+        assert result["wanted_count"] is None
 
 
 class TestParseFullItem:
@@ -230,3 +231,36 @@ class TestParseFullItem:
         data = parse_full_item(item_html, self._make_price_guide_html(), "S", "99999-1")
         assert data.parts_count is None
         assert data.theme is None
+
+
+class TestWantedCountExtraction:
+    """Parsing the 'On N Wanted Lists' marker from the item page."""
+
+    def test_wanted_count_single(self):
+        html = _wrap_html("<br>On 4 Wanted Lists\n")
+        info = parse_item_info(html)
+        assert info["wanted_count"] == 4
+
+    def test_wanted_count_plural_zero(self):
+        html = _wrap_html("<br>On 1 Wanted List\n")
+        info = parse_item_info(html)
+        assert info["wanted_count"] == 1
+
+    def test_wanted_count_with_thousands_separator(self):
+        html = _wrap_html("<br>On 1,234 Wanted Lists\n")
+        info = parse_item_info(html)
+        assert info["wanted_count"] == 1234
+
+    def test_wanted_count_missing_returns_none(self):
+        html = _wrap_html("<p>No wanted marker here</p>")
+        info = parse_item_info(html)
+        assert info["wanted_count"] is None
+
+    def test_wanted_count_flows_to_bricklink_data(self):
+        item_html = _wrap_html(
+            '<h1 id="item-name-title">UCS Millennium Falcon</h1>'
+            "On 756 Wanted Lists"
+        )
+        price_guide_html = '<tr bgcolor="#C0C0C0"><td></td><td></td><td></td><td></td></tr>'
+        data = parse_full_item(item_html, price_guide_html, "S", "75192-1")
+        assert data.wanted_count == 756

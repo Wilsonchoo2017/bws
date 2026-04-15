@@ -30,16 +30,18 @@ _cfg = MLPipelineConfig()
 logger = logging.getLogger(__name__)
 
 # Sets with P(avoid) above this are flagged as AVOID
+# (Exp 36: avoid means APR < 10%)
 AVOID_GATE_THRESHOLD = 0.5
 
 # Minimum predicted growth to trigger a BUY signal
-BUY_HURDLE_PCT = 8.0
+BUY_HURDLE_PCT = 10.0
 
 # P(great_buy) threshold for GREAT category
 GREAT_BUY_THRESHOLD = 0.6
 
-# P(great_buy) threshold for GOOD category (classifier-only mode)
-GOOD_BUY_THRESHOLD = 0.10
+# P(good_buy) threshold for GOOD category
+# good_buy = max(0, (1 - P(avoid)) - P(great_buy)) — derived, not trained
+GOOD_BUY_THRESHOLD = 0.30
 
 # Regressor fallback: predicted growth >= this for GOOD category
 GOOD_BUY_HURDLE_PCT = 10.0
@@ -136,10 +138,12 @@ def _engineer_legacy_be(
 ) -> pd.DataFrame:
     """Feature engineering for legacy BE model."""
     from services.ml.growth.features import engineer_intrinsic_features, engineer_keepa_features
+    from services.ml.growth.seasonality_features import engineer_q4_seasonal_features
     df_feat, _, _ = engineer_intrinsic_features(
         candidates, theme_stats=theme_stats, subtheme_stats=subtheme_stats,
     )
-    return engineer_keepa_features(df_feat, keepa_df)
+    df_kp = engineer_keepa_features(df_feat, keepa_df)
+    return engineer_q4_seasonal_features(df_kp, keepa_df)
 
 
 def _predict_classifier_only(
@@ -197,12 +201,14 @@ def _predict_classifier_only(
     for i, (_, row) in enumerate(df_feat.iterrows()):
         ap = float(avoid_probs[i])
         gbp = float(great_buy_probs[i])
+        # P(good_buy) = P(10 <= APR < 20) derived from the two trained heads
+        good_bp = max(0.0, min(1.0, (1.0 - ap) - gbp))
 
         if ap >= avoid_threshold:
             category = "WORST"
         elif gbp >= great_threshold:
             category = "GREAT"
-        elif gbp >= GOOD_BUY_THRESHOLD:
+        elif good_bp >= GOOD_BUY_THRESHOLD:
             category = "GOOD"
         else:
             category = "SKIP"
@@ -216,6 +222,7 @@ def _predict_classifier_only(
             tier=1,
             avoid_probability=ap,
             great_buy_probability=gbp,
+            good_buy_probability=good_bp,
             buy_category=category,
             raw_growth_pct=0.0,
         ))
@@ -361,6 +368,10 @@ def _predict_batch(
         growth_i = float(predicted_growth[i])
         ap = float(avoid_probs[i]) if avoid_probs is not None else None
         gbp = float(great_buy_probs[i]) if great_buy_probs is not None else None
+        # P(good_buy) = P(10 <= APR < 20) derived from the two trained heads
+        good_bp: float | None = None
+        if ap is not None and gbp is not None:
+            good_bp = max(0.0, min(1.0, (1.0 - ap) - gbp))
 
         # Buy category from combined classifier signals
         # Use auto-tuned thresholds from classifiers when available
@@ -370,6 +381,8 @@ def _predict_batch(
             category = "WORST"
         elif gbp is not None and gbp >= great_threshold:
             category = "GREAT"
+        elif good_bp is not None and good_bp >= GOOD_BUY_THRESHOLD:
+            category = "GOOD"
         elif growth_i >= GOOD_BUY_HURDLE_PCT:
             category = "GOOD"
         else:
@@ -413,6 +426,7 @@ def _predict_batch(
             shap_base_value=base_val,
             avoid_probability=ap,
             great_buy_probability=gbp,
+            good_buy_probability=good_bp,
             buy_category=category,
             raw_growth_pct=round(growth_i, 1),
             kelly_fraction=kelly_frac_i,

@@ -62,6 +62,13 @@ TIER2_FEATURES: tuple[str, ...] = TIER1_FEATURES + (
     # 3P spread features (Exp 30: BrickTalk "3P floor above retail" signal)
     "kp_fba_floor_above_rrp", "kp_fba_floor_vs_rrp",
     "kp_fbm_mean_vs_rrp", "kp_fba_never_below_rrp",
+    # Q4 seasonality (Exp 32: calendar-aware holiday demand features)
+    "kp_q4_avg_discount", "kp_q4_max_discount", "kp_q4_vs_nonq4_disc_delta",
+    "kp_q4_fba_floor_vs_rrp", "kp_q4_oct_dec_trajectory", "kp_q4_fbm_premium_pct",
+    "kp_yoy_q4_disc_delta", "kp_yoy_q4_price_delta_pct",
+    "kp_q4_price_cagr", "kp_q4_disc_slope", "kp_yoy_q4_count",
+    "kp_q4_clearance_signal", "kp_q4_clearance_slope",
+    "kp_amazon_oos_in_q4", "kp_q4_price_above_rrp_pct",
 )
 
 

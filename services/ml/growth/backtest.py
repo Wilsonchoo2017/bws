@@ -21,7 +21,7 @@ from services.ml.growth.model_selection import _get_monotonic_constraints, build
 logger = logging.getLogger(__name__)
 
 MYR_PER_USD = 4.50
-HURDLE_RATE = 8.0  # minimum acceptable return %
+HURDLE_RATE = 10.0  # minimum acceptable return % (Exp 36, was 8%)
 
 
 # ---------------------------------------------------------------------------

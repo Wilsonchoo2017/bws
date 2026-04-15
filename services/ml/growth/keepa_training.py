@@ -3,13 +3,15 @@
 Target: BrickLink current new price / RRP (real secondary market data).
 Features: 43 classifier features (36 Keepa+metadata + 7 Google Trends).
 
-Architecture (Exp 32 + Exp 33 + Exp 34 + Exp 35):
-  - P(avoid): BL annualized return < 8%, asymmetric weights
+Architecture (Exp 32 + Exp 33 + Exp 34 + Exp 35 + Exp 36):
+  - P(avoid): BL annualized return < 10%, asymmetric weights
   - P(great_buy): BL annualized return >= 20%
+  - P(good_buy): derived at prediction time as max(0, (1-P(avoid)) - P(great_buy))
   - No regressor -- buy categories from classifiers only
   - Theme-level Keepa aggregates (LOO Bayesian encoded, Exp 33)
   - Regional RRP, buy box, interactions (Exp 34)
   - Phase-aware, composite, and relative signal features (Exp 35)
+  - APR skip threshold tightened 8%->10% (Exp 36, 2026-04)
 """
 
 from __future__ import annotations
@@ -182,11 +184,11 @@ def train_keepa_bl_models(
         "BL ground truth: %d/%d sets (%.1f%%), avoid rate %.1f%%",
         len(y_classifier), len(train_set_numbers),
         len(y_classifier) / len(train_set_numbers) * 100,
-        (y_classifier < 8.0).mean() * 100,
+        (y_classifier < 10.0).mean() * 100,
     )
 
     avoid_weights = compute_avoid_sample_weights(y_classifier)
-    classifier_threshold = 8.0  # annualized growth % hurdle
+    classifier_threshold = 10.0  # annualized growth % hurdle (Exp 36)
 
     classifier = train_classifier(
         X_classifier, y_classifier, clf_feature_names,

@@ -21,6 +21,7 @@ CREATE TABLE IF NOT EXISTS bricklink_items (
     image_url VARCHAR,
     parts_count INTEGER,
     theme VARCHAR,
+    wanted_count INTEGER,
     set_number VARCHAR GENERATED ALWAYS AS (SPLIT_PART(item_id, '-', 1)) STORED,
     watch_status VARCHAR DEFAULT 'active',
     scrape_interval_days INTEGER DEFAULT 7,

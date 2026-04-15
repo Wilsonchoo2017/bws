@@ -19,8 +19,8 @@ from dataclasses import dataclass
 logger = logging.getLogger(__name__)
 
 # Minimum annual return to justify buying (opportunity cost)
-# 8% = roughly stock market average + storage/effort premium
-HURDLE_RATE_12M: float = 8.0
+# 10% = above inflation + storage/effort premium (Exp 36, was 8%)
+HURDLE_RATE_12M: float = 10.0
 HURDLE_RATE_24M: float = 20.0  # ~10% annualized over 2 years
 
 # Signal thresholds (effective return above hurdle)

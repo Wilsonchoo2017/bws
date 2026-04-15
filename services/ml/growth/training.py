@@ -516,7 +516,7 @@ def train_growth_models(
         logger.info(
             "BL ground truth: %d sets (%.1f%% of total), avoid rate %.1f%%",
             len(y_classifier), len(y_classifier) / len(y_all) * 100,
-            (y_classifier < 8.0).mean() * 100,
+            (y_classifier < 10.0).mean() * 100,
         )
 
         # Asymmetric weights: penalize missing severe losers more
@@ -531,7 +531,7 @@ def train_growth_models(
     classifier = train_classifier(
         X1_classifier, y_classifier, tier1_features,
         tuple((f, float(fill1[f])) for f in tier1_features),
-        threshold=8.0,  # 8% hurdle rate for buy decision
+        threshold=10.0,  # 10% hurdle rate for buy decision (Exp 36)
         tuning_trials=_cfg.classifier_tuning_trials,
         sample_weight=avoid_weights,
     )
@@ -540,6 +540,9 @@ def train_growth_models(
 
     cutoff_dates: dict[str, str] = {}
     df_kp = engineer_keepa_features(df_feat, keepa_df, cutoff_dates=cutoff_dates)
+    # Phase 3b: calendar-aware Q4 seasonality features (same cutoff_dates)
+    from services.ml.growth.seasonality_features import engineer_q4_seasonal_features
+    df_kp = engineer_q4_seasonal_features(df_kp, keepa_df, cutoff_dates=cutoff_dates)
     has_keepa = df_kp["kp_bb_premium"].notna() | df_kp["kp_below_rrp_pct"].notna()
     df_kp_sub = df_kp[has_keepa].copy()
     y_kp = df_kp_sub["annual_growth_pct"].values.astype(float)

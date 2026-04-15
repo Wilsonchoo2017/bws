@@ -36,6 +36,14 @@ RE_MIN_PRICE = re.compile(r"Min Price:\s*([A-Z]+)\s+([\d,\.]+)", re.IGNORECASE)
 RE_AVG_PRICE = re.compile(r"Avg Price:\s*([A-Z]+)\s+([\d,\.]+)", re.IGNORECASE)
 RE_QTY_AVG_PRICE = re.compile(r"Qty Avg Price:\s*([A-Z]+)\s+([\d,\.]+)", re.IGNORECASE)
 RE_MAX_PRICE = re.compile(r"Max Price:\s*([A-Z]+)\s+([\d,\.]+)", re.IGNORECASE)
+RE_WANTED_COUNT = re.compile(r"On\s+(\d[\d,]*)\s+Wanted\s+Lists?", re.IGNORECASE)
+
+
+def _extract_wanted_count(html: str) -> int | None:
+    match = RE_WANTED_COUNT.search(html)
+    if not match:
+        return None
+    return int(match.group(1).replace(",", ""))
 
 
 def _parse_url_params(url: str) -> tuple[str, str] | None:
@@ -372,6 +380,7 @@ def parse_item_info(html: str) -> dict[str, str | int | None]:
     minifig_count = _extract_minifig_count(soup)
     dimensions = _extract_dimensions(html)
     has_instructions = _extract_has_instructions(html)
+    wanted_count = _extract_wanted_count(html)
 
     # Fallback: construct predictable BrickLink image URL for sets
     if image_url is None:
@@ -400,6 +409,7 @@ def parse_item_info(html: str) -> dict[str, str | int | None]:
         "minifig_count": minifig_count,
         "dimensions": dimensions,
         "has_instructions": has_instructions,
+        "wanted_count": wanted_count,
     }
 
 
@@ -650,6 +660,7 @@ def parse_full_item(
         minifig_count=item_info.get("minifig_count"),  # type: ignore[arg-type]
         dimensions=item_info.get("dimensions"),  # type: ignore[arg-type]
         has_instructions=item_info.get("has_instructions"),  # type: ignore[arg-type]
+        wanted_count=item_info.get("wanted_count"),  # type: ignore[arg-type]
         six_month_new=pricing.get("six_month_new"),
         six_month_used=pricing.get("six_month_used"),
         current_new=pricing.get("current_new"),

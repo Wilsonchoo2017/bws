@@ -118,6 +118,7 @@ class BricklinkData:
     minifig_count: int | None = None
     dimensions: str | None = None
     has_instructions: bool | None = None
+    wanted_count: int | None = None
     six_month_new: PricingBox | None = None
     six_month_used: PricingBox | None = None
     current_new: PricingBox | None = None
