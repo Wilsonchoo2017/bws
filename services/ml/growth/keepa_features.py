@@ -99,6 +99,23 @@ KEEPA_BL_FEATURES: tuple[str, ...] = (
     "buybox_vs_theme",
     # Exp 36: depth × frequency composite
     "amz_discount_depth_x_freq",
+    # Exp 37: calendar-aware Q4 seasonality (from seasonality_features.py)
+    # Populated by engineer_q4_seasonal_features in the training pipeline.
+    "kp_q4_avg_discount",
+    "kp_q4_max_discount",
+    "kp_q4_vs_nonq4_disc_delta",
+    "kp_q4_fba_floor_vs_rrp",
+    "kp_q4_oct_dec_trajectory",
+    "kp_q4_fbm_premium_pct",
+    "kp_yoy_q4_disc_delta",
+    "kp_yoy_q4_price_delta_pct",
+    "kp_q4_price_cagr",
+    "kp_q4_disc_slope",
+    "kp_yoy_q4_count",
+    "kp_q4_clearance_signal",
+    "kp_q4_clearance_slope",
+    "kp_amazon_oos_in_q4",
+    "kp_q4_price_above_rrp_pct",
 )
 
 # Classifier-specific features: base 36 + 7 GT = 43 (Exp 32-35)

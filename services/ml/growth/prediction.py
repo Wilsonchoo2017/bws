@@ -106,16 +106,26 @@ def _engineer_keepa_bl(
     gt_df: pd.DataFrame | None = None,
     theme_stats: dict | None = None,
 ) -> pd.DataFrame:
-    """Feature engineering for Keepa+BL model (Exp 31) + GT (Exp 32) + theme (Exp 33)."""
+    """Feature engineering for Keepa+BL model (Exp 31) + GT (Exp 32) + theme (Exp 33) + Q4 (Exp 37)."""
     from services.ml.growth.keepa_features import (
         GT_FEATURES,
         engineer_gt_features,
         engineer_keepa_bl_features,
     )
+    from services.ml.growth.seasonality_features import (
+        Q4_FEATURE_NAMES,
+        engineer_q4_seasonal_features,
+    )
 
     df_feat = engineer_keepa_bl_features(
         candidates, keepa_df, theme_stats=theme_stats if theme_stats else None,
     )
+
+    # Exp 37: merge calendar-aware Q4 seasonality features
+    q4_input = candidates[["set_number", "rrp_usd_cents"]].copy()
+    q4_out = engineer_q4_seasonal_features(q4_input, keepa_df, cutoff_dates=None)
+    q4_cols = ["set_number", *[c for c in Q4_FEATURE_NAMES if c in q4_out.columns]]
+    df_feat = df_feat.merge(q4_out[q4_cols], on="set_number", how="left")
 
     if gt_df is not None and not gt_df.empty:
         gt_feat = engineer_gt_features(gt_df, candidates)

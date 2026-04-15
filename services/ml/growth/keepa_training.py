@@ -77,6 +77,28 @@ def train_keepa_bl_models(
                 len(base_df), len(keepa_df))
     df_feat = engineer_keepa_bl_features(base_df, keepa_df)
 
+    # Exp 37: calendar-aware Q4 seasonality features merged in on set_number.
+    # No cutoff — matches the convention of existing keepa_bl features (full
+    # timeline; temporal safety handled by excluding 2025+ from training).
+    # engineer_keepa_bl_features pre-fills Q4 names with 0.0 via its
+    # ensure-columns loop; drop those zeros first so the merge wins.
+    from services.ml.growth.seasonality_features import (
+        Q4_FEATURE_NAMES,
+        engineer_q4_seasonal_features,
+    )
+    df_feat = df_feat.drop(
+        columns=[c for c in Q4_FEATURE_NAMES if c in df_feat.columns],
+    )
+    q4_input = base_df[["set_number", "rrp_usd_cents"]].copy()
+    q4_out = engineer_q4_seasonal_features(q4_input, keepa_df, cutoff_dates=None)
+    q4_cols = ["set_number", *[c for c in Q4_FEATURE_NAMES if c in q4_out.columns]]
+    df_feat = df_feat.merge(q4_out[q4_cols], on="set_number", how="left")
+    q4_non_null = df_feat[Q4_FEATURE_NAMES[0]].notna().sum() if Q4_FEATURE_NAMES else 0
+    logger.info(
+        "Q4 seasonality features merged: %d columns (%d rows with first-feature populated)",
+        len(q4_cols) - 1, int(q4_non_null),
+    )
+
     # Merge with target
     target_map = dict(zip(target_series.index, target_series.values))
     df_feat["target"] = df_feat["set_number"].map(target_map)
