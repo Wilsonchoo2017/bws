@@ -56,6 +56,31 @@ export interface HoldingDetail {
   transactions: Transaction[];
 }
 
+export interface DrawdownSummary {
+  position_count: number;
+  at_risk_count: number;
+  at_risk_cost_cents: number;
+  max_drawdown_pct: number;
+  weighted_drawdown_pct: number;
+}
+
+export interface PositionDrawdown {
+  set_number: string;
+  condition: string;
+  quantity: number;
+  cost_basis_cents: number;
+  avg_cost_cents: number;
+  acquired_at: string | null;
+  current_value_cents: number;
+  peak_value_cents: number;
+  peak_date: string | null;
+  drawdown_pct: number;
+  unrealized_pl_cents: number;
+  unrealized_pl_pct: number;
+  months_in_drawdown: number;
+  at_risk: boolean;
+}
+
 export interface PortfolioSummary {
   total_cost_cents: number;
   total_market_value_cents: number;
@@ -64,6 +89,7 @@ export interface PortfolioSummary {
   realized_pl_cents: number;
   holdings_count: number;
   unique_sets: number;
+  drawdown?: DrawdownSummary;
 }
 
 export interface ForwardReturn {

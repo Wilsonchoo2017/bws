@@ -1,4 +1,9 @@
-export type JobStatus = 'queued' | 'running' | 'completed' | 'failed';
+export type JobStatus =
+  | 'queued'
+  | 'running'
+  | 'completed'
+  | 'failed'
+  | 'blocked_verify';
 
 export interface QueueStats {
   total: number;

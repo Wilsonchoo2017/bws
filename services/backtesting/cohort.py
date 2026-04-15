@@ -39,6 +39,12 @@ KNOWN_SIGNALS: tuple[str, ...] = (
     "price_wall",
     "listing_ratio",
     "new_used_spread",
+    # Malaysia exit-liquidity signals (see services/my_liquidity)
+    "my_sold_velocity_30d",
+    "my_premium_median_pct",
+    "my_saturation_inverse",
+    "my_churn_ratio",
+    "my_liquidity_ratio",
 )
 
 PIECE_GROUPS: tuple[tuple[str, int, int], ...] = (

@@ -19,10 +19,15 @@ logger = logging.getLogger("bws.worker")
 
 # Hard timeout per job -- prevents a single hung browser from blocking the worker forever.
 # Shopee gets extra time because captcha resolution requires human intervention (up to 3 min).
+# Competition sweeps process a batch of sets in a single job, so they need a
+# much larger envelope than single-URL scrapes -- browser launch + ~20-30s per
+# item + possible Cloudflare/captcha waits easily exceed the default.
 _JOB_TIMEOUT_SECONDS = 300
 _JOB_TIMEOUT_OVERRIDES: dict[str, int] = {
     "shopee": 1200,
     "hobbydigi": 600,
+    "shopee_competition": 1800,
+    "carousell_competition": 1800,
 }
 
 

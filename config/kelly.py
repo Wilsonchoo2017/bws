@@ -21,8 +21,16 @@ SCORE_BIN_LABELS: dict[tuple[int, int], str] = {
 # Half-Kelly multiplier (safety margin for estimation error)
 KELLY_FRACTION: float = 0.5
 
-# Maximum allocation to any single set (25%)
+# Maximum allocation to any single set (25%) — used by backtesting/kelly_optimizer
 MAX_POSITION_PCT: float = 0.25
+
+# Diversification caps for the live portfolio allocator. Single positions
+# cap at 10% (one bad set can't blow >10% of capital); themes at 25%
+# (e.g. Marvel cycle downturn bounded); retirement years at 15% (so a single
+# vintage's market conditions can't dominate exits).
+MAX_SET_PCT: float = 0.10
+MAX_THEME_PCT: float = 0.25
+MAX_YEAR_PCT: float = 0.15
 
 # Minimum sample count per bin to produce a recommendation
 MIN_SAMPLE_COUNT: int = 10

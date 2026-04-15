@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useCallback, useState } from 'react';
+import { DrawdownPanel } from './drawdown-panel';
 import { EnrichPortfolioButton } from './enrich-portfolio-button';
 import { PortfolioSummaryCards } from './portfolio-summary-cards';
 import { HoldingsTable } from './holdings-table';
@@ -21,6 +22,7 @@ export function PortfolioDashboard() {
   return (
     <div className='flex flex-1 flex-col gap-6' key={refreshKey}>
       <PortfolioSummaryCards />
+      <DrawdownPanel />
       <div className='flex items-center justify-between'>
         <div className='flex items-center gap-4'>
           <Link

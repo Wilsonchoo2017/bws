@@ -14,7 +14,9 @@ from config.kelly import (
     CATEGORY_PARAMS,
     DISCOUNT_STEPS,
     HALF_KELLY_MULTIPLIER,
-    MAX_POSITION_PCT,
+    MAX_SET_PCT,
+    MAX_THEME_PCT,
+    MAX_YEAR_PCT,
     TARGET_APR,
 )
 from services.portfolio.settings import get_total_capital
@@ -57,6 +59,14 @@ class CapitalAllocation:
     expected_value_cents: int | None
     meets_target: bool
     discount_table: list[DiscountRow]
+    theme: str | None
+    year_retired: int | None
+    theme_exposure_cents: int
+    year_exposure_cents: int
+    theme_cap_cents: int | None
+    year_cap_cents: int | None
+    set_cap_cents: int | None
+    concentration_limited_by: str | None
 
 
 def _kelly_fraction(win_prob: float, avg_win: float, avg_loss: float) -> float:
@@ -89,8 +99,14 @@ def _build_discount_table(
     available_cents: int,
     total_capital_cents: int | None,
     existing_cost_cents: int,
+    concentration_cap_cents: int | None,
 ) -> list[DiscountRow]:
-    """Build a guideline table at various discount levels from RRP."""
+    """Build a guideline table at various discount levels from RRP.
+
+    `concentration_cap_cents` is the hard ceiling on target_position after
+    applying the diversification caps (set/theme/year). None if no total
+    capital is configured.
+    """
     rows: list[DiscountRow] = []
     for discount in DISCOUNT_STEPS:
         entry_cents = max(1, round(rrp_cents * (1.0 - discount)))
@@ -99,11 +115,22 @@ def _build_discount_table(
         avg_win = eff_3yr
         kelly_f = _kelly_fraction(win_prob, avg_win, AVG_LOSS_PCT)
         half_k = kelly_f * HALF_KELLY_MULTIPLIER
-        capped = min(half_k, MAX_POSITION_PCT)
-        rec_cents = round(available_cents * capped) if available_cents > 0 else None
-        target_pos = (
+        capped = min(half_k, MAX_SET_PCT)
+        raw_target = (
             round(total_capital_cents * capped) if total_capital_cents else None
         )
+        target_pos = (
+            min(raw_target, concentration_cap_cents)
+            if raw_target is not None and concentration_cap_cents is not None
+            else raw_target
+        )
+        raw_rec = round(available_cents * capped) if available_cents > 0 else None
+        if raw_rec is not None and concentration_cap_cents is not None:
+            rec_cents: int | None = max(
+                0, min(raw_rec, concentration_cap_cents - existing_cost_cents)
+            )
+        else:
+            rec_cents = raw_rec
         remaining = (
             max(0, min(target_pos - existing_cost_cents, available_cents))
             if target_pos is not None
@@ -122,6 +149,62 @@ def _build_discount_table(
             )
         )
     return rows
+
+
+def _load_concentration(conn: Any) -> tuple[dict[str, int], dict[int, int]]:
+    """Aggregate FIFO remaining cost basis by theme and by year_retired.
+
+    Both dicts map to total cost_cents currently invested in that bucket.
+    Holdings missing theme/year in `lego_items` are silently dropped from
+    that dimension (they still count toward the set-level cap).
+    """
+    from services.portfolio.repository import _fifo_cost_basis
+
+    rows = conn.execute(
+        """
+        SELECT pt.set_number, pt.condition, pt.txn_type, pt.quantity,
+               pt.price_cents, pt.txn_date,
+               li.theme, li.year_retired
+        FROM portfolio_transactions pt
+        LEFT JOIN lego_items li ON li.set_number = pt.set_number
+        ORDER BY pt.set_number, pt.condition, pt.txn_date ASC, pt.id ASC
+        """
+    ).fetchall()
+
+    groups: dict[tuple[str, str], list[tuple]] = {}
+    meta: dict[str, tuple[str | None, int | None]] = {}
+    for row in rows:
+        sn, cond = row[0], row[1]
+        groups.setdefault((sn, cond), []).append(
+            (sn, cond, row[2], row[3], row[4], row[5])
+        )
+        meta[sn] = (row[6], row[7])
+
+    theme_costs: dict[str, int] = {}
+    year_costs: dict[int, int] = {}
+    for (sn, _cond), txns in groups.items():
+        cost, qty = _fifo_cost_basis(txns)
+        if qty <= 0 or cost <= 0:
+            continue
+        theme, year_retired = meta.get(sn, (None, None))
+        if theme:
+            theme_costs[theme] = theme_costs.get(theme, 0) + cost
+        if year_retired is not None:
+            year_costs[int(year_retired)] = year_costs.get(int(year_retired), 0) + cost
+    return theme_costs, year_costs
+
+
+def _item_theme_year(conn: Any, set_number: str) -> tuple[str | None, int | None]:
+    """Fetch (theme, year_retired) for a single set. Missing metadata → (None, None)."""
+    row = conn.execute(
+        "SELECT theme, year_retired FROM lego_items WHERE set_number = ?",
+        [set_number],
+    ).fetchone()
+    if not row:
+        return (None, None)
+    theme = row[0]
+    year = int(row[1]) if row[1] is not None else None
+    return (theme, year)
 
 
 def _existing_position(conn: Any, set_number: str) -> tuple[int, int]:
@@ -168,6 +251,31 @@ def compute_capital_allocation(
     available = max(0, (total_capital or 0) - deployed)
     existing_qty, existing_cost = _existing_position(conn, set_number)
 
+    theme, year_retired = _item_theme_year(conn, set_number)
+    theme_costs, year_costs = _load_concentration(conn)
+    theme_exposure = theme_costs.get(theme, 0) if theme else 0
+    year_exposure = year_costs.get(year_retired, 0) if year_retired is not None else 0
+
+    # Per-dimension budget (None when total capital is unknown).
+    theme_cap = round(total_capital * MAX_THEME_PCT) if total_capital else None
+    year_cap = round(total_capital * MAX_YEAR_PCT) if total_capital else None
+    set_cap = round(total_capital * MAX_SET_PCT) if total_capital else None
+
+    # Headroom = how much MORE can still be committed to each bucket.
+    theme_head = max(0, theme_cap - theme_exposure) if theme_cap is not None else None
+    year_head = max(0, year_cap - year_exposure) if year_cap is not None else None
+
+    # Concentration ceiling on this set's TOTAL committed capital, which
+    # caps existing_cost + any new allocation.
+    concentration_ceiling: int | None = None
+    if set_cap is not None:
+        candidates = [set_cap]
+        if theme_head is not None:
+            candidates.append(existing_cost + theme_head)
+        if year_head is not None:
+            candidates.append(existing_cost + year_head)
+        concentration_ceiling = min(candidates)
+
     params = CATEGORY_PARAMS.get(ml_buy_category or "", None)
 
     if params is None or rrp_cents is None or rrp_cents <= 0:
@@ -194,6 +302,14 @@ def compute_capital_allocation(
             expected_value_cents=None,
             meets_target=False,
             discount_table=[],
+            theme=theme,
+            year_retired=year_retired,
+            theme_exposure_cents=theme_exposure,
+            year_exposure_cents=year_exposure,
+            theme_cap_cents=theme_cap,
+            year_cap_cents=year_cap,
+            set_cap_cents=set_cap,
+            concentration_limited_by=None,
         )
 
     annual_roi = params["annual_roi"]
@@ -205,11 +321,31 @@ def compute_capital_allocation(
 
     kelly_f = _kelly_fraction(win_prob, avg_win, AVG_LOSS_PCT)
     half_k = kelly_f * HALF_KELLY_MULTIPLIER
-    capped = min(half_k, MAX_POSITION_PCT)
+    capped = min(half_k, MAX_SET_PCT)
 
-    rec_cents = round(available * capped) if available > 0 else None
+    raw_target = round((total_capital or 0) * capped) if total_capital else None
+    target_position = raw_target
+    limited_by: str | None = None
+    if raw_target is not None and concentration_ceiling is not None:
+        target_position = min(raw_target, concentration_ceiling)
+        if target_position < raw_target:
+            # Something tighter than the raw Kelly×capital bid. Attribute it
+            # to whichever dimension is currently the binding constraint.
+            if set_cap is not None and target_position == set_cap:
+                limited_by = "set"
+            elif theme_head is not None and target_position == existing_cost + theme_head:
+                limited_by = "theme"
+            elif year_head is not None and target_position == existing_cost + year_head:
+                limited_by = "year"
 
-    target_position = round((total_capital or 0) * capped) if total_capital else None
+    raw_rec = round(available * capped) if available > 0 else None
+    if raw_rec is not None and concentration_ceiling is not None:
+        rec_cents: int | None = max(
+            0, min(raw_rec, concentration_ceiling - existing_cost)
+        )
+    else:
+        rec_cents = raw_rec
+
     remaining_amount = (
         max(0, min(target_position - existing_cost, available))
         if target_position is not None
@@ -220,7 +356,9 @@ def compute_capital_allocation(
     expected_value = round(rrp_cents * (1.0 + total_return_3yr))
 
     discount_table = _build_discount_table(
-        rrp_cents, annual_roi, win_prob, hold_years, available, total_capital, existing_cost
+        rrp_cents, annual_roi, win_prob, hold_years,
+        available, total_capital, existing_cost,
+        concentration_ceiling,
     )
 
     return CapitalAllocation(
@@ -246,6 +384,14 @@ def compute_capital_allocation(
         expected_value_cents=expected_value,
         meets_target=annual_roi >= TARGET_APR,
         discount_table=discount_table,
+        theme=theme,
+        year_retired=year_retired,
+        theme_exposure_cents=theme_exposure,
+        year_exposure_cents=year_exposure,
+        theme_cap_cents=theme_cap,
+        year_cap_cents=year_cap,
+        set_cap_cents=set_cap,
+        concentration_limited_by=limited_by,
     )
 
 
@@ -273,6 +419,14 @@ def allocation_to_dict(alloc: CapitalAllocation) -> dict:
         "target_value_cents": alloc.target_value_cents,
         "expected_value_cents": alloc.expected_value_cents,
         "meets_target": alloc.meets_target,
+        "theme": alloc.theme,
+        "year_retired": alloc.year_retired,
+        "theme_exposure_cents": alloc.theme_exposure_cents,
+        "year_exposure_cents": alloc.year_exposure_cents,
+        "theme_cap_cents": alloc.theme_cap_cents,
+        "year_cap_cents": alloc.year_cap_cents,
+        "set_cap_cents": alloc.set_cap_cents,
+        "concentration_limited_by": alloc.concentration_limited_by,
         "discount_table": [
             {
                 "discount_pct": r.discount_pct,

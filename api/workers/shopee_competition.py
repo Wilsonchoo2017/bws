@@ -18,7 +18,7 @@ class ShopeeCompetitionWorker:
         from db.connection import get_connection
         from db.schema import init_schema
         from services.shopee.competition_repository import (
-            get_portfolio_items_needing_competition_check,
+            get_items_needing_competition_check_tiered,
         )
         from services.shopee.competition_scraper import run_competition_batch
 
@@ -26,7 +26,7 @@ class ShopeeCompetitionWorker:
         init_schema(conn)
         try:
             if job.url == "batch":
-                items = get_portfolio_items_needing_competition_check(conn)
+                items = get_items_needing_competition_check_tiered(conn)
             else:
                 row = conn.execute(
                     "SELECT set_number, title, rrp_cents FROM lego_items WHERE set_number = ?",

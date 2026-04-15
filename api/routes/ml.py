@@ -59,6 +59,14 @@ async def ml_health():
     }
 
 
+@router.get("/predictions/progress")
+async def get_prediction_progress():
+    """Get current prediction progress (X/Y sets scored, ETA)."""
+    from services.scoring.growth_provider import growth_provider
+
+    return sanitize_nan(growth_provider.get_progress())
+
+
 @router.get("/predictions")
 async def list_predictions(
     horizon: int = Query(12, description="Horizon in months (12, 24, 36)"),
@@ -396,9 +404,11 @@ async def get_prediction_history(set_number: str, conn: Any = Depends(get_db)):
 @router.post("/tracking/snapshot")
 async def save_tracking_snapshot(conn: Any = Depends(get_db)):
     """Save today's predictions for future validation."""
-    from services.ml.prediction_tracker import backfill_actuals, save_prediction_snapshot
+    from services.ml.prediction_tracker import backfill_actuals, save_scored_snapshot
+    from services.scoring.growth_provider import growth_provider
 
-    n_saved = save_prediction_snapshot(conn)
+    scored = growth_provider.score_all()
+    n_saved = save_scored_snapshot(conn, scored)
     n_backfilled = backfill_actuals(conn)
     return {"saved": n_saved, "backfilled": n_backfilled}
 

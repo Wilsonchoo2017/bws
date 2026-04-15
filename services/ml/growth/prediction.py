@@ -39,9 +39,35 @@ BUY_HURDLE_PCT = 10.0
 # P(great_buy) threshold for GREAT category
 GREAT_BUY_THRESHOLD = 0.6
 
+# Live override for the great-buy decision threshold. When not None, this
+# takes precedence over the classifier's auto-tuned `decision_threshold`
+# for the purpose of the GREAT category rule.
+#
+# Calibrated from the OOF walk-forward threshold sweep (2026-04-15):
+# the classifier's auto-tuned 0.20 produced 44% mean APR / 77.3% win ≥10%
+# out-of-fold (ship gate 80%). Raising to 0.70 clears the gate with
+# margin — 9 picks/yr in OOF, 72.5% mean, 88.9% win ≥10%, ZERO negative
+# returns (worst OOF pick was +5.61%). The production classifier's own
+# decision_threshold stays at 0.20 for auditability; this override is
+# applied only at the category-rule site via _live_great_threshold().
+LIVE_GREAT_BUY_THRESHOLD: float | None = 0.70
+
 # P(good_buy) threshold for GOOD category
 # good_buy = max(0, (1 - P(avoid)) - P(great_buy)) — derived, not trained
 GOOD_BUY_THRESHOLD = 0.30
+
+
+def _live_great_threshold(clf: "TrainedClassifier | None") -> float:
+    """Resolve the effective GREAT decision threshold.
+
+    Precedence: LIVE_GREAT_BUY_THRESHOLD override > classifier.decision_threshold
+    > module-level GREAT_BUY_THRESHOLD default.
+    """
+    if LIVE_GREAT_BUY_THRESHOLD is not None:
+        return LIVE_GREAT_BUY_THRESHOLD
+    if clf is not None:
+        return clf.decision_threshold
+    return GREAT_BUY_THRESHOLD
 
 # Regressor fallback: predicted growth >= this for GOOD category
 GOOD_BUY_HURDLE_PCT = 10.0
@@ -127,6 +153,31 @@ def _engineer_keepa_bl(
     q4_cols = ["set_number", *[c for c in Q4_FEATURE_NAMES if c in q4_out.columns]]
     df_feat = df_feat.merge(q4_out[q4_cols], on="set_number", how="left")
 
+    # Exp 38: merge BrickLink sales velocity (R8 in root cause analysis).
+    from services.ml.growth.sales_velocity_features import (
+        SALES_VELOCITY_FEATURE_NAMES,
+        load_sales_velocity_features,
+        merge_sales_velocity,
+    )
+    from db.pg.engine import get_engine as _get_engine_for_velocity
+    df_feat = df_feat.drop(
+        columns=[c for c in SALES_VELOCITY_FEATURE_NAMES if c in df_feat.columns],
+    )
+    velocity_df = load_sales_velocity_features(_get_engine_for_velocity())
+    df_feat = merge_sales_velocity(df_feat, velocity_df)
+
+    # Exp 39: merge minifig-value-ratio features (R8 in root cause analysis).
+    from services.ml.growth.minifig_value_features import (
+        MINIFIG_VALUE_FEATURE_NAMES,
+        load_minifig_value_features,
+        merge_minifig_value,
+    )
+    df_feat = df_feat.drop(
+        columns=[c for c in MINIFIG_VALUE_FEATURE_NAMES if c in df_feat.columns],
+    )
+    minifig_df = load_minifig_value_features(_get_engine_for_velocity())
+    df_feat = merge_minifig_value(df_feat, minifig_df)
+
     if gt_df is not None and not gt_df.empty:
         gt_feat = engineer_gt_features(gt_df, candidates)
         df_feat = df_feat.merge(gt_feat, on="set_number", how="left")
@@ -205,7 +256,7 @@ def _predict_classifier_only(
         great_buy_probs = predict_class_proba(X_gb, great_buy_classifier)
 
     avoid_threshold = classifier.decision_threshold if classifier else AVOID_GATE_THRESHOLD
-    great_threshold = great_buy_classifier.decision_threshold if great_buy_classifier else GREAT_BUY_THRESHOLD
+    great_threshold = _live_great_threshold(great_buy_classifier)
 
     predictions: list[GrowthPrediction] = []
     for i, (_, row) in enumerate(df_feat.iterrows()):
@@ -214,10 +265,19 @@ def _predict_classifier_only(
         # P(good_buy) = P(10 <= APR < 20) derived from the two trained heads
         good_bp = max(0.0, min(1.0, (1.0 - ap) - gbp))
 
-        if ap >= avoid_threshold:
-            category = "WORST"
-        elif gbp >= great_threshold:
+        # Category rule: GREAT overrides WORST when the great-buy signal is
+        # strictly stronger than the avoid signal. The two heads are
+        # independently calibrated on different hurdles (10% vs 20% APR),
+        # so they can fire together on edge-case sets (e.g. 76173, where
+        # blended minifig value floors the parted-out APR well above 20%
+        # but the whole-set APR hovers at the 10% boundary). Trusting the
+        # stronger head is the principled tiebreaker: if p_great_buy is
+        # both above its threshold AND greater than p_avoid, the set
+        # genuinely belongs in GREAT, not WORST.
+        if gbp >= great_threshold and gbp > ap:
             category = "GREAT"
+        elif ap >= avoid_threshold:
+            category = "WORST"
         elif good_bp >= GOOD_BUY_THRESHOLD:
             category = "GOOD"
         else:
@@ -386,8 +446,13 @@ def _predict_batch(
         # Buy category from combined classifier signals
         # Use auto-tuned thresholds from classifiers when available
         avoid_threshold = classifier.decision_threshold if classifier is not None else AVOID_GATE_THRESHOLD
-        great_threshold = great_buy_classifier.decision_threshold if great_buy_classifier is not None else GREAT_BUY_THRESHOLD
-        if ap is not None and ap >= avoid_threshold:
+        great_threshold = _live_great_threshold(great_buy_classifier)
+        # GREAT overrides WORST when p_great_buy is stronger than p_avoid
+        # (see classifier-only path above for rationale).
+        if (gbp is not None and ap is not None
+                and gbp >= great_threshold and gbp > ap):
+            category = "GREAT"
+        elif ap is not None and ap >= avoid_threshold:
             category = "WORST"
         elif gbp is not None and gbp >= great_threshold:
             category = "GREAT"

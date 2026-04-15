@@ -972,7 +972,15 @@ def get_missing_listings_candidates(
                 AND st.completed_at
                     > CURRENT_TIMESTAMP - CAST(? || ' days' AS INTERVAL)
           )
-        ORDER BY li.year_released DESC NULLS LAST, li.set_number DESC
+        ORDER BY
+            -- Missing rows beat stale rows (backfill first, refresh later).
+            (CASE WHEN ll.last_listings_at IS NULL THEN 0 ELSE 1 END),
+            -- Retiring-soon sets come first: these are near-term buy
+            -- opportunities and need listings data now to seed classifier
+            -- predictions. Everything else falls to the default order.
+            (CASE WHEN li.retiring_soon IS TRUE THEN 0 ELSE 1 END),
+            li.year_released DESC NULLS LAST,
+            li.set_number DESC
         LIMIT ?
     """  # noqa: S608
 

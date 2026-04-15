@@ -34,7 +34,8 @@ export function MLPanel() {
       const json = await res.json();
       if (Array.isArray(json)) {
         const preds = json;
-        const buy = preds.filter((p: Record<string, unknown>) => p.buy_category === 'GREAT' || p.buy_category === 'GOOD').length;
+        // GREAT-only: OOF walk-forward showed GOOD was a 52% coin flip on the 10% hurdle.
+        const buy = preds.filter((p: Record<string, unknown>) => p.buy_category === 'GREAT').length;
         const avoid = preds.filter((p: Record<string, unknown>) => p.buy_category === 'WORST').length;
         const hold = preds.length - buy - avoid;
         const growths = preds

@@ -18,6 +18,8 @@ export interface DetailBundle {
   liquidity_bricklink: Record<string, unknown> | null;
   liquidity_brickeconomy: Record<string, unknown> | null;
   liquidity_cohorts: Record<string, unknown> | null;
+  my_liquidity: Record<string, unknown> | null;
+  my_liquidity_cohorts: Record<string, unknown> | null;
 }
 
 interface BundleState {

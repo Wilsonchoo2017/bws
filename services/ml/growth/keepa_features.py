@@ -116,9 +116,25 @@ KEEPA_BL_FEATURES: tuple[str, ...] = (
     "kp_q4_clearance_slope",
     "kp_amazon_oos_in_q4",
     "kp_q4_price_above_rrp_pct",
+    # Exp 38: BrickLink sales velocity (R8 in root cause analysis).
+    # Populated by sales_velocity_features.load_sales_velocity_features
+    # in the training pipeline. A set turning 5+ units/month is a different
+    # investment from one sitting at zero, even at the same APR.
+    "bl_sales_per_month_recent",
+    "bl_sales_per_month_12m",
+    "bl_sales_velocity_slope",
+    "bl_sales_lumpiness",
+    "bl_sales_active_months_12m",
+    "bl_sales_log_total_12m",
+    # Exp 39: Minifig-value ratio (R8). Sets where minifigs alone account
+    # for >50% of RRP are parted-out arbitrage candidates regardless of
+    # whole-set APR. Populated by minifig_value_features.merge_minifig_value.
+    "minifig_value_total_usd",
+    "minifig_value_to_rrp",
+    "minifig_count_priced",
 )
 
-# Classifier-specific features: base 36 + 7 GT = 43 (Exp 32-35)
+# Classifier-specific features: base 36 + 7 GT + 6 sales velocity = 49+
 CLASSIFIER_FEATURES: tuple[str, ...] = KEEPA_BL_FEATURES + GT_FEATURES
 
 

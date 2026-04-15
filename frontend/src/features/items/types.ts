@@ -279,6 +279,14 @@ export interface CapitalAllocationData {
   target_value_cents: number | null;
   expected_value_cents: number | null;
   meets_target: boolean;
+  theme?: string | null;
+  year_retired?: number | null;
+  theme_exposure_cents?: number;
+  year_exposure_cents?: number;
+  theme_cap_cents?: number | null;
+  year_cap_cents?: number | null;
+  set_cap_cents?: number | null;
+  concentration_limited_by?: 'set' | 'theme' | 'year' | null;
   discount_table: DiscountRow[];
 }
 

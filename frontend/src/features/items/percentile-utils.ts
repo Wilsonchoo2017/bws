@@ -26,6 +26,15 @@ export const LIQUIDITY_WEIGHTS: Record<string, number> = {
   quantity: 0.8,     // informational, not in composite
 };
 
+// Malaysia exit-liquidity weights (mirrors services/my_liquidity/cohort_rank.py)
+export const MY_LIQUIDITY_WEIGHTS: Record<string, number> = {
+  my_sold_velocity_30d: 1.5,
+  my_premium_median_pct: 1.2,
+  my_churn_ratio: 1.1,
+  my_saturation_inverse: 1.0,
+  my_liquidity_ratio: 0.8,
+};
+
 const DEFAULT_WEIGHT = 1.0;
 
 // Scale factor: each 1.0 of weight above/below 1.0 shifts thresholds by this many points
@@ -75,6 +84,11 @@ export function getSignalWeight(signalKey: string): number {
 /** Look up the liquidity sub-metric weight. Falls back to 1.0. */
 export function getLiquidityWeight(metricKey: string): number {
   return LIQUIDITY_WEIGHTS[metricKey] ?? DEFAULT_WEIGHT;
+}
+
+/** Look up the Malaysia-exit signal weight. Falls back to 1.0. */
+export function getMyLiquidityWeight(signalKey: string): number {
+  return MY_LIQUIDITY_WEIGHTS[signalKey] ?? DEFAULT_WEIGHT;
 }
 
 export function rankToPercentile(rank: number | null, size: number): number | null {

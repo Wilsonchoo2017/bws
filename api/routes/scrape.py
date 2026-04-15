@@ -5,7 +5,7 @@ import asyncio
 import logging
 from pathlib import Path
 
-from fastapi import APIRouter, BackgroundTasks, HTTPException
+from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel
 
@@ -569,17 +569,11 @@ class CaptchaEventResponse(BaseModel):
     snapshot_dir: str
     detection_reason: str
     detection_signals: dict | None = None
-    status: str
     detected_at: str
-    verified_at: str | None = None
-    resolved_at: str | None = None
-    resolution_duration_s: int | None = None
-    notes: str | None = None
 
 
 class CaptchaEventsListResponse(BaseModel):
     events: list[CaptchaEventResponse]
-    pending_count: int
 
 
 def _event_to_response(ev) -> "CaptchaEventResponse":
@@ -592,12 +586,7 @@ def _event_to_response(ev) -> "CaptchaEventResponse":
         snapshot_dir=ev.snapshot_dir,
         detection_reason=ev.detection_reason,
         detection_signals=ev.detection_signals,
-        status=ev.status,
         detected_at=_iso(ev.detected_at) or "",
-        verified_at=_iso(ev.verified_at),
-        resolved_at=_iso(ev.resolved_at),
-        resolution_duration_s=ev.resolution_duration_s,
-        notes=ev.notes,
     )
 
 
@@ -605,22 +594,20 @@ def _event_to_response(ev) -> "CaptchaEventResponse":
     "/shopee/captcha-events",
     response_model=CaptchaEventsListResponse,
 )
-async def list_captcha_events(status: str | None = None, limit: int = 50):
+async def list_captcha_events(limit: int = 50):
     """List recent Shopee captcha events, newest first."""
     from db.connection import get_connection
     from db.schema import init_schema
-    from services.shopee.captcha_events import count_pending, list_events
+    from services.shopee.captcha_events import list_events
 
     conn = get_connection()
     init_schema(conn)
     try:
-        rows = list_events(conn, status=status, limit=limit)
-        pending = count_pending(conn)
+        rows = list_events(conn, limit=limit)
     finally:
         conn.close()
     return CaptchaEventsListResponse(
         events=[_event_to_response(r) for r in rows],
-        pending_count=pending,
     )
 
 
@@ -687,53 +674,5 @@ async def get_captcha_snapshot_file(event_id: int, file_name: str):
     return FileResponse(str(target), media_type=media_types[file_name])
 
 
-class VerifyStartResponse(BaseModel):
-    event_id: int
-    status: str
-    message: str
-
-
-@router.post(
-    "/shopee/captcha-events/{event_id}/verify",
-    response_model=VerifyStartResponse,
-)
-async def start_captcha_verification(
-    event_id: int,
-    background_tasks: BackgroundTasks,
-):
-    """Launch the manual verification flow in the background.
-
-    Returns immediately with status='verifying'. The client polls GET
-    /shopee/captcha-events/{event_id} to track progress.
-    """
-    from db.connection import get_connection
-    from db.schema import init_schema
-    from services.shopee.captcha_events import STATUS_PENDING, get_event
-    from services.shopee.verification import run_verification
-
-    conn = get_connection()
-    init_schema(conn)
-    try:
-        ev = get_event(conn, event_id)
-    finally:
-        conn.close()
-    if ev is None:
-        raise HTTPException(status_code=404, detail="Event not found")
-    if ev.status != STATUS_PENDING:
-        raise HTTPException(
-            status_code=409,
-            detail=f"Event is {ev.status}, cannot start verification",
-        )
-
-    async def _runner() -> None:
-        try:
-            await run_verification(event_id)
-        except Exception:
-            logger.exception("Verification background task failed event=%s", event_id)
-
-    background_tasks.add_task(_runner)
-    return VerifyStartResponse(
-        event_id=event_id,
-        status="verifying",
-        message="Browser launching — solve the captcha in the new window.",
-    )
+# POST /verify endpoint removed — captcha solving is now manual only.
+# Users interact with Shopee directly on the page where the captcha was detected.

@@ -1,6 +1,7 @@
 import Link from 'next/link';
 
 import { MlStatusBadge } from './ml-status-badge';
+import { PredictionProgressBadge } from './prediction-progress-badge';
 
 const NAV_ITEMS = [
   { href: '/portfolio', label: 'Portfolio' },
@@ -27,7 +28,8 @@ export function Nav() {
           </Link>
         ))}
       </div>
-      <div className='ml-auto'>
+      <div className='ml-auto flex items-center gap-3'>
+        <PredictionProgressBadge />
         <MlStatusBadge />
       </div>
     </nav>

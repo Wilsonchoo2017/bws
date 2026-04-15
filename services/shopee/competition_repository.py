@@ -234,6 +234,107 @@ def get_portfolio_items_needing_competition_check(
     ]
 
 
+def get_items_needing_competition_check_tiered(
+    conn: Any,
+    limit: int = 20,
+) -> list[dict]:
+    """Find items needing a Shopee competition check, tiered by source.
+
+    Thin wrapper over the shared tiered-selection logic in
+    `services.marketplace_competition.tiered_selection`. See that module
+    for tier priorities and staleness windows.
+    """
+    from services.marketplace_competition.tiered_selection import (
+        get_tiered_items_needing_check,
+    )
+
+    return get_tiered_items_needing_check(
+        conn,
+        snapshots_table="shopee_competition_snapshots",
+        limit=limit,
+    )
+
+
+def get_snapshot_velocity(
+    conn: Any,
+    set_number: str,
+    window_days: int,
+) -> dict[str, Any] | None:
+    """Return total_sold_count delta across a trailing window.
+
+    Picks the most recent snapshot as the window end and the newest
+    snapshot at-or-before (latest - window_days) as the window start.
+    Falls back to the oldest snapshot older than the latest when no
+    row lands inside the window (gives a best-effort delta for sets
+    with sparse history).
+
+    Returns None if no snapshots exist. Returns a dict with None
+    deltas when only one snapshot exists so callers can still surface
+    absolute counts.
+    """
+    if window_days <= 0:
+        raise ValueError("window_days must be positive")
+
+    latest = conn.execute(
+        """
+        SELECT scraped_at, total_sold_count
+        FROM shopee_competition_snapshots
+        WHERE set_number = ?
+        ORDER BY scraped_at DESC
+        LIMIT 1
+        """,
+        [set_number],
+    ).fetchone()
+
+    if latest is None:
+        return None
+
+    latest_at, latest_total = latest
+
+    count_row = conn.execute(
+        """
+        SELECT COUNT(*)
+        FROM shopee_competition_snapshots
+        WHERE set_number = ?
+          AND scraped_at >= ? - (? || ' days')::INTERVAL
+        """,
+        [set_number, latest_at, window_days],
+    ).fetchone()
+    snapshots_in_window = int(count_row[0]) if count_row else 0
+
+    prior = conn.execute(
+        """
+        SELECT scraped_at, total_sold_count
+        FROM shopee_competition_snapshots
+        WHERE set_number = ?
+          AND scraped_at <= ? - (? || ' days')::INTERVAL
+        ORDER BY scraped_at DESC
+        LIMIT 1
+        """,
+        [set_number, latest_at, window_days],
+    ).fetchone()
+
+    if prior is None:
+        prior = conn.execute(
+            """
+            SELECT scraped_at, total_sold_count
+            FROM shopee_competition_snapshots
+            WHERE set_number = ? AND scraped_at < ?
+            ORDER BY scraped_at ASC
+            LIMIT 1
+            """,
+            [set_number, latest_at],
+        ).fetchone()
+
+    return {
+        "latest_at": latest_at,
+        "latest_total": int(latest_total) if latest_total is not None else None,
+        "prior_at": prior[0] if prior else None,
+        "prior_total": int(prior[1]) if prior and prior[1] is not None else None,
+        "snapshots_in_window": snapshots_in_window,
+    }
+
+
 def get_listing_sold_deltas(
     conn: Any,
     set_number: str,

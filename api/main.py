@@ -19,6 +19,9 @@ from services.enrichment.scheduler import run_enrichment_sweep, run_priority_res
 from services.images.sweep import run_image_download_sweep
 from services.keepa.scheduler import run_keepa_sweep
 from services.scrape_queue.dispatcher import recover_scrape_queue, run_scrape_dispatcher, shutdown_scrape_dispatcher
+from services.carousell.competition_scheduler import (
+    run_competition_sweep as run_carousell_competition_sweep,
+)
 from services.shopee.competition_scheduler import run_competition_sweep
 from services.shopee.saturation_scheduler import run_saturation_sweep
 
@@ -120,13 +123,15 @@ def _sync_warm_growth_models() -> None:
 
 
 def _sync_prediction_snapshot() -> int | None:
-    """Run prediction snapshot (CPU-heavy) -- called from executor."""
+    """Run prediction snapshot via the live keepa_bl classifier (single writer)."""
     from db.connection import get_connection
-    from services.ml.prediction_tracker import backfill_actuals, save_prediction_snapshot
+    from services.ml.prediction_tracker import backfill_actuals, save_scored_snapshot
+    from services.scoring.growth_provider import growth_provider
 
+    scored = growth_provider.score_all()
     conn = get_connection()
     try:
-        n = save_prediction_snapshot(conn)
+        n = save_scored_snapshot(conn, scored)
         backfill_actuals(conn)
         return n
     finally:
@@ -142,9 +147,33 @@ async def _run_daily_prediction_snapshot() -> None:
             n = await loop.run_in_executor(None, _sync_prediction_snapshot)
             if n and n > 0:
                 logger.info("Daily prediction snapshot: saved %d predictions", n)
+            else:
+                # A zero-write run is suspicious — score_all() returning empty
+                # is a real failure mode (e.g. broken model load) that the
+                # 04-15 incident hid for hours. Surface it loudly.
+                logger.error(
+                    "Daily prediction snapshot: zero predictions written. "
+                    "Model load or feature pipeline likely failed.",
+                )
         except Exception:
-            logger.warning("Prediction snapshot failed", exc_info=True)
+            logger.error("Prediction snapshot failed", exc_info=True)
 
+        await asyncio.sleep(86400)  # 24 hours
+
+
+async def _run_shopee_snapshot_retention() -> None:
+    """Nightly prune of resolved/expired Shopee captcha snapshots."""
+    from services.shopee.retention import prune_old_snapshots
+
+    await asyncio.sleep(60)  # delay startup pruning
+    loop = asyncio.get_running_loop()
+    while True:
+        try:
+            n = await loop.run_in_executor(None, prune_old_snapshots)
+            if n:
+                logger.info("Shopee snapshot retention: pruned %d dirs", n)
+        except Exception:
+            logger.warning("Shopee snapshot retention failed", exc_info=True)
         await asyncio.sleep(86400)  # 24 hours
 
 
@@ -177,6 +206,9 @@ async def lifespan(app: FastAPI):
     sweep_task = asyncio.create_task(run_enrichment_sweep(job_manager))
     saturation_task = asyncio.create_task(run_saturation_sweep(job_manager))
     competition_task = asyncio.create_task(run_competition_sweep(job_manager))
+    carousell_competition_task = asyncio.create_task(
+        run_carousell_competition_sweep(job_manager)
+    )
     image_task = asyncio.create_task(run_image_download_sweep())
     scrape_dispatcher_task = asyncio.create_task(run_scrape_dispatcher())
     prediction_task = asyncio.create_task(_run_daily_prediction_snapshot())
@@ -185,6 +217,7 @@ async def lifespan(app: FastAPI):
     retiring_soon_task = asyncio.create_task(run_retiring_soon_sweep())
     bricklink_listings_task = asyncio.create_task(run_bricklink_listings_sweep())
     analysis_sweep_task = asyncio.create_task(run_analysis_sweep())
+    captcha_retention_task = asyncio.create_task(_run_shopee_snapshot_retention())
 
     # Eagerly warm growth models in a background thread so scraping isn't
     # blocked when the first score_all() call arrives.
@@ -207,7 +240,7 @@ async def lifespan(app: FastAPI):
     except Exception:
         logger.warning("Failed to save cooldown state", exc_info=True)
     # Everything inside _shutdown has a hard 10s ceiling
-    all_tasks = [worker_task, sweep_task, saturation_task, image_task, scrape_dispatcher_task, keepa_task, rescrape_task, prediction_task, retiring_soon_task, bricklink_listings_task, analysis_sweep_task]
+    all_tasks = [worker_task, sweep_task, saturation_task, competition_task, carousell_competition_task, image_task, scrape_dispatcher_task, keepa_task, rescrape_task, prediction_task, retiring_soon_task, bricklink_listings_task, analysis_sweep_task, captcha_retention_task]
     try:
         await asyncio.wait_for(_shutdown(all_tasks), timeout=10)
     except (asyncio.TimeoutError, asyncio.CancelledError):

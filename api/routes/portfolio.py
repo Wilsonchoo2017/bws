@@ -26,6 +26,11 @@ from services.portfolio.repository import (
 from services.portfolio.forward_return_query import (
     get_holdings_forward_returns,
 )
+from services.portfolio.drawdown import (
+    get_drawdown_summary,
+    get_positions_drawdown,
+    position_drawdown_to_dict,
+)
 from services.portfolio.reallocation import get_reallocation_analysis
 from services.portfolio.settings import get_total_capital, set_total_capital
 from services.portfolio.wbr_metrics import calculate_wbr
@@ -429,9 +434,23 @@ async def enrich_portfolio_items(conn: Any = Depends(get_db)) -> dict:
 
 @router.get("/summary")
 async def portfolio_summary(conn: Any = Depends(get_db)) -> dict:
-    """Get portfolio-wide summary totals."""
+    """Get portfolio-wide summary totals plus drawdown roll-up."""
     summary = get_portfolio_summary(conn)
+    positions = get_positions_drawdown(conn)
+    summary["drawdown"] = get_drawdown_summary(positions)
     return {"success": True, "data": summary}
+
+
+@router.get("/drawdown")
+async def portfolio_drawdown(conn: Any = Depends(get_db)) -> dict:
+    """Per-position drawdown from peak value since acquisition."""
+    positions = get_positions_drawdown(conn)
+    return {
+        "success": True,
+        "data": [position_drawdown_to_dict(p) for p in positions],
+        "summary": get_drawdown_summary(positions),
+        "count": len(positions),
+    }
 
 
 # ---------------------------------------------------------------------------

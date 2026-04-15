@@ -36,6 +36,14 @@ from services.ml.growth.model_selection import (
     clip_outliers,
     compute_recency_weights,
 )
+from services.ml.growth.minifig_value_features import (
+    MINIFIG_VALUE_FEATURE_NAMES,
+    NO_MINIFIG_SENTINEL,
+)
+from services.ml.growth.sales_velocity_features import (
+    NO_SALES_SENTINEL,
+    SALES_VELOCITY_FEATURE_NAMES,
+)
 from services.ml.growth.types import TrainedGrowthModel
 
 logger = logging.getLogger(__name__)
@@ -99,6 +107,49 @@ def train_keepa_bl_models(
         len(q4_cols) - 1, int(q4_non_null),
     )
 
+    # Exp 38: BrickLink sales velocity (R8). Rows missing from the
+    # bricklink_monthly_sales table get NO_SALES_SENTINEL, NOT median-fill.
+    # Drop the placeholder columns the ensure-columns loop wrote so the
+    # velocity merge wins (same pattern as the Q4 merge above).
+    from services.ml.growth.sales_velocity_features import (
+        SALES_VELOCITY_FEATURE_NAMES,
+        load_sales_velocity_features,
+        merge_sales_velocity,
+    )
+    from db.pg.engine import get_engine as _get_engine_for_velocity
+    df_feat = df_feat.drop(
+        columns=[c for c in SALES_VELOCITY_FEATURE_NAMES if c in df_feat.columns],
+    )
+    velocity_df = load_sales_velocity_features(_get_engine_for_velocity())
+    df_feat = merge_sales_velocity(df_feat, velocity_df)
+    velocity_covered = (
+        df_feat["bl_sales_per_month_12m"] > 0
+    ).sum() if "bl_sales_per_month_12m" in df_feat.columns else 0
+    logger.info(
+        "Sales velocity features merged: %d cols (%d sets with non-zero 12m volume)",
+        len(SALES_VELOCITY_FEATURE_NAMES), int(velocity_covered),
+    )
+
+    # Exp 39: Minifig value ratio (R8). Same drop+merge+sentinel pattern.
+    from services.ml.growth.minifig_value_features import (
+        load_minifig_value_features,
+        merge_minifig_value,
+    )
+    df_feat = df_feat.drop(
+        columns=[c for c in MINIFIG_VALUE_FEATURE_NAMES if c in df_feat.columns],
+    )
+    minifig_df = load_minifig_value_features(_get_engine_for_velocity())
+    # merge_minifig_value needs rrp_usd_cents in base — base_df has it,
+    # df_feat already inherits from base_df via engineer_keepa_bl_features.
+    df_feat = merge_minifig_value(df_feat, minifig_df)
+    mv_covered = (
+        df_feat["minifig_value_to_rrp"] > 0
+    ).sum() if "minifig_value_to_rrp" in df_feat.columns else 0
+    logger.info(
+        "Minifig value features merged: %d cols (%d sets with non-zero ratio)",
+        len(MINIFIG_VALUE_FEATURE_NAMES), int(mv_covered),
+    )
+
     # Merge with target
     target_map = dict(zip(target_series.index, target_series.values))
     df_feat["target"] = df_feat["set_number"].map(target_map)
@@ -139,11 +190,54 @@ def train_keepa_bl_models(
     if len(df_feat) < 50:
         raise ValueError(f"Too few training sets: {len(df_feat)} (need 50+)")
 
-    # Classifier features: base 36 + GT 7 = 43 total
+    # Classifier features: base 36 + GT 7 + Q4 15 = 58 total
     clf_feature_names = [f for f in CLASSIFIER_FEATURES if f in df_feat.columns]
-    X_clf_full = df_feat[clf_feature_names].fillna(0).copy()
-    clf_fill_values = X_clf_full.median()
-    X_clf_full = X_clf_full.fillna(clf_fill_values)
+    X_clf_full = df_feat[clf_feature_names].copy()
+
+    # Coverage-gated columns: Q4 features have 23-69% coverage and a plain
+    # median-fill collapses LightGBM into ~10 leaves (R5 in the root cause
+    # analysis: "no Q4 history" looks identical to "exactly average Q4"). Use
+    # a distinct sentinel that sits far outside any real Q4 metric range
+    # (these features are bounded in [-1, 1] or [-100, 100]) so the gradient
+    # booster can split on it as its own branch.
+    Q4_MISSING_SENTINEL = -999.0
+    # Coverage-gated feature groups: their NaN cannot be median-filled
+    # without collapsing decision boundaries (R5 in the root cause analysis).
+    # Each group has its own sentinel that sits outside any real metric range.
+    q4_set = set(Q4_FEATURE_NAMES)
+    velocity_set = set(SALES_VELOCITY_FEATURE_NAMES)
+    minifig_set = set(MINIFIG_VALUE_FEATURE_NAMES)
+    coverage_gated = q4_set | velocity_set | minifig_set
+    fillable_cols = [c for c in clf_feature_names if c not in coverage_gated]
+    gated_cols = [c for c in clf_feature_names if c in coverage_gated]
+
+    # Median-fill for well-covered base + GT features only.
+    base_medians = X_clf_full[fillable_cols].median()
+    X_clf_full[fillable_cols] = X_clf_full[fillable_cols].fillna(base_medians)
+
+    q4_cols_in_train = [c for c in gated_cols if c in q4_set]
+    velocity_cols_in_train = [c for c in gated_cols if c in velocity_set]
+    minifig_cols_in_train = [c for c in gated_cols if c in minifig_set]
+    if q4_cols_in_train:
+        X_clf_full[q4_cols_in_train] = X_clf_full[q4_cols_in_train].fillna(
+            Q4_MISSING_SENTINEL,
+        )
+    if velocity_cols_in_train:
+        X_clf_full[velocity_cols_in_train] = X_clf_full[velocity_cols_in_train].fillna(
+            NO_SALES_SENTINEL,
+        )
+    if minifig_cols_in_train:
+        X_clf_full[minifig_cols_in_train] = X_clf_full[minifig_cols_in_train].fillna(
+            NO_MINIFIG_SENTINEL,
+        )
+
+    # Persisted fill map: medians for base/GT, sentinels for gated groups.
+    clf_fill_values = pd.concat([
+        base_medians,
+        pd.Series({c: Q4_MISSING_SENTINEL for c in q4_cols_in_train}),
+        pd.Series({c: NO_SALES_SENTINEL for c in velocity_cols_in_train}),
+        pd.Series({c: NO_MINIFIG_SENTINEL for c in minifig_cols_in_train}),
+    ])
 
     # Groups for CV: year_retired from base_df
     year_retired_map = dict(zip(base_df["set_number"].astype(str), base_df.get("year_retired")))

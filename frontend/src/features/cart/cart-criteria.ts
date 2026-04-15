@@ -54,11 +54,10 @@ export function meetsCartCriteria(
   const itemConf = CONFIDENCE_ORDER[(item.ml_confidence ?? '').toLowerCase()] ?? 0;
   if (itemConf < minConf) return false;
 
-  // 4. Must be a buy category (GREAT or GOOD)
-  if (
-    item.ml_buy_category == null ||
-    (item.ml_buy_category !== 'GREAT' && item.ml_buy_category !== 'GOOD')
-  ) {
+  // 4. Must be GREAT. OOF walk-forward showed GOOD hits the 10% hurdle
+  //    only 52% of the time out-of-fold — unreliable for live capital.
+  //    GOOD stays visible as a category label elsewhere in the UI.
+  if (item.ml_buy_category !== 'GREAT') {
     return false;
   }
 

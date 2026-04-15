@@ -7,12 +7,20 @@ import { CoveragePanel } from './coverage-panel';
 import { CooldownsPanel } from './cooldowns-panel';
 import { SettingsPanel } from './settings-panel';
 import { MLPanel } from './ml-panel';
+import { ShopeeCaptchaPanel } from './shopee-captcha-panel';
 import type { QueueStats, WorkerJob } from './types';
 
-type Tab = 'workers' | 'cooldowns' | 'coverage' | 'settings' | 'ml';
+type Tab =
+  | 'workers'
+  | 'cooldowns'
+  | 'coverage'
+  | 'settings'
+  | 'ml'
+  | 'shopee';
 
 const TABS: ReadonlyArray<{ readonly id: Tab; readonly label: string }> = [
   { id: 'workers', label: 'Workers' },
+  { id: 'shopee', label: 'Shopee' },
   { id: 'cooldowns', label: 'Cooldowns' },
   { id: 'coverage', label: 'Coverage' },
   { id: 'ml', label: 'ML' },
@@ -26,6 +34,7 @@ export function OperationsDashboard() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [autoRefresh, setAutoRefresh] = useState(true);
+  const [captchaPending, setCaptchaPending] = useState(0);
   const pollRef = useRef<NodeJS.Timeout | null>(null);
 
   const fetchJobs = useCallback(async () => {
@@ -49,6 +58,27 @@ export function OperationsDashboard() {
   useEffect(() => {
     fetchJobs();
   }, [fetchJobs]);
+
+  // Poll captcha event count for badge on the Shopee tab
+  useEffect(() => {
+    let cancelled = false;
+    const tick = async () => {
+      try {
+        const res = await fetch('/api/scrape/shopee/captcha-events?limit=1');
+        if (!res.ok) return;
+        const json = await res.json();
+        if (!cancelled) setCaptchaPending(json.pending_count ?? 0);
+      } catch {
+        /* ignore */
+      }
+    };
+    tick();
+    const id = setInterval(tick, 5000);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, []);
 
   useEffect(() => {
     if (autoRefresh && tab === 'workers') {
@@ -159,6 +189,11 @@ export function OperationsDashboard() {
                 {stats.running}
               </span>
             )}
+            {t.id === 'shopee' && captchaPending > 0 && (
+              <span className='ml-2 inline-flex h-5 min-w-[1.25rem] items-center justify-center rounded-full bg-orange-100 px-1.5 text-xs font-medium text-orange-700 dark:bg-orange-900/30 dark:text-orange-300'>
+                {captchaPending}
+              </span>
+            )}
           </button>
         ))}
       </div>
@@ -172,6 +207,7 @@ export function OperationsDashboard() {
           hasFinished={hasFinished}
         />
       )}
+      {tab === 'shopee' && <ShopeeCaptchaPanel />}
       {tab === 'cooldowns' && <CooldownsPanel />}
       {tab === 'coverage' && <CoveragePanel />}
       {tab === 'ml' && <MLPanel />}

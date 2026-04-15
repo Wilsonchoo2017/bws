@@ -134,12 +134,7 @@ CREATE TABLE IF NOT EXISTS shopee_captcha_events (
     snapshot_dir VARCHAR NOT NULL,
     detection_reason VARCHAR NOT NULL,
     detection_signals JSONB,
-    status VARCHAR NOT NULL DEFAULT 'pending',
-    detected_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    verified_at TIMESTAMPTZ,
-    resolved_at TIMESTAMPTZ,
-    resolution_duration_s INTEGER,
-    notes VARCHAR
+    detected_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 """
 
@@ -626,6 +621,45 @@ CREATE TABLE IF NOT EXISTS shopee_competition_listings (
 );
 """
 
+CAROUSELL_COMPETITION_SNAPSHOTS_DDL = """
+CREATE TABLE IF NOT EXISTS carousell_competition_snapshots (
+    id INTEGER PRIMARY KEY,
+    set_number VARCHAR NOT NULL,
+    listings_count INTEGER NOT NULL,
+    unique_sellers INTEGER NOT NULL,
+    flipped_to_sold_count INTEGER,
+    min_price_cents INTEGER,
+    max_price_cents INTEGER,
+    avg_price_cents INTEGER,
+    median_price_cents INTEGER,
+    saturation_score FLOAT NOT NULL,
+    saturation_level VARCHAR NOT NULL,
+    scraped_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+);
+"""
+
+CAROUSELL_COMPETITION_LISTINGS_DDL = """
+CREATE TABLE IF NOT EXISTS carousell_competition_listings (
+    id INTEGER PRIMARY KEY,
+    snapshot_id INTEGER NOT NULL,
+    set_number VARCHAR NOT NULL,
+    listing_id VARCHAR NOT NULL,
+    listing_url VARCHAR NOT NULL,
+    shop_id VARCHAR,
+    seller_name VARCHAR,
+    title VARCHAR NOT NULL,
+    price_cents INTEGER,
+    price_display VARCHAR,
+    condition VARCHAR,
+    image_url VARCHAR,
+    time_ago VARCHAR,
+    is_sold BOOLEAN DEFAULT FALSE,
+    is_reserved BOOLEAN DEFAULT FALSE,
+    is_delisted BOOLEAN DEFAULT FALSE,
+    scraped_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+);
+"""
+
 ML_PREDICTION_SNAPSHOTS_DDL = """
 CREATE TABLE IF NOT EXISTS ml_prediction_snapshots (
     id INTEGER PRIMARY KEY DEFAULT nextval('ml_prediction_snapshots_id_seq'),
@@ -637,8 +671,13 @@ CREATE TABLE IF NOT EXISTS ml_prediction_snapshots (
     model_version VARCHAR,
     actual_growth_pct FLOAT,
     actual_measured_at DATE,
+    buy_category VARCHAR(10),
+    great_buy_probability DOUBLE PRECISION,
+    good_buy_probability DOUBLE PRECISION,
     UNIQUE (snapshot_date, set_number)
 );
+CREATE INDEX IF NOT EXISTS idx_ml_snapshot_buy_category
+    ON ml_prediction_snapshots (snapshot_date, buy_category);
 """
 
 SEQUENCES_DDL = """
@@ -677,6 +716,8 @@ CREATE SEQUENCE IF NOT EXISTS ml_model_runs_id_seq;
 CREATE SEQUENCE IF NOT EXISTS ml_prediction_snapshots_id_seq;
 CREATE SEQUENCE IF NOT EXISTS shopee_competition_snapshots_id_seq;
 CREATE SEQUENCE IF NOT EXISTS shopee_competition_listings_id_seq;
+CREATE SEQUENCE IF NOT EXISTS carousell_competition_snapshots_id_seq;
+CREATE SEQUENCE IF NOT EXISTS carousell_competition_listings_id_seq;
 """
 
 # Index creation statements
@@ -788,6 +829,12 @@ CREATE INDEX IF NOT EXISTS idx_competition_listings_set_url
     ON shopee_competition_listings(set_number, product_url, scraped_at);
 CREATE INDEX IF NOT EXISTS idx_competition_listings_set_shop
     ON shopee_competition_listings(set_number, shop_id);
+CREATE INDEX IF NOT EXISTS idx_carousell_comp_snapshots_set
+    ON carousell_competition_snapshots(set_number, scraped_at);
+CREATE INDEX IF NOT EXISTS idx_carousell_comp_listings_snapshot
+    ON carousell_competition_listings(snapshot_id);
+CREATE INDEX IF NOT EXISTS idx_carousell_comp_listings_set_listing
+    ON carousell_competition_listings(set_number, listing_id, scraped_at);
 CREATE INDEX IF NOT EXISTS idx_shopee_captcha_events_status
     ON shopee_captcha_events(status, detected_at DESC);
 CREATE INDEX IF NOT EXISTS idx_shopee_captcha_events_job
@@ -856,6 +903,8 @@ ALL_DDL = [
     ML_PREDICTION_SNAPSHOTS_DDL,
     SHOPEE_COMPETITION_SNAPSHOTS_DDL,
     SHOPEE_COMPETITION_LISTINGS_DDL,
+    CAROUSELL_COMPETITION_SNAPSHOTS_DDL,
+    CAROUSELL_COMPETITION_LISTINGS_DDL,
     INDEXES_DDL,
 ]
 
@@ -983,12 +1032,19 @@ def _migrate_ml_prediction_snapshots(conn: Any) -> None:
         ("win_probability", "FLOAT"),
         ("interval_lower", "FLOAT"),
         ("interval_upper", "FLOAT"),
+        ("buy_category", "VARCHAR(10)"),
+        ("great_buy_probability", "DOUBLE PRECISION"),
+        ("good_buy_probability", "DOUBLE PRECISION"),
     ]
     for col_name, col_type in _new_columns:
         if col_name not in existing:
             conn.execute(
                 f"ALTER TABLE ml_prediction_snapshots ADD COLUMN {col_name} {col_type}"
             )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_ml_snapshot_buy_category "
+        "ON ml_prediction_snapshots (snapshot_date, buy_category)"
+    )
 
 
 def _migrate_scrape_tasks(conn: Any) -> None:
@@ -1159,6 +1215,8 @@ _SEQUENCE_TABLE_MAP = [
     ("ml_model_runs_id_seq", "ml_model_runs"),
     ("shopee_competition_snapshots_id_seq", "shopee_competition_snapshots"),
     ("shopee_competition_listings_id_seq", "shopee_competition_listings"),
+    ("carousell_competition_snapshots_id_seq", "carousell_competition_snapshots"),
+    ("carousell_competition_listings_id_seq", "carousell_competition_listings"),
 ]
 
 

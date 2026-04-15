@@ -28,6 +28,7 @@ import { BricklinkPriceChart } from './bricklink-price-chart';
 import { BricklinkSellersPanel } from './bricklink-sellers-panel';
 import { CohortPanel } from './cohort-panel';
 import { LiquidityPanel } from './liquidity-panel';
+import { MyLiquidityPanel } from './my-liquidity-panel';
 import { MLPredictionPanel } from './ml-prediction-panel';
 import { KeepaPanel } from './keepa-panel';
 import { MinifiguresPanel } from './minifigures-panel';
@@ -695,6 +696,7 @@ export function ItemDetailView({ setNumber }: ItemDetailViewProps) {
       {/* Cohort rankings */}
       <CohortPanel setNumber={setNumber} />
       <LiquidityPanel setNumber={setNumber} />
+      <MyLiquidityPanel setNumber={setNumber} />
 
       {/* Minifigures */}
       <MinifiguresPanel setNumber={setNumber} />

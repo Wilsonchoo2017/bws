@@ -226,6 +226,73 @@ async def get_item_competition(set_number: str, conn: Any = Depends(get_db)):
     }
 
 
+@router.get("/{set_number}/my-liquidity")
+async def get_item_my_liquidity(set_number: str, conn: Any = Depends(get_db)):
+    """Return the Malaysian exit-liquidity composite for a set.
+
+    Composites Shopee competition snapshots, BL/BE USD benchmarks,
+    and the current MYR FX rate into a single payload covering
+    premium distribution, 30d + 7d velocity, and data sufficiency.
+    """
+    if not item_exists(conn, set_number):
+        raise HTTPException(status_code=404, detail=f"Item {set_number} not found")
+    data = await asyncio.to_thread(_fetch_my_liquidity, set_number)
+    return {"success": True, "data": data}
+
+
+_my_cohort_cache: dict = {}
+_MY_COHORT_TTL = 30 * 60  # 30 minutes
+
+
+def _build_my_cohort_cache() -> dict[str, dict]:
+    """Compute + cache MY cohort ranks for the full universe."""
+    import time as _time
+
+    from db.connection import get_connection
+    from services.my_liquidity import compute_my_cohort_ranks
+
+    now = _time.time()
+    cached = _my_cohort_cache.get("all")
+    if cached and cached["expires"] > now:
+        return cached["results"]
+
+    conn = get_connection()
+    try:
+        results = compute_my_cohort_ranks(conn)
+    finally:
+        conn.close()
+
+    _my_cohort_cache["all"] = {
+        "results": results,
+        "expires": now + _MY_COHORT_TTL,
+    }
+    return results
+
+
+def _fetch_my_cohorts(set_number: str) -> dict | None:
+    """Return the MY cohort entry for a single set, or None."""
+    results = _build_my_cohort_cache()
+    return results.get(set_number)
+
+
+@router.get("/{set_number}/my-liquidity/cohorts")
+async def get_item_my_liquidity_cohorts(
+    set_number: str,
+    conn: Any = Depends(get_db),
+):
+    """MY-exit percentile rankings within cohort peer groups.
+
+    Signals: my_sold_velocity_30d, my_premium_median_pct,
+    my_saturation_inverse, my_churn_ratio, my_liquidity_ratio.
+    """
+    if not item_exists(conn, set_number):
+        raise HTTPException(status_code=404, detail=f"Item {set_number} not found")
+    data = await asyncio.to_thread(_fetch_my_cohorts, set_number)
+    if data is None:
+        return {"success": True, "data": None}
+    return {"success": True, "data": sanitize_nan(data)}
+
+
 @router.get("/{set_number}/kelly")
 async def get_item_kelly(
     set_number: str,
@@ -1145,6 +1212,17 @@ def _fetch_competition(set_number: str) -> dict:
         conn.close()
 
 
+def _fetch_my_liquidity(set_number: str) -> dict:
+    from db.connection import get_connection
+    from services.my_liquidity import build_my_liquidity_data
+
+    conn = get_connection()
+    try:
+        return sanitize_nan(build_my_liquidity_data(conn, set_number))
+    finally:
+        conn.close()
+
+
 def _fetch_minifigures(set_number: str) -> dict:
     from db.connection import get_connection
 
@@ -1300,6 +1378,8 @@ async def get_item_detail_bundle(set_number: str, conn: Any = Depends(get_db)):
         bricklink_prices,
         bricklink_sellers,
         competition,
+        my_liquidity,
+        my_liquidity_cohorts,
         minifigures,
         minifig_value_history,
         ml_growth,
@@ -1310,6 +1390,8 @@ async def get_item_detail_bundle(set_number: str, conn: Any = Depends(get_db)):
         asyncio.to_thread(_fetch_bricklink_prices, set_number),
         asyncio.to_thread(_fetch_bricklink_sellers, set_number),
         asyncio.to_thread(_fetch_competition, set_number),
+        asyncio.to_thread(_fetch_my_liquidity, set_number),
+        asyncio.to_thread(_fetch_my_cohorts, set_number),
         asyncio.to_thread(_fetch_minifigures, set_number),
         asyncio.to_thread(_fetch_minifig_value_history, set_number),
         asyncio.to_thread(_fetch_ml_growth, set_number),
@@ -1357,6 +1439,8 @@ async def get_item_detail_bundle(set_number: str, conn: Any = Depends(get_db)):
             "bricklink_prices": bricklink_prices,
             "bricklink_sellers": bricklink_sellers,
             "competition": competition,
+            "my_liquidity": my_liquidity,
+            "my_liquidity_cohorts": sanitize_nan(my_liquidity_cohorts) if my_liquidity_cohorts else None,
             "minifigures": minifigures,
             "minifig_value_history": minifig_value_history,
             "ml_growth": ml_growth,
