@@ -251,21 +251,29 @@ export const unifiedColumns: ColumnDef<UnifiedItem>[] = [
       const category = row.original.ml_buy_category;
       if (table.options.meta?.enriching && category == null) return <PriceShimmer />;
       if (category == null) return <span className='text-muted-foreground'>-</span>;
-      const styles: Record<string, { label: string; cls: string }> = {
+      const styles: Record<string, { label: string; cls: string; title?: string }> = {
         GREAT: { label: 'GREAT', cls: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300' },
         GOOD: { label: 'GOOD', cls: 'bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300' },
         SKIP: { label: 'SKIP', cls: 'bg-neutral-100 text-neutral-500 dark:bg-neutral-800/40 dark:text-neutral-400' },
         WORST: { label: 'WORST', cls: 'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300' },
+        NONE: {
+          label: 'NONE',
+          cls: 'bg-slate-100 text-slate-500 dark:bg-slate-800/40 dark:text-slate-400',
+          title: 'Prediction unavailable: set is missing Keepa or BrickLink data',
+        },
       };
       const style = styles[category] ?? styles.SKIP;
       return (
-        <span className={`rounded px-1.5 py-0.5 text-[10px] font-bold leading-none ${style.cls}`}>
+        <span
+          className={`rounded px-1.5 py-0.5 text-[10px] font-bold leading-none ${style.cls}`}
+          title={style.title}
+        >
           {style.label}
         </span>
       );
     },
     sortingFn: (rowA, rowB) => {
-      const order: Record<string, number> = { GREAT: 4, GOOD: 3, SKIP: 2, WORST: 1 };
+      const order: Record<string, number> = { GREAT: 4, GOOD: 3, SKIP: 2, WORST: 1, NONE: 0 };
       const a = order[rowA.original.ml_buy_category ?? ''] ?? 0;
       const b = order[rowB.original.ml_buy_category ?? ''] ?? 0;
       return a - b;

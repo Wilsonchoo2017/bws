@@ -22,6 +22,11 @@ import asyncio
 import logging
 
 from api.jobs import JobManager
+from services.operations.scheduler_registry import (
+    is_enabled,
+    record_disabled,
+    record_run,
+)
 
 WARMUP_SECONDS = 60
 
@@ -34,6 +39,7 @@ async def run_marketplace_competition_sweep(
     logger: logging.Logger,
     interval_minutes: int,
     batch_size: int,
+    scheduler_name: str | None = None,
 ) -> None:
     """Tiered competition sweep loop for a marketplace.
 
@@ -61,15 +67,24 @@ async def run_marketplace_competition_sweep(
 
     await asyncio.sleep(WARMUP_SECONDS)
 
+    tracked_name = scheduler_name or scraper_id
+
     while True:
+        if not is_enabled(tracked_name):
+            await record_disabled(tracked_name)
+            await asyncio.sleep(interval_minutes * 60)
+            continue
+
         try:
-            await _run_one_sweep(
-                manager,
-                scraper_id=scraper_id,
-                snapshots_table=snapshots_table,
-                logger=logger,
-                batch_size=batch_size,
-            )
+            async with record_run(tracked_name) as run:
+                queued = await _run_one_sweep(
+                    manager,
+                    scraper_id=scraper_id,
+                    snapshots_table=snapshots_table,
+                    logger=logger,
+                    batch_size=batch_size,
+                )
+                run.items_queued = queued
         except Exception:
             logger.exception("%s sweep iteration failed", scraper_id)
 
@@ -83,8 +98,11 @@ async def _run_one_sweep(
     snapshots_table: str,
     logger: logging.Logger,
     batch_size: int,
-) -> None:
-    """Run a single sweep pass: select stale items and queue one batch."""
+) -> int:
+    """Run a single sweep pass: select stale items and queue one batch.
+
+    Returns the number of items queued (0 if skipped or no work).
+    """
     existing = manager.list_jobs()
     has_pending = any(
         j.scraper_id == scraper_id and j.status.value in ("queued", "running")
@@ -92,7 +110,7 @@ async def _run_one_sweep(
     )
     if has_pending:
         logger.debug("%s sweep: job already pending, skipping", scraper_id)
-        return
+        return 0
 
     from db.connection import get_connection
     from db.schema import init_schema
@@ -113,7 +131,7 @@ async def _run_one_sweep(
 
     if not items:
         logger.debug("%s sweep: no items need checking", scraper_id)
-        return
+        return 0
 
     tier_counts: dict[int, int] = {}
     for item in items:
@@ -133,3 +151,4 @@ async def _run_one_sweep(
         len(items),
         tier_summary,
     )
+    return len(items)

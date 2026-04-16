@@ -1,9 +1,10 @@
-"""Gating logic for Shopee jobs when a recent captcha has been detected.
+"""Gating logic for Shopee jobs based on captcha clearance.
 
-The rule is simple: if a captcha event was detected within the last 2 hours,
-no Shopee-family job (shopee, shopee_saturation, shopee_competition) may start.
-Jobs that arrive are moved to BLOCKED_VERIFY status. After 2 hours with no new
-captcha, jobs automatically resume.
+The rule: Shopee-family jobs (shopee, shopee_saturation, shopee_competition)
+may only run when a valid captcha clearance exists (granted within the last
+24 hours and not invalidated by a mid-scrape captcha detection).
+
+If no valid clearance exists, jobs are moved to BLOCKED_VERIFY status.
 """
 
 from __future__ import annotations
@@ -13,37 +14,66 @@ from typing import Any
 
 from db.connection import get_connection
 from db.schema import init_schema
-from services.shopee.captcha_events import has_recent_captcha
+from services.shopee.captcha_clearance import (
+    has_valid_clearance,
+    invalidate_clearance,
+)
 
 logger = logging.getLogger("bws.shopee.captcha_gate")
 
 SHOPEE_SCRAPER_PREFIX = "shopee"
-CAPTCHA_GATE_HOURS = 2
 
 
 def _shopee_scraper(scraper_id: str) -> bool:
     return scraper_id.startswith(SHOPEE_SCRAPER_PREFIX)
 
 
-def has_pending_captcha() -> bool:
-    """Return True if a captcha was detected within the last 2 hours.
+def should_gate_job(scraper_id: str) -> bool:
+    """True if this scraper_id is Shopee-family AND no valid clearance exists."""
+    if not _shopee_scraper(scraper_id):
+        return False
+    return not _check_clearance()
 
-    Opens a short-lived connection. Never raises — on DB failure returns
-    False so scraping can proceed rather than stalling everything.
+
+def _check_clearance() -> bool:
+    """Return True if a valid clearance exists.
+
+    Opens a short-lived connection.  Never raises -- on DB failure returns
+    False so that jobs are gated (safe default).
     """
     try:
         conn = get_connection()
-        init_schema(conn)
-        result = has_recent_captcha(conn, hours=CAPTCHA_GATE_HOURS)
-        conn.close()
-        return result
+        try:
+            init_schema(conn)
+            return has_valid_clearance(conn)
+        finally:
+            conn.close()
     except Exception:
-        logger.exception("has_pending_captcha: DB check failed")
+        logger.exception("Clearance check failed")
         return False
 
 
+def invalidate_current_clearance(reason: str) -> None:
+    """Invalidate the active clearance (e.g. captcha detected mid-scrape).
+
+    Never raises -- logs on failure.
+    """
+    try:
+        conn = get_connection()
+        try:
+            init_schema(conn)
+            invalidate_clearance(conn, reason=reason)
+        finally:
+            conn.close()
+    except Exception:
+        logger.exception("Failed to invalidate clearance")
+
+
 def latest_pending_event_id(conn: Any | None = None) -> int | None:
-    """Return the most recent captcha event id, or None."""
+    """Return the most recent captcha event id, or None.
+
+    Kept for backward compatibility with existing blocked jobs.
+    """
     own_conn = conn is None
     if own_conn:
         conn = get_connection()
@@ -63,10 +93,3 @@ def latest_pending_event_id(conn: Any | None = None) -> int | None:
     finally:
         if own_conn and conn is not None:
             conn.close()
-
-
-def should_gate_job(scraper_id: str) -> bool:
-    """True if this scraper_id is Shopee-family AND a captcha was detected recently."""
-    if not _shopee_scraper(scraper_id):
-        return False
-    return has_pending_captcha()

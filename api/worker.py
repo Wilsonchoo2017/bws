@@ -135,16 +135,15 @@ async def run_worker(manager: JobManager | None = None) -> None:
             mgr.mark_failed(job_id, f"Unknown scraper: {job.scraper_id}")
             continue
 
-        # Shopee-family gate: if a captcha verification is pending, park the
-        # job as BLOCKED_VERIFY instead of running it.
+        # Shopee-family gate: jobs can only run when a valid captcha clearance
+        # exists (proactive 24-hour window).  Without clearance, park as
+        # BLOCKED_VERIFY until the user solves a captcha via the UI.
         if should_gate_job(job.scraper_id):
-            from services.shopee.captcha_gate import latest_pending_event_id
-            event_id = latest_pending_event_id() or 0
             logger.info(
-                "Job %s parked BLOCKED_VERIFY (captcha event #%s pending)",
-                job_id, event_id,
+                "Job %s parked BLOCKED_VERIFY (no valid captcha clearance)",
+                job_id,
             )
-            mgr.mark_blocked_verify(job_id, event_id)
+            mgr.mark_blocked_verify(job_id, 0)
             continue
 
         sem = semaphores.get(job.scraper_id)

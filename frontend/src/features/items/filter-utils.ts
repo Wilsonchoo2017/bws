@@ -126,7 +126,7 @@ const PREDICATES: Record<FilterKey, (item: UnifiedItem, dealThreshold: number, c
   cat_good: (item) => item.ml_buy_category === 'GOOD',
   cat_skip: (item) => item.ml_buy_category === 'SKIP',
   cat_worst: (item) => item.ml_buy_category === 'WORST',
-  cat_none: (item) => item.ml_buy_category == null,
+  cat_none: (item) => item.ml_buy_category == null || item.ml_buy_category === 'NONE',
   conf_high: (item) => item.ml_confidence === 'high',
   conf_moderate: (item) => item.ml_confidence === 'moderate',
   conf_low: (item) => item.ml_confidence === 'low',

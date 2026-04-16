@@ -97,6 +97,7 @@ _DEFAULTS: dict[str, Any] = {
         "checkpoint_interval_s": 30,
     },
     "paused_workers": [],
+    "scheduler_enabled": {},
     "suppliers": [],
     "platforms": [],
     "listing": {
@@ -235,6 +236,8 @@ def _apply_runtime(section: str, values: dict[str, Any]) -> None:
         _apply_dispatcher(values)
     elif section == "paused_workers":
         _apply_paused_workers(values)
+    elif section == "scheduler_enabled":
+        pass  # read on demand by schedulers and operations API
     elif section == "listing":
         pass  # static config, no live propagation needed
     elif section == "cart":

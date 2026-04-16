@@ -71,10 +71,10 @@ async def enrich_item(
     if request.source:
         task_type_str = _SOURCE_TO_TASK_TYPE.get(request.source, request.source)
         task_type = TaskType(task_type_str)
-        task = create_task(conn, request.set_number, task_type, reason="manual")
+        task = create_task(conn, request.set_number, task_type, reason="manual", source="api")
         tasks = [task] if task else []
     else:
-        tasks = create_tasks_for_set(conn, request.set_number, reason="manual")
+        tasks = create_tasks_for_set(conn, request.set_number, reason="manual", source="api")
 
     return ScrapeTasksResponse(
         created=len(tasks),
@@ -138,9 +138,42 @@ async def enrich_missing(
     for item in items:
         set_number = item["set_number"]
         tasks = create_tasks_for_set(
-            conn, set_number, reason="manual: enrich missing",
+            conn, set_number, reason="manual: enrich missing", source="api",
         )
         if tasks:
+            queued_numbers.append(set_number)
+
+    return EnrichBatchResponse(queued=len(queued_numbers), set_numbers=queued_numbers)
+
+
+def _batch_create_for_null_column(
+    conn: Any,
+    column: str,
+    reason: str,
+    request: EnrichBatchRequest | None,
+) -> EnrichBatchResponse:
+    """Shared logic for batch-creating BrickLink tasks for items with a NULL column."""
+    from services.scrape_queue.models import TaskType
+    from services.scrape_queue.repository import create_task
+
+    if request and request.set_numbers:
+        placeholders = ", ".join(["?"] * len(request.set_numbers))
+        rows = conn.execute(
+            f"SELECT set_number FROM lego_items WHERE {column} IS NULL AND set_number IN ({placeholders})",  # noqa: S608
+            request.set_numbers,
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            f"SELECT set_number FROM lego_items WHERE {column} IS NULL",  # noqa: S608
+        ).fetchall()
+
+    queued_numbers: list[str] = []
+    for (set_number,) in rows:
+        task = create_task(
+            conn, set_number, TaskType.BRICKLINK_METADATA,
+            reason=reason, source="api",
+        )
+        if task:
             queued_numbers.append(set_number)
 
     return EnrichBatchResponse(queued=len(queued_numbers), set_numbers=queued_numbers)
@@ -151,36 +184,10 @@ async def scrape_missing_minifigs(
     conn: Any = Depends(get_db),
     request: EnrichBatchRequest | None = None,
 ) -> EnrichBatchResponse:
-    """Create scrape tasks for items with unknown minifig_count (NULL).
-
-    Items with minifig_count = 0 (previously scraped, no minifigs) are skipped.
-    Only items with minifig_count IS NULL (never scraped) are queued.
-    """
-    from services.scrape_queue.models import TaskType
-    from services.scrape_queue.repository import create_task
-
-    if request and request.set_numbers:
-        placeholders = ", ".join(["?"] * len(request.set_numbers))
-        rows = conn.execute(
-            f"SELECT set_number FROM lego_items WHERE minifig_count IS NULL AND set_number IN ({placeholders})",  # noqa: S608
-            request.set_numbers,
-        ).fetchall()
-    else:
-        rows = conn.execute(
-            "SELECT set_number FROM lego_items WHERE minifig_count IS NULL",
-        ).fetchall()
-
-    queued_numbers: list[str] = []
-    for (set_number,) in rows:
-        # Create bricklink_metadata task (which discovers minifig_count)
-        task = create_task(
-            conn, set_number, TaskType.BRICKLINK_METADATA,
-            reason="manual: missing minifig count",
-        )
-        if task:
-            queued_numbers.append(set_number)
-
-    return EnrichBatchResponse(queued=len(queued_numbers), set_numbers=queued_numbers)
+    """Create scrape tasks for items with unknown minifig_count (NULL)."""
+    return _batch_create_for_null_column(
+        conn, "minifig_count", "manual: missing minifig count", request,
+    )
 
 
 @router.post("/enrich-missing-dimensions", response_model=EnrichBatchResponse)
@@ -189,28 +196,9 @@ async def enrich_missing_dimensions(
     request: EnrichBatchRequest | None = None,
 ) -> EnrichBatchResponse:
     """Create scrape tasks for items with missing dimensions (NULL)."""
-    from services.scrape_queue.models import TaskType
-    from services.scrape_queue.repository import create_task
-
-    if request and request.set_numbers:
-        placeholders = ", ".join(["?"] * len(request.set_numbers))
-        rows = conn.execute(
-            f"SELECT set_number FROM lego_items WHERE dimensions IS NULL AND set_number IN ({placeholders})",  # noqa: S608
-            request.set_numbers,
-        ).fetchall()
-    else:
-        rows = conn.execute(
-            "SELECT set_number FROM lego_items WHERE dimensions IS NULL",
-        ).fetchall()
-
-    queued_numbers: list[str] = []
-    for (set_number,) in rows:
-        task = create_task(
-            conn, set_number, TaskType.BRICKLINK_METADATA,
-            reason="manual: missing dimensions",
-        )
-        if task:
-            queued_numbers.append(set_number)
+    return _batch_create_for_null_column(
+        conn, "dimensions", "manual: missing dimensions", request,
+    )
 
     return EnrichBatchResponse(queued=len(queued_numbers), set_numbers=queued_numbers)
 

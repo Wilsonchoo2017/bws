@@ -393,7 +393,7 @@ def _is_not_found(title: str, url: str) -> bool:
     return (
         "not found" in t
         or "404" in t
-        or "search" in t
+        or t.startswith("search")
         or "/search" in url
     )
 

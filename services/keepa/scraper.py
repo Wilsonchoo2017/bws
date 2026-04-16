@@ -37,6 +37,24 @@ logger = logging.getLogger("bws.keepa.scraper")
 
 KEEPA_BASE = "https://keepa.com"
 
+# Manual ASIN overrides for sets where Keepa's search ranks the real product
+# below our top-5 candidate cap, or where the Amazon title doesn't contain the
+# bare set number and our title validator keeps rejecting the true match.
+#
+# The scraper navigates directly to the product page for any set_number in
+# this map and SKIPS both the candidate search and the title-match validator
+# — by definition, the override says "trust me, this ASIN is correct."
+#
+# Add new entries sparingly. Preferred fix is a better ranker, not a
+# growing hand-maintained list. When adding an entry, include a comment
+# noting *why* the automated path failed.
+_KEEPA_ASIN_OVERRIDES: dict[str, str] = {
+    # Amazon lists related Ninjago mech packs under 71805 ("Jay's Mech Battle
+    # Pack"); the search for 71808 keeps returning 71805 and the title
+    # validator rejects the mismatch. B0CGY44HYD is the real product page.
+    "71808": "B0CGY44HYD",
+}
+
 
 
 def _keepa_browser() -> AsyncCamoufox:
@@ -572,8 +590,16 @@ async def scrape_with_page(
 ) -> KeepaScrapeResult:
     """Core Keepa scraping logic operating on an existing page."""
     try:
-        search_url = f"{KEEPA_BASE}/#!search/1-{set_number}%20lego"
-        logger.info("Navigating to search: %s", search_url)
+        override_asin = _KEEPA_ASIN_OVERRIDES.get(_bare_set_number(set_number))
+        if override_asin:
+            search_url = f"{KEEPA_BASE}/#!product/1-{override_asin}"
+            logger.info(
+                "Keepa override for %s: navigating directly to ASIN %s",
+                set_number, override_asin,
+            )
+        else:
+            search_url = f"{KEEPA_BASE}/#!search/1-{set_number}%20lego"
+            logger.info("Navigating to search: %s", search_url)
         await page.goto(search_url, wait_until="domcontentloaded")
         await human_delay(2_500, 6_000)
 
@@ -616,45 +642,47 @@ async def scrape_with_page(
                 )
             await human_delay(2_500, 6_000)
 
-        # Wait for search results
-        result_found = await _wait_for_search_results(page)
-
-        if not result_found:
-            # Check if CF widget appeared during/after search load
-            if await _detect_cloudflare(page):
-    
-                solved = await _wait_for_cloudflare(page, set_number)
-                if solved:
-                    await page.goto(search_url, wait_until="domcontentloaded")
-                    await human_delay(2_500, 6_000)
-                    result_found = await _wait_for_search_results(page)
+        # Search → click flow (skipped entirely on override paths, which
+        # land directly on the product page).
+        if not override_asin:
+            result_found = await _wait_for_search_results(page)
 
             if not result_found:
-                body_text = await page.evaluate(
-                    "() => document.body.innerText.substring(0, 500)"
-                )
-                logger.warning(
-                    "No search result selectors matched. Page text: %s",
-                    body_text[:200],
-                )
+                # Check if CF widget appeared during/after search load
+                if await _detect_cloudflare(page):
+
+                    solved = await _wait_for_cloudflare(page, set_number)
+                    if solved:
+                        await page.goto(search_url, wait_until="domcontentloaded")
+                        await human_delay(2_500, 6_000)
+                        result_found = await _wait_for_search_results(page)
+
+                if not result_found:
+                    body_text = await page.evaluate(
+                        "() => document.body.innerText.substring(0, 500)"
+                    )
+                    logger.warning(
+                        "No search result selectors matched. Page text: %s",
+                        body_text[:200],
+                    )
+                    return KeepaScrapeResult(
+                        success=False,
+                        set_number=set_number,
+                        error="Search results did not load within timeout",
+                    )
+
+            await human_delay(800, 2_500)
+            await _idle_behavior(page)
+
+            # Click first matching result (verifies it's a LEGO product)
+            clicked = await _click_first_result(page, set_number, item_title)
+            if not clicked:
                 return KeepaScrapeResult(
                     success=False,
                     set_number=set_number,
-                    error="Search results did not load within timeout",
+                    error=f"Not listed on Amazon (no LEGO product found for {set_number})",
+                    not_found=True,
                 )
-
-        await human_delay(800, 2_500)
-        await _idle_behavior(page)
-
-        # Click first matching result (verifies it's a LEGO product)
-        clicked = await _click_first_result(page, set_number, item_title)
-        if not clicked:
-            return KeepaScrapeResult(
-                success=False,
-                set_number=set_number,
-                error=f"Not listed on Amazon (no LEGO product found for {set_number})",
-                not_found=True,
-            )
 
         await human_delay(4_000, 9_000)
         await _idle_behavior(page)
@@ -674,7 +702,9 @@ async def scrape_with_page(
         # Cross-check: verify the Keepa product actually matches our set number.
         # The product title should contain the set number (e.g. "LEGO 60305 ...").
         # Without this, high-number sets like 122222 can match wrong products.
-        if not _title_contains_set_number(product_data.title, set_number):
+        # Override paths bypass this check — the whole point of an override is
+        # that the automated title-match failed but the ASIN is known-correct.
+        if not override_asin and not _title_contains_set_number(product_data.title, set_number):
             logger.warning(
                 "Keepa product mismatch for %s: title='%s' does not contain set number",
                 set_number, product_data.title,

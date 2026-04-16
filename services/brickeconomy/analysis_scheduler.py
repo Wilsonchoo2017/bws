@@ -7,6 +7,12 @@ aggregate growth data fresh for ML features.
 import asyncio
 import logging
 
+from services.operations.scheduler_registry import (
+    is_enabled,
+    record_disabled,
+    record_run,
+)
+
 logger = logging.getLogger("bws.brickeconomy.analysis_scheduler")
 
 # 5 months in days
@@ -35,27 +41,35 @@ async def run_analysis_sweep(
         else:
             await asyncio.sleep(interval_days * 86400)
 
+        if not is_enabled("analysis"):
+            await record_disabled("analysis")
+            continue
+
         try:
-            from services.brickeconomy.analysis_scraper import (
-                load_analysis_data,
-                run_scrape_and_parse,
-            )
-
-            # Check if we already have data (skip on first startup if recent)
-            existing = load_analysis_data()
-            if existing and first_run:
-                logger.info(
-                    "Analysis data already exists (%d themes, %d years), skipping initial scrape",
-                    len(existing.get("themes", [])),
-                    len(existing.get("years", [])),
+            async with record_run("analysis") as run:
+                from services.brickeconomy.analysis_scraper import (
+                    load_analysis_data,
+                    run_scrape_and_parse,
                 )
-                continue
 
-            result = await run_scrape_and_parse(headless=True)
-            for name, records in result.items():
-                logger.info(
-                    "Analysis sweep: scraped %d %s records", len(records), name,
-                )
+                # Check if we already have data (skip on first startup if recent)
+                existing = load_analysis_data()
+                if existing and first_run:
+                    logger.info(
+                        "Analysis data already exists (%d themes, %d years), skipping initial scrape",
+                        len(existing.get("themes", [])),
+                        len(existing.get("years", [])),
+                    )
+                    continue
+
+                result = await run_scrape_and_parse(headless=True)
+                total = 0
+                for name, records in result.items():
+                    logger.info(
+                        "Analysis sweep: scraped %d %s records", len(records), name,
+                    )
+                    total += len(records)
+                run.items_queued = total
 
         except Exception:
             logger.exception("BrickEconomy analysis sweep failed")

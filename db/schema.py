@@ -138,6 +138,17 @@ CREATE TABLE IF NOT EXISTS shopee_captcha_events (
 );
 """
 
+SHOPEE_CAPTCHA_CLEARANCE_DDL = """
+CREATE TABLE IF NOT EXISTS shopee_captcha_clearance (
+    id INTEGER PRIMARY KEY,
+    cleared_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    expires_at TIMESTAMPTZ NOT NULL,
+    invalidated_at TIMESTAMPTZ,
+    invalidated_reason VARCHAR,
+    method VARCHAR NOT NULL DEFAULT 'proactive'
+);
+"""
+
 MIGHTYUTAN_PRODUCTS_DDL = """
 CREATE TABLE IF NOT EXISTS mightyutan_products (
     id INTEGER PRIMARY KEY,
@@ -379,7 +390,9 @@ CREATE TABLE IF NOT EXISTS scrape_tasks (
     completed_at TIMESTAMPTZ,
     locked_by VARCHAR,
     locked_at TIMESTAMPTZ,
-    reason VARCHAR
+    reason VARCHAR,
+    outcome VARCHAR,
+    source VARCHAR
 );
 """
 
@@ -693,6 +706,7 @@ CREATE SEQUENCE IF NOT EXISTS shopee_products_id_seq;
 CREATE SEQUENCE IF NOT EXISTS shopee_saturation_id_seq;
 CREATE SEQUENCE IF NOT EXISTS shopee_scrape_history_id_seq;
 CREATE SEQUENCE IF NOT EXISTS shopee_captcha_events_id_seq;
+CREATE SEQUENCE IF NOT EXISTS shopee_captcha_clearance_id_seq;
 CREATE SEQUENCE IF NOT EXISTS mightyutan_products_id_seq;
 CREATE SEQUENCE IF NOT EXISTS mightyutan_price_history_id_seq;
 CREATE SEQUENCE IF NOT EXISTS hobbydigi_products_id_seq;
@@ -718,6 +732,19 @@ CREATE SEQUENCE IF NOT EXISTS shopee_competition_snapshots_id_seq;
 CREATE SEQUENCE IF NOT EXISTS shopee_competition_listings_id_seq;
 CREATE SEQUENCE IF NOT EXISTS carousell_competition_snapshots_id_seq;
 CREATE SEQUENCE IF NOT EXISTS carousell_competition_listings_id_seq;
+CREATE SEQUENCE IF NOT EXISTS scheduler_runs_id_seq;
+"""
+
+SCHEDULER_RUNS_DDL = """
+CREATE TABLE IF NOT EXISTS scheduler_runs (
+    id INTEGER PRIMARY KEY DEFAULT nextval('scheduler_runs_id_seq'),
+    name VARCHAR NOT NULL,
+    started_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    finished_at TIMESTAMPTZ,
+    items_queued INTEGER DEFAULT 0,
+    status VARCHAR NOT NULL DEFAULT 'running',
+    error VARCHAR
+);
 """
 
 # Index creation statements
@@ -839,6 +866,9 @@ CREATE INDEX IF NOT EXISTS idx_shopee_captcha_events_status
     ON shopee_captcha_events(status, detected_at DESC);
 CREATE INDEX IF NOT EXISTS idx_shopee_captcha_events_job
     ON shopee_captcha_events(job_id);
+CREATE INDEX IF NOT EXISTS idx_shopee_captcha_clearance_active
+    ON shopee_captcha_clearance(expires_at DESC)
+    WHERE invalidated_at IS NULL;
 CREATE INDEX IF NOT EXISTS idx_price_records_source_shopee
     ON price_records(set_number, recorded_at DESC)
     WHERE source = 'shopee';
@@ -863,6 +893,8 @@ CREATE INDEX IF NOT EXISTS idx_scrape_tasks_pending_type
 CREATE INDEX IF NOT EXISTS idx_bricklink_monthly_sales_new
     ON bricklink_monthly_sales(item_id, year, month)
     WHERE condition = 'N';
+CREATE INDEX IF NOT EXISTS idx_scheduler_runs_name_started
+    ON scheduler_runs(name, started_at DESC);
 """
 
 ALL_DDL = [
@@ -880,6 +912,7 @@ ALL_DDL = [
     SHOPEE_SATURATION_DDL,
     SHOPEE_SCRAPE_HISTORY_DDL,
     SHOPEE_CAPTCHA_EVENTS_DDL,
+    SHOPEE_CAPTCHA_CLEARANCE_DDL,
     MIGHTYUTAN_PRODUCTS_DDL,
     MIGHTYUTAN_PRICE_HISTORY_DDL,
     HOBBYDIGI_PRODUCTS_DDL,
@@ -905,6 +938,7 @@ ALL_DDL = [
     SHOPEE_COMPETITION_LISTINGS_DDL,
     CAROUSELL_COMPETITION_SNAPSHOTS_DDL,
     CAROUSELL_COMPETITION_LISTINGS_DDL,
+    SCHEDULER_RUNS_DDL,
     INDEXES_DDL,
 ]
 
@@ -1048,7 +1082,7 @@ def _migrate_ml_prediction_snapshots(conn: Any) -> None:
 
 
 def _migrate_scrape_tasks(conn: Any) -> None:
-    """Add reason column to scrape_tasks."""
+    """Add reason, outcome, and source columns to scrape_tasks."""
     existing = {
         row[0]
         for row in conn.execute(
@@ -1058,6 +1092,10 @@ def _migrate_scrape_tasks(conn: Any) -> None:
     }
     if "reason" not in existing:
         conn.execute("ALTER TABLE scrape_tasks ADD COLUMN reason VARCHAR")
+    if "outcome" not in existing:
+        conn.execute("ALTER TABLE scrape_tasks ADD COLUMN outcome VARCHAR")
+    if "source" not in existing:
+        conn.execute("ALTER TABLE scrape_tasks ADD COLUMN source VARCHAR")
 
 
 def _migrate_shopee_products(conn: Any) -> None:
@@ -1193,6 +1231,7 @@ _SEQUENCE_TABLE_MAP = [
     ("shopee_saturation_id_seq", "shopee_saturation"),
     ("shopee_scrape_history_id_seq", "shopee_scrape_history"),
     ("shopee_captcha_events_id_seq", "shopee_captcha_events"),
+    ("shopee_captcha_clearance_id_seq", "shopee_captcha_clearance"),
     ("mightyutan_products_id_seq", "mightyutan_products"),
     ("mightyutan_price_history_id_seq", "mightyutan_price_history"),
     ("hobbydigi_products_id_seq", "hobbydigi_products"),
@@ -1217,6 +1256,7 @@ _SEQUENCE_TABLE_MAP = [
     ("shopee_competition_listings_id_seq", "shopee_competition_listings"),
     ("carousell_competition_snapshots_id_seq", "carousell_competition_snapshots"),
     ("carousell_competition_listings_id_seq", "carousell_competition_listings"),
+    ("scheduler_runs_id_seq", "scheduler_runs"),
 ]
 
 

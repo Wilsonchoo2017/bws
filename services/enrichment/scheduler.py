@@ -4,6 +4,11 @@ import asyncio
 import logging
 
 from api.jobs import JobManager
+from services.operations.scheduler_registry import (
+    is_enabled,
+    record_disabled,
+    record_run,
+)
 
 logger = logging.getLogger("bws.enrichment.scheduler")
 
@@ -39,40 +44,47 @@ async def run_enrichment_sweep(
         else:
             await asyncio.sleep(interval_minutes * 60)
 
+        if not is_enabled("enrichment"):
+            await record_disabled("enrichment")
+            continue
+
         try:
-            from db.connection import get_connection
-            from db.schema import init_schema
-            from services.enrichment.repository import (
-                compute_enrichment_reason,
-                get_items_needing_enrichment,
-            )
-            from services.scrape_queue.repository import create_tasks_for_set
-
-            conn = get_connection()
-            try:
-                init_schema(conn)
-                items = get_items_needing_enrichment(conn, limit=batch_size)
-
-                if not items:
-                    logger.debug("Enrichment sweep: no items need enrichment")
-                    continue
-
-                queued = 0
-                for item in items:
-                    reason = compute_enrichment_reason(item)
-                    tasks = create_tasks_for_set(
-                        conn, item["set_number"], reason=reason,
-                    )
-                    if tasks:
-                        queued += 1
-
-                logger.info(
-                    "Enrichment sweep: found %d items, created tasks for %d",
-                    len(items),
-                    queued,
+            async with record_run("enrichment") as run:
+                from db.connection import get_connection
+                from db.schema import init_schema
+                from services.enrichment.repository import (
+                    compute_enrichment_reason,
+                    get_items_needing_enrichment,
                 )
-            finally:
-                conn.close()
+                from services.scrape_queue.repository import create_tasks_for_set
+
+                conn = get_connection()
+                try:
+                    init_schema(conn)
+                    items = get_items_needing_enrichment(conn, limit=batch_size)
+
+                    if not items:
+                        logger.debug("Enrichment sweep: no items need enrichment")
+                        continue
+
+                    queued = 0
+                    for item in items:
+                        reason = compute_enrichment_reason(item)
+                        tasks = create_tasks_for_set(
+                            conn, item["set_number"], reason=reason,
+                            source="enrichment_sweep",
+                        )
+                        if tasks:
+                            queued += 1
+
+                    run.items_queued = queued
+                    logger.info(
+                        "Enrichment sweep: found %d items, created tasks for %d",
+                        len(items),
+                        queued,
+                    )
+                finally:
+                    conn.close()
 
         except Exception:
             logger.exception("Enrichment sweep failed")
@@ -101,14 +113,25 @@ async def run_retiring_soon_sweep(
         else:
             await asyncio.sleep(interval_days * 86400)
 
+        if not is_enabled("retiring_soon"):
+            await record_disabled("retiring_soon")
+            continue
+
         try:
-            await _sync_retiring_soon()
+            async with record_run("retiring_soon") as run:
+                marked = await _sync_retiring_soon()
+                if marked is not None:
+                    run.items_queued = marked
         except Exception:
             logger.exception("Retiring-soon sweep failed")
 
 
-async def _sync_retiring_soon() -> None:
-    """Scrape the retiring-soon page and update the database."""
+async def _sync_retiring_soon() -> int | None:
+    """Scrape the retiring-soon page and update the database.
+
+    Returns the number of rows flipped to ``retiring_soon=TRUE`` for
+    operations tracking. ``None`` on scrape failure or empty result.
+    """
     from services.brickeconomy.retiring_soon_scraper import (
         scrape_retiring_soon,
     )
@@ -116,11 +139,11 @@ async def _sync_retiring_soon() -> None:
     result = await scrape_retiring_soon()
     if not result.success:
         logger.error("Retiring-soon scrape failed: %s", result.error)
-        return
+        return None
 
     if not result.set_numbers:
         logger.info("Retiring-soon sweep: no sets found on page")
-        return
+        return 0
 
     from db.connection import get_connection
     from db.schema import init_schema
@@ -163,6 +186,7 @@ async def _sync_retiring_soon() -> None:
             cleared,
             len(retiring_list),
         )
+        return marked
     finally:
         conn.close()
 
@@ -208,45 +232,52 @@ async def run_priority_rescrape_sweep(
         else:
             await asyncio.sleep(interval_minutes * 60)
 
+        if not is_enabled("rescrape"):
+            await record_disabled("rescrape")
+            continue
+
         try:
-            from db.connection import get_connection
-            from db.schema import init_schema
-            from services.scrape_queue.repository import (
-                create_task,
-                get_rescrape_candidates,
-            )
+            async with record_run("rescrape") as run:
+                from db.connection import get_connection
+                from db.schema import init_schema
+                from services.scrape_queue.repository import (
+                    create_task,
+                    get_rescrape_candidates,
+                )
 
-            conn = get_connection()
-            try:
-                init_schema(conn)
-                total_queued = 0
+                conn = get_connection()
+                try:
+                    init_schema(conn)
+                    total_queued = 0
 
-                for task_type in task_types:
-                    candidates = get_rescrape_candidates(conn, task_type)
-                    if not candidates:
-                        continue
+                    for task_type in task_types:
+                        candidates = get_rescrape_candidates(conn, task_type)
+                        if not candidates:
+                            continue
 
-                    queued = 0
-                    for set_number, reason in candidates:
-                        task = create_task(
-                            conn, set_number, task_type, reason=reason,
+                        queued = 0
+                        for set_number, reason in candidates:
+                            task = create_task(
+                                conn, set_number, task_type, reason=reason,
+                                source="rescrape_sweep",
+                            )
+                            if task is not None:
+                                queued += 1
+
+                        logger.info(
+                            "Tiered rescrape [%s]: %d candidates, queued %d",
+                            task_type.value,
+                            len(candidates),
+                            queued,
                         )
-                        if task is not None:
-                            queued += 1
+                        total_queued += queued
 
-                    logger.info(
-                        "Tiered rescrape [%s]: %d candidates, queued %d",
-                        task_type.value,
-                        len(candidates),
-                        queued,
-                    )
-                    total_queued += queued
+                    run.items_queued = total_queued
+                    if total_queued == 0:
+                        logger.debug("Tiered rescrape sweep: nothing to enqueue")
 
-                if total_queued == 0:
-                    logger.debug("Tiered rescrape sweep: nothing to enqueue")
-
-            finally:
-                conn.close()
+                finally:
+                    conn.close()
 
         except Exception:
             logger.exception("Tiered rescrape sweep failed")

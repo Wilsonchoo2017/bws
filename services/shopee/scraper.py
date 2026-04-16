@@ -140,6 +140,11 @@ async def _handle_captcha_detected(
         signals=signals,
         job_id=job_id,
     )
+
+    # Invalidate the 24-hour clearance so all Shopee jobs pause
+    from services.shopee.captcha_gate import invalidate_current_clearance
+    invalidate_current_clearance(reason=f"mid_scrape_captcha:{reason}")
+
     _notify_shopee_captcha(event_id)
     if on_progress:
         on_progress("CAPTCHA detected — please solve manually")

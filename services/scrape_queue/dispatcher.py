@@ -71,6 +71,23 @@ def shutdown_scrape_dispatcher() -> None:
     logger.info("Scrape dispatcher shutdown requested")
 
 
+def reset_scrape_dispatcher() -> None:
+    """Clear the shutdown flag so the dispatcher can be restarted."""
+    global _shutting_down  # noqa: PLW0603
+    _shutting_down = False
+    logger.info("Scrape dispatcher shutdown flag reset")
+
+
+async def start_scrape_dispatcher() -> None:
+    """Reset shutdown flag then run the dispatcher.
+
+    Use this as the task factory for the task registry so the dispatcher
+    can be restarted after a crash without stale shutdown state.
+    """
+    reset_scrape_dispatcher()
+    await run_scrape_dispatcher()
+
+
 def checkpoint_database() -> None:
     """Run a Postgres CHECKPOINT to flush WAL.
 
@@ -279,6 +296,18 @@ def _classify_exception(exc: Exception) -> ErrorCategory:
     return ErrorCategory.UNKNOWN
 
 
+def _format_exception(exc: BaseException) -> str:
+    # Some exceptions stringify to empty (e.g. bare `TargetClosedError()`), which
+    # turns ops rows into silent red entries. Fall back to repr, then class name.
+    msg = str(exc).strip()
+    if msg:
+        return f"{type(exc).__name__}: {msg}"
+    rep = repr(exc).strip()
+    if rep and rep != f"{type(exc).__name__}()":
+        return rep
+    return f"{type(exc).__name__} (no message)"
+
+
 def _claim_and_execute(
     worker_id: str,
     cfg: TaskTypeConfig,
@@ -324,14 +353,15 @@ def _claim_and_execute(
         except Exception as exc:
             duration = time.monotonic() - t0
             category = _classify_exception(exc)
+            error_message = _format_exception(exc)
             logger.exception("[%s] %s crashed", worker_id, task.set_number)
-            fail_task(conn, task.task_id, str(exc))
+            fail_task(conn, task.task_id, error_message)
             record_attempt(
                 conn,
                 task.task_id,
                 task.attempt_count,
                 error_category=category,
-                error_message=str(exc),
+                error_message=error_message,
                 duration_seconds=duration,
             )
             return None
@@ -351,12 +381,27 @@ def _handle_result(
 ) -> float | None:
     """Process an ExecutorResult -- no magic strings, just typed fields."""
     if result.success:
-        complete_task(conn, task.task_id)
+        complete_task(conn, task.task_id, outcome=result.outcome)
         record_attempt(
             conn, task.task_id, task.attempt_count,
             duration_seconds=duration,
         )
-        logger.info("[%s] %s completed", worker_id, task.set_number)
+        if result.outcome == "skipped":
+            logger.info("[%s] %s skipped: %s", worker_id, task.set_number, result.error or "no reason")
+        else:
+            logger.info("[%s] %s completed (%.1fs)", worker_id, task.set_number, duration)
+
+        # Auto-trigger ML prediction after Keepa scrape so predictions
+        # appear without waiting for the 24h daily snapshot.
+        if task.task_type == TaskType.KEEPA and result.outcome != "skipped":
+            try:
+                from services.scoring.growth_provider import growth_provider
+                pred = growth_provider.predict_single(task.set_number)
+                if pred:
+                    logger.info("[%s] %s auto-predicted after Keepa scrape", worker_id, task.set_number)
+            except Exception:
+                logger.debug("[%s] %s auto-predict skipped", worker_id, task.set_number, exc_info=True)
+
         return None
 
     if result.is_cooldown:

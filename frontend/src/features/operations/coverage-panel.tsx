@@ -3,6 +3,10 @@
 import { useCallback, useEffect, useState } from 'react';
 import type {
   CoverageData,
+  MarketplaceAggregate,
+  MarketplaceCellData,
+  MarketplaceCoverageData,
+  MarketplaceCoverageRow,
   SetCoverageData,
   SetCoverageRow,
   SourceCoverage,
@@ -37,35 +41,38 @@ function barColor(pct: number): string {
   return 'bg-red-500';
 }
 
+type CoverageView = 'sources' | 'sets' | 'marketplace';
+
 export function CoveragePanel() {
-  const [view, setView] = useState<'sources' | 'sets'>('sources');
+  const [view, setView] = useState<CoverageView>('sources');
+
+  const tabs: { id: CoverageView; label: string }[] = [
+    { id: 'sources', label: 'By Source' },
+    { id: 'sets', label: 'By Set' },
+    { id: 'marketplace', label: 'Marketplace Saturation' },
+  ];
 
   return (
     <div className='flex flex-col gap-4'>
       <div className='flex gap-1 rounded-lg border p-1 self-start'>
-        <button
-          onClick={() => setView('sources')}
-          className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
-            view === 'sources'
-              ? 'bg-primary text-primary-foreground'
-              : 'hover:bg-muted'
-          }`}
-        >
-          By Source
-        </button>
-        <button
-          onClick={() => setView('sets')}
-          className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
-            view === 'sets'
-              ? 'bg-primary text-primary-foreground'
-              : 'hover:bg-muted'
-          }`}
-        >
-          By Set
-        </button>
+        {tabs.map((t) => (
+          <button
+            key={t.id}
+            onClick={() => setView(t.id)}
+            className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
+              view === t.id
+                ? 'bg-primary text-primary-foreground'
+                : 'hover:bg-muted'
+            }`}
+          >
+            {t.label}
+          </button>
+        ))}
       </div>
 
-      {view === 'sources' ? <SourcesView /> : <SetsView />}
+      {view === 'sources' && <SourcesView />}
+      {view === 'sets' && <SetsView />}
+      {view === 'marketplace' && <MarketplaceView />}
     </div>
   );
 }
@@ -476,6 +483,330 @@ function SourceRow({
     </tr>
   );
 }
+
+// ---------------------------------------------------------------------------
+// Marketplace saturation view
+// ---------------------------------------------------------------------------
+
+type MarketplaceFilter = 'all' | 'stale' | 'empty' | 'populated';
+
+const TIER_LABELS: Record<string, string> = {
+  cart: 'Cart',
+  watchlist: 'Watchlist',
+  holdings: 'Holdings',
+  retiring_soon: 'Retiring Soon',
+};
+
+const TIER_BADGE: Record<string, string> = {
+  cart: 'bg-amber-500/15 text-amber-600 dark:text-amber-400',
+  watchlist: 'bg-blue-500/15 text-blue-600 dark:text-blue-400',
+  holdings: 'bg-purple-500/15 text-purple-600 dark:text-purple-400',
+  retiring_soon: 'bg-rose-500/15 text-rose-600 dark:text-rose-400',
+};
+
+function MarketplaceView() {
+  const [data, setData] = useState<MarketplaceCoverageData | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [filter, setFilter] = useState<MarketplaceFilter>('all');
+  const [tier, setTier] = useState<string>('all');
+
+  const fetchData = useCallback(async () => {
+    try {
+      const res = await fetch('/api/stats/marketplace-coverage');
+      const json = await res.json();
+      if (json.success) {
+        setData(json.data);
+        setError(null);
+      } else {
+        setError(json.error ?? 'Failed to load');
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Network error');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchData();
+    const interval = setInterval(fetchData, 30_000);
+    return () => clearInterval(interval);
+  }, [fetchData]);
+
+  if (loading && !data) return <LoadingState />;
+  if (error || !data) return <ErrorState message={error} />;
+
+  const filteredRows = data.rows.filter((r) => {
+    if (tier !== 'all' && r.tier !== tier) return false;
+    if (filter === 'all') return true;
+    const s = r.shopee;
+    const c = r.carousell;
+    if (filter === 'stale') return !s.fresh || !c.fresh;
+    if (filter === 'empty') return s.empty || c.empty;
+    if (filter === 'populated')
+      return s.scraped && c.scraped && !s.empty && !c.empty;
+    return true;
+  });
+
+  return (
+    <div className='flex flex-col gap-4'>
+      {/* Aggregate cards */}
+      <div className='grid grid-cols-1 gap-3 md:grid-cols-2'>
+        <MarketplaceSummaryCard
+          label='Shopee Saturation'
+          aggregate={data.marketplaces.shopee}
+        />
+        <MarketplaceSummaryCard
+          label='Carousell Saturation'
+          aggregate={data.marketplaces.carousell}
+        />
+      </div>
+
+      {/* Tier counts strip */}
+      <div className='grid grid-cols-2 gap-3 sm:grid-cols-4'>
+        {Object.entries(data.tier_counts).map(([t, count]) => (
+          <SummaryCard
+            key={t}
+            label={TIER_LABELS[t] ?? t}
+            value={count.toString()}
+            sub='sets'
+          />
+        ))}
+      </div>
+
+      {/* Filters */}
+      <div className='flex flex-wrap items-center gap-2'>
+        <span className='text-muted-foreground text-xs font-medium uppercase'>
+          Tier
+        </span>
+        <select
+          value={tier}
+          onChange={(e) => setTier(e.target.value)}
+          className='rounded-md border bg-background px-2 py-1 text-sm'
+        >
+          <option value='all'>All</option>
+          {Object.keys(data.tier_counts).map((t) => (
+            <option key={t} value={t}>
+              {TIER_LABELS[t] ?? t}
+            </option>
+          ))}
+        </select>
+
+        <span className='text-muted-foreground ml-4 text-xs font-medium uppercase'>
+          Status
+        </span>
+        <div className='flex gap-1 rounded-md border p-0.5'>
+          {(['all', 'populated', 'empty', 'stale'] as const).map((f) => (
+            <button
+              key={f}
+              onClick={() => setFilter(f)}
+              className={`rounded px-2 py-1 text-xs font-medium transition-colors ${
+                filter === f
+                  ? 'bg-primary text-primary-foreground'
+                  : 'hover:bg-muted'
+              }`}
+            >
+              {f.charAt(0).toUpperCase() + f.slice(1)}
+            </button>
+          ))}
+        </div>
+
+        <span className='text-muted-foreground ml-auto text-xs'>
+          {filteredRows.length} of {data.total_targets} sets
+        </span>
+      </div>
+
+      {/* Row table */}
+      <div className='overflow-auto rounded border'>
+        <table className='w-full text-sm'>
+          <thead className='bg-muted/50 sticky top-0'>
+            <tr>
+              <th className='px-3 py-2 text-left font-medium'>Set</th>
+              <th className='px-3 py-2 text-left font-medium'>Title</th>
+              <th className='px-3 py-2 text-left font-medium'>Tier</th>
+              <th className='px-3 py-2 text-right font-medium'>Shopee</th>
+              <th className='px-3 py-2 text-left font-medium'>
+                Shopee Updated
+              </th>
+              <th className='px-3 py-2 text-right font-medium'>Carousell</th>
+              <th className='px-3 py-2 text-left font-medium'>
+                Carousell Updated
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            {filteredRows.map((row) => (
+              <MarketplaceRow key={row.set_number} row={row} />
+            ))}
+          </tbody>
+        </table>
+        {filteredRows.length === 0 && (
+          <div className='text-muted-foreground px-4 py-6 text-center text-sm'>
+            No sets match the current filters.
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function MarketplaceSummaryCard({
+  label,
+  aggregate,
+}: {
+  label: string;
+  aggregate: MarketplaceAggregate;
+}) {
+  const pct =
+    aggregate.total > 0
+      ? Math.round((aggregate.scraped / aggregate.total) * 100)
+      : 0;
+  const populatedPct =
+    aggregate.scraped > 0
+      ? Math.round(
+          ((aggregate.scraped - aggregate.empty) / aggregate.scraped) * 100,
+        )
+      : 0;
+
+  return (
+    <div className='rounded-lg border px-4 py-3'>
+      <div className='flex items-start justify-between'>
+        <div>
+          <p className='text-muted-foreground text-xs font-medium uppercase'>
+            {label}
+          </p>
+          <p className='mt-1 text-2xl font-bold'>
+            {aggregate.scraped}
+            <span className='text-muted-foreground text-base font-normal'>
+              /{aggregate.total}
+            </span>
+          </p>
+          <p className={`text-xs font-medium ${coverageColor(pct)}`}>
+            {pct}% scraped
+          </p>
+        </div>
+        <div className='text-right'>
+          <p className='text-muted-foreground text-xs'>
+            Latest:{' '}
+            {aggregate.latest ? formatRelativeTime(aggregate.latest) : '-'}
+          </p>
+        </div>
+      </div>
+      <div className='mt-3 grid grid-cols-3 gap-2 text-xs'>
+        <div>
+          <p className='text-muted-foreground'>Fresh</p>
+          <p className='font-mono font-medium text-green-600 dark:text-green-400'>
+            {aggregate.fresh}
+          </p>
+        </div>
+        <div>
+          <p className='text-muted-foreground'>Stale</p>
+          <p
+            className={`font-mono font-medium ${
+              aggregate.stale > 0
+                ? 'text-red-600 dark:text-red-400'
+                : 'text-muted-foreground'
+            }`}
+          >
+            {aggregate.stale}
+          </p>
+        </div>
+        <div>
+          <p className='text-muted-foreground'>Empty</p>
+          <p
+            className={`font-mono font-medium ${
+              aggregate.empty > 0
+                ? 'text-yellow-600 dark:text-yellow-400'
+                : 'text-muted-foreground'
+            }`}
+          >
+            {aggregate.empty}
+          </p>
+        </div>
+      </div>
+      <div className='bg-muted mt-3 h-1.5 w-full overflow-hidden rounded-full'>
+        <div
+          className={`h-full rounded-full ${barColor(populatedPct)}`}
+          style={{ width: `${Math.min(populatedPct, 100)}%` }}
+        />
+      </div>
+      <p className='text-muted-foreground mt-1 text-[10px]'>
+        {populatedPct}% of scraped snapshots are populated
+      </p>
+    </div>
+  );
+}
+
+function MarketplaceRow({ row }: { row: MarketplaceCoverageRow }) {
+  const tierClass =
+    TIER_BADGE[row.tier] ?? 'bg-muted text-muted-foreground';
+
+  return (
+    <tr className='border-border border-t'>
+      <td className='px-3 py-2 font-mono text-xs'>{row.set_number}</td>
+      <td className='max-w-[280px] truncate px-3 py-2 text-xs'>
+        {row.title ?? '-'}
+      </td>
+      <td className='px-3 py-2'>
+        <span
+          className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${tierClass}`}
+        >
+          {TIER_LABELS[row.tier] ?? row.tier}
+        </span>
+      </td>
+      <MarketplaceCells cell={row.shopee} staleDays={row.stale_days} />
+      <MarketplaceCells cell={row.carousell} staleDays={row.stale_days} />
+    </tr>
+  );
+}
+
+function MarketplaceCells({
+  cell,
+  staleDays,
+}: {
+  cell: MarketplaceCellData;
+  staleDays: number;
+}) {
+  const count = cell.listings_count;
+  const countClass = !cell.scraped
+    ? 'text-red-500 dark:text-red-400'
+    : cell.empty
+      ? 'text-yellow-600 dark:text-yellow-400'
+      : 'text-foreground';
+  const timeClass = !cell.scraped
+    ? 'text-red-500 dark:text-red-400'
+    : cell.fresh
+      ? 'text-muted-foreground'
+      : 'text-yellow-600 dark:text-yellow-400';
+
+  return (
+    <>
+      <td className={`px-3 py-2 text-right font-mono text-xs ${countClass}`}>
+        {!cell.scraped ? (
+          '—'
+        ) : (
+          <span title={`score ${cell.saturation_score ?? 0}`}>
+            {count ?? 0}
+          </span>
+        )}
+      </td>
+      <td className={`px-3 py-2 text-xs ${timeClass}`}>
+        {cell.last_checked ? (
+          <span title={`stale after ${staleDays}d`}>
+            {formatRelativeTime(cell.last_checked)}
+          </span>
+        ) : (
+          'never'
+        )}
+      </td>
+    </>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Shared set row (existing)
+// ---------------------------------------------------------------------------
 
 function SetRow({
   row,

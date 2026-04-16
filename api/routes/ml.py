@@ -67,6 +67,132 @@ async def get_prediction_progress():
     return sanitize_nan(growth_provider.get_progress())
 
 
+@router.get("/status")
+async def ml_status(conn: Any = Depends(get_db)):
+    """Return model + snapshot lineage for the nav freshness chip.
+
+    Answers the questions: which experiment is active, when was the live
+    model trained, is today's snapshot persisted, and is anything stale.
+    """
+    from datetime import datetime, timezone
+
+    from config.model_registry import ACTIVE_MODEL
+    from services.scoring.growth_provider import (
+        _cache,
+        _prediction_cache,
+        growth_provider,
+    )
+
+    models_loaded = bool(_cache)
+    n_cached = len(_prediction_cache.get("data", {}))
+
+    clf = _cache.get("classifier")
+    gb_clf = _cache.get("great_buy_classifier")
+    tier1 = _cache.get("tier1")
+
+    def _iso_to_epoch(iso: str | None) -> float | None:
+        if not iso:
+            return None
+        try:
+            # fromisoformat handles both naive and offset-aware strings
+            return datetime.fromisoformat(iso).timestamp()
+        except ValueError:
+            return None
+
+    trained_at_iso: str | None = None
+    for candidate in (clf, gb_clf, tier1):
+        if candidate is not None and getattr(candidate, "trained_at", None):
+            trained_at_iso = candidate.trained_at
+            break
+
+    trained_epoch = _iso_to_epoch(trained_at_iso)
+    mtime = growth_provider._current_model_mtime()  # pyright: ignore[reportPrivateUsage]
+    now_epoch = datetime.now(timezone.utc).timestamp()
+
+    # Prefer the explicit trained_at from the model object; fall back to
+    # the artifact file's mtime so we still report something if the model
+    # was loaded from an older format without a trained_at field.
+    effective_trained_epoch = trained_epoch or mtime
+    trained_age_hours: float | None = None
+    if effective_trained_epoch is not None:
+        trained_age_hours = max(0.0, (now_epoch - effective_trained_epoch) / 3600.0)
+
+    metrics: dict[str, float] = {}
+    if clf is not None:
+        metrics["classifier_auc"] = round(float(clf.cv_auc), 3)
+        metrics["classifier_recall"] = round(float(clf.cv_recall), 3)
+        metrics["n_train"] = int(clf.n_train)
+    if gb_clf is not None:
+        metrics["great_buy_auc"] = round(float(gb_clf.cv_auc), 3)
+        metrics["great_buy_recall"] = round(float(gb_clf.cv_recall), 3)
+
+    # Snapshot freshness: compare the newest persisted snapshot_date with
+    # the server's local date. If they match, we're confident the daily
+    # tracker ran today; otherwise the nav should warn.
+    latest_snapshot_row = conn.execute(
+        """
+        SELECT snapshot_date, COUNT(*) AS n, MIN(model_version) AS model_version
+        FROM ml_prediction_snapshots
+        WHERE snapshot_date = (SELECT MAX(snapshot_date) FROM ml_prediction_snapshots)
+        GROUP BY snapshot_date
+        """
+    ).fetchone()
+
+    if latest_snapshot_row is not None:
+        latest_date = latest_snapshot_row[0]
+        latest_n = int(latest_snapshot_row[1])
+        latest_model_version = latest_snapshot_row[2]
+        latest_date_iso = latest_date.isoformat() if hasattr(latest_date, "isoformat") else str(latest_date)
+    else:
+        latest_date_iso = None
+        latest_n = 0
+        latest_model_version = None
+
+    from datetime import date as _date
+
+    today_iso = _date.today().isoformat()
+    snapshot_is_today = latest_date_iso == today_iso
+
+    # Freshness rule (drives the dot color in the nav chip):
+    #   fresh: model ≤7d AND snapshot is today
+    #   ok:    model 7-30d OR snapshot is yesterday
+    #   stale: model >30d OR no snapshot in the last 2 days
+    if not models_loaded or n_cached == 0:
+        freshness = "loading"
+    elif trained_age_hours is None:
+        freshness = "stale"
+    elif trained_age_hours <= 24 * 7 and snapshot_is_today:
+        freshness = "fresh"
+    elif trained_age_hours > 24 * 30:
+        freshness = "stale"
+    elif latest_date_iso is None:
+        freshness = "stale"
+    else:
+        freshness = "ok"
+
+    return sanitize_nan({
+        "freshness": freshness,
+        "model": {
+            "active_experiment": ACTIVE_MODEL,
+            "version": growth_provider._model_version(clf, gb_clf, tier1),  # pyright: ignore[reportPrivateUsage]
+            "trained_at": trained_at_iso,
+            "trained_age_hours": round(trained_age_hours, 1) if trained_age_hours is not None else None,
+            "artifact_mtime": mtime,
+        },
+        "snapshot": {
+            "latest_date": latest_date_iso,
+            "is_today": snapshot_is_today,
+            "count": latest_n,
+            "model_version": latest_model_version,
+        },
+        "cache": {
+            "predictions_in_memory": n_cached,
+            "models_loaded": models_loaded,
+        },
+        "metrics": metrics,
+    })
+
+
 @router.get("/predictions")
 async def list_predictions(
     horizon: int = Query(12, description="Horizon in months (12, 24, 36)"),

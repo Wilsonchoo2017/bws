@@ -145,7 +145,7 @@ export function CartTable() {
         confidence: string | null;
         avoid_probability: number | null;
         great_buy_probability: number | null;
-        buy_category: 'GREAT' | 'GOOD' | 'SKIP' | 'WORST' | null;
+        buy_category: 'GREAT' | 'GOOD' | 'SKIP' | 'WORST' | 'NONE' | null;
         buy_signal: boolean;
         avoid: boolean;
         kelly_fraction: number | null;

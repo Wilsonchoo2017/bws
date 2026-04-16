@@ -17,6 +17,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { DataTable } from '@/components/ui/table/data-table';
 import type { BuyRating, ItemDetail, PriceRecord } from '../types';
 import { formatPrice, getLatestPriceBySource } from '../types';
@@ -36,6 +37,7 @@ import { ListingPanel } from './listing-panel';
 import { CompetitionPanel } from './competition-panel';
 import { MinifigureValueChart } from './minifigure-value-chart';
 import { CapitalAllocationPanel } from './capital-allocation-panel';
+import { ScrapeHistoryPanel } from './scrape-history-panel';
 
 export interface ChartDateRange {
   min: number; // unix ms
@@ -52,10 +54,6 @@ const BUY_RATING_OPTIONS: {
   { value: 3, label: 'Bad Buy', color: 'bg-orange-100 text-orange-800 border-orange-300 dark:bg-orange-900/30 dark:text-orange-300 dark:border-orange-700' },
   { value: 4, label: 'Worst Buy', color: 'bg-red-100 text-red-800 border-red-300 dark:bg-red-900/30 dark:text-red-300 dark:border-red-700' },
 ];
-
-function getBuyRatingOption(rating: BuyRating) {
-  return BUY_RATING_OPTIONS.find((o) => o.value === rating) ?? BUY_RATING_OPTIONS[0];
-}
 
 const ENRICH_SOURCES = [
   { id: null, label: 'All Sources' },
@@ -199,7 +197,6 @@ export function ItemDetailView({ setNumber }: ItemDetailViewProps) {
         `Enrichment queued from ${label} (${json.data.job_id})`
       );
 
-      // Auto-refresh item data after a delay to pick up enrichment results
       setTimeout(() => {
         fetchItem();
       }, 5000);
@@ -211,7 +208,7 @@ export function ItemDetailView({ setNumber }: ItemDetailViewProps) {
     }
   };
 
-  const handleBrickeconomyScrape = async () => {
+  const handleScrapeAction = async (scraperId: string, label: string) => {
     setEnrichStatus('loading');
     setEnrichMessage(null);
 
@@ -219,126 +216,22 @@ export function ItemDetailView({ setNumber }: ItemDetailViewProps) {
       const res = await fetch('/api/scrape/run', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          scraperId: 'brickeconomy',
-          url: setNumber,
-        }),
+        body: JSON.stringify({ scraperId, url: setNumber }),
       });
       const json = await res.json();
 
       if (!json.success && !json.job_id) {
         setEnrichStatus('error');
-        setEnrichMessage(json.error ?? json.detail ?? 'BrickEconomy scrape failed');
+        setEnrichMessage(json.error ?? json.detail ?? `${label} failed`);
         return;
       }
 
       setEnrichStatus('success');
-      setEnrichMessage(
-        `BrickEconomy scrape queued (${json.job_id})`
-      );
+      setEnrichMessage(`${label} queued (${json.job_id})`);
     } catch (err) {
       setEnrichStatus('error');
       setEnrichMessage(
-        err instanceof Error ? err.message : 'Failed to start BrickEconomy scrape'
-      );
-    }
-  };
-
-  const handleKeepaScrape = async () => {
-    setEnrichStatus('loading');
-    setEnrichMessage(null);
-
-    try {
-      const res = await fetch('/api/scrape/run', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          scraperId: 'keepa',
-          url: setNumber,
-        }),
-      });
-      const json = await res.json();
-
-      if (!json.success && !json.job_id) {
-        setEnrichStatus('error');
-        setEnrichMessage(json.error ?? json.detail ?? 'Keepa scrape failed');
-        return;
-      }
-
-      setEnrichStatus('success');
-      setEnrichMessage(
-        `Keepa scrape queued (${json.job_id})`
-      );
-    } catch (err) {
-      setEnrichStatus('error');
-      setEnrichMessage(
-        err instanceof Error ? err.message : 'Failed to start Keepa scrape'
-      );
-    }
-  };
-
-  const handleShopeeSaturation = async () => {
-    setEnrichStatus('loading');
-    setEnrichMessage(null);
-
-    try {
-      const res = await fetch('/api/scrape/run', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          scraperId: 'shopee_saturation',
-          url: setNumber,
-        }),
-      });
-      const json = await res.json();
-
-      if (!json.success && !json.job_id) {
-        setEnrichStatus('error');
-        setEnrichMessage(json.error ?? json.detail ?? 'Shopee saturation check failed');
-        return;
-      }
-
-      setEnrichStatus('success');
-      setEnrichMessage(
-        `Shopee saturation queued (${json.job_id})`
-      );
-    } catch (err) {
-      setEnrichStatus('error');
-      setEnrichMessage(
-        err instanceof Error ? err.message : 'Failed to start Shopee saturation check'
-      );
-    }
-  };
-
-  const handleShopeeCompetition = async () => {
-    setEnrichStatus('loading');
-    setEnrichMessage(null);
-
-    try {
-      const res = await fetch('/api/scrape/run', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          scraperId: 'shopee_competition',
-          url: setNumber,
-        }),
-      });
-      const json = await res.json();
-
-      if (!json.success && !json.job_id) {
-        setEnrichStatus('error');
-        setEnrichMessage(json.error ?? json.detail ?? 'Shopee competition scan failed');
-        return;
-      }
-
-      setEnrichStatus('success');
-      setEnrichMessage(
-        `Shopee competition scan queued (${json.job_id})`
-      );
-    } catch (err) {
-      setEnrichStatus('error');
-      setEnrichMessage(
-        err instanceof Error ? err.message : 'Failed to start Shopee competition scan'
+        err instanceof Error ? err.message : `Failed to start ${label}`
       );
     }
   };
@@ -409,13 +302,12 @@ export function ItemDetailView({ setNumber }: ItemDetailViewProps) {
     );
   }
 
-  // Group prices by source for summary
   const latestBySource = getLatestPriceBySource(item.prices);
 
   return (
     <DetailBundleProvider setNumber={setNumber}>
     <div className='flex flex-col gap-6'>
-      {/* Header */}
+      {/* Header -- always visible above tabs */}
       <div className='flex items-start gap-4'>
         <Link
           href='/items'
@@ -554,16 +446,16 @@ export function ItemDetailView({ setNumber }: ItemDetailViewProps) {
                   </DropdownMenuItem>
                 ))}
                 <DropdownMenuSeparator />
-                <DropdownMenuItem onClick={handleBrickeconomyScrape}>
+                <DropdownMenuItem onClick={() => handleScrapeAction('brickeconomy', 'BrickEconomy scrape')}>
                   BrickEconomy
                 </DropdownMenuItem>
-                <DropdownMenuItem onClick={handleKeepaScrape}>
+                <DropdownMenuItem onClick={() => handleScrapeAction('keepa', 'Keepa scrape')}>
                   Keepa
                 </DropdownMenuItem>
-                <DropdownMenuItem onClick={handleShopeeSaturation}>
+                <DropdownMenuItem onClick={() => handleScrapeAction('shopee_saturation', 'Shopee saturation')}>
                   Find Shopee Saturation
                 </DropdownMenuItem>
-                <DropdownMenuItem onClick={handleShopeeCompetition}>
+                <DropdownMenuItem onClick={() => handleScrapeAction('shopee_competition', 'Shopee competition scan')}>
                   Scan Shopee Competition
                 </DropdownMenuItem>
               </DropdownMenuContent>
@@ -684,77 +576,93 @@ export function ItemDetailView({ setNumber }: ItemDetailViewProps) {
         </div>
       </div>
 
-      {/* Listing helper */}
-      <ListingPanel item={item} />
+      {/* Tabbed content */}
+      <Tabs defaultValue='analysis'>
+        <TabsList className='w-full justify-start'>
+          <TabsTrigger value='analysis'>Analysis</TabsTrigger>
+          <TabsTrigger value='pricing'>Pricing</TabsTrigger>
+          <TabsTrigger value='competition'>Competition</TabsTrigger>
+          <TabsTrigger value='contents'>Contents</TabsTrigger>
+          <TabsTrigger value='operations'>Operations</TabsTrigger>
+        </TabsList>
 
-      {/* Investment analysis: buy signal, returns, discount scenarios */}
-      <InvestmentPanel setNumber={setNumber} />
-
-      {/* ML growth prediction */}
-      <MLPredictionPanel setNumber={setNumber} />
-
-      {/* Cohort rankings */}
-      <CohortPanel setNumber={setNumber} />
-      <LiquidityPanel setNumber={setNumber} />
-      <MyLiquidityPanel setNumber={setNumber} />
-
-      {/* Minifigures */}
-      <MinifiguresPanel setNumber={setNumber} />
-
-      {/* Minifigure value trend chart */}
-      <MinifigureValueChart
-        setNumber={setNumber}
-        globalDateRange={globalDateRange}
-        onDateRange={(r) => reportDateRange('minifig', r)}
-      />
-
-      {/* Keepa Amazon price history */}
-      <KeepaPanel
-        setNumber={setNumber}
-        globalDateRange={globalDateRange}
-        onDateRange={(r) => reportDateRange('keepa', r)}
-      />
-
-      {/* BrickEconomy valuation panel */}
-      <BrickeconomyPanel
-        setNumber={setNumber}
-        globalDateRange={globalDateRange}
-        onDateRange={(r) => reportDateRange('brickeconomy', r)}
-      />
-
-      {/* Shopee competition tracker */}
-      <CompetitionPanel
-        setNumber={setNumber}
-        globalDateRange={globalDateRange}
-        onDateRange={(r) => reportDateRange('competition', r)}
-      />
-
-      {/* BrickLink price analysis charts */}
-      <BricklinkPriceChart
-        setNumber={setNumber}
-        globalDateRange={globalDateRange}
-        onDateRange={(r) => reportDateRange('bricklink', r)}
-      />
-
-      {/* BrickLink seller snapshot — Asia stats + global lowest */}
-      <BricklinkSellersPanel setNumber={setNumber} />
-
-      {/* Capital allocation (Kelly) */}
-      <CapitalAllocationPanel setNumber={setNumber} />
-
-      {/* Price history table */}
-      <div>
-        <h2 className='mb-3 text-lg font-semibold'>Price History</h2>
-        {item.prices.length === 0 ? (
-          <p className='text-muted-foreground text-sm'>
-            No price records yet.
-          </p>
-        ) : (
-          <div className='h-[500px]'>
-            <DataTable table={priceTable} />
+        {/* Analysis -- buy decision signals */}
+        <TabsContent value='analysis'>
+          <div className='flex flex-col gap-6'>
+            <InvestmentPanel setNumber={setNumber} />
+            <MLPredictionPanel setNumber={setNumber} />
+            <CapitalAllocationPanel setNumber={setNumber} />
+            <CohortPanel setNumber={setNumber} />
           </div>
-        )}
-      </div>
+        </TabsContent>
+
+        {/* Pricing -- historical prices and valuations */}
+        <TabsContent value='pricing'>
+          <div className='flex flex-col gap-6'>
+            <KeepaPanel
+              setNumber={setNumber}
+              globalDateRange={globalDateRange}
+              onDateRange={(r) => reportDateRange('keepa', r)}
+            />
+            <BrickeconomyPanel
+              setNumber={setNumber}
+              globalDateRange={globalDateRange}
+              onDateRange={(r) => reportDateRange('brickeconomy', r)}
+            />
+            <BricklinkPriceChart
+              setNumber={setNumber}
+              globalDateRange={globalDateRange}
+              onDateRange={(r) => reportDateRange('bricklink', r)}
+            />
+            <BricklinkSellersPanel setNumber={setNumber} />
+            <div>
+              <h2 className='mb-3 text-lg font-semibold'>Price History</h2>
+              {item.prices.length === 0 ? (
+                <p className='text-muted-foreground text-sm'>
+                  No price records yet.
+                </p>
+              ) : (
+                <div className='h-[500px]'>
+                  <DataTable table={priceTable} />
+                </div>
+              )}
+            </div>
+          </div>
+        </TabsContent>
+
+        {/* Competition -- market competition and liquidity */}
+        <TabsContent value='competition'>
+          <div className='flex flex-col gap-6'>
+            <CompetitionPanel
+              setNumber={setNumber}
+              globalDateRange={globalDateRange}
+              onDateRange={(r) => reportDateRange('competition', r)}
+            />
+            <LiquidityPanel setNumber={setNumber} />
+            <MyLiquidityPanel setNumber={setNumber} />
+          </div>
+        </TabsContent>
+
+        {/* Contents -- minifigures and set contents */}
+        <TabsContent value='contents'>
+          <div className='flex flex-col gap-6'>
+            <MinifiguresPanel setNumber={setNumber} />
+            <MinifigureValueChart
+              setNumber={setNumber}
+              globalDateRange={globalDateRange}
+              onDateRange={(r) => reportDateRange('minifig', r)}
+            />
+          </div>
+        </TabsContent>
+
+        {/* Operations -- listing and scrape management */}
+        <TabsContent value='operations'>
+          <div className='flex flex-col gap-6'>
+            <ListingPanel item={item} />
+            <ScrapeHistoryPanel setNumber={setNumber} />
+          </div>
+        </TabsContent>
+      </Tabs>
     </div>
     </DetailBundleProvider>
   );

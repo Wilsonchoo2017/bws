@@ -44,7 +44,7 @@ def _get_rowcount(result: object) -> int:
     return -1
 
 
-def _row_to_task(row: tuple, columns: list[str]) -> ScrapeTask:
+def row_to_task(row: tuple, columns: list[str]) -> ScrapeTask:
     d = dict(zip(columns, row))
     return ScrapeTask(
         id=d["id"],
@@ -63,18 +63,20 @@ def _row_to_task(row: tuple, columns: list[str]) -> ScrapeTask:
         locked_by=d.get("locked_by"),
         locked_at=d.get("locked_at"),
         reason=d.get("reason"),
+        outcome=d.get("outcome"),
+        source=d.get("source"),
     )
 
 
-_TASK_COLUMNS = [
+TASK_COLUMNS = [
     "id", "task_id", "set_number", "task_type", "priority", "status",
     "depends_on", "attempt_count", "max_attempts", "error",
     "created_at", "started_at", "completed_at", "locked_by", "locked_at",
-    "reason",
+    "reason", "outcome", "source",
 ]
 
-_COLUMNS_SQL = ", ".join(_TASK_COLUMNS)
-_COLUMNS_SQL_PREFIXED = ", ".join(f"st.{c}" for c in _TASK_COLUMNS)
+COLUMNS_SQL = ", ".join(TASK_COLUMNS)
+COLUMNS_SQL_PREFIXED = ", ".join(f"st.{c}" for c in TASK_COLUMNS)
 
 
 # ---------------------------------------------------------------------------
@@ -87,6 +89,7 @@ def _create_task_inner(
     set_number: str,
     task_type: TaskType,
     reason: str | None = None,
+    source: str | None = None,
 ) -> ScrapeTask | None:
     """Create a single scrape task within an existing transaction.
 
@@ -104,25 +107,30 @@ def _create_task_inner(
     if existing:
         return None
 
-    recently_completed = conn.execute(
-        "SELECT 1 FROM scrape_tasks "
-        "WHERE set_number = ? AND task_type = ? AND status = 'completed' "
-        "AND completed_at > CURRENT_TIMESTAMP - INTERVAL '24 hours' "
-        "LIMIT 1",
-        [set_number, task_type.value],
-    ).fetchone()
-    if recently_completed:
-        return None
+    skip_dedup = reason is not None and (
+        reason.startswith("manual") or reason.startswith("sweep")
+    )
 
-    recently_failed = conn.execute(
-        "SELECT 1 FROM scrape_tasks "
-        "WHERE set_number = ? AND task_type = ? AND status = 'failed' "
-        "AND completed_at > CURRENT_TIMESTAMP - INTERVAL '7 days' "
-        "LIMIT 1",
-        [set_number, task_type.value],
-    ).fetchone()
-    if recently_failed:
-        return None
+    if not skip_dedup:
+        recently_completed = conn.execute(
+            "SELECT 1 FROM scrape_tasks "
+            "WHERE set_number = ? AND task_type = ? AND status = 'completed' "
+            "AND completed_at > CURRENT_TIMESTAMP - INTERVAL '24 hours' "
+            "LIMIT 1",
+            [set_number, task_type.value],
+        ).fetchone()
+        if recently_completed:
+            return None
+
+        recently_failed = conn.execute(
+            "SELECT 1 FROM scrape_tasks "
+            "WHERE set_number = ? AND task_type = ? AND status = 'failed' "
+            "AND completed_at > CURRENT_TIMESTAMP - INTERVAL '7 days' "
+            "LIMIT 1",
+            [set_number, task_type.value],
+        ).fetchone()
+        if recently_failed:
+            return None
 
     task_id = uuid.uuid4().hex
     priority = TASK_PRIORITIES[task_type]
@@ -135,11 +143,11 @@ def _create_task_inner(
         conn.execute(
             """
             INSERT INTO scrape_tasks (id, task_id, set_number, task_type, priority,
-                                      status, depends_on, reason)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                                      status, depends_on, reason, source)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             [seq_id, task_id, set_number, task_type.value, priority,
-             status.value, depends_on, reason],
+             status.value, depends_on, reason, source],
         )
     except Exception as exc:
         # Partial unique index (idx_scrape_tasks_active_unique) prevents
@@ -156,10 +164,10 @@ def _create_task_inner(
         raise
 
     row = conn.execute(
-        f"SELECT {_COLUMNS_SQL} FROM scrape_tasks WHERE task_id = ?",  # noqa: S608
+        f"SELECT {COLUMNS_SQL} FROM scrape_tasks WHERE task_id = ?",  # noqa: S608
         [task_id],
     ).fetchone()
-    return _row_to_task(row, _TASK_COLUMNS) if row else None
+    return row_to_task(row, TASK_COLUMNS) if row else None
 
 
 def create_task(
@@ -167,6 +175,7 @@ def create_task(
     set_number: str,
     task_type: TaskType,
     reason: str | None = None,
+    source: str | None = None,
 ) -> ScrapeTask | None:
     """Create a single scrape task, deduplicating against active tasks.
 
@@ -181,7 +190,7 @@ def create_task(
 
     conn.execute("BEGIN TRANSACTION")
     try:
-        result = _create_task_inner(conn, set_number, task_type, reason=reason)
+        result = _create_task_inner(conn, set_number, task_type, reason=reason, source=source)
         conn.execute("COMMIT")
         return result
     except Exception:
@@ -203,6 +212,7 @@ def create_tasks_for_set(
     conn: Any,
     set_number: str,
     reason: str | None = None,
+    source: str | None = None,
 ) -> list[ScrapeTask]:
     """Create the full set of scrape tasks for a LEGO set.
 
@@ -224,7 +234,7 @@ def create_tasks_for_set(
         for task_type in TaskType:
             if task_type in NON_SET_TASK_TYPES:
                 continue
-            task = _create_task_inner(conn, set_number, task_type, reason=reason)
+            task = _create_task_inner(conn, set_number, task_type, reason=reason, source=source)
             if task is not None:
                 created.append(task)
 
@@ -273,7 +283,7 @@ def claim_next(
     conn.execute("BEGIN TRANSACTION")
     try:
         row = conn.execute(
-            f"SELECT {_COLUMNS_SQL_PREFIXED} FROM scrape_tasks st "  # noqa: S608
+            f"SELECT {COLUMNS_SQL_PREFIXED} FROM scrape_tasks st "  # noqa: S608
             "LEFT JOIN lego_items li ON st.set_number = li.set_number "
             f"WHERE st.status = 'pending' {type_filter}"
             "ORDER BY COALESCE(li.year_released, 0) DESC, st.created_at ASC "
@@ -284,7 +294,7 @@ def claim_next(
             conn.execute("COMMIT")
             return None
 
-        task = _row_to_task(row, _TASK_COLUMNS)
+        task = row_to_task(row, TASK_COLUMNS)
         result = conn.execute(
             """
             UPDATE scrape_tasks
@@ -314,20 +324,25 @@ def claim_next(
         raise
 
     updated = conn.execute(
-        f"SELECT {_COLUMNS_SQL} FROM scrape_tasks WHERE task_id = ?",  # noqa: S608
+        f"SELECT {COLUMNS_SQL} FROM scrape_tasks WHERE task_id = ?",  # noqa: S608
         [task.task_id],
     ).fetchone()
-    return _row_to_task(updated, _TASK_COLUMNS) if updated else None
+    return row_to_task(updated, TASK_COLUMNS) if updated else None
 
 
 def complete_task(
     conn: Any,
     task_id: str,
+    *,
+    outcome: str | None = None,
 ) -> None:
     """Mark a task as completed and unblock dependents.
 
     Only updates if the task is still running (guards against late writes
     from orphaned executor threads after a timeout).
+
+    *outcome* distinguishes real successes ("success") from skips
+    ("skipped") so the dashboard can tell them apart.
     """
     row = conn.execute(
         "SELECT set_number, task_type FROM scrape_tasks WHERE task_id = ?",
@@ -342,10 +357,11 @@ def complete_task(
         """
         UPDATE scrape_tasks
         SET status = 'completed', completed_at = now(),
-            locked_by = NULL, locked_at = NULL
+            locked_by = NULL, locked_at = NULL,
+            outcome = ?
         WHERE task_id = ? AND status = 'running'
         """,
-        [task_id],
+        [outcome or "success", task_id],
     )
 
     _unblock_dependents(conn, set_number, task_type_str)
@@ -502,13 +518,13 @@ def _unblock_dependents(
     - google_trends: skip when title or year_released is missing.
     """
     blocked_rows = conn.execute(
-        f"SELECT {_COLUMNS_SQL} FROM scrape_tasks "  # noqa: S608
+        f"SELECT {COLUMNS_SQL} FROM scrape_tasks "  # noqa: S608
         "WHERE set_number = ? AND depends_on = ? AND status = 'blocked'",
         [set_number, completed_type],
     ).fetchall()
 
     for row in blocked_rows:
-        task = _row_to_task(row, _TASK_COLUMNS)
+        task = row_to_task(row, TASK_COLUMNS)
 
         if task.task_type == TaskType.MINIFIGURES:
             mf_row = conn.execute(
@@ -596,12 +612,12 @@ def re_evaluate_blocked(conn: Any) -> int:
     Returns count of tasks unblocked.
     """
     blocked_rows = conn.execute(
-        f"SELECT {_COLUMNS_SQL} FROM scrape_tasks WHERE status = 'blocked'",  # noqa: S608
+        f"SELECT {COLUMNS_SQL} FROM scrape_tasks WHERE status = 'blocked'",  # noqa: S608
     ).fetchall()
 
     unblocked = 0
     for row in blocked_rows:
-        task = _row_to_task(row, _TASK_COLUMNS)
+        task = row_to_task(row, TASK_COLUMNS)
         if not task.depends_on:
             conn.execute(
                 "UPDATE scrape_tasks SET status = 'pending' WHERE task_id = ?",
@@ -638,11 +654,11 @@ def get_tasks_for_set(
 ) -> list[ScrapeTask]:
     """Get all scrape tasks for a given set_number."""
     rows = conn.execute(
-        f"SELECT {_COLUMNS_SQL} FROM scrape_tasks "  # noqa: S608
+        f"SELECT {COLUMNS_SQL} FROM scrape_tasks "  # noqa: S608
         "WHERE set_number = ? ORDER BY priority ASC, created_at ASC",
         [set_number],
     ).fetchall()
-    return [_row_to_task(row, _TASK_COLUMNS) for row in rows]
+    return [row_to_task(row, TASK_COLUMNS) for row in rows]
 
 
 def get_queue_stats(conn: Any) -> dict[str, int]:

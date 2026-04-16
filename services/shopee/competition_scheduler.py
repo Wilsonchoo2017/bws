@@ -32,4 +32,5 @@ async def run_competition_sweep(
         logger=logger,
         interval_minutes=interval_minutes,
         batch_size=batch_size,
+        scheduler_name="shopee_competition",
     )

@@ -15,6 +15,12 @@ from __future__ import annotations
 import asyncio
 import logging
 
+from services.operations.scheduler_registry import (
+    is_enabled,
+    record_disabled,
+    record_run,
+)
+
 logger = logging.getLogger("bws.bricklink.scheduler")
 
 DEFAULT_INTERVAL_MINUTES = 60
@@ -48,16 +54,23 @@ async def run_bricklink_listings_sweep(
         else:
             await asyncio.sleep(interval_minutes * 60)
 
+        if not is_enabled("bricklink_listings"):
+            await record_disabled("bricklink_listings")
+            continue
+
         try:
-            await asyncio.to_thread(_run_one_pass, limit)
+            async with record_run("bricklink_listings") as run:
+                queued = await asyncio.to_thread(_run_one_pass, limit)
+                run.items_queued = queued or 0
         except Exception:
             logger.exception("BrickLink listings sweep iteration failed")
 
 
-def _run_one_pass(limit: int) -> None:
+def _run_one_pass(limit: int) -> int:
     """Synchronous body of one sweep iteration.
 
     Isolated so tests can call it directly without spinning up a task.
+    Returns the number of tasks queued this pass.
     """
     from db.connection import get_connection
     from db.schema import init_schema
@@ -74,7 +87,7 @@ def _run_one_pass(limit: int) -> None:
 
         if not candidates:
             logger.debug("BrickLink listings sweep: no candidates")
-            return
+            return 0
 
         queued = 0
         for set_number, reason in candidates:
@@ -83,6 +96,7 @@ def _run_one_pass(limit: int) -> None:
                 set_number,
                 TaskType.BRICKLINK_METADATA,
                 reason=reason,
+                source="bricklink_sweep",
             )
             if task is not None:
                 queued += 1
@@ -92,6 +106,7 @@ def _run_one_pass(limit: int) -> None:
             len(candidates),
             queued,
         )
+        return queued
     finally:
         try:
             conn.close()

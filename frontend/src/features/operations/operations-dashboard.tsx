@@ -8,10 +8,12 @@ import { CooldownsPanel } from './cooldowns-panel';
 import { SettingsPanel } from './settings-panel';
 import { MLPanel } from './ml-panel';
 import { ShopeeCaptchaPanel } from './shopee-captcha-panel';
+import { SchedulersPanel } from './schedulers-panel';
 import type { QueueStats, WorkerJob } from './types';
 
 type Tab =
   | 'workers'
+  | 'schedulers'
   | 'cooldowns'
   | 'coverage'
   | 'settings'
@@ -20,6 +22,7 @@ type Tab =
 
 const TABS: ReadonlyArray<{ readonly id: Tab; readonly label: string }> = [
   { id: 'workers', label: 'Workers' },
+  { id: 'schedulers', label: 'Schedulers' },
   { id: 'shopee', label: 'Shopee' },
   { id: 'cooldowns', label: 'Cooldowns' },
   { id: 'coverage', label: 'Coverage' },
@@ -207,6 +210,7 @@ export function OperationsDashboard() {
           hasFinished={hasFinished}
         />
       )}
+      {tab === 'schedulers' && <SchedulersPanel />}
       {tab === 'shopee' && <ShopeeCaptchaPanel />}
       {tab === 'cooldowns' && <CooldownsPanel />}
       {tab === 'coverage' && <CoveragePanel />}

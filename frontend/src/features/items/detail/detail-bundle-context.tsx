@@ -20,6 +20,14 @@ export interface DetailBundle {
   liquidity_cohorts: Record<string, unknown> | null;
   my_liquidity: Record<string, unknown> | null;
   my_liquidity_cohorts: Record<string, unknown> | null;
+  scrape_history: ScrapeHistoryEntry[] | null;
+}
+
+export interface ScrapeHistoryEntry {
+  source: string;
+  scraped_at: string;
+  status?: string;
+  error?: string | null;
 }
 
 interface BundleState {

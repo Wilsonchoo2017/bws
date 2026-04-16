@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 
+import { formatCountdown, useShopeeClearance } from './use-shopee-clearance';
+
 interface CaptchaEvent {
   id: number;
   job_id: string | null;
@@ -16,9 +18,6 @@ interface CaptchaEventsResponse {
   events: CaptchaEvent[];
 }
 
-const CAPTCHA_GATE_HOURS = 2;
-const GATE_DURATION_MS = CAPTCHA_GATE_HOURS * 3_600_000;
-
 function formatRelative(iso: string): string {
   const diff = Date.now() - new Date(iso).getTime();
   if (diff < 60_000) return 'just now';
@@ -27,28 +26,18 @@ function formatRelative(iso: string): string {
   return new Date(iso).toLocaleString();
 }
 
-function formatCountdown(ms: number): string {
-  if (ms <= 0) return '0s';
-  const totalSeconds = Math.ceil(ms / 1000);
-  const hours = Math.floor(totalSeconds / 3600);
-  const minutes = Math.floor((totalSeconds % 3600) / 60);
-  const seconds = totalSeconds % 60;
-  if (hours > 0) return `${hours}h ${minutes}m`;
-  if (minutes > 0) return `${minutes}m ${seconds}s`;
-  return `${seconds}s`;
-}
-
 export function ShopeeCaptchaPanel() {
+  const { clearance, solveStatus, solving, countdown, handleSolve } =
+    useShopeeClearance({ pollIntervalMs: 10_000 });
+
   const [events, setEvents] = useState<CaptchaEvent[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [countdown, setCountdown] = useState(0);
   const pollRef = useRef<NodeJS.Timeout | null>(null);
-  const countdownRef = useRef<NodeJS.Timeout | null>(null);
 
   const fetchEvents = useCallback(async () => {
     try {
-      const res = await fetch('/api/scrape/shopee/captcha-events?limit=5');
+      const res = await fetch('/api/scrape/shopee/captcha-events?limit=3');
       const json: CaptchaEventsResponse & { error?: string } = await res.json();
       if (!res.ok) {
         setError(json.error ?? 'Failed to load captcha events');
@@ -56,18 +45,6 @@ export function ShopeeCaptchaPanel() {
       }
       setEvents(json.events);
       setError(null);
-
-      // Set countdown from the most recent event
-      if (json.events.length > 0) {
-        const lastEvent = json.events[0];
-        const detectedTime = new Date(lastEvent.detected_at).getTime();
-        const now = Date.now();
-        const elapsedMs = now - detectedTime;
-        const remainingMs = Math.max(0, GATE_DURATION_MS - elapsedMs);
-        setCountdown(remainingMs);
-      } else {
-        setCountdown(0);
-      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Network error');
     } finally {
@@ -77,49 +54,86 @@ export function ShopeeCaptchaPanel() {
 
   useEffect(() => {
     fetchEvents();
-    pollRef.current = setInterval(fetchEvents, 10_000); // Poll every 10 seconds
+    pollRef.current = setInterval(fetchEvents, 10_000);
     return () => {
       if (pollRef.current) clearInterval(pollRef.current);
     };
   }, [fetchEvents]);
 
-  // Countdown tick
-  useEffect(() => {
-    if (countdown <= 0) return;
-    countdownRef.current = setTimeout(() => setCountdown((c) => Math.max(0, c - 1000)), 1000);
-    return () => {
-      if (countdownRef.current) clearTimeout(countdownRef.current);
-    };
-  }, [countdown]);
-
   if (loading) {
     return (
       <div className='rounded-md border border-border p-4 text-sm text-muted-foreground'>
-        Loading captcha events...
+        Loading captcha status...
       </div>
     );
   }
 
-  const lastEvent = events.length > 0 ? events[0] : null;
-  const isBlocked = countdown > 0;
+  const isValid = clearance?.valid ?? false;
 
   return (
     <div className='flex flex-col gap-3'>
-      {/* Status banner */}
-      {isBlocked && lastEvent ? (
-        <div className='rounded-md border border-orange-300 bg-orange-50 p-4 dark:border-orange-700 dark:bg-orange-950/20'>
-          <div>
-            <h3 className='text-sm font-semibold text-orange-900 dark:text-orange-200'>
-              Captcha detected – jobs blocked
-            </h3>
-            <p className='text-xs text-orange-800 dark:text-orange-300'>
-              Jobs will resume in {formatCountdown(countdown)}
-            </p>
+      {/* Clearance status banner */}
+      {isValid ? (
+        <div className='rounded-md border border-emerald-300 bg-emerald-50 p-4 dark:border-emerald-700 dark:bg-emerald-950/20'>
+          <div className='flex items-center justify-between'>
+            <div>
+              <h3 className='text-sm font-semibold text-emerald-900 dark:text-emerald-200'>
+                Clearance active
+              </h3>
+              <p className='text-xs text-emerald-800 dark:text-emerald-300'>
+                Shopee jobs can run. Expires in {formatCountdown(countdown)}
+              </p>
+            </div>
+            <button
+              onClick={handleSolve}
+              disabled={solving}
+              className='rounded border border-emerald-300 px-3 py-1 text-xs text-emerald-700 hover:bg-emerald-100 disabled:opacity-50 dark:border-emerald-600 dark:text-emerald-300 dark:hover:bg-emerald-900'
+            >
+              Renew
+            </button>
           </div>
         </div>
       ) : (
-        <div className='rounded-md border border-border bg-muted/30 p-3 text-sm text-muted-foreground'>
-          No recent Shopee captcha events.
+        <div className='rounded-md border border-red-300 bg-red-50 p-4 dark:border-red-700 dark:bg-red-950/20'>
+          <div className='flex items-center justify-between'>
+            <div>
+              <h3 className='text-sm font-semibold text-red-900 dark:text-red-200'>
+                No captcha clearance
+              </h3>
+              <p className='text-xs text-red-800 dark:text-red-300'>
+                All Shopee jobs are blocked until you solve a captcha.
+              </p>
+            </div>
+            <button
+              onClick={handleSolve}
+              disabled={solving}
+              className='rounded bg-red-600 px-3 py-1 text-xs font-medium text-white hover:bg-red-700 disabled:opacity-50'
+            >
+              Solve Captcha
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Solve progress */}
+      {solving && solveStatus && (
+        <div className='rounded-md border border-amber-300 bg-amber-50 p-3 dark:border-amber-700 dark:bg-amber-950/20'>
+          <div className='flex items-center gap-2'>
+            <div className='h-2 w-2 animate-pulse rounded-full bg-amber-500' />
+            <p className='text-sm text-amber-800 dark:text-amber-200'>
+              {solveStatus.status === 'launching' && 'Launching browser...'}
+              {solveStatus.status === 'waiting_for_user' &&
+                'Solve the captcha in the browser window'}
+              {solveStatus.status === 'verifying' && 'Verifying...'}
+            </p>
+          </div>
+        </div>
+      )}
+
+      {/* Solve error */}
+      {!solving && solveStatus?.status === 'failed' && (
+        <div className='rounded-md border border-red-300 bg-red-50 p-3 text-sm text-red-800 dark:border-red-700 dark:bg-red-950/20 dark:text-red-300'>
+          Solve failed: {solveStatus.error?.slice(0, 200)}
         </div>
       )}
 
@@ -129,13 +143,13 @@ export function ShopeeCaptchaPanel() {
         </div>
       )}
 
-      {/* Recent events */}
+      {/* Recent captcha events */}
       {events.length > 0 && (
         <div className='flex flex-col gap-3'>
           <h4 className='text-xs font-semibold uppercase tracking-wide text-muted-foreground'>
             Recent Captchas ({events.length})
           </h4>
-          {events.slice(0, 3).map((ev) => (
+          {events.map((ev) => (
             <CaptchaEventRow key={ev.id} event={ev} />
           ))}
         </div>
@@ -149,19 +163,20 @@ interface EventRowProps {
 }
 
 function CaptchaEventRow({ event }: EventRowProps) {
+  const [imgError, setImgError] = useState(false);
   const thumbSrc = `/api/scrape/shopee/captcha-events/${event.id}/snapshot/screenshot.png`;
 
   return (
     <div className='flex gap-3 rounded-md border border-border bg-card p-3'>
-      {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img
-        src={thumbSrc}
-        alt={`Snapshot for event ${event.id}`}
-        className='h-20 w-32 flex-shrink-0 rounded border border-border object-cover'
-        onError={(e) => {
-          (e.target as HTMLImageElement).style.visibility = 'hidden';
-        }}
-      />
+      {!imgError && (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={thumbSrc}
+          alt={`Snapshot for event ${event.id}`}
+          className='h-20 w-32 flex-shrink-0 rounded border border-border object-cover'
+          onError={() => setImgError(true)}
+        />
+      )}
       <div className='flex min-w-0 flex-1 flex-col gap-1'>
         <div className='flex items-center gap-2'>
           <span className='text-xs text-muted-foreground'>

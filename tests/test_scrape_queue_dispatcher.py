@@ -111,6 +111,46 @@ class TestClaimAndExecute:
         # First attempt fails -> back to pending for retry
         assert status in ("pending", "failed")
 
+    def test_given_executor_raises_empty_exception_then_error_message_is_readable(
+        self, conn, no_close_conn
+    ):
+        """Given an executor that raises an exception with no string message
+        (e.g. bare RuntimeError()), when the dispatcher records the failure,
+        then the stored error_message is non-empty and identifies the class."""
+        import services.scrape_queue.dispatcher as dispatcher
+
+        task = create_task(conn, "75193", TaskType.BRICKLINK_METADATA)
+        mock_executor = MagicMock(side_effect=RuntimeError())
+        cfg = _make_test_config(executor=mock_executor)
+
+        with patch(
+            "db.connection.get_connection", return_value=no_close_conn
+        ), patch.object(
+            dispatcher, "_schema_initialized", True
+        ):
+            dispatcher._claim_and_execute("worker-1", cfg)
+
+        row = conn.execute(
+            "SELECT error_message FROM scrape_tasks WHERE task_id = ?",
+            [task.task_id],
+        ).fetchone()
+        assert row is not None
+        error_message = row[0]
+        assert error_message, "error_message must never be blank"
+        assert "RuntimeError" in error_message
+
+    def test_format_exception_handles_blank_and_messaged_errors(self):
+        """_format_exception returns a non-empty, informative string for both
+        exceptions with messages and exceptions that stringify to empty."""
+        from services.scrape_queue.dispatcher import _format_exception
+
+        msg = _format_exception(RuntimeError("boom"))
+        assert msg == "RuntimeError: boom"
+
+        blank = _format_exception(RuntimeError())
+        assert blank
+        assert "RuntimeError" in blank
+
     def test_given_empty_queue_when_claim_and_execute_then_returns_none(
         self, conn, no_close_conn
     ):

@@ -57,7 +57,7 @@ export interface UnifiedItem {
   ml_tier: number | null;
   ml_avoid_probability: number | null;
   ml_great_buy_probability: number | null;
-  ml_buy_category: 'GREAT' | 'GOOD' | 'SKIP' | 'WORST' | null;
+  ml_buy_category: 'GREAT' | 'GOOD' | 'SKIP' | 'WORST' | 'NONE' | null;
   ml_raw_growth_pct: number | null;
   ml_kelly_fraction: number | null;
   ml_win_probability: number | null;
@@ -259,7 +259,7 @@ export interface DiscountRow {
 
 export interface CapitalAllocationData {
   set_number: string;
-  ml_buy_category: 'GREAT' | 'GOOD' | 'SKIP' | 'WORST' | null;
+  ml_buy_category: 'GREAT' | 'GOOD' | 'SKIP' | 'WORST' | 'NONE' | null;
   rrp_cents: number | null;
   rrp_currency: string;
   annual_roi: number;

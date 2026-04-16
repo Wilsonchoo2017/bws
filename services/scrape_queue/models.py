@@ -70,15 +70,16 @@ class ExecutorResult:
     cooldown_seconds: float | None = None
     error_category: ErrorCategory | None = None
     permanent: bool = False
+    outcome: str | None = None  # "success", "skipped" -- None for failures/cooldowns
 
     @staticmethod
     def ok() -> ExecutorResult:
-        return ExecutorResult(success=True)
+        return ExecutorResult(success=True, outcome="success")
 
     @staticmethod
     def skip(reason: str) -> ExecutorResult:
         """Item not available at this source -- don't retry or restart browser."""
-        return ExecutorResult(success=True, error=reason)
+        return ExecutorResult(success=True, error=reason, outcome="skipped")
 
     @staticmethod
     def fail(
@@ -182,6 +183,8 @@ class ScrapeTask:
     locked_by: str | None
     locked_at: object | None
     reason: str | None = None
+    outcome: str | None = None
+    source: str | None = None
 
 
 # ---------------------------------------------------------------------------

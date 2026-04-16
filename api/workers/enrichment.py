@@ -41,7 +41,10 @@ class EnrichmentWorker:
 
     async def run(self, job: Job, mgr: JobManager) -> WorkResult:
         """Convert legacy enrichment job to persistent scrape tasks."""
-        result = await asyncio.to_thread(_create_scrape_tasks, job.url)
+        source = "portfolio" if job.reason and "metadata" in job.reason else "api"
+        result = await asyncio.to_thread(
+            _create_scrape_tasks, job.url, source=source
+        )
         return WorkResult(
             items_found=result["tasks_created"],
             items=[result],
@@ -49,7 +52,7 @@ class EnrichmentWorker:
         )
 
 
-def _create_scrape_tasks(job_url: str) -> dict:
+def _create_scrape_tasks(job_url: str, *, source: str | None = None) -> dict:
     """Create persistent scrape tasks from a legacy enrichment job URL."""
     from db.connection import get_connection
     from db.schema import init_schema
@@ -69,12 +72,12 @@ def _create_scrape_tasks(job_url: str) -> dict:
             }
             task_type = source_to_type.get(source_str)
             if task_type:
-                task = create_task(conn, set_number, task_type)
+                task = create_task(conn, set_number, task_type, source=source)
                 tasks = [task] if task else []
             else:
                 tasks = []
         else:
-            tasks = create_tasks_for_set(conn, set_number)
+            tasks = create_tasks_for_set(conn, set_number, source=source)
 
         return {
             "set_number": set_number,

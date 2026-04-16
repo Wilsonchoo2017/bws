@@ -25,7 +25,10 @@ class KeepaWorker:
 
     async def run(self, job: Job, mgr: JobManager) -> WorkResult:
         """Convert a manual Keepa job to a persistent scrape task."""
-        result = await asyncio.to_thread(_create_keepa_task, job.url.strip())
+        source = "keepa_sweep" if job.reason and job.reason.startswith("sweep") else "api"
+        result = await asyncio.to_thread(
+            _create_keepa_task, job.url.strip(), reason=job.reason, source=source
+        )
         return WorkResult(
             items_found=result["tasks_created"],
             items=[result],
@@ -33,7 +36,12 @@ class KeepaWorker:
         )
 
 
-def _create_keepa_task(set_number: str) -> dict:
+def _create_keepa_task(
+    set_number: str,
+    *,
+    reason: str | None = None,
+    source: str | None = None,
+) -> dict:
     """Create a persistent Keepa scrape task in the database queue."""
     from db.connection import get_connection
     from db.schema import init_schema
@@ -43,7 +51,7 @@ def _create_keepa_task(set_number: str) -> dict:
     conn = get_connection()
     try:
         init_schema(conn)
-        task = create_task(conn, set_number, TaskType.KEEPA)
+        task = create_task(conn, set_number, TaskType.KEEPA, reason=reason, source=source)
         tasks_created = 1 if task else 0
         return {
             "set_number": set_number,

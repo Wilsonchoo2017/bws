@@ -34,6 +34,9 @@ class ScrapeJobResponse(BaseModel):
     reason: str | None = None
     last_run_at: datetime | None = None
     last_run_status: str | None = None
+    outcome: str | None = None
+    duration_ms: int | None = None
+    source: str | None = None
 
 
 class ScrapeQueueStats(BaseModel):
@@ -61,8 +64,30 @@ class ScrapeItemResponse(BaseModel):
     image_url: str | None = None
 
 
+class ScrapeAttemptResponse(BaseModel):
+    attempt_number: int
+    error_category: str | None = None
+    error_message: str | None = None
+    duration_seconds: float | None = None
+    created_at: datetime | None = None
+
+
+class ScrapeSnapshotInfo(BaseModel):
+    source: str
+    scraped_at: datetime | None = None
+    summary: str | None = None
+
+
 class ScrapeJobDetailResponse(ScrapeJobResponse):
     items: list[ScrapeItemResponse] = []
+    attempts: list[ScrapeAttemptResponse] = []
+    snapshots: list[ScrapeSnapshotInfo] = []
+    set_number: str | None = None
+    task_type: str | None = None
+    attempt_count: int | None = None
+    max_attempts: int | None = None
+    depends_on: str | None = None
+    locked_by: str | None = None
 
 
 class ScraperInfo(BaseModel):

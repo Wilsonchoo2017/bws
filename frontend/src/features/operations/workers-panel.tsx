@@ -1,10 +1,16 @@
 'use client';
 
-import { useState } from 'react';
+import { useCallback, useState } from 'react';
 import { Button } from '@/components/ui/button';
+import { BackgroundTasksCard } from './background-tasks-card';
 import { ImageDownloadCard } from './image-download-card';
+import { JobDetailDrawer } from './job-detail-drawer';
 import type { JobStatus, QueueStats, WorkerJob } from './types';
-import { formatDuration, formatRelativeTime } from './types';
+import {
+  formatDateTime,
+  formatDuration,
+  formatDurationMs,
+} from './types';
 
 const SCRAPER_LABELS: Record<string, string> = {
   shopee: 'Shopee',
@@ -52,6 +58,9 @@ export function WorkersPanel({
 }: WorkersPanelProps) {
   const [filter, setFilter] = useState<FilterStatus>('all');
   const [page, setPage] = useState(1);
+  const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
+
+  const handleCloseDrawer = useCallback(() => setSelectedJobId(null), []);
 
   const filtered =
     filter === 'all' ? jobs : jobs.filter((j) => j.status === filter);
@@ -65,6 +74,9 @@ export function WorkersPanel({
 
   return (
     <div className='flex flex-col gap-6'>
+      {/* Crashed background tasks */}
+      <BackgroundTasksCard />
+
       {/* Image download status */}
       <ImageDownloadCard />
 
@@ -141,16 +153,23 @@ export function WorkersPanel({
                   <th className='px-3 py-2 text-left font-medium'>Status</th>
                   <th className='px-3 py-2 text-left font-medium'>Type</th>
                   <th className='px-3 py-2 text-left font-medium'>Target</th>
-                  <th className='px-3 py-2 text-left font-medium'>Reason</th>
-                  <th className='px-3 py-2 text-right font-medium'>Items</th>
+                  <th className='px-3 py-2 text-left font-medium'>Queued</th>
+                  <th className='px-3 py-2 text-left font-medium'>Started</th>
+                  <th className='px-3 py-2 text-left font-medium'>Completed</th>
                   <th className='px-3 py-2 text-right font-medium'>Duration</th>
-                  <th className='px-3 py-2 text-left font-medium'>Last Run</th>
+                  <th className='px-3 py-2 text-right font-medium'>Items</th>
+                  <th className='px-3 py-2 text-left font-medium'>Outcome</th>
+                  <th className='px-3 py-2 text-left font-medium'>Source</th>
                   <th className='px-3 py-2 text-left font-medium'>Error</th>
                 </tr>
               </thead>
               <tbody>
                 {paginatedJobs.map((job) => (
-                  <JobRow key={job.job_id} job={job} />
+                  <JobRow
+                    key={job.job_id}
+                    job={job}
+                    onSelect={setSelectedJobId}
+                  />
                 ))}
               </tbody>
             </table>
@@ -225,6 +244,8 @@ export function WorkersPanel({
           )}
         </>
       )}
+
+      <JobDetailDrawer jobId={selectedJobId} onClose={handleCloseDrawer} />
     </div>
   );
 }
@@ -368,19 +389,33 @@ function StatCard({
   );
 }
 
-const LAST_RUN_STATUS_STYLES: Record<string, string> = {
-  completed: 'text-green-600 dark:text-green-400',
-  failed: 'text-red-600 dark:text-red-400',
+const OUTCOME_STYLES: Record<string, string> = {
+  success: 'text-green-600 dark:text-green-400',
+  skipped: 'text-amber-600 dark:text-amber-400',
 };
 
-function JobRow({ job }: { readonly job: WorkerJob }) {
+function JobRow({
+  job,
+  onSelect,
+}: {
+  readonly job: WorkerJob;
+  readonly onSelect: (id: string) => void;
+}) {
   const target =
     job.scraper_id === 'enrichment' || isScrapeTask(job)
       ? job.url
       : truncateUrl(job.url);
 
+  const durationText =
+    job.duration_ms != null
+      ? formatDurationMs(job.duration_ms)
+      : formatDuration(job.started_at, job.completed_at);
+
   return (
-    <tr className='border-border border-t'>
+    <tr
+      className='border-border cursor-pointer border-t transition-colors hover:bg-muted/50'
+      onClick={() => onSelect(job.job_id)}
+    >
       <td className='px-3 py-2'>
         <span
           className={`rounded-full px-2 py-0.5 text-xs font-medium ${STATUS_STYLES[job.status]}`}
@@ -397,21 +432,30 @@ function JobRow({ job }: { readonly job: WorkerJob }) {
       <td className='max-w-xs truncate px-3 py-2 font-mono text-xs'>
         {target}
       </td>
-      <td className='max-w-[180px] truncate px-3 py-2 text-xs text-muted-foreground' title={job.reason ?? undefined}>
-        {job.reason ?? '-'}
+      <td className='whitespace-nowrap px-3 py-2 font-mono text-xs text-muted-foreground'>
+        {formatDateTime(job.created_at)}
+      </td>
+      <td className='whitespace-nowrap px-3 py-2 font-mono text-xs text-muted-foreground'>
+        {formatDateTime(job.started_at)}
+      </td>
+      <td className='whitespace-nowrap px-3 py-2 font-mono text-xs text-muted-foreground'>
+        {formatDateTime(job.completed_at)}
+      </td>
+      <td className='text-muted-foreground whitespace-nowrap px-3 py-2 text-right text-xs'>
+        {durationText}
       </td>
       <td className='px-3 py-2 text-right font-mono'>{job.items_found}</td>
-      <td className='text-muted-foreground px-3 py-2 text-right text-xs'>
-        {formatDuration(job.started_at, job.completed_at)}
-      </td>
       <td className='px-3 py-2 text-xs'>
-        {job.last_run_at ? (
-          <span className={LAST_RUN_STATUS_STYLES[job.last_run_status ?? ''] ?? 'text-muted-foreground'}>
-            {job.last_run_status} {formatRelativeTime(job.last_run_at)}
+        {job.outcome ? (
+          <span className={OUTCOME_STYLES[job.outcome] ?? 'text-muted-foreground'}>
+            {job.outcome}
           </span>
         ) : (
-          <span className='text-muted-foreground'>first run</span>
+          <span className='text-muted-foreground'>-</span>
         )}
+      </td>
+      <td className='px-3 py-2 text-xs text-muted-foreground'>
+        {job.source ?? '-'}
       </td>
       <td className='max-w-xs truncate px-3 py-2 text-xs text-red-600 dark:text-red-400'>
         {job.error ?? ''}

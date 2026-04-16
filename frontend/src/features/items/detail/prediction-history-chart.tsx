@@ -18,7 +18,7 @@ interface PredictionPoint {
   growth_pct: number;
   confidence: string | null;
   buy_signal: boolean | null;
-  buy_category: 'GREAT' | 'GOOD' | 'SKIP' | 'WORST' | null;
+  buy_category: 'GREAT' | 'GOOD' | 'SKIP' | 'WORST' | 'NONE' | null;
   avoid_probability: number | null;
   great_buy_probability: number | null;
   good_buy_probability: number | null;

@@ -18,7 +18,10 @@ from services.marketplace_competition.sweep_scheduler import (
 logger = logging.getLogger("bws.carousell.competition.scheduler")
 
 DEFAULT_INTERVAL_MINUTES = 720  # 12 hours
-DEFAULT_BATCH_SIZE = 12
+# Shared-browser path makes per-item cost ~20s (no per-query Camoufox
+# boot), so a batch of 30 fits comfortably inside the 30-min job
+# timeout even with a Cloudflare challenge on the first item.
+DEFAULT_BATCH_SIZE = 30
 
 
 async def run_competition_sweep(
@@ -34,4 +37,5 @@ async def run_competition_sweep(
         logger=logger,
         interval_minutes=interval_minutes,
         batch_size=batch_size,
+        scheduler_name="carousell_competition",
     )

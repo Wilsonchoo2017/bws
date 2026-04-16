@@ -13,12 +13,15 @@ type ProgressData =
       eta_seconds: number
     }
 
+type CompletedRun = { total: number }
+
 export function PredictionProgressBadge() {
   const [progress, setProgress] = useState<ProgressData>({ is_running: false })
+  const [completed, setCompleted] = useState<CompletedRun | null>(null)
 
   useEffect(() => {
     let mounted = true
-    let abortController = new AbortController()
+    const abortController = new AbortController()
 
     const fetchProgress = async () => {
       try {
@@ -27,21 +30,24 @@ export function PredictionProgressBadge() {
         })
         if (!response.ok) return
         const data = (await response.json()) as ProgressData
-        if (mounted) {
-          setProgress(data)
+        if (!mounted) return
+
+        // Keep a snapshot of the total from the most recent running tick
+        // so the badge can show "N/N (100%)" after scoring ends instead of
+        // vanishing the moment is_running flips to false.
+        if (data.is_running) {
+          setCompleted({ total: data.total })
         }
+
+        setProgress(data)
       } catch (error) {
-        // Silent fail on network errors (tab may be hidden, network may be down)
         if (error instanceof Error && error.name !== 'AbortError') {
           // Ignore abort errors from cleanup
         }
       }
     }
 
-    // Fetch immediately
     fetchProgress()
-
-    // Poll every 3 seconds
     const interval = setInterval(fetchProgress, 3000)
 
     return () => {
@@ -50,10 +56,6 @@ export function PredictionProgressBadge() {
       abortController.abort()
     }
   }, [])
-
-  if (!progress.is_running) {
-    return null
-  }
 
   const formatEta = (seconds: number): string => {
     if (seconds < 60) {
@@ -64,16 +66,33 @@ export function PredictionProgressBadge() {
     return `${minutes}m ${secs}s`
   }
 
-  const eta = formatEta(progress.eta_seconds)
+  if (progress.is_running) {
+    const eta = formatEta(progress.eta_seconds)
+    return (
+      <Badge
+        variant="secondary"
+        className="animate-pulse bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-200"
+      >
+        <span className="text-sm font-medium">
+          {progress.scored}/{progress.total} ({progress.percentage}%) • ETA: {eta}
+        </span>
+      </Badge>
+    )
+  }
 
-  return (
-    <Badge
-      variant="secondary"
-      className="animate-pulse bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-200"
-    >
-      <span className="text-sm font-medium">
-        {progress.scored}/{progress.total} ({progress.percentage}%) • ETA: {eta}
-      </span>
-    </Badge>
-  )
+  // Finished: show 100% persistently until the next run starts.
+  if (completed && completed.total > 0) {
+    return (
+      <Badge
+        variant="secondary"
+        className="bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-200"
+      >
+        <span className="text-sm font-medium">
+          {completed.total}/{completed.total} (100%)
+        </span>
+      </Badge>
+    )
+  }
+
+  return null
 }

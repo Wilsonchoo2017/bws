@@ -326,3 +326,226 @@ async def set_coverage(
             "distribution": distribution,
         },
     }
+
+
+# ---------------------------------------------------------------------------
+# Marketplace saturation coverage (Shopee / Carousell competition sweeps)
+# ---------------------------------------------------------------------------
+
+# Mirrors the tiered selection in
+# services/marketplace_competition/tiered_selection.py. Keep these in sync:
+# any tier priority / stale_days change must be made in both places.
+_MARKETPLACE_TIER_LABELS = {
+    1: "cart",
+    2: "watchlist",
+    3: "holdings",
+    4: "retiring_soon",
+}
+
+
+def _build_tiered_rows_cte() -> str:
+    """The CTE that joins the 4 tier sources and picks the tightest per set."""
+    return """
+        WITH targets AS (
+            SELECT set_number, 1 AS priority, 7 AS stale_days FROM cart_items
+            UNION ALL
+            SELECT set_number, 2, 7 FROM lego_items WHERE watchlist = TRUE
+            UNION ALL
+            SELECT pt.set_number, 3, 14
+            FROM portfolio_transactions pt
+            GROUP BY pt.set_number
+            HAVING SUM(CASE WHEN pt.txn_type = 'BUY' THEN pt.quantity ELSE -pt.quantity END) > 0
+            UNION ALL
+            SELECT set_number, 4, 30 FROM lego_items WHERE retiring_soon = TRUE
+        ),
+        tiered AS (
+            SELECT set_number,
+                   MIN(priority) AS priority,
+                   MIN(stale_days) AS stale_days
+            FROM targets
+            GROUP BY set_number
+        )
+    """
+
+
+@router.get("/marketplace-coverage")
+async def marketplace_coverage(
+    conn: "DualWriter" = Depends(get_db),
+) -> dict:
+    """Return Shopee + Carousell competition sweep coverage.
+
+    Scope mirrors the tiered selection used by the sweep schedulers:
+    cart (7d) U watchlist (7d) U holdings (14d) U retiring_soon (30d).
+
+    For each tiered item returns side-by-side Shopee and Carousell
+    state: last scrape time, listings count, saturation score/level,
+    and whether the per-marketplace snapshot is stale relative to the
+    set's tier window. Also returns per-marketplace aggregate
+    counters (scraped / fresh / stale / empty).
+    """
+    query = (
+        _build_tiered_rows_cte()
+        + """
+        SELECT t.set_number,
+               t.priority,
+               t.stale_days,
+               li.title,
+               s.last_checked  AS shopee_last,
+               s.listings_count AS shopee_count,
+               s.saturation_score AS shopee_score,
+               s.saturation_level AS shopee_level,
+               c.last_checked  AS carousell_last,
+               c.listings_count AS carousell_count,
+               c.saturation_score AS carousell_score,
+               c.saturation_level AS carousell_level
+        FROM tiered t
+        JOIN lego_items li ON li.set_number = t.set_number
+        LEFT JOIN LATERAL (
+            SELECT scraped_at AS last_checked,
+                   listings_count,
+                   saturation_score,
+                   saturation_level
+            FROM shopee_competition_snapshots
+            WHERE set_number = t.set_number
+            ORDER BY scraped_at DESC
+            LIMIT 1
+        ) s ON TRUE
+        LEFT JOIN LATERAL (
+            SELECT scraped_at AS last_checked,
+                   listings_count,
+                   saturation_score,
+                   saturation_level
+            FROM carousell_competition_snapshots
+            WHERE set_number = t.set_number
+            ORDER BY scraped_at DESC
+            LIMIT 1
+        ) c ON TRUE
+        ORDER BY t.priority ASC, t.set_number ASC
+        """
+    )
+
+    raw_rows = conn.execute(query).fetchall()
+
+    rows: list[dict] = []
+    agg: dict[str, dict] = {
+        "shopee": {
+            "total": 0,
+            "scraped": 0,
+            "fresh": 0,
+            "stale": 0,
+            "empty": 0,
+            "latest": None,
+        },
+        "carousell": {
+            "total": 0,
+            "scraped": 0,
+            "fresh": 0,
+            "stale": 0,
+            "empty": 0,
+            "latest": None,
+        },
+    }
+
+    def _mp_status(
+        last_checked,
+        listings_count,
+        stale_days: int,
+    ) -> tuple[bool, bool, bool]:
+        """Return (scraped, fresh, empty) for a marketplace cell."""
+        if last_checked is None:
+            return False, False, False
+        # Fresh = scraped within the tier's staleness window.
+        import datetime as _dt
+
+        now = _dt.datetime.now(tz=_dt.timezone.utc)
+        lc = last_checked
+        if isinstance(lc, str):
+            lc = _dt.datetime.fromisoformat(lc.replace("Z", "+00:00"))
+        if lc.tzinfo is None:
+            lc = lc.replace(tzinfo=_dt.timezone.utc)
+        fresh = (now - lc) < _dt.timedelta(days=stale_days)
+        empty = (listings_count or 0) == 0
+        return True, fresh, empty
+
+    for r in raw_rows:
+        (
+            set_number,
+            priority,
+            stale_days,
+            title,
+            s_last,
+            s_count,
+            s_score,
+            s_level,
+            c_last,
+            c_count,
+            c_score,
+            c_level,
+        ) = r
+
+        s_scraped, s_fresh, s_empty = _mp_status(s_last, s_count, stale_days)
+        c_scraped, c_fresh, c_empty = _mp_status(c_last, c_count, stale_days)
+
+        for mp, scraped, fresh, empty, last in (
+            ("shopee", s_scraped, s_fresh, s_empty, s_last),
+            ("carousell", c_scraped, c_fresh, c_empty, c_last),
+        ):
+            a = agg[mp]
+            a["total"] += 1
+            if scraped:
+                a["scraped"] += 1
+                if fresh:
+                    a["fresh"] += 1
+                else:
+                    a["stale"] += 1
+                if empty:
+                    a["empty"] += 1
+            else:
+                a["stale"] += 1
+            if last is not None:
+                last_str = str(last)
+                if a["latest"] is None or last_str > a["latest"]:
+                    a["latest"] = last_str
+
+        rows.append({
+            "set_number": set_number,
+            "title": title,
+            "tier": _MARKETPLACE_TIER_LABELS.get(int(priority), str(priority)),
+            "tier_priority": int(priority),
+            "stale_days": int(stale_days),
+            "shopee": {
+                "last_checked": str(s_last) if s_last else None,
+                "listings_count": int(s_count) if s_count is not None else None,
+                "saturation_score": float(s_score) if s_score is not None else None,
+                "saturation_level": s_level,
+                "scraped": s_scraped,
+                "fresh": s_fresh,
+                "empty": s_empty,
+            },
+            "carousell": {
+                "last_checked": str(c_last) if c_last else None,
+                "listings_count": int(c_count) if c_count is not None else None,
+                "saturation_score": float(c_score) if c_score is not None else None,
+                "saturation_level": c_level,
+                "scraped": c_scraped,
+                "fresh": c_fresh,
+                "empty": c_empty,
+            },
+        })
+
+    # Tier-level distribution counter for the summary strip.
+    tier_counts: dict[str, int] = {
+        label: 0 for label in _MARKETPLACE_TIER_LABELS.values()
+    }
+    for r in rows:
+        tier_counts[r["tier"]] = tier_counts.get(r["tier"], 0) + 1
+
+    return {
+        "success": True,
+        "data": {
+            "total_targets": len(rows),
+            "tier_counts": tier_counts,
+            "marketplaces": agg,
+            "rows": rows,
+        },
+    }

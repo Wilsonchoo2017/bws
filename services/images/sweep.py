@@ -13,6 +13,11 @@ from db.connection import get_connection
 from db.schema import init_schema
 from services.images.downloader import download_batch
 from services.images.repository import get_download_stats, register_existing_images
+from services.operations.scheduler_registry import (
+    is_enabled,
+    record_disabled,
+    record_run,
+)
 
 logger = logging.getLogger("bws.images.sweep")
 
@@ -64,21 +69,32 @@ async def run_image_download_sweep() -> None:
                     return
             logger.info("Image sweep resuming -- metadata queue empty")
 
+        if not is_enabled("images"):
+            await record_disabled("images")
+            await asyncio.sleep(_SWEEP_INTERVAL_S)
+            continue
+
         try:
-            conn = get_connection()
-            init_schema(conn)
+            async with record_run("images") as run:
+                conn = get_connection()
+                try:
+                    init_schema(conn)
 
-            stats = get_download_stats(conn)
-            pending = stats["totals"].get("pending", 0) + stats["totals"].get("failed", 0)
+                    stats = get_download_stats(conn)
+                    pending = (
+                        stats["totals"].get("pending", 0)
+                        + stats["totals"].get("failed", 0)
+                    )
 
-            if pending > 0:
-                logger.info("Image sweep: %d pending, starting batch download", pending)
-                downloaded, failed = await download_batch(conn, batch_size=_BATCH_SIZE)
-                logger.info("Image sweep: downloaded=%d, failed=%d", downloaded, failed)
-            else:
-                logger.debug("Image sweep: no pending downloads")
-
-            conn.close()
+                    if pending > 0:
+                        logger.info("Image sweep: %d pending, starting batch download", pending)
+                        downloaded, failed = await download_batch(conn, batch_size=_BATCH_SIZE)
+                        run.items_queued = downloaded
+                        logger.info("Image sweep: downloaded=%d, failed=%d", downloaded, failed)
+                    else:
+                        logger.debug("Image sweep: no pending downloads")
+                finally:
+                    conn.close()
         except asyncio.CancelledError:
             raise
         except Exception:

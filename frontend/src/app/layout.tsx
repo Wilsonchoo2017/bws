@@ -2,6 +2,7 @@ import { Toaster } from '@/components/ui/sonner';
 import { fontVariables } from '@/lib/font';
 import ThemeProvider from '@/components/layout/ThemeToggle/theme-provider';
 import { Nav } from '@/components/layout/nav';
+import { ShopeeClearanceBanner } from '@/components/layout/shopee-clearance-banner';
 import { cn } from '@/lib/utils';
 import type { Metadata, Viewport } from 'next';
 import './globals.css';
@@ -54,6 +55,7 @@ export default function RootLayout({
           enableColorScheme
         >
           <Nav />
+          <ShopeeClearanceBanner />
           <Toaster />
           {children}
         </ThemeProvider>

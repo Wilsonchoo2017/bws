@@ -48,30 +48,48 @@ def _build_entry(
     p: "GrowthPrediction",
     model_version: str | None,
     market_prices: dict[str, tuple[float, float]] | None = None,
+    keepa_set_numbers: set[str] | None = None,
 ) -> dict:
     """Build the provider-shape dict from a GrowthPrediction.
 
     Populates every field the snapshot table cares about. Classifier-only
     paths leave `growth_pct` at 0.0 as a sentinel; downstream consumers
     should read `buy_category` + probabilities, not `growth_pct`.
+
+    Gate: the keepa_bl model is trained on Keepa price history AND
+    BrickLink sold-price rows, so a set missing either input gets its
+    category demoted to NONE. The model can still emit a probability from
+    zero-sentinel features, but that probability is blind to the
+    strongest trained signals and shouldn't drive buy decisions.
     """
+    # Coverage gate first — NONE overrides whatever the classifier said.
+    has_keepa = keepa_set_numbers is None or p.set_number in keepa_set_numbers
+    has_bl = market_prices is not None and p.set_number in market_prices
+    gated_category: str | None = p.buy_category
+    gated_confidence = p.confidence
+    if not (has_keepa and has_bl):
+        gated_category = "NONE"
+        gated_confidence = "none"
+
     ap = p.avoid_probability
-    is_avoid = p.buy_category == "WORST"
+    is_avoid = gated_category == "WORST"
     # OOF walk-forward (2026-04-15) showed GOOD hits the 10% hurdle only
     # 52% of the time out-of-fold — a coin flip. GREAT is the only
     # bucket with reliable signal, so buy_signal surfaces GREAT only.
     # GOOD stays as a category label for the UI watchlist but does not
     # trigger buy_signal / cart inclusion.
-    is_buy = p.buy_category == "GREAT"
+    is_buy = gated_category == "GREAT"
 
     entry: dict = {
         "growth_pct": p.predicted_growth_pct,
-        "confidence": p.confidence,
+        "confidence": gated_confidence,
         "tier": p.tier,
         "buy_signal": is_buy,
         "avoid": is_avoid,
-        "buy_category": p.buy_category,
+        "buy_category": gated_category,
         "model_version": model_version,
+        "has_keepa_data": has_keepa,
+        "has_bl_data": has_bl,
     }
     if ap is not None:
         entry["avoid_probability"] = round(ap, 3)
@@ -110,16 +128,20 @@ def _build_entry(
                 ratio = current_usd / rrp_usd
                 entry["price_vs_rrp_ratio"] = round(ratio, 3)
                 entry["current_price_usd_cents"] = int(current_usd)
-                gate = _ENTRY_PRICE_MAX_RATIO.get(p.buy_category or "")
-                if gate is not None:
-                    entry["entry_price_ok"] = ratio <= gate
-                    entry["recommended_action"] = "BUY" if ratio <= gate else "WAIT"
-                elif p.buy_category == "WORST":
-                    entry["entry_price_ok"] = False
-                    entry["recommended_action"] = "SKIP"
-                else:
+                if gated_category == "NONE":
                     entry["entry_price_ok"] = None
-                    entry["recommended_action"] = "HOLD"
+                    entry["recommended_action"] = "NONE"
+                else:
+                    gate = _ENTRY_PRICE_MAX_RATIO.get(gated_category or "")
+                    if gate is not None:
+                        entry["entry_price_ok"] = ratio <= gate
+                        entry["recommended_action"] = "BUY" if ratio <= gate else "WAIT"
+                    elif gated_category == "WORST":
+                        entry["entry_price_ok"] = False
+                        entry["recommended_action"] = "SKIP"
+                    else:
+                        entry["entry_price_ok"] = None
+                        entry["recommended_action"] = "HOLD"
 
     return entry
 
@@ -167,10 +189,20 @@ class GrowthScoringProvider:
 
         # Try to acquire lock; if another thread is scoring, wait or return cache
         if not _scoring_lock.acquire(blocking=False):
-            # Another thread is already scoring — wait for it to finish
+            # Another thread is already scoring — wait for it to finish, then
+            # return whatever it produced. If the winner produced an empty
+            # result (or didn't write at all), fall through and retry instead
+            # of handing callers an empty dict that downstream treats as a
+            # failed prediction run.
             logger.debug("Scoring already in progress, waiting for completion...")
             _scoring_event.wait(timeout=600)
-            return _prediction_cache.get("data", {})
+            cached = _prediction_cache.get("data") or {}
+            if cached:
+                return cached
+            logger.warning(
+                "score_all: waited on concurrent run but cache is empty; retrying"
+            )
+            _scoring_lock.acquire(blocking=True, timeout=600)
 
         try:
             from services.ml.growth.prediction import predict_growth
@@ -206,6 +238,17 @@ class GrowthScoringProvider:
                 logger.warning("Entry-price filter: price load failed", exc_info=True)
                 market_prices = {}
 
+            # Ground truth for "has Keepa data" — any set_number with a row
+            # in keepa_snapshots is considered covered. Sets missing from
+            # this set are gated to buy_category=NONE in _build_entry.
+            try:
+                keepa_set_numbers: set[str] = set(
+                    keepa_df["set_number"].astype(str).tolist()
+                ) if not keepa_df.empty else set()
+            except Exception:
+                logger.warning("Keepa coverage set build failed", exc_info=True)
+                keepa_set_numbers = set()
+
             # Initialize progress tracking only if there are sets to score
             total_sets = len(predictions)
             if total_sets > 0:
@@ -220,7 +263,11 @@ class GrowthScoringProvider:
             try:
                 result: dict[str, dict] = {}
                 for idx, p in enumerate(predictions, start=1):
-                    result[p.set_number] = _build_entry(p, model_version, market_prices=market_prices)
+                    result[p.set_number] = _build_entry(
+                        p, model_version,
+                        market_prices=market_prices,
+                        keepa_set_numbers=keepa_set_numbers,
+                    )
                     # Batch progress updates every 50 sets to reduce lock contention
                     if total_sets > 0 and (idx % 50 == 0 or idx == total_sets):
                         with _progress_lock:
@@ -229,6 +276,18 @@ class GrowthScoringProvider:
                 # Always clear progress, even if an exception occurred
                 with _progress_lock:
                     _progress.clear()
+
+            # Never cache an empty result — it would stick for _PREDICTION_TTL
+            # (6h) and every subsequent caller would skip scoring entirely.
+            # An empty result is always a failure mode (transient DB race,
+            # missing feature rows, etc.); let the next call retry.
+            if not result:
+                logger.warning(
+                    "score_all produced 0 predictions (candidates=%d); "
+                    "refusing to cache empty result",
+                    len(predictions),
+                )
+                return result
 
             _prediction_cache["data"] = result
             _prediction_cache["expires"] = now + _PREDICTION_TTL
@@ -323,10 +382,18 @@ class GrowthScoringProvider:
         except Exception:
             market_prices = {}
 
+        try:
+            keepa_set_numbers: set[str] = set(
+                keepa_df["set_number"].astype(str).tolist()
+            ) if not keepa_df.empty else set()
+        except Exception:
+            keepa_set_numbers = set()
+
         entry = _build_entry(
             predictions[0],
             self._model_version(clf, gb_clf, tier1),
             market_prices=market_prices,
+            keepa_set_numbers=keepa_set_numbers,
         )
 
         # Inject into prediction cache so subsequent GET requests pick it up

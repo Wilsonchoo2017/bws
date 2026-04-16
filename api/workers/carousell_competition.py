@@ -26,7 +26,12 @@ class CarousellCompetitionWorker:
         init_schema(conn)
         try:
             if job.url == "batch":
-                items = get_items_needing_competition_check_tiered(conn)
+                # Match the scheduler's DEFAULT_BATCH_SIZE so the worker
+                # actually picks up the number of items the scheduler
+                # intended to dispatch (see services/carousell/competition_scheduler.py).
+                items = get_items_needing_competition_check_tiered(
+                    conn, limit=30,
+                )
             else:
                 row = conn.execute(
                     "SELECT set_number, title, rrp_cents FROM lego_items WHERE set_number = ?",

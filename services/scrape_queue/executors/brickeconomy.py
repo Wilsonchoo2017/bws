@@ -23,6 +23,7 @@ class _FetchContext:
     """Tracks state across the fetch/enrich pipeline without mutation."""
 
     data_miss: bool = False
+    scrape_ok: bool = False
     last_error: str | None = None
 
 
@@ -30,6 +31,32 @@ def _brickeconomy_cooldown_remaining() -> float:
     from config.settings import BRICKECONOMY_RATE_LIMITER
 
     return BRICKECONOMY_RATE_LIMITER.cooldown_remaining()
+
+
+def _trace_missing_item(conn: Any, set_number: str) -> str:
+    # When an executor sees a task for a set that is not in lego_items, the
+    # upstream producer either (a) enqueued a set it never inserted, or (b) the
+    # item was deleted after enqueue (e.g. excluded-packaging cleanup in this
+    # same executor). Peek at related tables so ops rows explain which it was.
+    traces: list[str] = []
+    probes = (
+        ("bricklink_items", "set_number"),
+        ("brickeconomy_snapshots", "set_number"),
+        ("keepa_snapshots", "set_number"),
+    )
+    for table, col in probes:
+        try:
+            row = conn.execute(
+                f"SELECT 1 FROM {table} WHERE {col} = ? LIMIT 1",  # noqa: S608
+                [set_number],
+            ).fetchone()
+        except Exception:
+            continue
+        if row:
+            traces.append(f"seen in {table}")
+    if not traces:
+        return "never seen in any source table -- upstream enqueue bug"
+    return "; ".join(traces) + " -- likely deleted post-enqueue"
 
 
 @executor(
@@ -58,8 +85,13 @@ def execute_brickeconomy(
 
     item = get_item_detail(conn, set_number)
     if not item:
+        trace = _trace_missing_item(conn, set_number)
+        logger.warning(
+            "BrickEconomy task for %s: item not in lego_items (%s) -- permanent fail",
+            set_number, trace,
+        )
         return ExecutorResult.fail(
-            f"Item {set_number} not found in lego_items",
+            f"Item {set_number} not found in lego_items ({trace})",
             category=ErrorCategory.NOT_FOUND,
             permanent=True,
         )
@@ -113,6 +145,7 @@ def execute_brickeconomy(
         # enrichment later finds 0 fields (instead of "unknown").
         snap = scrape_result.snapshot
         ctx_holder[0] = _FetchContext(
+            scrape_ok=True,
             last_error=(
                 f"Scrape OK but metadata empty "
                 f"(title={snap.title!r}, theme={snap.theme!r}, "
@@ -136,10 +169,24 @@ def execute_brickeconomy(
     cb_state = CircuitBreakerState()
     result, _ = enrich(set_number, item, fetchers, cb_state)
 
-    if result.fields_found == 0:
+    if result.fields_found == 0 and result.field_results:
         if ctx_holder[0].data_miss:
             logger.info("BrickEconomy for %s: not found, skipping", set_number)
             return ExecutorResult.skip("Not found on BrickEconomy")
+        if ctx_holder[0].scrape_ok:
+            # Scrape succeeded and snapshot/value saved, but the remaining
+            # missing fields (e.g. year_retired, retired_date) are genuinely
+            # unavailable from the source.  This is normal for current sets.
+            missing_names = [
+                fr.field.value for fr in result.field_results
+                if fr.status.value != "found"
+            ]
+            logger.info(
+                "BrickEconomy for %s: snapshot saved, %d missing fields "
+                "unavailable from source: %s",
+                set_number, len(missing_names), ", ".join(missing_names[:5]),
+            )
+            return ExecutorResult.ok()
         # Log field-level detail for diagnosis
         failed_fields = [
             f"{fr.field.value}={fr.status.value}"
@@ -158,6 +205,11 @@ def execute_brickeconomy(
             f"BrickEconomy returned no data (0 fields): {error_detail}",
             category=ErrorCategory.TIMEOUT if timed_out else ErrorCategory.BROWSER_CRASH,
             permanent=timed_out,
+        )
+    elif not result.field_results:
+        logger.info(
+            "BrickEconomy for %s: all fields already populated, snapshot saved",
+            set_number,
         )
 
     store_enrichment_result(conn, result)

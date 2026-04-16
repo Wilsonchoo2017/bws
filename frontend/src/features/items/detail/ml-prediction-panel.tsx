@@ -18,7 +18,9 @@ interface GrowthPrediction {
   avoid?: boolean;
   avoid_probability?: number;
   great_buy_probability?: number;
-  buy_category?: 'GREAT' | 'GOOD' | 'SKIP' | 'WORST';
+  buy_category?: 'GREAT' | 'GOOD' | 'SKIP' | 'WORST' | 'NONE';
+  has_keepa_data?: boolean;
+  has_bl_data?: boolean;
   drivers?: Driver[];
   shap_base?: number;
 }
@@ -102,6 +104,12 @@ const CATEGORY_STYLES: Record<string, { label: string; description: string; colo
     color: 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300',
     border: 'border-red-500/20',
   },
+  NONE: {
+    label: 'NO DATA',
+    description: 'Prediction unavailable: set is missing Keepa or BrickLink data (model trained on both)',
+    color: 'bg-slate-100 text-slate-600 dark:bg-slate-800/40 dark:text-slate-400',
+    border: 'border-slate-500/20',
+  },
 };
 
 function confidenceBadge(confidence: string): { label: string; className: string } {
@@ -133,6 +141,8 @@ export function MLPredictionPanel({ setNumber }: MLPredictionPanelProps) {
   const [prediction, setPrediction] = useState<GrowthPrediction | null>(null);
   const [missingData, setMissingData] = useState<MissingDataResponse | null>(null);
   const [loading, setLoading] = useState(true);
+  const [predicting, setPredicting] = useState(false);
+  const [predictError, setPredictError] = useState<string | null>(null);
 
   useEffect(() => {
     if (bundleLoading) return;
@@ -165,6 +175,24 @@ export function MLPredictionPanel({ setNumber }: MLPredictionPanelProps) {
     );
   }
 
+  const handlePredict = () => {
+    setPredicting(true);
+    setPredictError(null);
+    fetch(`/api/ml/growth/predict/${setNumber}`, { method: 'POST' })
+      .then((res) => res.json())
+      .then((json) => {
+        if (json.error) {
+          setPredictError(json.error);
+        } else if (json.growth_pct != null) {
+          setPrediction(json);
+        } else {
+          setPredictError('No prediction returned');
+        }
+      })
+      .catch(() => setPredictError('Failed to reach prediction endpoint'))
+      .finally(() => setPredicting(false));
+  };
+
   if (!prediction) {
     return (
       <div className="rounded-lg border border-border p-4">
@@ -175,6 +203,16 @@ export function MLPredictionPanel({ setNumber }: MLPredictionPanelProps) {
           <p className="mt-2 text-sm text-muted-foreground">
             No ML prediction available for this set.
           </p>
+        )}
+        <button
+          onClick={handlePredict}
+          disabled={predicting}
+          className="mt-3 rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+        >
+          {predicting ? 'Predicting...' : 'Run Prediction'}
+        </button>
+        {predictError && (
+          <p className="mt-2 text-sm text-destructive">{predictError}</p>
         )}
       </div>
     );

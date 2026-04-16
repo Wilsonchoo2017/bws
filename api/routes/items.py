@@ -1431,6 +1431,8 @@ async def get_item_detail_bundle(set_number: str, conn: Any = Depends(get_db)):
         liq_cohorts_resp = await get_item_liquidity_cohorts(set_number, "bricklink", "new", conn)
         liq_cohorts_data = liq_cohorts_resp.get("data") if isinstance(liq_cohorts_resp, dict) else None
 
+    scrape_history = await asyncio.to_thread(_fetch_scrape_history, set_number)
+
     return {
         "success": True,
         "data": {
@@ -1450,5 +1452,125 @@ async def get_item_detail_bundle(set_number: str, conn: Any = Depends(get_db)):
             "liquidity_bricklink": liq_bl_data,
             "liquidity_brickeconomy": liq_be_data,
             "liquidity_cohorts": liq_cohorts_data,
+            "scrape_history": scrape_history,
         },
     }
+
+
+def _fetch_scrape_history(set_number: str) -> list[dict]:
+    """Return a unified scrape timeline for a set from all snapshot tables.
+
+    Each entry: {source, scraped_at, record_count}.
+    Ordered newest-first.
+    """
+    from db.connection import get_connection
+
+    item_id = f"{set_number}-1"
+
+    queries: list[tuple[str, str, list]] = [
+        (
+            "bricklink_prices",
+            "SELECT scraped_at FROM bricklink_price_history "
+            "WHERE item_id = ? ORDER BY scraped_at DESC",
+            [item_id],
+        ),
+        (
+            "bricklink_sales",
+            "SELECT DISTINCT scraped_at FROM bricklink_monthly_sales "
+            "WHERE item_id = ? ORDER BY scraped_at DESC",
+            [item_id],
+        ),
+        (
+            "bricklink_sellers",
+            "SELECT DISTINCT scraped_at FROM bricklink_store_listings "
+            "WHERE item_id = ? ORDER BY scraped_at DESC",
+            [item_id],
+        ),
+        (
+            "brickeconomy",
+            "SELECT scraped_at FROM brickeconomy_snapshots "
+            "WHERE set_number = ? ORDER BY scraped_at DESC",
+            [set_number],
+        ),
+        (
+            "keepa",
+            "SELECT scraped_at FROM keepa_snapshots "
+            "WHERE set_number = ? ORDER BY scraped_at DESC",
+            [set_number],
+        ),
+        (
+            "shopee_saturation",
+            "SELECT scraped_at FROM shopee_saturation "
+            "WHERE set_number = ? ORDER BY scraped_at DESC",
+            [set_number],
+        ),
+        (
+            "shopee_competition",
+            "SELECT scraped_at FROM shopee_competition_snapshots "
+            "WHERE set_number = ? ORDER BY scraped_at DESC",
+            [set_number],
+        ),
+        (
+            "minifigures",
+            "SELECT DISTINCT scraped_at FROM set_minifigures "
+            "WHERE set_number = ? ORDER BY scraped_at DESC",
+            [set_number],
+        ),
+        (
+            "ml_prediction",
+            "SELECT snapshot_date AS scraped_at FROM ml_prediction_snapshots "
+            "WHERE set_number = ? ORDER BY snapshot_date DESC",
+            [set_number],
+        ),
+        (
+            "google_trends",
+            "SELECT scraped_at FROM google_trends_snapshots "
+            "WHERE set_number = ? ORDER BY scraped_at DESC",
+            [set_number],
+        ),
+    ]
+
+    rows: list[dict] = []
+    conn = get_connection()
+    try:
+        for source, sql, params in queries:
+            try:
+                result = conn.execute(sql, params).fetchall()
+                for r in result:
+                    ts = r[0]
+                    if ts is not None:
+                        rows.append({"source": source, "scraped_at": str(ts)})
+            except Exception:
+                pass
+
+        # Also include scrape_task queue entries (pending/running/completed/failed)
+        try:
+            task_rows = conn.execute(
+                "SELECT task_type, status, created_at, completed_at, error "
+                "FROM scrape_tasks WHERE set_number = ? "
+                "ORDER BY created_at DESC",
+                [set_number],
+            ).fetchall()
+            for t in task_rows:
+                rows.append({
+                    "source": f"task:{t[0]}",
+                    "scraped_at": str(t[3] or t[2]),
+                    "status": t[1],
+                    "error": t[4],
+                })
+        except Exception:
+            pass
+    finally:
+        conn.close()
+
+    rows.sort(key=lambda r: r["scraped_at"], reverse=True)
+    return rows
+
+
+@router.get("/{set_number}/scrape-history")
+async def get_item_scrape_history(set_number: str, conn: Any = Depends(get_db)):
+    """Return unified scrape history timeline for an item."""
+    if not item_exists(conn, set_number):
+        raise HTTPException(status_code=404, detail=f"Item {set_number} not found")
+    data = await asyncio.to_thread(_fetch_scrape_history, set_number)
+    return {"success": True, "data": data}

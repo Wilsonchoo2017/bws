@@ -31,6 +31,7 @@ from services.portfolio.drawdown import (
     get_positions_drawdown,
     position_drawdown_to_dict,
 )
+from services.portfolio.pnl_history import get_profit_history
 from services.portfolio.reallocation import get_reallocation_analysis
 from services.portfolio.settings import get_total_capital, set_total_capital
 from services.portfolio.wbr_metrics import calculate_wbr
@@ -451,6 +452,16 @@ async def portfolio_drawdown(conn: Any = Depends(get_db)) -> dict:
         "summary": get_drawdown_summary(positions),
         "count": len(positions),
     }
+
+
+@router.get("/pnl-history")
+async def pnl_history(
+    months: int = Query(default=24, ge=2, le=60),
+    conn: Any = Depends(get_db),
+) -> dict:
+    """Monthly cumulative profit history from actual transactions."""
+    data = get_profit_history(conn, months=months)
+    return {"success": True, "data": data, "count": len(data)}
 
 
 # ---------------------------------------------------------------------------

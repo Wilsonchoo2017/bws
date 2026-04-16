@@ -10,6 +10,11 @@ import logging
 from datetime import datetime, timezone
 
 from api.jobs import JobManager
+from services.operations.scheduler_registry import (
+    is_enabled,
+    record_disabled,
+    record_run,
+)
 
 logger = logging.getLogger("bws.keepa.scheduler")
 
@@ -167,27 +172,33 @@ async def run_keepa_sweep(
         else:
             await asyncio.sleep(interval_minutes * 60)
 
+        if not is_enabled("keepa"):
+            await record_disabled("keepa")
+            continue
+
         try:
-            missing = _get_items_without_keepa(limit=batch_size)
+            async with record_run("keepa") as run:
+                missing = _get_items_without_keepa(limit=batch_size)
 
-            if not missing:
-                logger.debug("Keepa sweep: all items have Keepa data")
-                continue
+                if not missing:
+                    logger.debug("Keepa sweep: all items have Keepa data")
+                    continue
 
-            queued = queue_keepa_batch(manager, missing)
-            if queued > 0:
-                logger.info(
-                    "Keepa sweep: %d items missing Keepa data, "
-                    "queued %d jobs (sets: %s)",
-                    len(missing),
-                    queued,
-                    ", ".join(missing[:10]),
-                )
-            else:
-                logger.debug(
-                    "Keepa sweep: %d items missing but all skipped "
-                    "(already queued or on cooldown)",
-                    len(missing),
-                )
+                queued = queue_keepa_batch(manager, missing)
+                run.items_queued = queued
+                if queued > 0:
+                    logger.info(
+                        "Keepa sweep: %d items missing Keepa data, "
+                        "queued %d jobs (sets: %s)",
+                        len(missing),
+                        queued,
+                        ", ".join(missing[:10]),
+                    )
+                else:
+                    logger.debug(
+                        "Keepa sweep: %d items missing but all skipped "
+                        "(already queued or on cooldown)",
+                        len(missing),
+                    )
         except Exception:
             logger.exception("Keepa sweep failed")
